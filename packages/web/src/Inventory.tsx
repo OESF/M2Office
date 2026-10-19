@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { INVENTORY_ITEM_KINDS, inventoryKindLabel, inventorySaleValue, type InventoryItem, type InventoryItemKind, type InventoryItemView, type InventoryLocation, type InventoryMove, type InventoryMoveKind, type InventorySupplier } from '@m2office/shared';
+import { INVENTORY_ITEM_KINDS, inventoryCostValue, inventoryKindLabel, inventoryMargin, inventorySaleValue, type InventoryItem, type InventoryItemKind, type InventoryItemView, type InventoryLocation, type InventoryMove, type InventoryMoveKind, type InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryDetail, type InventoryList } from './api.js';
 import { Stocktake } from './Stocktake.js';
 import { BookingsPanel, OrderPanel, SlipResultPanel, SuppliersPanel } from './InventoryOrders.js';
@@ -110,7 +110,7 @@ interface ExtraContext { suppliers: Map<string, string>; lowDefault: number; for
 /**
  * 一覧の、はじめは隠す列（表の「列」で選ぶと出る。仕様書 第6.1.2.1節）。品目の詳細にしか無かった項目を、一覧でも見られるようにする。
  */
-const EXTRA_COLUMNS: { label: string; num?: boolean; cell: (i: InventoryItemView, x: ExtraContext) => string }[] = [
+const EXTRA_COLUMNS: { label: string; num?: boolean; adminOnly?: boolean; cell: (i: InventoryItemView, x: ExtraContext) => string }[] = [
   { label: '自社のコード', cell: (i) => i.sku },
   { label: 'バーコード', cell: (i) => i.codes.join(' ') },
   { label: '公開する名前', cell: (i) => i.publicName },
@@ -127,6 +127,11 @@ const EXTRA_COLUMNS: { label: string; num?: boolean; cell: (i: InventoryItemView
       return yenText(Math.round(i.priceTaxIncluded ? amount : (amount * (100 + i.taxRate)) / 100));
     },
   },
+  // 仕入価格・利益・利益率・在庫額（仕入価格）は、利用範囲の管理者だけに出す（第29.6.2節）
+  { label: '仕入価格', num: true, adminOnly: true, cell: (i) => (i.purchasePrice === null || i.purchasePrice === undefined ? '' : `${yenText(i.purchasePrice)}（${i.purchaseTaxIncluded ? '税込' : '税抜'}）`) },
+  { label: '利益', num: true, adminOnly: true, cell: (i) => { const m = inventoryMargin(i); return m ? yenText(m.profit) : ''; } },
+  { label: '利益率', num: true, adminOnly: true, cell: (i) => { const m = inventoryMargin(i); return m ? `${m.rate}%` : ''; } },
+  { label: '在庫額（仕入価格）', num: true, adminOnly: true, cell: (i) => { const v = inventoryCostValue(i); return v === null ? '' : yenText(v); } },
   { label: '引き当て', num: true, cell: (i) => (i.reserved ? qtyText(i, i.reserved) : '') },
   { label: '期限切れの数', num: true, cell: (i) => (i.expired ? qtyText(i, i.expired) : '') },
   {
@@ -190,6 +195,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
     return list.items.filter((i) => matchesFilter(i, filter, out, today, soon));
   }, [list, filter]);
   const saleValue = useMemo(() => (list ? inventorySaleValue(shown, list.taxRounding ?? 'floor') : null), [list, shown]);
+  const extraColumns = EXTRA_COLUMNS.filter((c) => !c.adminOnly || list?.admin);
   const extra: ExtraContext = { suppliers: supplierNames, lowDefault: list?.settings.lowDefault ?? 0, forecastOn: list?.settings.features.forecast !== false };
   // サマリーのどのカードが効いているか
   const summaryActive: SummaryFilter = filter.category ? null
@@ -372,7 +378,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       {/* 減り具合（第29.14.1節）。一覧の絞り込みがそのまま効く */}
       {panel === 'usage' && <UsagePanel itemIds={new Set(shown.map((i) => i.id))} onOpenItem={(id) => onOpen(id)} />}
       {/* 販売品の相場と競合の比較（第29.24節）。一覧の絞り込みがそのまま効く */}
-      {panel === 'market' && <MarketPanel items={shown} onOpenItem={(id) => onOpen(id)} />}
+      {panel === 'market' && <MarketPanel items={shown} onOpenItem={(id) => onOpen(id)} admin={!!list?.admin} />}
       {!working && list && list.items.length > 0 && shown.length === 0 && <p className="muted">絞り込みに当たる品目はありません</p>}
       {!working && list && shown.length > 0 && (
         <div className="table-scroll"><table className="table inventory-table">
@@ -380,7 +386,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
             <tr>
               <th>品名</th><th>区分</th><th>分類</th><th className="num">使える数</th><th className="num onhand">在庫</th><th>期限</th>
               {/* はじめは隠す列（表の「列」で選ぶと出る。仕様書 第6.1.2.1節） */}
-              {EXTRA_COLUMNS.map((c) => <th key={c.label} data-col-default="hidden" className={c.num ? 'num' : undefined}>{c.label}</th>)}
+              {extraColumns.map((c) => <th key={c.label} data-col-default="hidden" className={c.num ? 'num' : undefined}>{c.label}</th>)}
               <th />
             </tr>
           </thead>
@@ -395,7 +401,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
                 <td className="num">{qtyText(i, i.available)}</td>
                 <td className="num muted onhand">{i.onHand !== i.available ? qtyText(i, i.onHand) : ''}</td>
                 <td className="small date">{i.nearestExpiry ?? ''}</td>
-                {EXTRA_COLUMNS.map((c) => <td key={c.label} className={c.num ? 'num small nowrap' : 'small'}>{c.cell(i, extra)}</td>)}
+                {extraColumns.map((c) => <td key={c.label} className={c.num ? 'num small nowrap' : 'small'}>{c.cell(i, extra)}</td>)}
                 <td className="marks"><Marks item={i} /></td>
               </tr>
             ))}
@@ -568,6 +574,7 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
 
   if (!detail || !list) return <p className="muted">{message ?? '読み込んでいます…'}</p>;
   const { item } = detail;
+  const margin = inventoryMargin(item);
   const locs = new Map(list.locations.map((l) => [l.id, l]));
   const reversed = new Set(detail.moves.map((m) => m.reversalOf).filter(Boolean));
   const today = todayJst();
@@ -600,6 +607,8 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
           <span><span className="muted small">使える数</span> <strong>{qtyText(item, item.available)}</strong></span>
           {item.onHand !== item.available && <span className="muted small">在庫 {qtyText(item, item.onHand)}</span>}
           {item.reserved > 0 && <span className="muted small">引き当て {qtyText(item, item.reserved)}</span>}
+          {/* 利益と利益率（利用範囲の管理者だけ。第29.6.2節） */}
+          {list.admin && margin && <span className="muted small">利益 {yenText(margin.profit)}（利益率 {margin.rate}%・税抜）</span>}
           <Marks item={item} />
         </div>
       </div>
@@ -624,8 +633,8 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
         </table>
       )}
       <UsageChart weekly={detail.weekly ?? []} usage={detail.usage ?? null} unit={item.unit} />
-      {list.settings.features.market !== false && <MarketSection item={item} />}
-      <ItemFields item={item} unitsOn={list.settings.features.units} suppliers={suppliers} onSaved={load} />
+      {list.settings.features.market !== false && <MarketSection item={item} admin={list.admin} />}
+      <ItemFields item={item} unitsOn={list.settings.features.units} suppliers={suppliers} onSaved={load} admin={list.admin} />
       {detail.moves.length > 0 && (
         <>
           <h3>記録</h3>
@@ -743,8 +752,10 @@ function MoveForm({ item, locations, features, onDone }: {
 }
 
 /** 品目の項目（その場で直す）。 */
-function ItemFields({ item, unitsOn, suppliers, onSaved }: {
+function ItemFields({ item, unitsOn, suppliers, onSaved, admin = false }: {
   item: InventoryItemView; unitsOn: boolean; suppliers: InventorySupplier[]; onSaved: () => void;
+  /** 利用範囲の管理者か（仕入価格を見て直せる。第29.6.2節）。 */
+  admin?: boolean;
 }) {
   const [draft, setDraft] = useState(() => toDraft(item));
   const [code, setCode] = useState('');
@@ -758,6 +769,8 @@ function ItemFields({ item, unitsOn, suppliers, onSaved }: {
       await api.inventory.update(item.id, {
         name: draft.name, publicName: draft.publicName, sku: draft.sku, category: draft.category, kind: draft.kind, taxRate: draft.taxRate, unit: draft.unit, note: draft.note,
         packUnit: draft.packUnit, packSize: numOrNull(draft.packSize), price: numOrNull(draft.price), employeePrice: numOrNull(draft.employeePrice), lowThreshold: numOrNull(draft.lowThreshold),
+        // 仕入価格は利用範囲の管理者だけが送る（第29.6.2節）
+        ...(admin ? { purchasePrice: numOrNull(draft.purchasePrice), purchaseTaxIncluded: draft.purchaseTaxIncluded } : {}),
         supplierId: draft.supplierId || null, leadDays: numOrNull(draft.leadDays),
         ...(extraCode ? { codes: [extraCode] } : {}),
       });
@@ -775,7 +788,7 @@ function ItemFields({ item, unitsOn, suppliers, onSaved }: {
   const field = (key: keyof ReturnType<typeof toDraft>, label: string, type = 'text') => (
     <>
       <dt>{label}</dt>
-      <dd><input type={type} value={draft[key]} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} /></dd>
+      <dd><input type={type} value={String(draft[key])} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} /></dd>
     </>
   );
 
@@ -815,6 +828,18 @@ function ItemFields({ item, unitsOn, suppliers, onSaved }: {
           </>
         )}
         {field('employeePrice', '社員価格', 'number')}
+        {admin && (
+          <>
+            <dt>仕入価格</dt>
+            <dd>
+              <input type="number" value={draft.purchasePrice} onChange={(e) => setDraft({ ...draft, purchasePrice: e.target.value })} aria-label="仕入価格（1 つあたり）" />
+              <select value={draft.purchaseTaxIncluded ? 'in' : 'ex'} onChange={(e) => setDraft({ ...draft, purchaseTaxIncluded: e.target.value === 'in' })} aria-label="仕入価格の税">
+                <option value="ex">税抜</option>
+                <option value="in">税込</option>
+              </select>
+            </dd>
+          </>
+        )}
         {field('lowThreshold', '残りわずかの目安', 'number')}
         <dt>仕入先</dt>
         <dd>
@@ -851,6 +876,7 @@ function toDraft(i: InventoryItem) {
   return {
     name: i.name, publicName: i.publicName, sku: i.sku, category: i.category, kind: i.kind, taxRate: i.taxRate as 10 | 8, unit: i.unit, packUnit: i.packUnit,
     packSize: s(i.packSize), price: s(i.price), employeePrice: s(i.employeePrice), lowThreshold: s(i.lowThreshold), note: i.note,
+    purchasePrice: s(i.purchasePrice ?? null), purchaseTaxIncluded: !!i.purchaseTaxIncluded,
     supplierId: i.supplierId ?? '', leadDays: s(i.leadDays),
   };
 }

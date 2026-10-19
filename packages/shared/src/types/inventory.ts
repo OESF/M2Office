@@ -106,6 +106,13 @@ export interface InventoryItem {
    * 在庫の評価ではない。税込か税抜かは販売価格と同じ（`priceTaxIncluded`）。
    */
   employeePrice: number | null;
+  /**
+   * 仕入価格（使う単位 1 つあたり。第29.6.2節、Q-244）。**在庫管理の利用範囲の管理者だけ**に返す（ほかの人には API が取り除く）。
+   * Web への公開・外部のアプリ・Web の調べものには渡さない。決算の在庫の評価ではない（Q-108）
+   */
+  purchasePrice?: number | null;
+  /** 仕入価格が税込か（既定は税抜）。 */
+  purchaseTaxIncluded?: boolean;
   photoFileId: string | null;
   /** 残りわずかの目安。`null` なら会社の既定（需要の予測があればその目安）。会社が決めた値は「固定」として予測で変えない（第29.14節）。 */
   lowThreshold: number | null;
@@ -466,12 +473,19 @@ export interface InventoryMarketSource {
   taxIncluded: boolean;
   /** Web の検索か、競合の分析のサイトの事実か。 */
   from: 'web' | 'competitor';
+  /** 入り数（仕入れの相場で、ケースなどの価格を 1 つあたりに割ったとき。第29.6.2節）。 */
+  pack?: number;
 }
 
 /** 販売品の相場を調べた結果（第29.24節、Q-243）。 */
 export interface InventoryMarketCheck {
   id: string;
   itemId: string;
+  /**
+   * 販売価格の相場（`sale`）か、仕入れの相場（`purchase`。第29.6.2節）か。仕入れの相場は自社の仕入価格を含むため、
+   * 在庫管理の利用範囲の管理者にだけ返す
+   */
+  kind?: 'sale' | 'purchase';
   checkedAt: string;
   /** found（見つかった）・none（同じ商品と確かめられる価格が無かった）・unavailable（調べられなかった） */
   status: 'found' | 'none' | 'unavailable';
@@ -494,4 +508,45 @@ export interface InventoryMarketCheck {
 
 /** 位置の呼び方。 */
 export const INVENTORY_MARKET_POSITION_LABEL: Record<'low' | 'fair' | 'high', string> = { low: '安め', fair: '相場並み', high: '高め' };
+/** 仕入れの相場の位置の呼び方（第29.6.2節）。 */
+export const INVENTORY_PURCHASE_POSITION_LABEL: Record<'low' | 'fair' | 'high', string> = { low: '安く仕入れている', fair: '相場並み', high: '高く仕入れている' };
+
+/** 品目の利益と利益率（第29.6.2節）。どちらも品目の消費税率で税抜にそろえる。 */
+export interface InventoryMargin {
+  /** 1 つあたりの利益（税抜。円）。 */
+  profit: number;
+  /** 利益率（%。小数第 1 位まで）。 */
+  rate: number;
+}
+
+/** 税抜にそろえる。 */
+const exTax = (price: number, included: boolean, rate: number) => (included ? (price * 100) / (100 + rate) : price);
+
+/**
+ * 利益と利益率を出す（販売価格 − 仕入価格。利益 ÷ 販売価格）。販売価格か仕入価格が無ければ `null`（推測しない）。
+ */
+export function inventoryMargin(i: Pick<InventoryItem, 'price' | 'priceTaxIncluded' | 'purchasePrice' | 'purchaseTaxIncluded' | 'taxRate'>): InventoryMargin | null {
+  if (i.price === null || i.price <= 0 || i.purchasePrice === null || i.purchasePrice === undefined) return null;
+  const sale = exTax(i.price, i.priceTaxIncluded, i.taxRate);
+  const cost = exTax(i.purchasePrice, !!i.purchaseTaxIncluded, i.taxRate);
+  const profit = Math.round(sale - cost);
+  return { profit, rate: Math.round(((sale - cost) / sale) * 1000) / 10 };
+}
+
+/** 在庫額（仕入価格。税抜の目安。第29.6.2節）。仕入価格が無ければ `null`。 */
+export function inventoryCostValue(i: Pick<InventoryItemView, 'purchasePrice' | 'purchaseTaxIncluded' | 'taxRate' | 'onHand' | 'expired'>): number | null {
+  if (i.purchasePrice === null || i.purchasePrice === undefined) return null;
+  return Math.round(exTax(i.purchasePrice, !!i.purchaseTaxIncluded, i.taxRate) * Math.max(0, i.onHand - i.expired));
+}
+
+/** 在庫管理の API の答えから、仕入価格の項目を取り除く（利用範囲の管理者でない人に返すとき。第29.6.2節）。 */
+export function withoutPurchase<T>(v: T): T {
+  if (Array.isArray(v)) return v.map(withoutPurchase) as T;
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) if (k !== 'purchasePrice' && k !== 'purchaseTaxIncluded') out[k] = withoutPurchase(x);
+    return out as T;
+  }
+  return v;
+}
 

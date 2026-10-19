@@ -7760,5 +7760,46 @@ console.log('\n■ 108. 販売品の相場の比較（調べられなければ�
   }
 }
 
+console.log('\n■ 109. 仕入価格と利益率（見て直せるのは利用範囲の管理者だけ・ほかの人の答えには出さない。第29.6.2節、Q-244）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用仕入${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const item = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 茶`, unit: '本', price: 1100, purchasePrice: 600 }) })).body?.item;
+    const adminList = (await call('a', '/v1/inventory')).body;
+    const memberList = await call('a', '/v1/inventory', {}, 'member');
+    const memberDetail = await call('a', `/v1/inventory/items/${item?.id}`, {}, 'member');
+    const memberPut = await call('a', `/v1/inventory/items/${item?.id}`, { method: 'PUT', body: JSON.stringify({ purchasePrice: 1 }) }, 'member');
+    const memberCsv = await fetch(`${API}/v1/inventory/export?format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } }).then((r) => r.text());
+    const adminCsv = await fetch(`${API}/v1/inventory/export?format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } }).then((r) => r.text());
+    const mine = (adminList?.items ?? []).find((i) => i.id === item?.id);
+    mine?.purchasePrice === 600 && mine.purchaseTaxIncluded === false
+      && !JSON.stringify(memberList.body).includes('purchase') && !JSON.stringify(memberDetail.body).includes('purchase')
+      && memberPut.status === 403 && /仕入価格/.test(adminCsv.split('\n')[0]) && !/仕入価格/.test(memberCsv.split('\n')[0])
+      ? ok('仕入価格は管理者だけが見て直せ、ほかの人の答え・書き出しには出ず、直そうとすると断る') : ng('仕入価格の見え方が違う', JSON.stringify({ admin: mine?.purchasePrice, memberLeak: JSON.stringify(memberList.body).includes('purchase'), put: memberPut.status }));
+    // 仕入れの相場（第29.6.2節）。管理者だけが調べて見られ、ほかの人の品目の相場の履歴には出さない
+    const pCheck = await call('a', '/v1/inventory/market/check', { method: 'POST', body: JSON.stringify({ itemIds: [item?.id], kind: 'purchase' }) });
+    const pMember = await call('a', '/v1/inventory/market?kind=purchase', {}, 'member');
+    const pMemberCheck = await call('a', '/v1/inventory/market/check', { method: 'POST', body: JSON.stringify({ itemIds: [item?.id], kind: 'purchase' }) }, 'member');
+    const pAdmin = (await call('a', '/v1/inventory/market?kind=purchase')).body;
+    const memberHist = (await call('a', `/v1/inventory/items/${item?.id}/market`, {}, 'member')).body;
+    pCheck.body?.check?.kind === 'purchase' && pCheck.body.check.ourPrice === 600 && pMember.status === 403 && pMemberCheck.status === 403
+      && (pAdmin?.checks ?? []).some((x) => x.itemId === item?.id) && !(memberHist?.checks ?? []).some((x) => x.kind === 'purchase')
+      ? ok('仕入れの相場は管理者だけが調べて見られ、ほかの人には相場の履歴にも出さない') : ng('仕入れの相場の見え方が違う', JSON.stringify({ check: pCheck.body?.check?.kind, member: pMember.status, memberCheck: pMemberCheck.status, hist: memberHist?.checks?.map((x) => x.kind) }));
+  } catch (err) {
+    ng('仕入価格の確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes', 'inventory_market_checks']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

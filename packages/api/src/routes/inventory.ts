@@ -14,7 +14,7 @@ import {
   readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
   MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput, type PublicationView,
 } from '@m2office/core';
-import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, type InventoryItemKind, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
+import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, withoutPurchase, type InventoryItemKind, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -42,6 +42,12 @@ function itemInput(body: Record<string, unknown>): ItemInput {
     if (v !== undefined) out[k] = v;
   }
   if (typeof body['priceTaxIncluded'] === 'boolean') out.priceTaxIncluded = body['priceTaxIncluded'];
+  // 仕入価格（第29.6.2節）。受け取るのは利用範囲の管理者のときだけ（呼ぶ側で落とす）
+  for (const k of ['purchasePrice'] as const) {
+    const v = numOrNull(body[k]);
+    if (v !== undefined) out[k] = v;
+  }
+  if (typeof body['purchaseTaxIncluded'] === 'boolean') out.purchaseTaxIncluded = body['purchaseTaxIncluded'];
   // 区分と消費税率（第29.6.1節）。知らない値は捨てる
   if (INVENTORY_ITEM_KINDS.some((k) => k.id === body['kind'])) out.kind = body['kind'] as InventoryItemKind;
   if (body['taxRate'] === 8 || body['taxRate'] === 10) out.taxRate = body['taxRate'];
@@ -58,6 +64,22 @@ function itemInput(body: Record<string, unknown>): ItemInput {
 export function inventoryRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
   const { service } = deps.inventory;
+
+  // 仕入価格は利用範囲の管理者だけに返す（第29.6.2節）。ほかの人には、どの口の答えからも取り除く。受け取るのも管理者のときだけ
+  app.use('*', async (c, next) => {
+    const admin = c.get('ctx').user.roles.includes('admin');
+    if (!admin && c.req.header('content-type')?.includes('application/json') && ['POST', 'PUT', 'PATCH'].includes(c.req.method)) {
+      const raw = await c.req.raw.clone().json().catch(() => null);
+      if (raw && typeof raw === 'object' && ('purchasePrice' in raw || 'purchaseTaxIncluded' in raw)) {
+        return c.json({ error: '仕入価格を直せるのは、在庫管理を使える管理者だけです' }, 403);
+      }
+    }
+    await next();
+    if (admin || !c.res.headers.get('content-type')?.includes('application/json')) return;
+    const body = await c.res.clone().json().catch(() => undefined);
+    if (body === undefined) return;
+    c.res = new Response(JSON.stringify(withoutPurchase(body)), { status: c.res.status, headers: c.res.headers });
+  });
 
   // 在庫管理を使えない会社・人には、どの口も使わせない（第12.13節・第16.7.3節）
   app.use('*', async (c, next) => {
@@ -106,8 +128,11 @@ export function inventoryRoute(deps: AppDeps) {
    */
   app.get('/market', async (c) => {
     const { tenant } = c.get('ctx');
+    // 仕入れの相場（`kind=purchase`。第29.6.2節）は自社の仕入価格を含むため、利用範囲の管理者だけ
+    const kind = c.req.query('kind') === 'purchase' ? 'purchase' : 'sale';
+    if (kind === 'purchase' && !isAdmin(c)) return c.json({ error: '仕入れの相場を見られるのは、在庫管理を使える管理者だけです' }, 403);
     const why = await marketUnavailable(tenant.id);
-    return c.json({ available: !why, ...(why ? { reason: why } : {}), checks: await deps.inventory.market.latest(tenant.id), running: deps.inventory.market.isRunning(tenant.id) });
+    return c.json({ available: !why, ...(why ? { reason: why } : {}), kind, checks: await deps.inventory.market.latest(tenant.id, kind), running: deps.inventory.market.isRunning(tenant.id) });
   });
 
   /**
@@ -120,21 +145,27 @@ export function inventoryRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const why = await marketUnavailable(tenant.id);
     if (why) return c.json({ error: why }, 409);
-    const b = await c.req.json<{ itemIds?: unknown }>().catch(() => ({} as { itemIds?: unknown }));
+    const b = await c.req.json<{ itemIds?: unknown; kind?: unknown }>().catch(() => ({} as { itemIds?: unknown; kind?: unknown }));
+    const kind = b.kind === 'purchase' ? 'purchase' : 'sale';
+    if (kind === 'purchase' && !isAdmin(c)) return c.json({ error: '仕入れの相場を調べられるのは、在庫管理を使える管理者だけです' }, 403);
     const ids = Array.isArray(b.itemIds) ? b.itemIds.filter((x): x is string => typeof x === 'string').slice(0, 50) : undefined;
     if (ids && ids.length === 1) {
-      const items = await deps.inventory.market.targets(tenant.id, ids);
-      if (!items.length) return c.json({ error: '販売品の品目を選んでください' }, 400);
-      const [check] = await deps.inventory.market.check(tenant.id, user.id, items);
+      const items = await deps.inventory.market.targets(tenant.id, ids, kind);
+      if (!items.length) return c.json({ error: kind === 'purchase' ? '品目を選んでください' : '販売品の品目を選んでください' }, 400);
+      const [check] = await deps.inventory.market.check(tenant.id, user.id, items, new Date(), kind);
       return c.json({ check });
     }
-    const n = await deps.inventory.market.startBackground(tenant.id, user.id, ids);
+    const n = await deps.inventory.market.startBackground(tenant.id, user.id, ids, kind);
     if (n === 0 && deps.inventory.market.isRunning(tenant.id)) return c.json({ error: 'いま調べている途中です。終わるまでお待ちください' }, 409);
     return c.json({ started: n }, 202);
   });
 
   /** 品目の相場の結果の履歴（12 か月。新しい順。第29.24節）。 */
-  app.get('/items/:id/market', async (c) => c.json({ checks: await deps.inventory.market.history(c.get('ctx').tenant.id, c.req.param('id')) }));
+  app.get('/items/:id/market', async (c) => {
+    const checks = await deps.inventory.market.history(c.get('ctx').tenant.id, c.req.param('id'));
+    // 仕入れの相場は利用範囲の管理者だけ（第29.6.2節）
+    return c.json({ checks: isAdmin(c) ? checks : checks.filter((x) => (x.kind ?? 'sale') === 'sale') });
+  });
 
   /** 品目ごとの減り具合と次の 4 週の見込み（第29.14.1節）。 */
   app.get('/usage', async (c) => c.json({ rows: await service.usage(c.get('ctx').tenant.id) }));
@@ -511,14 +542,14 @@ export function inventoryRoute(deps: AppDeps) {
       return c.json({ error: '表として読めませんでした（CSV か Excel のファイルを選んでください）' }, 400);
     }
     if (rows.length < 2) return c.json({ error: '見出しの行と、品目の行が要ります' }, 400);
-    return c.json(await service.importRows(tenant.id, user.id, rows));
+    return c.json(await service.importRows(tenant.id, user.id, rows, { withPurchase: isAdmin(c) }));
   });
 
   /** 品目と数を CSV・Excel で書き出す（監査ログに残す）。 */
   app.get('/export', async (c) => {
     const { tenant, user } = c.get('ctx');
     const format = c.req.query('format') === 'xlsx' ? 'xlsx' : 'csv';
-    const { columns, rows } = await service.exportRows(tenant.id, user.id);
+    const { columns, rows } = await service.exportRows(tenant.id, user.id, { withPurchase: isAdmin(c) });
     const bytes = await renderSheet('在庫', columns, rows, format);
     const date = new Date().toISOString().slice(0, 10);
     c.header('Content-Type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

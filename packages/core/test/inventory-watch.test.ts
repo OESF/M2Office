@@ -85,10 +85,12 @@ test('見張り: 毎朝の見直しは、足りなくなりそうなものと使
   assert.equal(await watch.daily('t1', now), 0, '同じ日に二度まとめない');
 });
 
-test('納品書: 推論の答えを読み、金額は読まない。形が違えば読めなかった扱いにする', () => {
-  const r = parseSlipReading('```json\n{"isSlip": true, "supplier": "文具店", "date": "2026-09-29", "lines": [{"name": "トナー 黒", "sku": "TN-1", "code": "", "qty": "２", "unit": "箱", "lot": "", "expiresOn": "2027/01/31", "price": 5000}]}\n```');
+test('納品書: 推論の答えを読み、行の金額は読まず単価だけを読む（第29.6.2節）。形が違えば読めなかった扱いにする', () => {
+  const r = parseSlipReading('```json\n{"isSlip": true, "supplier": "文具店", "date": "2026-09-29", "lines": [{"name": "トナー 黒", "sku": "TN-1", "code": "", "qty": "２", "unit": "箱", "lot": "", "expiresOn": "2027/01/31", "price": 5000, "unitPrice": "２,５００円", "unitPriceTaxIncluded": false}]}\n```');
   assert.ok(r.kind === 'slip');
-  assert.deepEqual(r.lines[0], { name: 'トナー 黒', sku: 'TN-1', code: '', qty: 2, unit: '箱', lot: '', expiresOn: '' });
+  assert.deepEqual(r.lines[0], { name: 'トナー 黒', sku: 'TN-1', code: '', qty: 2, unit: '箱', lot: '', expiresOn: '', unitPrice: 2500, unitPriceTaxIncluded: false });
+  const noPrice = parseSlipReading('{"isSlip": true, "lines": [{"name": "紙", "qty": 1, "unitPrice": "不明"}]}');
+  assert.ok(noPrice.kind === 'slip' && noPrice.lines[0]!.unitPrice === null, '単価が読めなければ null（推測しない）');
   assert.equal(parseSlipReading('よく分かりません').kind, 'not-slip');
   assert.equal(parseSlipReading('{"isSlip": false}').kind, 'not-slip');
 });

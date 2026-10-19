@@ -263,7 +263,7 @@ function day(v: unknown): string | null {
 
 interface ItemRow {
   id: string; name: string; public_name: string; sku: string; category: string; kind?: InventoryItemKind | null; tax_rate?: number | null; unit: string; pack_unit: string;
-  pack_size: unknown; price: unknown; price_tax_included: boolean; employee_price: unknown; photo_file_id: string | null; low_threshold: unknown;
+  pack_size: unknown; price: unknown; price_tax_included: boolean; employee_price: unknown; purchase_price?: unknown; purchase_tax_included?: boolean | null; photo_file_id: string | null; low_threshold: unknown;
   supplier_id: string | null; lead_days: number | null; note: string; status: 'active' | 'stopped'; updated_at: unknown;
   codes: string[] | null;
   forecast_low?: unknown; forecast_factor?: unknown; forecast_note?: string | null; forecast_at?: unknown;
@@ -274,6 +274,7 @@ function toItem(r: ItemRow): InventoryItem {
     id: r.id, name: r.name, publicName: r.public_name, sku: r.sku, category: r.category, kind: r.kind ?? 'supply', taxRate: Number(r.tax_rate) === 8 ? 8 : 10,
     unit: r.unit, packUnit: r.pack_unit,
     packSize: numOrNull(r.pack_size), price: numOrNull(r.price), priceTaxIncluded: r.price_tax_included, employeePrice: numOrNull(r.employee_price),
+    purchasePrice: numOrNull(r.purchase_price), purchaseTaxIncluded: !!r.purchase_tax_included,
     photoFileId: r.photo_file_id, lowThreshold: numOrNull(r.low_threshold), supplierId: r.supplier_id, leadDays: r.lead_days,
     note: r.note, status: r.status, codes: r.codes ?? [], updatedAt: iso(r.updated_at),
     forecast: r.forecast_at ? { low: numOrNull(r.forecast_low), factor: numOrNull(r.forecast_factor) ?? 1, note: r.forecast_note ?? '', at: iso(r.forecast_at) } : null,
@@ -414,17 +415,17 @@ export class PostgresInventoryStore implements InventoryStore {
     await this.q(tenantId,
       `insert into inventory_items (id, tenant_id, name, public_name, sku, category, unit, pack_unit, pack_size, price,
          price_tax_included, photo_file_id, low_threshold, supplier_id, lead_days, note, status, created_by, created_at, updated_by, updated_at,
-         employee_price, kind, tax_rate)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$18,$19,$20,$21,$22)
+         employee_price, kind, tax_rate, purchase_price, purchase_tax_included)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$18,$19,$20,$21,$22,$23,$24)
        on conflict (id) do update set name = excluded.name, public_name = excluded.public_name, sku = excluded.sku,
          category = excluded.category, unit = excluded.unit, pack_unit = excluded.pack_unit, pack_size = excluded.pack_size,
          price = excluded.price, price_tax_included = excluded.price_tax_included, employee_price = excluded.employee_price, photo_file_id = excluded.photo_file_id,
          low_threshold = excluded.low_threshold, supplier_id = excluded.supplier_id, lead_days = excluded.lead_days,
          note = excluded.note, status = excluded.status, updated_by = excluded.updated_by, updated_at = excluded.updated_at,
-         kind = excluded.kind, tax_rate = excluded.tax_rate
+         kind = excluded.kind, tax_rate = excluded.tax_rate, purchase_price = excluded.purchase_price, purchase_tax_included = excluded.purchase_tax_included
        where inventory_items.tenant_id = excluded.tenant_id`,
       [i.id, tenantId, i.name, i.publicName, i.sku, i.category, i.unit, i.packUnit, i.packSize, i.price, i.priceTaxIncluded,
-        i.photoFileId, i.lowThreshold, i.supplierId, i.leadDays, i.note, i.status, userId, at, i.employeePrice, i.kind, i.taxRate]);
+        i.photoFileId, i.lowThreshold, i.supplierId, i.leadDays, i.note, i.status, userId, at, i.employeePrice, i.kind, i.taxRate, i.purchasePrice ?? null, !!i.purchaseTaxIncluded]);
   }
 
   async addCode(tenantId: string, itemId: string, value: string, kind: string): Promise<boolean> {

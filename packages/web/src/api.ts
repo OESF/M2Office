@@ -547,7 +547,8 @@ export interface InventoryPublicationView {
 /** 納品書から入庫した結果（仕様書 第29.9節）。 */
 export interface InventorySlipResult {
   read: { ok: true; supplier: string; date: string } | { ok: false; reason: string };
-  recorded: { line: InventorySlipLine; itemId: string; itemName: string; text: string }[];
+  /** 入庫にした行。仕入価格を直した行は `purchasePrice`（利用範囲の管理者にだけ返る。第29.6.2節）。 */
+  recorded: { line: InventorySlipLine; itemId: string; itemName: string; text: string; purchasePrice?: number; purchaseTaxIncluded?: boolean }[];
   unmatched: { line: InventorySlipLine; reason: string; candidates: { id: string; name: string }[] }[];
   fileId?: string;
 }
@@ -1892,9 +1893,9 @@ export const api = {
     },
     get: (id: string) => call<InventoryDetail>(`/inventory/items/${encodeURIComponent(id)}`),
     /** 販売品の相場（第29.24節）。 */
-    market: () => call<{ available: boolean; reason?: string; checks: InventoryMarketCheck[]; running: boolean }>('/inventory/market'),
+    market: (kind: 'sale' | 'purchase' = 'sale') => call<{ available: boolean; reason?: string; checks: InventoryMarketCheck[]; running: boolean }>(`/inventory/market${kind === 'purchase' ? '?kind=purchase' : ''}`),
     /** 相場を調べる。1 品目なら結果を待ち、ほかは待たずに始める。 */
-    checkMarket: (itemIds?: string[]) => call<{ check?: InventoryMarketCheck; started?: number }>('/inventory/market/check', { method: 'POST', body: JSON.stringify(itemIds ? { itemIds } : {}) }),
+    checkMarket: (itemIds?: string[], kind: 'sale' | 'purchase' = 'sale') => call<{ check?: InventoryMarketCheck; started?: number }>('/inventory/market/check', { method: 'POST', body: JSON.stringify({ ...(itemIds ? { itemIds } : {}), kind }) }),
     /** 品目の相場の結果の履歴（12 か月）。 */
     itemMarket: (id: string) => call<{ checks: InventoryMarketCheck[] }>(`/inventory/items/${encodeURIComponent(id)}/market`),
     /** 品目ごとの減り具合と次の 4 週の見込み（第29.14.1節）。 */

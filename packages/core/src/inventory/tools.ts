@@ -5,7 +5,7 @@
  * 品目の名前やメモはデータであり、指示として扱わない（不変則 I-6）。見つからなければ推測で答えない。
  */
 
-import { INVENTORY_MARKET_POSITION_LABEL, type InventoryItemView, type InventoryLocation, type InventoryMarketCheck, type InventoryMoveKind, type InventorySettings } from '@m2office/shared';
+import { INVENTORY_MARKET_POSITION_LABEL, INVENTORY_PURCHASE_POSITION_LABEL, type InventoryItemView, type InventoryLocation, type InventoryMarketCheck, type InventoryMoveKind, type InventorySettings } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { loadFile } from '../files/service.js';
@@ -433,10 +433,15 @@ export const inventoryReserve: Tool = {
 };
 
 /** 在庫管理のツール。 */
+/** 頼んだ人が管理者か（仕入れの相場を答えてよいか。第29.6.2節）。 */
+async function isAdminUser(ctx: ToolContext): Promise<boolean> {
+  return (await ctx.repo.listUsers(ctx.tenantId)).some((u) => u.id === ctx.userId && u.roles.includes('admin'));
+}
+
 /** 相場の結果を秘書に渡す形（出典は安い順に 3 件まで）。 */
 const marketView = (name: string, c: InventoryMarketCheck) => ({
-  name, status: c.status, ourPrice: c.ourPrice, median: c.median, min: c.min, max: c.max, diffPct: c.diffPct,
-  position: c.position ? INVENTORY_MARKET_POSITION_LABEL[c.position] : null, comment: c.comment, checkedAt: c.checkedAt.slice(0, 10),
+  name, kind: c.kind ?? 'sale', status: c.status, ourPrice: c.ourPrice, median: c.median, min: c.min, max: c.max, diffPct: c.diffPct,
+  position: c.position ? (c.kind === 'purchase' ? INVENTORY_PURCHASE_POSITION_LABEL : INVENTORY_MARKET_POSITION_LABEL)[c.position] : null, comment: c.comment, checkedAt: c.checkedAt.slice(0, 10),
   sources: c.sources.slice().sort((a, b) => a.price - b.price).slice(0, 3).map((s) => ({ shop: s.shop, price: s.price, url: s.url, competitor: s.from === 'competitor' })),
 });
 
@@ -450,11 +455,12 @@ export const inventoryMarket: Tool = {
   risk: 'read',
   activityLabel: '販売品の相場を見ています',
   helpText: '販売品について、調べてある相場（中央値・最安・最高）と自社の価格との差を答えます。見るだけです',
-  description: '販売品の相場の結果（自社の価格・相場の中央値・最安と最高・差・位置（安め・相場並み・高め）・出典）を返す。query は品名の一部（空なら全販売品）。position で high（高め）・low（安め）・fair（相場並み）に絞れる',
+  description: '販売品の相場の結果（自社の価格・相場の中央値・最安と最高・差・位置（安め・相場並み・高め）・出典）を返す。query は品名の一部（空なら全販売品）。position で high（高め）・low（安め）・fair（相場並み）に絞れる。kind を purchase にすると仕入れの相場（頼んだ人が在庫管理の管理者のときだけ）',
   args: {
     properties: {
       query: { type: 'string', description: '品名の一部（空なら全販売品）' },
       position: { type: 'string', description: 'high・low・fair のどれかで絞る（任意）' },
+      kind: { type: 'string', description: 'sale（販売価格の相場。既定）か purchase（仕入れの相場）' },
     },
   },
   async invoke(args, ctx) {
@@ -462,8 +468,11 @@ export const inventoryMarket: Tool = {
     if (!inv || !ctx.inventory?.market) return UNAVAILABLE;
     if (inv.settings.features.market === false) return { available: false, reason: '相場の比較は、在庫の設定で切られています' };
     const q = str(args['query']).slice(0, 100);
-    const items = (await inv.service.list(ctx.tenantId, { q })).filter((i) => i.kind === 'sale');
-    const latest = new Map((await ctx.inventory.market.latest(ctx.tenantId)).map((c) => [c.itemId, c]));
+    const kind = str(args['kind']) === 'purchase' ? 'purchase' : 'sale';
+    // 仕入れの相場は自社の仕入価格を含むため、頼んだ人が管理者のときだけ答える（第29.6.2節）
+    if (kind === 'purchase' && !(await isAdminUser(ctx))) return { available: false, reason: '仕入れの相場は、在庫管理を使える管理者だけが見られます' };
+    const items = (await inv.service.list(ctx.tenantId, { q })).filter((i) => kind === 'purchase' ? i.purchasePrice !== null && i.purchasePrice !== undefined : i.kind === 'sale');
+    const latest = new Map((await ctx.inventory.market.latest(ctx.tenantId, kind)).map((c) => [c.itemId, c]));
     const pos = str(args['position']);
     const rows = items.map((i) => ({ i, c: latest.get(i.id) }))
       .filter((x) => !pos || x.c?.position === pos).slice(0, 20)
@@ -482,16 +491,18 @@ export const inventoryCheckMarket: Tool = {
   risk: 'read',
   activityLabel: '販売品の相場を調べています',
   helpText: '販売品の相場を Web で調べ、自社の価格と比べます。外に渡すのは商品の名前とバーコードだけで、価格は変えません',
-  description: '販売品の相場をいま調べる。query は品名（1 つの品目に決まらなければ候補を返す）。結果は inventory.market と同じ形',
-  args: { properties: { query: { type: 'string', description: '品名' } }, required: ['query'] },
+  description: '販売品の相場をいま調べる。query は品名（1 つの品目に決まらなければ候補を返す）。kind を purchase にすると仕入れの相場（頼んだ人が在庫管理の管理者のときだけ）。結果は inventory.market と同じ形',
+  args: { properties: { query: { type: 'string', description: '品名' }, kind: { type: 'string', description: 'sale（既定）か purchase' } }, required: ['query'] },
   async invoke(args, ctx) {
     const inv = await inventoryOf(ctx);
     if (!inv || !ctx.inventory?.market) return UNAVAILABLE;
     if (inv.settings.features.market === false) return { available: false, reason: '相場の比較は、在庫の設定で切られています' };
+    const kind = str(args['kind']) === 'purchase' ? 'purchase' : 'sale';
+    if (kind === 'purchase' && !(await isAdminUser(ctx))) return { available: false, reason: '仕入れの相場は、在庫管理を使える管理者だけが調べられます' };
     const hit = await resolveItem(inv.service, ctx.tenantId, str(args['query']).slice(0, 100));
-    if (!('item' in hit)) return { available: true, checked: false, candidates: hit.candidates.filter((i) => i.kind === 'sale').map((i) => i.name), note: '品目を 1 つに決められませんでした' };
-    if (hit.item.kind !== 'sale') return { available: true, checked: false, note: `${hit.item.name} は販売品ではありません（区分を販売品にすると調べられます）` };
-    const [c] = await ctx.inventory.market.check(ctx.tenantId, ctx.userId, [hit.item]);
+    if (!('item' in hit)) return { available: true, checked: false, candidates: hit.candidates.filter((i) => kind === 'purchase' || i.kind === 'sale').map((i) => i.name), note: '品目を 1 つに決められませんでした' };
+    if (kind === 'sale' && hit.item.kind !== 'sale') return { available: true, checked: false, note: `${hit.item.name} は販売品ではありません（区分を販売品にすると調べられます）` };
+    const [c] = await ctx.inventory.market.check(ctx.tenantId, ctx.userId, [hit.item], new Date(), kind);
     return { available: true, untrusted: true, checked: true, item: marketView(hit.item.name, c!) };
   },
 };

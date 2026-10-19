@@ -49,6 +49,10 @@ export interface ItemInput {
   priceTaxIncluded?: boolean;
   /** 社員価格（第29.6節）。公開には出さない。 */
   employeePrice?: number | null;
+  /** 仕入価格（第29.6.2節）。利用範囲の管理者だけが直す（API が確かめる）。 */
+  purchasePrice?: number | null;
+  /** 仕入価格が税込か（既定は税抜）。 */
+  purchaseTaxIncluded?: boolean;
   lowThreshold?: number | null;
   supplierId?: string | null;
   leadDays?: number | null;
@@ -103,8 +107,11 @@ export interface ItemDetail {
 export interface SlipResult {
   /** 読み取れたか。読めなければ理由。 */
   read: { ok: true; supplier: string; date: string } | { ok: false; reason: string };
-  /** 入庫にした行。 */
-  recorded: { line: SlipLine; itemId: string; itemName: string; text: string }[];
+  /**
+   * 入庫にした行。単価が読めて仕入価格を直した行は、新しい仕入価格を `purchasePrice` に入れる（第29.6.2節）。
+   * 金額は `text` に入れない（利用範囲の管理者でない人には、API が `purchasePrice` を取り除く）
+   */
+  recorded: { line: SlipLine; itemId: string; itemName: string; text: string; purchasePrice?: number; purchaseTaxIncluded?: boolean }[];
   /** 照らせなかった行（候補があれば添える）。入庫にしていない。 */
   unmatched: { line: SlipLine; reason: string; candidates: { id: string; name: string }[] }[];
 }
@@ -123,13 +130,13 @@ export interface ImportResult {
 
 /** 取り込みで読む項目。 */
 export type ImportField =
-  | 'name' | 'publicName' | 'sku' | 'category' | 'kind' | 'taxRate' | 'unit' | 'packUnit' | 'packSize' | 'price' | 'employeePrice' | 'code'
+  | 'name' | 'publicName' | 'sku' | 'category' | 'kind' | 'taxRate' | 'unit' | 'packUnit' | 'packSize' | 'price' | 'employeePrice' | 'purchasePrice' | 'code'
   | 'lowThreshold' | 'leadDays' | 'note' | 'qty' | 'warehouse' | 'shelf' | 'lot' | 'expiresOn';
 
 const IMPORT_FIELDS: Record<ImportField, string> = {
   name: '品名', publicName: '公開する名前', sku: '自社のコード（品番）', category: '分類', kind: '区分（販売品・消耗品・原材料・その他）', taxRate: '消費税率',
   unit: '単位', packUnit: '仕入れの単位',
-  packSize: '入り数', price: '販売価格', employeePrice: '社員価格', code: 'バーコード（JAN）', lowThreshold: '残りわずかの目安', leadDays: '仕入れにかかる日数',
+  packSize: '入り数', price: '販売価格', employeePrice: '社員価格', purchasePrice: '仕入価格（1 つあたり）', code: 'バーコード（JAN）', lowThreshold: '残りわずかの目安', leadDays: '仕入れにかかる日数',
   note: 'メモ', qty: '在庫の数', warehouse: '倉庫', shelf: '棚', lot: 'ロット', expiresOn: '使用期限',
 };
 
@@ -146,7 +153,8 @@ const HEADER_WORDS: [ImportField, RegExp][] = [
   ['packSize', /入数|入り数|入数量/],
   ['packUnit', /仕入(れ)?単位|梱包単位|荷姿/],
   ['unit', /^(単位|unit)$/i],
-  // 社員価格は「価格」を含むため、販売価格より先に見る
+  // 社員価格・仕入価格は「価格」を含むため、販売価格より先に見る
+  ['purchasePrice', /仕入価格|仕入値|仕入れ値|仕入単価|仕入れ単価|原価|cost/i],
   ['employeePrice', /社員価格|社販|社員販売|従業員価格|employee.?price/i],
   ['price', /売価|販売価格|価格|定価|price/i],
   ['lowThreshold', /発注点|最低在庫|安全在庫|残りわずか/],
@@ -425,6 +433,8 @@ export class InventoryService {
       price: num(input.price, prev?.price ?? null),
       priceTaxIncluded: input.priceTaxIncluded ?? prev?.priceTaxIncluded ?? true,
       employeePrice: num(input.employeePrice, prev?.employeePrice ?? null),
+      purchasePrice: num(input.purchasePrice, prev?.purchasePrice ?? null),
+      purchaseTaxIncluded: input.purchaseTaxIncluded ?? prev?.purchaseTaxIncluded ?? false,
       photoFileId: prev?.photoFileId ?? null,
       lowThreshold: num(input.lowThreshold, prev?.lowThreshold ?? null),
       supplierId: input.supplierId !== undefined ? input.supplierId : prev?.supplierId ?? null,
@@ -847,7 +857,17 @@ export class InventoryService {
       });
       if (!res.ok) { unmatched.push({ line, reason: res.error, candidates: [{ id: hit.item.id, name: hit.item.name }] }); continue; }
       const units = res.moves.reduce((a, m) => a + m.delta, 0);
-      recorded.push({ line, itemId: hit.item.id, itemName: hit.item.name, text: `${hit.item.name}: ${formatQty(hit.item, units)}` });
+      // 単価が読めれば、仕入価格をその単価に直す（使う単位 1 つあたりに換算。社内のこと。第29.6.2節）
+      let cost: { purchasePrice: number; purchaseTaxIncluded: boolean } | null = null;
+      if (line.unitPrice) {
+        const per = Math.round((pack && hit.item.packSize ? line.unitPrice / hit.item.packSize : line.unitPrice) * 100) / 100;
+        const taxIncl = line.unitPriceTaxIncluded === true;
+        if (per !== hit.item.purchasePrice || taxIncl !== !!hit.item.purchaseTaxIncluded) {
+          await this.saveItem(tenantId, userId, { id: hit.item.id, purchasePrice: per, purchaseTaxIncluded: taxIncl });
+          cost = { purchasePrice: per, purchaseTaxIncluded: taxIncl };
+        }
+      }
+      recorded.push({ line, itemId: hit.item.id, itemName: hit.item.name, text: `${hit.item.name}: ${formatQty(hit.item, units)}`, ...(cost ?? {}) });
     }
     return { recorded, unmatched };
   }
@@ -1083,7 +1103,7 @@ export class InventoryService {
    * 同じバーコード・自社のコード・名前の品目があれば直し、無ければ作る。在庫の数は、新しく作った品目だけに入れる
    * （今ある品目の数を取り込みで上書きしない。数を合わせるのは棚卸し）。監査ログに残す
    */
-  async importRows(tenantId: string, userId: string, rows: (string | number | boolean | null)[][]): Promise<ImportResult> {
+  async importRows(tenantId: string, userId: string, rows: (string | number | boolean | null)[][], opts: { withPurchase?: boolean } = {}): Promise<ImportResult> {
     const headers = (rows[0] ?? []).map((h) => String(h ?? '').trim());
     const mapping = await this.mapHeaders(tenantId, headers);
     const col = (f: ImportField) => mapping.findIndex((m) => m.field === f);
@@ -1123,6 +1143,8 @@ export class InventoryService {
         ...(numOf('packSize') !== undefined ? { packSize: numOf('packSize') } : {}),
         ...(numOf('price') !== undefined ? { price: numOf('price') } : {}),
         ...(numOf('employeePrice') !== undefined ? { employeePrice: numOf('employeePrice') } : {}),
+        // 仕入価格は利用範囲の管理者の取り込みだけで読む（第29.6.2節）
+        ...(opts.withPurchase && numOf('purchasePrice') !== undefined ? { purchasePrice: numOf('purchasePrice') } : {}),
         ...(numOf('lowThreshold') !== undefined ? { lowThreshold: numOf('lowThreshold') } : {}),
         ...(numOf('leadDays') !== undefined ? { leadDays: numOf('leadDays') } : {}),
         ...(text('note') !== undefined ? { note: text('note') } : {}),
@@ -1213,16 +1235,18 @@ export class InventoryService {
    *
    * @remarks 監査ログに残す（第29.16節）
    */
-  async exportRows(tenantId: string, userId: string): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
+  async exportRows(tenantId: string, userId: string, opts: { withPurchase?: boolean } = {}): Promise<{ columns: string[]; rows: (string | number | null)[][] }> {
     const items = await this.list(tenantId, { includeStopped: true });
     const locs = new Map((await this.deps.store.listLocations(tenantId)).map((l) => [l.id, l]));
     const stock = await this.deps.store.listStock(tenantId);
     const columns = ['品名', '公開する名前', '自社のコード', 'バーコード', '分類', '区分', '単位', '仕入れの単位', '入り数', '販売価格', '社員価格', '消費税率',
-      '倉庫', '棚', 'ロット', '使用期限', '在庫の数', '使える数', '残りわずかの目安', '状態'];
+      ...(opts.withPurchase ? ['仕入価格', '仕入価格の税'] : []), '倉庫', '棚', 'ロット', '使用期限', '在庫の数', '使える数', '残りわずかの目安', '状態'];
     const rows: (string | number | null)[][] = [];
     for (const i of items) {
       const mine = stock.filter((s) => s.itemId === i.id);
-      const head = [i.name, i.publicName, i.sku, i.codes.join(' '), i.category, inventoryKindLabel(i.kind), i.unit, i.packUnit, i.packSize, i.price, i.employeePrice, i.kind === 'sale' ? `${i.taxRate}%` : ''];
+      const head = [i.name, i.publicName, i.sku, i.codes.join(' '), i.category, inventoryKindLabel(i.kind), i.unit, i.packUnit, i.packSize, i.price, i.employeePrice, i.kind === 'sale' ? `${i.taxRate}%` : '',
+        // 仕入価格は利用範囲の管理者の書き出しだけに出す（第29.6.2節）
+        ...(opts.withPurchase ? [i.purchasePrice ?? null, i.purchasePrice === null || i.purchasePrice === undefined ? '' : i.purchaseTaxIncluded ? '税込' : '税抜'] : [])];
       const tail = [i.available, i.lowThreshold, i.status === 'active' ? '使う' : '止めた'];
       if (mine.length === 0) rows.push([...head, '', '', '', '', 0, ...tail]);
       for (const s of mine) {

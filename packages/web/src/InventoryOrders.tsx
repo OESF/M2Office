@@ -200,7 +200,9 @@ export function SlipResultPanel({ result, items, onRecorded, onClose }: {
   return (
     <div className="card inventory-new slip-result">
       <div className="order-head"><strong>納品書{result.read.supplier ? `（${result.read.supplier}${result.read.date ? `・${result.read.date}` : ''}）` : ''}</strong></div>
-      {result.recorded.length > 0 && <ul className="plain">{result.recorded.map((r, i) => <li key={i}>入庫: {r.text}</li>)}</ul>}
+      {result.recorded.length > 0 && <ul className="plain">{result.recorded.map((r, i) => (
+        <li key={i}>入庫: {r.text}{r.purchasePrice !== undefined && <span className="muted small">（仕入価格を {r.purchasePrice.toLocaleString('ja-JP')} 円（{r.purchaseTaxIncluded ? '税込' : '税抜'}）にしました）</span>}</li>
+      ))}</ul>}
       {result.unmatched.map((u, i) => (
         <div key={i} className="row wrap">
           <span className="grow small">{u.line.name || u.line.sku || u.line.code}{u.line.qty !== null ? `・${u.line.qty} ${u.line.unit}` : ''}<span className="muted">（{u.reason}）</span></span>

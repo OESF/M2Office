@@ -197,10 +197,10 @@
 | `inquiries.faq` | `days`: さかのぼる日数 |
 | `inquiries.list` | `status`: 対応中か、すべてか（open・all）、`days`: 最近何日に動いたもの、`q`: 人・会社・用件の言葉、`waiting`: 次にやることが残っているものだけ |
 | `inquiries.review` | `month`: 月（YYYY-MM） |
-| `inventory.check_market` | `query`（必須）: 品名 |
+| `inventory.check_market` | `query`（必須）: 品名、`kind`: sale（既定）か purchase |
 | `inventory.forecast` | `query`: 品目の名前の一部（省けば全品目）、`all`: 足りている品目も返すか |
 | `inventory.history` | `query`: 品目の名前・コード（省けば全品目）、`from`: 期間の始め（YYYY-MM-DD）、`to`: 期間の終わり（YYYY-MM-DD。この日を含む）、`kind`: 記録の種類（in・out・transfer・adjust） |
-| `inventory.market` | `query`: 品名の一部（空なら全販売品）、`position`: high・low・fair のどれかで絞る（任意） |
+| `inventory.market` | `query`: 品名の一部（空なら全販売品）、`position`: high・low・fair のどれかで絞る（任意）、`kind`: sale（販売価格の相場。既定）か purchase（仕入れの相場） |
 | `inventory.read_slip` | `fileId`（必須）: 納品書の画像か PDF のファイル ID |
 | `inventory.search` | `query`: 探す言葉（空なら全品目）、`lowOnly`: 残りわずかの品目だけにするか |
 | `knowledge.search` | `query`（必須）: 調べる言葉 |

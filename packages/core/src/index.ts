@@ -117,7 +117,7 @@ export { readQuoteSample, type QuoteSampleKind } from './files/quote-sample.js';
 export { buildDataRecipients, type DataRecipientFacts } from './privacy/recipients.js';
 export { checkRecruitText, RECRUIT_TOOLS } from './tools/recruit.js';
 export {
-  InventoryMarketService, PostgresMarketStore, MemoryMarketStore, runMarketWatch, competitorPriceFacts, researchItemPrice, marketSummary, marketComment, relatedFacts, taxIncluded,
+  InventoryMarketService, PostgresMarketStore, MemoryMarketStore, runMarketWatch, competitorPriceFacts, researchItemPrice, researchItemPurchase, purchaseExTax, marketSummary, marketComment, relatedFacts, taxIncluded,
   MARKET_FAIR_PCT, MARKET_ALERT_PCT, MARKET_BATCH_MAX, type MarketStore, type CompetitorPriceFact,
 } from './inventory/market.js';
 export { forecastDemand, runDemandForecasts, demandBase, baseFactor, askDemandFactors, demandDue, DEMAND_FACTOR_MIN, DEMAND_FACTOR_MAX, type DemandBase } from './inventory/demand.js';

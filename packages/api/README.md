@@ -181,8 +181,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `POST /v1/admin/extensions/signage/sounds` ／ `GET …/sounds/:id` ／ `DELETE …/sounds/:id` | 管理者: 会社のジングルの音（本文は MP3・WAV そのもの。`x-sound-name`・`x-duration-ms`。5 秒・300 KB・10 個まで）／ 中身（設定の欄の再生のボタン）／ 消す（既定の音なら「ピンポーン」に戻す） |
 | `/v1/signage-play/...` | 再生のページ（端末）。**ログインを使わず、画面の鍵（`Authorization: Bearer`）で名乗る**。`POST /pairings`（登録の番号。1 時間に 20 回まで）・`GET /pairings/qr.svg`・`POST /pairings/poll`（登録されたら鍵を 1 度だけ返す）・`GET /state`・`GET /assets/:id`（`Range`）・`GET /assets/:id/thumbnail`・`GET /events`（SSE。流れ・設定・外された・割り込み・消す・音の大きさ）・`POST /heartbeat`（停止中も受ける）・`GET /interrupts`（待っているものと出しているもの。経過はサーバーが数える）・`POST /interrupts/:id/started`・`/ended`（`ended` は停止中も受ける）・`GET /sounds/:id`。鍵が無い・違う会社は 401、切った会社は 404 |
 | `GET /v1/inventory` | 在庫の品目の一覧（`q`・`stopped=1`）と使える数・場所・会社の機能の入り切り・無くなる見込みの品目（`runningOut`）・端数の扱い（`taxRounding`）・本日の出庫の記録の数（`todayOut`。在庫のサマリー）。在庫管理を切っている会社と利用範囲の外の人には、`/v1/inventory` のどの口も 403（仕様書 第29章） |
+| 仕入価格（在庫の API 全体） | 品目の `purchasePrice`・`purchaseTaxIncluded`（仕入価格）は、在庫管理の利用範囲の管理者にだけ返す。ほかの人にはどの口の答えからも取り除き、送れば 403（仕様書 第29.6.2節） |
 | `GET /v1/inventory/items/:id` | 品目の詳細（場所とロットごとの数・最近の記録・直近 12 週の週ごとの使用 `weekly`・減り具合 `usage`。仕様書 第29.14.1節） |
-| `GET /v1/inventory/market`・`POST /v1/inventory/market/check`・`GET /v1/inventory/items/:id/market` | 販売品の相場（品目ごとのいちばん新しい結果・まとめて調べている途中か）／相場を調べる（`itemIds`。1 品目は待って結果、ほかは 202 で始める）／品目の結果の履歴（12 か月）。相場の比較を切っている会社と「ローカルだけ」の会社は使えない（第29.24節） |
+| `GET /v1/inventory/market`・`POST /v1/inventory/market/check`・`GET /v1/inventory/items/:id/market` | 販売品の相場（品目ごとのいちばん新しい結果・まとめて調べている途中か）／相場を調べる（`itemIds`。1 品目は待って結果、ほかは 202 で始める）／品目の結果の履歴（12 か月）。`kind=purchase`（本文は `kind: 'purchase'`）で仕入れの相場（利用範囲の管理者だけ。ほかの人は 403、履歴からも除く。第29.6.2節）。相場の比較を切っている会社と「ローカルだけ」の会社は使えない（第29.24節） |
 | `GET /v1/inventory/usage` | 品目ごとの減り具合（1 日の使用・前の 4 週からの増減・あと何日・次の 4 週の見込み・予測の倍率と理由。第29.14.1節） |
 | `POST /v1/inventory/items` ／ `PUT /v1/inventory/items/:id` | 品目を作る・直す（バーコードは `codes` で足す。会社の中で重ならない）。作るときは `initialQty`（いまの数）を入庫として記録し、単位の欄の数ははじめの数として読んで `note` で返す。直すときに単位へ数を入れると 400 |
 | `PUT /v1/inventory/items/:id/status` | 管理者: 品目を止める・使うに戻す（在庫が残れば止められない） |

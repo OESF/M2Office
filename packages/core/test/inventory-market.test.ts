@@ -91,3 +91,19 @@ test('月の見回り: 30 日に 1 回、販売価格のある販売品を調べ
   settings.aiPolicy = { mode: 'local-only' } as typeof settings.aiPolicy;
   assert.equal(await market.watch('t1', new Date(now.getTime() + 40 * 86_400_000)), 0, '「ローカルだけ」の会社では見回らない');
 });
+
+test('仕入れの相場: ケースの価格を入り数で割って 1 つあたりの税抜にそろえ、自社の仕入価格と比べる（第29.6.2節）', async () => {
+  const { researchItemPurchase, purchaseExTax } = await import('../src/index.js');
+  const asked: string[] = [];
+  const r = await researchItemPurchase({ research: research(asked), llm: llm({ offers: [
+    { source: 1, shop: '卸 A', price: 12000, pack: 24, taxIncluded: false },
+    { source: 2, shop: '業務用 B', price: 13200, pack: 24, taxIncluded: true },
+    { source: 2, shop: '入り数なし', price: 500 },
+    { source: 7, shop: '架空', price: 1, pack: 1 },
+  ] }) }, item({ taxRate: 10 }));
+  assert.deepEqual(r.sources.map((s) => [s.shop, s.price, s.pack]), [['卸 A', 500, 24], ['業務用 B', 500, 24]], '1 つ 500 円（税抜）にそろう。入り数の無いもの・番号の合わないものは捨てる');
+  assert.match(asked[0]!, /卸・業務用・ケース/);
+  assert.doesNotMatch(asked[0]!, /仕入価格|円/, '自社の仕入価格は渡さない');
+  assert.equal(purchaseExTax({ purchasePrice: 660, purchaseTaxIncluded: true, taxRate: 10 }), 600);
+  assert.equal(marketComment(marketSummary([500, 500], 600), '卸 A', 'purchase'), '仕入れの相場（1 つ 500 円・税抜）より 20% 高く仕入れている。最安は 1 つ 500 円（卸 A）');
+});
