@@ -17,7 +17,7 @@ import type { InvoiceStyleInput } from './pdf-render.js';
  * 差出人は会社情報から組み立てる。帳票ごとに書かせない（第15.2.2節）。
  * ロゴが読めない場合は、ロゴ無しで帳票を出す（帳票が出せないほうが困るため）。
  */
-export async function loadInvoiceStyle(ctx: ToolContext): Promise<InvoiceStyleInput> {
+export async function loadInvoiceStyle(ctx: Pick<ToolContext, 'repo' | 'files' | 'tenantId'>): Promise<InvoiceStyleInput> {
   const settings = await ctx.repo.getTenantSettings(ctx.tenantId);
   const { company, invoice } = settings;
   const from = [

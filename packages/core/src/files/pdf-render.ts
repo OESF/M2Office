@@ -614,3 +614,169 @@ export async function renderRuledQuote(doc: RuledQuoteDoc): Promise<Uint8Array> 
   return pdf.save();
 }
 
+
+/** 発注書の品目 1 行（第29.14.5節）。金額は持たない。 */
+export interface PurchaseOrderRow {
+  name: string;
+  /** 品番（無ければ空）。 */
+  code: string;
+  /** 数（例: `2 箱（10 個）`）。 */
+  quantity: string;
+}
+
+/** 発注書の中身（第29.14.5節）。 */
+export interface PurchaseOrderDoc {
+  /** 宛先（例: 株式会社○○ 御中）。 */
+  to: string;
+  /** 情報の欄（発注番号・発注日・希望納期）。 */
+  fields: { label: string; value: string }[];
+  greeting?: string;
+  rows: PurchaseOrderRow[];
+  notes: string[];
+  /** 会社の体裁（ロゴ・差出人・印）。 */
+  style?: InvoiceStyleInput;
+}
+
+/**
+ * 発注書の PDF を作る（第29.14.5節、Q-249）。見積書と同じ体裁（左上にロゴ、右上に差出人と印、中央に下線つきの表題）で、
+ * 品目の表（No・品名・品番・数量）と備考の枠を置く。**金額は載せない**（お金の確定は仕入先の請求と会計で行う）。
+ */
+export async function renderPurchaseOrder(doc: PurchaseOrderDoc): Promise<Uint8Array> {
+  const fonts = await loadFonts();
+  const pdf = await PDFDocument.create();
+  pdf.registerFontkit(fontkit);
+  const [font, bold] = await Promise.all([pdf.embedFont(fonts.regular, EMBED), pdf.embedFont(fonts.bold, EMBED)]);
+  pdf.setTitle('発注書');
+  const M = 40;
+  const left = M;
+  const right = PAGE.width - M;
+  const ink = rgb(0.1, 0.1, 0.1);
+  const rule = rgb(0.25, 0.25, 0.25);
+  const faint = rgb(0.55, 0.55, 0.55);
+  const shade = rgb(0.9, 0.9, 0.9);
+  let page = pdf.addPage([PAGE.width, PAGE.height]);
+  const text = (t: string, x: number, y: number, o: { size?: number; bold?: boolean; right?: number; center?: number; maxWidth?: number } = {}) => {
+    const size = o.size ?? 9;
+    const f = o.bold ? bold : font;
+    let shown = fit(t);
+    if (o.maxWidth !== undefined) {
+      while (shown.length > 1 && f.widthOfTextAtSize(shown, size) > o.maxWidth) shown = `${shown.slice(0, -2)}…`;
+    }
+    const w = f.widthOfTextAtSize(shown, size);
+    const x0 = o.right !== undefined ? o.right - w : o.center !== undefined ? o.center - w / 2 : x;
+    page.drawText(shown, { x: x0, y, size, font: f, color: ink });
+  };
+  const line = (x1: number, y1: number, x2: number, y2: number, thickness = 0.5, color = rule) =>
+    page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness, color });
+  const wrap = (t: string, width: number, size: number): string[] => {
+    const out: string[] = [];
+    for (const para of t.split('\n')) {
+      let cur = '';
+      for (const ch of fit(para)) {
+        if (font.widthOfTextAtSize(cur + ch, size) > width && cur) { out.push(cur); cur = ''; }
+        cur += ch;
+      }
+      out.push(cur);
+    }
+    return out;
+  };
+
+  // 上の段: ロゴ（左上）と差出人・印（右上）
+  let y = PAGE.height - M;
+  const logo = doc.style?.logo ? await (doc.style.logo.kind === 'png' ? pdf.embedPng(doc.style.logo.bytes) : pdf.embedJpg(doc.style.logo.bytes)).catch(() => null) : null;
+  if (logo) {
+    const scale = Math.min(160 / logo.width, 40 / logo.height);
+    page.drawImage(logo, { x: left, y: y - 10 - logo.height * scale - 10, width: logo.width * scale, height: logo.height * scale });
+  }
+  const fromX = right - 230;
+  let fy = y - 12;
+  (doc.style?.from ?? []).forEach((l, i) => {
+    for (const part of i === 0 ? [l] : wrap(l, right - fromX, 8.5)) {
+      text(part, fromX, fy, { size: i === 0 ? 10 : 8.5, bold: i === 0, maxWidth: right - fromX });
+      fy -= i === 0 ? 14 : 12;
+    }
+  });
+  if (doc.style?.sealBox) await drawSeal(pdf, page, font, doc.style, right - SEAL_SIZE + 6, y - 12 - SEAL_SIZE + 22);
+  y = Math.min(fy, y - SEAL_SIZE, y - 60) - 18;
+
+  // 表題（中央・下線）
+  const title = '発注書';
+  text(title, 0, y, { size: 17, bold: true, center: PAGE.width / 2 });
+  const tw = bold.widthOfTextAtSize(fit(title), 17);
+  line(PAGE.width / 2 - tw / 2 - 4, y - 5, PAGE.width / 2 + tw / 2 + 4, y - 5, 1, ink);
+  y -= 34;
+
+  // 宛先・情報の欄・前文
+  text(doc.to, left, y, { size: 12, bold: true, maxWidth: 300 });
+  line(left, y - 4, left + 300, y - 4, 0.75, ink);
+  y -= 24;
+  const labelW = Math.max(60, ...doc.fields.map((f) => font.widthOfTextAtSize(fit(f.label), 9))) + 8;
+  for (const f of doc.fields) {
+    text(f.label, left, y);
+    text(`：  ${f.value}`, left + labelW, y, { maxWidth: 260 });
+    y -= 13;
+  }
+  if (doc.greeting) { y -= 8; text(doc.greeting, left, y); }
+  y -= 18;
+
+  // 品目の表（No・品名・品番・数量）
+  const xNo = left + 30;
+  const xQty = right - 110;
+  const xCode = xQty - 120;
+  const ROW = 20;
+  const pad = 4;
+  const header = () => {
+    page.drawRectangle({ x: left, y: y - ROW, width: right - left, height: ROW, color: shade });
+    const ty = y - ROW + 6;
+    text('No', 0, ty, { bold: true, center: (left + xNo) / 2 });
+    text('品名', 0, ty, { bold: true, center: (xNo + xCode) / 2 });
+    text('品番', 0, ty, { bold: true, center: (xCode + xQty) / 2 });
+    text('数量', 0, ty, { bold: true, center: (xQty + right) / 2 });
+    line(left, y, right, y, 0.75);
+    y -= ROW;
+    line(left, y, right, y, 0.75);
+  };
+  const drawRow = (k: number | null, r: PurchaseOrderRow | null) => {
+    const by = y - ROW;
+    const ty = by + 6;
+    for (const vx of [left, xNo, xCode, xQty, right]) line(vx, y, vx, by, 0.5);
+    line(left, by, right, by, 0.3, faint);
+    if (r && k !== null) {
+      text(String(k + 1), 0, ty, { center: (left + xNo) / 2 });
+      text(r.name, xNo + pad, ty, { maxWidth: xCode - xNo - pad * 2 });
+      text(r.code, xCode + pad, ty, { maxWidth: xQty - xCode - pad * 2 });
+      text(r.quantity, 0, ty, { right: right - pad, maxWidth: right - xQty - pad * 2 });
+    }
+    y = by;
+  };
+  const notesLines = doc.notes.flatMap((n) => wrap(n, right - left - pad * 4, 8));
+  const notesH = Math.max(80, ROW + notesLines.length * 11 + 16);
+  header();
+  doc.rows.forEach((r, k) => {
+    if (y - ROW < M) {
+      line(left, y, right, y, 0.75);
+      page = pdf.addPage([PAGE.width, PAGE.height]);
+      y = PAGE.height - M;
+      header();
+    }
+    drawRow(k, r);
+  });
+  // 空の罫線の行で、備考の枠が下に収まるところまで埋める（10 行まで）
+  for (let k = doc.rows.length; k < 10 && y - ROW >= M + notesH + 20; k++) drawRow(null, null);
+  line(left, y, right, y, 0.75);
+
+  // 備考の枠
+  if (y - 14 - notesH < M) { page = pdf.addPage([PAGE.width, PAGE.height]); y = PAGE.height - M; }
+  y -= 14;
+  const nTop = Math.min(y, M + notesH);
+  page.drawRectangle({ x: left, y: M, width: right - left, height: nTop - M, borderColor: rule, borderWidth: 0.75 });
+  page.drawRectangle({ x: left, y: nTop - ROW, width: right - left, height: ROW, color: shade, borderColor: rule, borderWidth: 0.75 });
+  text('備考', 0, nTop - ROW + 6, { bold: true, center: PAGE.width / 2 });
+  let ny = nTop - ROW - 14;
+  for (const l of notesLines) {
+    if (ny < M + 4) break;
+    text(l, left + pad * 2, ny, { size: 8 });
+    ny -= 11;
+  }
+  return pdf.save();
+}

@@ -29,3 +29,4 @@ export {
   type SalesStore, type SaleRecord, type ReceiptRecord, type UnmatchedRecord, type ReceiptEventInput, type ReceiptEventResult, type ReceiptLineResult, type SalesItem, type SalesItemList, type SalesItemQuery, type SaleEventInput,
   type SaleEventResult, type SaleLineResult, type HookResponse, type InventorySalesDeps,
 } from './sales.js';
+export { createOrderSheet, orderQuantityText } from './order-sheet.js';

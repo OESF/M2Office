@@ -11,7 +11,7 @@ import { createPool } from '../repository/pool.js';
 import type {
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryBookingStatus, InventoryCount, InventoryItem, InventoryItemKind, InventoryWeeklyUsage,
   InventoryLocation, InventoryMove, InventoryMoveKind, InventoryPublicationScope, InventoryPublicSnapshot, InventoryReservationLine,
-  InventoryDiscontinued, InventoryOutPurpose, InventorySupplier,
+  InventoryDiscontinued, InventoryOrder, InventoryOutPurpose, InventorySupplier,
 } from '@m2office/shared';
 
 /** 置き場に渡す品目（バーコードは別に持つ）。 */
@@ -162,6 +162,23 @@ export interface PublicationRecord {
   createdAt: string;
 }
 
+/** 置き場に渡す発注（品目の行を含む）。 */
+export interface OrderRecord {
+  id: string;
+  number: string;
+  supplierId: string | null;
+  supplierName: string;
+  method: InventoryOrder['method'];
+  status: InventoryOrder['status'];
+  orderedAt: string | null;
+  dueOn: string | null;
+  runId: string | null;
+  fileId: string | null;
+  createdBy: string;
+  createdAt: string;
+  lines: { id: string; itemId: string; qty: number }[];
+}
+
 export interface InventoryStore {
   listItems(tenantId: string, opts?: { includeStopped?: boolean }): Promise<InventoryItem[]>;
   getItem(tenantId: string, id: string): Promise<InventoryItem | null>;
@@ -208,6 +225,24 @@ export interface InventoryStore {
 
   /** 入出庫の記録を足し、同じトランザクションでいまの数を直す。 */
   applyMoves(tenantId: string, moves: NewMove[]): Promise<void>;
+  /** 発注を作る（品目の行も。第29.14.4節）。 */
+  createOrder(tenantId: string, o: OrderRecord): Promise<void>;
+  /** 発注 1 件（品目の名前・単位つき）。 */
+  getOrder(tenantId: string, id: string): Promise<InventoryOrder | null>;
+  /** 発注の一覧（新しい順）。`open` なら発注前・承認待ち・入荷待ち・一部入荷だけ。 */
+  listOrders(tenantId: string, q?: { open?: boolean; limit?: number }): Promise<InventoryOrder[]>;
+  /** 発注の状態などを直す。 */
+  updateOrder(tenantId: string, id: string, patch: Partial<Pick<InventoryOrder, 'status' | 'orderedAt' | 'dueOn' | 'runId' | 'fileId' | 'closedAt'>>): Promise<void>;
+  /** 発注の品目の行を差し替える（発注待ちの出し直し。届いた数は 0 から）。 */
+  replaceOrderLines(tenantId: string, orderId: string, lines: { id: string; itemId: string; qty: number }[]): Promise<void>;
+  /** その月（YYYYMM）に作った発注の数（発注番号の連番）。 */
+  countOrdersInMonth(tenantId: string, yyyymm: string): Promise<number>;
+  /** 入庫で消し込む（行の届いた数を足し、入庫の記録との結び付きを残す）。 */
+  addReceipt(tenantId: string, lineId: string, moveId: string, qty: number): Promise<void>;
+  /** 入庫の記録の消し込みを戻す（入庫を取り消したとき）。戻した行の発注の ID を返す。 */
+  removeReceipts(tenantId: string, moveIds: string[]): Promise<string[]>;
+  /** 品目ごとの入荷待ちの数（入荷待ち・一部入荷の届いていない数）と、いちばん早い届く予定の日。 */
+  onOrderByItem(tenantId: string): Promise<Map<string, { qty: number; due: string | null }>>;
   /** 品目ごとの最後の出庫の用途（取り消しを除く。用途の既定に使う。第29.9.1節）。 */
   lastOutPurposes(tenantId: string, itemIds: string[]): Promise<Map<string, InventoryOutPurpose>>;
   getMove(tenantId: string, id: string): Promise<InventoryMove | null>;
@@ -605,6 +640,98 @@ export class PostgresInventoryStore implements InventoryStore {
     return new Map(rows.map((r) => [r.item_id, r.purpose]));
   }
 
+  async createOrder(tenantId: string, o: OrderRecord): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      await c.query(
+        `insert into inventory_orders (id, tenant_id, number, supplier_id, supplier_name, method, status, ordered_at, due_on, run_id, file_id, created_by, created_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [o.id, tenantId, o.number, o.supplierId, o.supplierName, o.method, o.status, o.orderedAt, o.dueOn, o.runId, o.fileId, o.createdBy, o.createdAt]);
+      for (const l of o.lines) {
+        await c.query(`insert into inventory_order_lines (id, tenant_id, order_id, item_id, qty) values ($1,$2,$3,$4,$5)`, [l.id, tenantId, o.id, l.itemId, l.qty]);
+      }
+    });
+  }
+
+  private async ordersWhere(tenantId: string, where: string, params: unknown[], limit: number): Promise<InventoryOrder[]> {
+    const rows = await this.q<{
+      id: string; number: string; supplier_id: string | null; supplier_name: string; method: InventoryOrder['method']; status: InventoryOrder['status'];
+      ordered_at: unknown; due_on: unknown; run_id: string | null; file_id: string | null; created_by: string; created_by_name: string | null; created_at: unknown; closed_at: unknown;
+      lines: { id: string; item_id: string; item_name: string; unit: string; pack_unit: string; pack_size: unknown; qty: unknown; received: unknown }[] | null;
+    }>(tenantId,
+      `select o.*, u.display_name as created_by_name,
+              (select json_agg(json_build_object('id', l.id, 'item_id', l.item_id, 'item_name', i.name, 'unit', i.unit, 'pack_unit', i.pack_unit,
+                 'pack_size', i.pack_size, 'qty', l.qty, 'received', l.received) order by i.name)
+                 from inventory_order_lines l join inventory_items i on i.id = l.item_id where l.order_id = o.id) as lines
+         from inventory_orders o left join users u on u.id = o.created_by
+        where o.tenant_id = $1 ${where} order by o.created_at desc limit ${limit}`, [tenantId, ...params]);
+    return rows.map((r) => ({
+      id: r.id, number: r.number, supplierId: r.supplier_id, supplierName: r.supplier_name, method: r.method, status: r.status,
+      orderedAt: r.ordered_at ? iso(r.ordered_at) : null, dueOn: r.due_on ? day(r.due_on) : null, runId: r.run_id, fileId: r.file_id,
+      createdBy: r.created_by, createdByName: r.created_by_name ?? undefined, createdAt: iso(r.created_at), closedAt: r.closed_at ? iso(r.closed_at) : null,
+      lines: (r.lines ?? []).map((l) => ({ id: l.id, itemId: l.item_id, itemName: l.item_name, unit: l.unit, packUnit: l.pack_unit, packSize: numOrNull(l.pack_size), qty: num(l.qty), received: num(l.received) })),
+    }));
+  }
+
+  async getOrder(tenantId: string, id: string): Promise<InventoryOrder | null> {
+    return (await this.ordersWhere(tenantId, 'and o.id = $2', [id], 1))[0] ?? null;
+  }
+
+  async listOrders(tenantId: string, q: { open?: boolean; limit?: number } = {}): Promise<InventoryOrder[]> {
+    return this.ordersWhere(tenantId, q.open ? `and o.status in ('pending', 'ordered', 'partial')` : '', [], Math.min(500, q.limit ?? 200));
+  }
+
+  async updateOrder(tenantId: string, id: string, patch: Partial<Pick<InventoryOrder, 'status' | 'orderedAt' | 'dueOn' | 'runId' | 'fileId' | 'closedAt'>>): Promise<void> {
+    const cols: Record<string, string> = { status: 'status', orderedAt: 'ordered_at', dueOn: 'due_on', runId: 'run_id', fileId: 'file_id', closedAt: 'closed_at' };
+    const sets: string[] = [];
+    const params: unknown[] = [tenantId, id];
+    for (const [k, v] of Object.entries(patch)) {
+      if (!(k in cols)) continue;
+      params.push(v);
+      sets.push(`${cols[k]} = $${params.length}`);
+    }
+    if (sets.length) await this.q(tenantId, `update inventory_orders set ${sets.join(', ')} where tenant_id = $1 and id = $2`, params);
+  }
+
+  async replaceOrderLines(tenantId: string, orderId: string, lines: { id: string; itemId: string; qty: number }[]): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      await c.query(`delete from inventory_order_lines where tenant_id = $1 and order_id = $2`, [tenantId, orderId]);
+      for (const l of lines) {
+        await c.query(`insert into inventory_order_lines (id, tenant_id, order_id, item_id, qty) values ($1,$2,$3,$4,$5)`, [l.id, tenantId, orderId, l.itemId, l.qty]);
+      }
+    });
+  }
+
+  async countOrdersInMonth(tenantId: string, yyyymm: string): Promise<number> {
+    const rows = await this.q<{ n: unknown }>(tenantId, `select count(*) as n from inventory_orders where tenant_id = $1 and number like $2`, [tenantId, `PO-${yyyymm}-%`]);
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  async addReceipt(tenantId: string, lineId: string, moveId: string, qty: number): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      await c.query(`insert into inventory_order_receipts (id, tenant_id, line_id, move_id, qty) values ($1,$2,$3,$4,$5)`, [randomUUID(), tenantId, lineId, moveId, qty]);
+      await c.query(`update inventory_order_lines set received = received + $3 where tenant_id = $1 and id = $2`, [tenantId, lineId, qty]);
+    });
+  }
+
+  async removeReceipts(tenantId: string, moveIds: string[]): Promise<string[]> {
+    if (moveIds.length === 0) return [];
+    return this.tx(tenantId, async (c) => {
+      const rows = (await c.query<{ line_id: string; qty: unknown; order_id: string }>(
+        `delete from inventory_order_receipts r using inventory_order_lines l
+          where r.tenant_id = $1 and r.move_id = any($2::text[]) and l.id = r.line_id returning r.line_id, r.qty, l.order_id`, [tenantId, moveIds])).rows;
+      for (const r of rows) await c.query(`update inventory_order_lines set received = greatest(0, received - $3) where tenant_id = $1 and id = $2`, [tenantId, r.line_id, num(r.qty)]);
+      return [...new Set(rows.map((r) => r.order_id))];
+    });
+  }
+
+  async onOrderByItem(tenantId: string): Promise<Map<string, { qty: number; due: string | null }>> {
+    const rows = await this.q<{ item_id: string; qty: unknown; due: unknown }>(tenantId,
+      `select l.item_id, sum(greatest(0, l.qty - l.received)) as qty, min(o.due_on) as due
+         from inventory_order_lines l join inventory_orders o on o.id = l.order_id
+        where l.tenant_id = $1 and o.status in ('ordered', 'partial') group by l.item_id having sum(greatest(0, l.qty - l.received)) > 0`, [tenantId]);
+    return new Map(rows.map((r) => [r.item_id, { qty: num(r.qty), due: r.due ? day(r.due) : null }]));
+  }
+
   // 外部のアプリからの記録（記録した人が `app:<アプリ>`）は「外部のアプリ（アプリの名前）」と出す（第13.4.1節・第29.20.1節）
   private readonly MOVE_SELECT = `select m.*, i.name as item_name, l.lot,
       coalesce(u.display_name, '外部のアプリ（' || xa.name || '）', case when m.created_by like 'app:%' then '外部のアプリ' end) as created_by_name
@@ -955,6 +1082,82 @@ export class MemoryInventoryStore implements InventoryStore {
     for (const r of this.reservations.values()) {
       if (r.tenantId !== tenantId || r.status !== 'held' || r.source === 'sales' || (r.bookedAt && r.bookedAt > until)) continue;
       out.set(r.itemId, (out.get(r.itemId) ?? 0) + r.qty);
+    }
+    return out;
+  }
+
+  readonly orders = new Map<string, OrderRecord & { tenantId: string; closedAt: string | null }>();
+  readonly orderLines = new Map<string, { id: string; tenantId: string; orderId: string; itemId: string; qty: number; received: number }>();
+  readonly orderReceipts: { tenantId: string; lineId: string; moveId: string; qty: number }[] = [];
+
+  async createOrder(tenantId: string, o: OrderRecord): Promise<void> {
+    this.orders.set(o.id, { ...o, tenantId, closedAt: null });
+    for (const l of o.lines) this.orderLines.set(l.id, { ...l, tenantId, orderId: o.id, received: 0 });
+  }
+
+  private orderView(o: OrderRecord & { tenantId: string; closedAt: string | null }): InventoryOrder {
+    const { tenantId: _t, lines: _l, ...rest } = o;
+    return {
+      ...rest,
+      lines: [...this.orderLines.values()].filter((l) => l.orderId === o.id).map((l) => {
+        const i = this.items.get(l.itemId);
+        return { id: l.id, itemId: l.itemId, itemName: i?.name, unit: i?.unit, packUnit: i?.packUnit, packSize: i?.packSize ?? null, qty: l.qty, received: l.received };
+      }),
+    };
+  }
+
+  async getOrder(tenantId: string, id: string): Promise<InventoryOrder | null> {
+    const o = this.orders.get(id);
+    return o && o.tenantId === tenantId ? this.orderView(o) : null;
+  }
+
+  async listOrders(tenantId: string, q: { open?: boolean; limit?: number } = {}): Promise<InventoryOrder[]> {
+    return [...this.orders.values()].filter((o) => o.tenantId === tenantId && (!q.open || ['pending', 'ordered', 'partial'].includes(o.status)))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, q.limit ?? 200).map((o) => this.orderView(o));
+  }
+
+  async updateOrder(tenantId: string, id: string, patch: Partial<Pick<InventoryOrder, 'status' | 'orderedAt' | 'dueOn' | 'runId' | 'fileId' | 'closedAt'>>): Promise<void> {
+    const o = this.orders.get(id);
+    if (o && o.tenantId === tenantId) Object.assign(o, patch);
+  }
+
+  async replaceOrderLines(tenantId: string, orderId: string, lines: { id: string; itemId: string; qty: number }[]): Promise<void> {
+    for (const [k, l] of this.orderLines) if (l.tenantId === tenantId && l.orderId === orderId) this.orderLines.delete(k);
+    for (const l of lines) this.orderLines.set(l.id, { ...l, tenantId, orderId, received: 0 });
+  }
+
+  async countOrdersInMonth(tenantId: string, yyyymm: string): Promise<number> {
+    return [...this.orders.values()].filter((o) => o.tenantId === tenantId && o.number.startsWith(`PO-${yyyymm}-`)).length;
+  }
+
+  async addReceipt(tenantId: string, lineId: string, moveId: string, qty: number): Promise<void> {
+    const l = this.orderLines.get(lineId);
+    if (!l || l.tenantId !== tenantId) return;
+    l.received += qty;
+    this.orderReceipts.push({ tenantId, lineId, moveId, qty });
+  }
+
+  async removeReceipts(tenantId: string, moveIds: string[]): Promise<string[]> {
+    const out = new Set<string>();
+    for (let k = this.orderReceipts.length - 1; k >= 0; k--) {
+      const r = this.orderReceipts[k]!;
+      if (r.tenantId !== tenantId || !moveIds.includes(r.moveId)) continue;
+      const l = this.orderLines.get(r.lineId);
+      if (l) { l.received = Math.max(0, l.received - r.qty); out.add(l.orderId); }
+      this.orderReceipts.splice(k, 1);
+    }
+    return [...out];
+  }
+
+  async onOrderByItem(tenantId: string): Promise<Map<string, { qty: number; due: string | null }>> {
+    const out = new Map<string, { qty: number; due: string | null }>();
+    for (const l of this.orderLines.values()) {
+      const o = this.orders.get(l.orderId);
+      if (l.tenantId !== tenantId || !o || !['ordered', 'partial'].includes(o.status)) continue;
+      const left = Math.max(0, l.qty - l.received);
+      if (left <= 0) continue;
+      const cur = out.get(l.itemId) ?? { qty: 0, due: null };
+      out.set(l.itemId, { qty: cur.qty + left, due: [cur.due, o.dueOn].filter((x): x is string => !!x).sort()[0] ?? null });
     }
     return out;
   }

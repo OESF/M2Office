@@ -2618,3 +2618,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .weekday-name { font-size: calc(11px * var(--font-scale)); color: var(--muted); margin-top: 2px; }
 .inv-discontinued { border-color: var(--warn-line); background: var(--warn-soft); display: flex; flex-direction: column; gap: 4px; align-items: flex-start; margin-bottom: calc(8px * var(--space-scale)); }
 .forecast-badge.warn { color: var(--warn); border-color: var(--warn-line); background: var(--warn-soft); }
+
+/* 入荷待ちの段の操作（第29.14.4節）。右にそろえ、ボタンの間を空ける */
+.order-group td.order-actions { white-space: nowrap; width: 1%; }
+.order-actions-row { display: flex; justify-content: flex-end; align-items: center; gap: calc(8px * var(--space-scale)); }
+.order-actions-row .btn { text-decoration: none; }

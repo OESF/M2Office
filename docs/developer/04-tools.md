@@ -64,6 +64,7 @@
 | `inventory.forecast` | read | — | 在庫の使う速さから、あと何日で無くなるか・残りわずか・使用期限の近いものと、発注の案を出します。見るだけです |
 | `inventory.history` | read | — | 入庫・使用・移動・調整の記録を、品目と期間で調べます。見るだけです |
 | `inventory.market` | read | — | 販売品について、調べてある相場（中央値・最安・最高）と自社の価格との差を答えます。見るだけです |
+| `inventory.orders` | read | — | 発注済み・入荷待ち・届いていない発注を確かめます |
 | `inventory.read_slip` | read | — | 納品書の写真や PDF から、品名・品番・数・ロット・使用期限を読み取ります。入庫はしません |
 | `inventory.search` | read | — | 品目の名前・コード・バーコードで、使える数・在庫・期限の近いロットを調べます。見るだけです |
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
@@ -127,6 +128,7 @@
 | `inventory.mark_discontinued` | write-internal | — | 仕入先からの終売の知らせをもとに、品目に「終売」の印を付けます（外すのは管理者だけ）。発注や品目の停止はしません |
 | `inventory.move` | write-internal | — | 入庫・出庫・移動を在庫に記録します。社内の記録に足すだけで、誰にも送りません |
 | `inventory.receive_slip` | write-internal | — | 納品書の写真や PDF を読み取り、在庫の品目に当てはまる行を入庫にします。当てはまらない行は残します。誰にも送りません |
+| `inventory.record_order` | write-internal | — | 発注したことを記録し、届くまで入荷待ちにします（社内の記録だけで、仕入先には何も送りません） |
 | `inventory.reserve` | write-internal | — | 予約に合わせて品目を取り置き（使える数だけを減らす）、取り消し・使ったにし、メニューで使う品目を覚えます。誰にも送りません |
 | `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
 | `members.points` | write-internal | — | 会員のポイントを足す・引く（理由を残す） |
@@ -202,6 +204,7 @@
 | `inventory.forecast` | `query`: 品目の名前の一部（省けば全品目）、`all`: 足りている品目も返すか |
 | `inventory.history` | `query`: 品目の名前・コード（省けば全品目）、`from`: 期間の始め（YYYY-MM-DD）、`to`: 期間の終わり（YYYY-MM-DD。この日を含む）、`kind`: 記録の種類（in・out・transfer・adjust） |
 | `inventory.market` | `query`: 品名の一部（空なら全販売品）、`position`: high・low・fair のどれかで絞る（任意）、`kind`: sale（販売価格の相場。既定）か purchase（仕入れの相場） |
+| `inventory.orders` | `item`: 品目（品名・コード）、`late`: 届いていない（遅れた）発注だけ |
 | `inventory.read_slip` | `fileId`（必須）: 納品書の画像か PDF のファイル ID |
 | `inventory.search` | `query`: 探す言葉（空なら全品目）、`lowOnly`: 残りわずかの品目だけにするか |
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
@@ -266,6 +269,7 @@
 | `inventory.mark_discontinued` | `item`（必須）: 品目（品名・自社のコード・バーコード）、`status`: 終売の状態（planned・ended）、`date`: 終売の日（YYYY-MM-DD）、`successor`: 後継品の名前、`source`: 知らせの出どころ、`clear`: 「終売ではない」として外す |
 | `inventory.move` | `kind`（必須）: 記録の種類（in・out・transfer）、`item`（必須）: 品目（品名・自社のコード・バーコード）、`qty`（必須）: 数（正の数）、`unit`: 数の単位（unit は使う単位、pack は仕入れの単位）（unit・pack）、`place`: 場所（省けば今ある場所）、`to`: 移動の先の場所、`lot`: ロット、`expiresOn`: 使用期限（YYYY-MM-DD）、`purpose`: 出庫の用途（sale 販売・internal 社内消費・disposal 廃棄・other その他）（sale・internal・disposal・other）、`reason`: メモ（任意。用途で足りれば入れない） |
 | `inventory.receive_slip` | `fileId`（必須）: 納品書の画像か PDF のファイル ID、`place`: 入れる場所（倉庫や棚の名前。省けば品目ごとに今ある場所） |
+| `inventory.record_order` | `item`: 品目（品名・自社のコード・バーコード）、`qty`: 数、`unit`: unit か pack（unit・pack）、`supplier`: 仕入先の名前、`cancel`: 取り消す発注番号 |
 | `inventory.reserve` | `action`（必須）: hold・cancel・use・teach（hold・cancel・use・teach）、`item`: 品目（品名・自社のコード・バーコード）、`qty`: 数（使う単位）、`when`: 予約の日時、`booking`: 予約番号、`menu`: 予約のメニュー（コース・施術・プラン）の名前 |
 | `knowledge.register` | `artifactId`（必須）: 登録する成果物の ID（document.create の結果） |
 | `members.points` | `query`（必須）: 会員番号か呼び名、`points`（必須）: 足す数（引くなら負）、`note`（必須）: 理由 |

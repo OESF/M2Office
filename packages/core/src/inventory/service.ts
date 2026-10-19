@@ -11,7 +11,7 @@ import {
   canUseAgent, defaultOutPurpose, INVENTORY_EXTENSION_ID, INVENTORY_ITEM_KINDS, INVENTORY_OUT_PURPOSES, inventoryKindLabel, inventoryPurposeLabel, type InventoryItemKind, type InventoryTaxRate, type InventoryUsageRow, type InventoryWeeklyUsage,
   type AuditEvent, type InventoryCount, type InventoryCountRow, type InventoryCountScope, type InventoryCountView,
   type InventoryItem, type InventoryItemView, type InventoryLocation, type InventoryMove,
-  type InventoryDiscontinued, type InventoryMoveKind, type InventoryOutPurpose, type InventorySettings, type InventoryStockRow, type InventorySupplier,
+  type InventoryDiscontinued, type InventoryMoveKind, type InventoryOrder, type InventoryOutPurpose, type InventorySettings, type InventoryStockRow, type InventorySupplier,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -20,7 +20,7 @@ import { dateIn } from '../cards/service.js';
 import { weekStartJst, type InventoryStore, type ItemRecord, type NewMove, type StockRecord } from './store.js';
 import { parseCode, type ParsedCode } from './gs1.js';
 import { shelfKeyOf } from './labels.js';
-import { effectiveLow, forecastItem, sortForecast, USAGE_DAYS, weekdayNote, type ForecastCalendar, type ForecastRow } from './forecast.js';
+import { daysBetween, effectiveLow, forecastItem, sortForecast, USAGE_DAYS, weekdayNote, type ForecastCalendar, type ForecastRow } from './forecast.js';
 import { closedReason } from '../scheduler/business-days.js';
 import { matchLine, readSlip, type SlipLine } from './slip.js';
 
@@ -83,6 +83,20 @@ export interface MoveInput {
   purpose?: InventoryOutPurpose;
   source?: InventoryMove['source'];
   sourceId?: string;
+  /** 入庫で発注を消し込むとき、先に見る仕入先の名前（納品書の仕入先。第29.14.4節）。 */
+  orderSupplier?: string;
+}
+
+/** 発注を消し込む入庫の出どころ（画面・スマホ・納品書・秘書。取り込みの初めの数・返品・取り消しは消し込まない）。 */
+const RECEIVING_SOURCES: InventoryMove['source'][] = ['manual', 'slip', 'secretary'];
+
+/** 発注を作る中身（第29.14.4節）。数は使う単位。 */
+export interface NewOrderInput {
+  supplierId: string;
+  lines: { itemId: string; qty: number }[];
+  /** `pending`（メールは承認待ち・Web と電話は発注前）か `ordered`（もう発注した）。 */
+  status: 'pending' | 'ordered';
+  runId?: string | null;
 }
 
 /** 品目を作った結果。 */
@@ -431,10 +445,11 @@ export class InventoryService {
     if (items.length === 0) return [];
     const day = today ?? dateIn('Asia/Tokyo');
     // 予約との引き当てを入れていない会社でも、販売管理の注文の取り置き（第29.20.1節）は使える数から引く
-    const [stock, held, purposes] = await Promise.all([
+    const [stock, held, purposes, onOrder] = await Promise.all([
       this.deps.store.listStock(tenantId, items.map((i) => i.id)),
       this.deps.store.heldByItem(tenantId, settings.features.reserve ? undefined : 'sales'),
       this.deps.store.lastOutPurposes(tenantId, items.map((i) => i.id)),
+      this.deps.store.onOrderByItem(tenantId),
     ]);
     const byItem = new Map<string, StockRecord[]>();
     for (const s of stock) byItem.set(s.itemId, [...(byItem.get(s.itemId) ?? []), s]);
@@ -447,10 +462,12 @@ export class InventoryService {
       const expiries = rows.filter((s) => s.qty > 0 && s.expiresOn).map((s) => s.expiresOn!).sort();
       return {
         ...i, onHand, reserved, expired, available,
-        // 目安は、会社が品目に決めた値（固定）→ 需要の予測の目安 → 会社の既定の順（第29.14節）
-        low: i.status === 'active' && available <= effectiveLow(i, settings),
+        // 目安は、会社が品目に決めた値（固定）→ 需要の予測の目安 → 会社の既定の順（第29.14節）。
+        // 入荷待ちの数は足して見る（発注してから届くまで「足りなくなりそう」を出さない。第29.14.4節）
+        low: i.status === 'active' && available + (onOrder.get(i.id)?.qty ?? 0) <= effectiveLow(i, settings),
         nearestExpiry: expiries[0] ?? null,
         outPurpose: defaultOutPurpose(i, purposes.get(i.id)),
+        ...(onOrder.get(i.id) ? { onOrder: round3(onOrder.get(i.id)!.qty), onOrderDue: onOrder.get(i.id)!.due } : {}),
       };
     });
   }
@@ -719,6 +736,10 @@ export class InventoryService {
     if (moves.length === 0) return { ok: false, error: '記録できませんでした' };
 
     await this.deps.store.applyMoves(tenantId, moves);
+    // 入庫なら、その品目の入荷待ちの発注を古い順に消し込む（確認を挟まない。第29.14.4節）
+    if (input.kind === 'in' && qty > 0 && RECEIVING_SOURCES.includes(input.source ?? 'manual')) {
+      await this.receiveOrders(tenantId, item.id, qty, moves[0]!.id, input.orderSupplier).catch(() => undefined);
+    }
     const [view] = await this.views(tenantId, [item], settings);
     const rows = await this.deps.store.listStock(tenantId, [item.id]);
     if (rows.some((r) => r.qty < 0)) warnings.push(`「${item.name}」の在庫がマイナスになりました。数え直して調整してください`);
@@ -814,6 +835,9 @@ export class InventoryService {
       reason: opts.reason, source: opts.source, sourceId: opts.sourceId ?? null, reversalOf: m.id, batchId, createdBy: actor, createdAt: at,
     }));
     await this.deps.store.applyMoves(tenantId, moves);
+    // 入庫を取り消したら、発注の消し込みも戻す
+    const touched = await this.deps.store.removeReceipts(tenantId, group.map((m) => m.id)).catch(() => [] as string[]);
+    for (const id of touched) await this.refreshOrderStatus(tenantId, id);
     const item = (await this.deps.store.getItem(tenantId, move.itemId))!;
     const [view] = await this.views(tenantId, [item], await this.settings(tenantId));
     const recorded = await Promise.all(moves.map((m) => this.deps.store.getMove(tenantId, m.id)));
@@ -867,6 +891,7 @@ export class InventoryService {
    */
   async forecast(tenantId: string, today?: string): Promise<ForecastRow[]> {
     const day = today ?? dateIn('Asia/Tokyo');
+    await this.reconcileOrders(tenantId).catch(() => undefined);
     const [items, settings, suppliers, stock] = await Promise.all([
       this.list(tenantId, { today: day }), this.settings(tenantId), this.deps.store.listSuppliers(tenantId), this.deps.store.listStock(tenantId),
     ]);
@@ -887,6 +912,166 @@ export class InventoryService {
     return sortForecast(rows);
   }
 
+  // ---- 発注の記録（第29.14.4節） -------------------------------------------
+
+  /** 発注番号を出す（会社ごと・月ごとの連番。例: `PO-202610-001`）。 */
+  private async orderNumber(tenantId: string, at: Date): Promise<string> {
+    const ym = dateIn('Asia/Tokyo', at).slice(0, 7).replace('-', '');
+    return `PO-${ym}-${String((await this.deps.store.countOrdersInMonth(tenantId, ym)) + 1).padStart(3, '0')}`;
+  }
+
+  /** 届く予定の日（発注した日 ＋ 品目の中でいちばん長い仕入れにかかる日数。品目 → 仕入先 → 会社の既定）。 */
+  private dueOn(orderedAt: string, items: InventoryItem[], supplier: InventorySupplier | null, settings: InventorySettings): string {
+    const lead = Math.max(0, ...items.map((i) => i.leadDays ?? supplier?.leadDays ?? settings.leadDaysDefault));
+    return dateIn('Asia/Tokyo', new Date(Date.parse(orderedAt) + lead * 86_400_000));
+  }
+
+  /**
+   * 発注を記録する（第29.14.4節）。
+   *
+   * @returns 作った発注か、作れない理由。同じ仕入先の発注待ちを出し直したときは `revised: true`
+   * @remarks 社内の記録だけで、仕入先には何も送らない（メールの発注は業務が承認の後に送る）
+   */
+  async createOrder(tenantId: string, userId: string, input: NewOrderInput): Promise<(InventoryOrder & { revised?: boolean }) | { error: string }> {
+    const settings = await this.settings(tenantId);
+    const supplier = (await this.deps.store.listSuppliers(tenantId)).find((x) => x.id === input.supplierId) ?? null;
+    if (!supplier) return { error: '仕入先が見つかりません' };
+    const all = new Map((await this.deps.store.listItems(tenantId)).map((i) => [i.id, i]));
+    const lines = input.lines.filter((l) => all.has(l.itemId) && Number.isFinite(l.qty) && l.qty > 0).map((l) => ({ id: randomUUID(), itemId: l.itemId, qty: round3(l.qty) }));
+    if (lines.length === 0) return { error: '発注する品目と数を選んでください' };
+    const at = new Date();
+    const orderedAt = input.status === 'ordered' ? at.toISOString() : null;
+    // 同じ仕入先の発注待ち（Web・電話でまだ発注していないもの）があれば、新しく作らずに出し直す（同じ発注を重ねないため）
+    if (input.status === 'pending' && !input.runId) {
+      const waiting = (await this.deps.store.listOrders(tenantId, { open: true })).find((o) => o.status === 'pending' && !o.runId && o.supplierId === supplier.id);
+      if (waiting) {
+        await this.deps.store.replaceOrderLines(tenantId, waiting.id, lines);
+        await this.deps.store.updateOrder(tenantId, waiting.id, { dueOn: this.dueOn(at.toISOString(), lines.map((l) => all.get(l.itemId)!), supplier, settings) });
+        await this.audit(tenantId, userId, 'inventory.order.revise', 'inventory_order', waiting.id, { number: waiting.number, lines: lines.length });
+        return { ...(await this.deps.store.getOrder(tenantId, waiting.id))!, revised: true };
+      }
+    }
+    const id = randomUUID();
+    await this.deps.store.createOrder(tenantId, {
+      id, number: await this.orderNumber(tenantId, at), supplierId: supplier.id, supplierName: supplier.name, method: supplier.method,
+      // 届く予定の日は、発注前・承認待ちでも今日から見た見込みを置く（発注書の希望納期。発注したときに出し直す）
+      status: input.status, orderedAt, dueOn: this.dueOn(orderedAt ?? at.toISOString(), lines.map((l) => all.get(l.itemId)!), supplier, settings),
+      runId: input.runId ?? null, fileId: null, createdBy: userId, createdAt: at.toISOString(), lines,
+    });
+    await this.audit(tenantId, userId, 'inventory.order.create', 'inventory_order', id, { supplier: supplier.name, lines: lines.length, status: input.status });
+    if (orderedAt) this.changed(tenantId, lines.map((l) => l.itemId));
+    return (await this.deps.store.getOrder(tenantId, id))!;
+  }
+
+  /** 発注に業務の実行（メールの発注）か発注書を結び付ける。 */
+  async attachToOrder(tenantId: string, orderId: string, patch: { runId?: string; fileId?: string }): Promise<void> {
+    await this.deps.store.updateOrder(tenantId, orderId, patch);
+  }
+
+  /**
+   * 発注の一覧（新しい順）。届く予定の日を過ぎた入荷待ちには、過ぎた日数を添える。
+   *
+   * @param open 発注前・承認待ち・入荷待ち・一部入荷だけ
+   */
+  async orders(tenantId: string, opts: { open?: boolean; limit?: number; today?: string } = {}): Promise<InventoryOrder[]> {
+    await this.reconcileOrders(tenantId).catch(() => undefined);
+    const day = opts.today ?? dateIn('Asia/Tokyo');
+    return (await this.deps.store.listOrders(tenantId, { ...(opts.open ? { open: true } : {}), ...(opts.limit ? { limit: opts.limit } : {}) })).map((o) => {
+      const late = (o.status === 'ordered' || o.status === 'partial') && o.dueOn && o.dueOn < day ? daysBetween(o.dueOn, day) : 0;
+      return late > 0 ? { ...o, overdueDays: late } : o;
+    });
+  }
+
+  /** 発注 1 件。 */
+  order(tenantId: string, id: string): Promise<InventoryOrder | null> { return this.deps.store.getOrder(tenantId, id); }
+
+  /**
+   * メールの発注の承認待ちを、業務の実行の結果に合わせる（承認されて送れたら入荷待ち、却下・失敗なら取り消し）。
+   */
+  async reconcileOrders(tenantId: string): Promise<void> {
+    const pending = (await this.deps.store.listOrders(tenantId, { open: true })).filter((o) => o.status === 'pending' && o.runId);
+    if (pending.length === 0) return;
+    const settings = await this.settings(tenantId);
+    const suppliers = await this.deps.store.listSuppliers(tenantId);
+    for (const o of pending) {
+      const run = await this.deps.repo.getRun(tenantId, o.runId!);
+      if (!run) continue;
+      if (run.status === 'completed') {
+        const at = run.endedAt ?? new Date().toISOString();
+        const items = (await Promise.all(o.lines.map((l) => this.deps.store.getItem(tenantId, l.itemId)))).filter((i): i is InventoryItem => !!i);
+        await this.deps.store.updateOrder(tenantId, o.id, { status: 'ordered', orderedAt: at, dueOn: this.dueOn(at, items, suppliers.find((x) => x.id === o.supplierId) ?? null, settings) });
+        this.changed(tenantId, o.lines.map((l) => l.itemId));
+      } else if (['failed', 'cancelled', 'expired'].includes(run.status)) {
+        await this.deps.store.updateOrder(tenantId, o.id, { status: 'cancelled', closedAt: run.endedAt ?? new Date().toISOString() });
+      }
+    }
+  }
+
+  /** Web・電話の発注を「発注した」にする（入荷待ち）。 */
+  async markOrdered(tenantId: string, userId: string, id: string): Promise<InventoryOrder | { error: string }> {
+    const o = await this.deps.store.getOrder(tenantId, id);
+    if (!o) return { error: '発注が見つかりません' };
+    if (o.status !== 'pending') return { error: 'この発注は、もう発注済みか取り消しです' };
+    if (o.method === 'mail' && o.runId) return { error: 'メールの発注は、承認されて送ったときに発注済みになります' };
+    const at = new Date().toISOString();
+    const settings = await this.settings(tenantId);
+    const supplier = (await this.deps.store.listSuppliers(tenantId)).find((x) => x.id === o.supplierId) ?? null;
+    const items = (await Promise.all(o.lines.map((l) => this.deps.store.getItem(tenantId, l.itemId)))).filter((i): i is InventoryItem => !!i);
+    await this.deps.store.updateOrder(tenantId, id, { status: 'ordered', orderedAt: at, dueOn: this.dueOn(at, items, supplier, settings) });
+    await this.audit(tenantId, userId, 'inventory.order.ordered', 'inventory_order', id, { number: o.number });
+    this.changed(tenantId, o.lines.map((l) => l.itemId));
+    return (await this.deps.store.getOrder(tenantId, id))!;
+  }
+
+  /** 発注を取り消す（社内の記録だけ。仕入先には何も送らない）。 */
+  async cancelOrder(tenantId: string, userId: string, id: string): Promise<InventoryOrder | { error: string }> {
+    const o = await this.deps.store.getOrder(tenantId, id);
+    if (!o) return { error: '発注が見つかりません' };
+    if (o.status === 'received' || o.status === 'cancelled') return { error: 'この発注は、もう閉じています' };
+    await this.deps.store.updateOrder(tenantId, id, { status: 'cancelled', closedAt: new Date().toISOString() });
+    await this.audit(tenantId, userId, 'inventory.order.cancel', 'inventory_order', id, { number: o.number });
+    this.changed(tenantId, o.lines.map((l) => l.itemId));
+    return (await this.deps.store.getOrder(tenantId, id))!;
+  }
+
+  /**
+   * 入庫した数を、その品目の入荷待ちの発注に古い順で消し込む。仕入先の名前が分かれば、その仕入先の発注を先に見る。
+   */
+  private async receiveOrders(tenantId: string, itemId: string, qty: number, moveId: string, supplier?: string): Promise<void> {
+    const open = (await this.deps.store.listOrders(tenantId, { open: true }))
+      .filter((o) => o.status === 'ordered' || o.status === 'partial')
+      .sort((a, b) => {
+        const pa = supplier && (a.supplierName.includes(supplier) || supplier.includes(a.supplierName)) ? 0 : 1;
+        const pb = supplier && (b.supplierName.includes(supplier) || supplier.includes(b.supplierName)) ? 0 : 1;
+        return pa - pb || (a.orderedAt ?? a.createdAt).localeCompare(b.orderedAt ?? b.createdAt);
+      });
+    let rest = qty;
+    const touched = new Set<string>();
+    for (const o of open) {
+      for (const l of o.lines) {
+        if (rest <= 0) break;
+        if (l.itemId !== itemId) continue;
+        const take = round3(Math.min(rest, Math.max(0, l.qty - l.received)));
+        if (take <= 0) continue;
+        await this.deps.store.addReceipt(tenantId, l.id, moveId, take);
+        rest = round3(rest - take);
+        touched.add(o.id);
+      }
+      if (rest <= 0) break;
+    }
+    for (const id of touched) await this.refreshOrderStatus(tenantId, id);
+  }
+
+  /** 届いた数から発注の状態を決め直す（全部届けば入荷済み・一部なら一部入荷・まだなら入荷待ち）。 */
+  private async refreshOrderStatus(tenantId: string, id: string): Promise<void> {
+    const o = await this.deps.store.getOrder(tenantId, id);
+    if (!o || o.status === 'cancelled' || o.status === 'pending') return;
+    const done = o.lines.every((l) => l.received >= l.qty);
+    const some = o.lines.some((l) => l.received > 0);
+    const status = done ? 'received' : some ? 'partial' : 'ordered';
+    if (status !== o.status) await this.deps.store.updateOrder(tenantId, id, { status, closedAt: done ? new Date().toISOString() : null });
+  }
+
   // ---- 納品書からの入庫（第29.9節） -------------------------------------------
 
   /**
@@ -901,11 +1086,11 @@ export class InventoryService {
     const reading = await readSlip(await this.deps.llm(tenantId), file.bytes, file.mimeType);
     if (reading.kind === 'unavailable') return { read: { ok: false, reason: reading.reason }, recorded: [], unmatched: [] };
     if (reading.kind === 'not-slip') return { read: { ok: false, reason: '納品書として読めませんでした。納品書全体が写るように撮り直してください' }, recorded: [], unmatched: [] };
-    return { read: { ok: true, supplier: reading.supplier, date: reading.date }, ...(await this.receiveLines(tenantId, userId, reading.lines, file.sourceId, locationId)) };
+    return { read: { ok: true, supplier: reading.supplier, date: reading.date }, ...(await this.receiveLines(tenantId, userId, reading.lines, file.sourceId, locationId, reading.supplier)) };
   }
 
   /** 読み取った行を品目に照らし、照らせた行を入庫にする。 */
-  async receiveLines(tenantId: string, userId: string, lines: SlipLine[], sourceId?: string, locationId?: string): Promise<Omit<SlipResult, 'read'>> {
+  async receiveLines(tenantId: string, userId: string, lines: SlipLine[], sourceId?: string, locationId?: string, supplier?: string): Promise<Omit<SlipResult, 'read'>> {
     const [items, settings] = await Promise.all([this.deps.store.listItems(tenantId), this.settings(tenantId)]);
     const recorded: SlipResult['recorded'] = [];
     const unmatched: SlipResult['unmatched'] = [];
@@ -920,7 +1105,7 @@ export class InventoryService {
       const pack = settings.features.units && !!hit.item.packSize && !!hit.item.packUnit && u === hit.item.packUnit.normalize('NFKC') && u !== hit.item.unit.normalize('NFKC');
       const res = await this.recordMove(tenantId, userId, {
         kind: 'in', itemId: hit.item.id, qty: line.qty, unit: pack ? 'pack' : 'unit', reason: '納品書', source: 'slip',
-        ...(sourceId ? { sourceId } : {}), ...(locationId ? { locationId } : {}),
+        ...(sourceId ? { sourceId } : {}), ...(locationId ? { locationId } : {}), ...(supplier ? { orderSupplier: supplier } : {}),
         ...(line.lot ? { lot: line.lot } : {}), ...(line.expiresOn ? { expiresOn: line.expiresOn } : {}),
       });
       if (!res.ok) { unmatched.push({ line, reason: res.error, candidates: [{ id: hit.item.id, name: hit.item.name }] }); continue; }

@@ -49,7 +49,7 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
   },
   // 読むだけのツールに限る（第10.11.4節）。送信・登録・作成のツールは持たせない。
   // Web の調べものと本人の予定・ToDo は、出張の行程のような依頼に答えるため（第 0.124.0 版、ADR-0033）
-  tools: ['file.read_text', 'file.compare', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read', 'quote.search', 'inventory.market', 'inventory.check_market'],
+  tools: ['file.read_text', 'file.compare', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read', 'quote.search', 'inventory.market', 'inventory.check_market', 'inventory.orders'],
   knowledge: { collections: ['internal-rules', 'minutes'] },
   steps: [
     {
@@ -67,6 +67,7 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
         '「〇〇社に出した見積は？」のように、これまでに作った見積書を尋ねられたら quote.search で探す（番号・合計・有効期限。期限が過ぎたものはそう添える）。',
         '在庫の販売品の相場（「ハンドクリームの相場は？」「高めの販売品は？」）を尋ねられたら inventory.market で答える（使えるときだけ。高めは position に high、安めは low）。'
           + '「相場を調べて」と頼まれたら inventory.check_market で調べる。価格を変えることはしない（値付けは会社が決める）。まだ調べていない品目は、そう答える。'
+          + '「〇〇は発注済み？」「届いていない発注は？」は inventory.orders で答える（発注番号・仕入先・届く予定の日・遅れた日数）。'
           + '仕入れの値段の相場（「〇〇の仕入れ値は高い？」「高く仕入れている品目は？」）は kind に purchase を渡す（在庫管理の管理者だけが使える。使えなければ、そう答える）。',
         '時刻表・乗り換え・道順・所要時間・天気・ニュース・価格・営業時間など、外の最新の情報が要るときは web.research で調べる。'
           + '検索の言葉は Google に送られるため、社内の情報（顧客名・金額・人の名前）を入れない。',

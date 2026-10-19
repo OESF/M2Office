@@ -4160,6 +4160,9 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     await owner.query(`delete from inventory_booking_sources where name like '${tag}%'`);
     await owner.query(`delete from inventory_menu_items where menu_key like '${tag}%'`);
     await owner.query(`delete from inventory_count_lines where item_id in (${items})`);
+    // 発注の記録（第29.14.4節）も消す（品目を消せるように）
+    await owner.query(`delete from inventory_orders where supplier_name like '${tag}%'`);
+    await owner.query(`delete from files where name like $1`, [`発注書_%${tag}%`]);
     await owner.query(`update inventory_items set supplier_id = null where name like '${tag}%'`);
     await owner.query(`delete from inventory_suppliers where name like '${tag}%'`);
     await owner.query(`delete from notifications where kind = 'inventory' and title like '%${tag}%'`);
@@ -7988,6 +7991,66 @@ console.log('\n■ 113. Phase 2 の需要の予測（予約の分を 2 回見込
     await owner.query(`delete from inventory_bookings where tenant_id = 't-alpha' and external_id like $1`, [`${tag}%`]);
     for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
     await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 114. 発注の記録と発注書（入荷待ちは見張りに入れ、入庫で消し込む。発注書は金額なしの PDF。第29.14.4節・第29.14.5節、Q-249）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用発注${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  let supplierId = null;
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { order: true }, lowDefault: 5 }) });
+    supplierId = (await call('a', '/v1/inventory/suppliers', { method: 'POST', body: JSON.stringify({ name: `${tag} 文具`, method: 'web', contact: 'https://order.example.jp', leadDays: 3 }) })).body?.supplier?.id;
+    const item = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} トナー`, unit: '本', kind: 'supply', initialQty: 2, supplierId, sku: 'TN-9' }) }, 'member')).body?.item;
+    const before = ((await call('a', '/v1/inventory', {}, 'member')).body?.items ?? []).find((i) => i.id === item?.id);
+    const made = await call('a', '/v1/inventory/orders', { method: 'POST', body: JSON.stringify({ supplierId, lines: [{ itemId: item?.id, qty: 6 }] }) }, 'member');
+    const orderId = made.body?.orderId;
+    const sheet = await fetch(`${API}/v1/inventory/orders/${orderId}/sheet`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+    const sheetBytes = new Uint8Array(await sheet.arrayBuffer());
+    const sheetText = Buffer.from(sheetBytes).toString('latin1');
+    const otherSheet = await call('b', `/v1/inventory/orders/${orderId}/sheet`);
+    const pendingList = (await call('a', '/v1/inventory/orders?open=1', {}, 'member')).body?.orders ?? [];
+    made.status === 200 && made.body?.method === 'web' && /^PO-\d{6}-\d{3}$/.test(made.body?.number ?? '') && sheet.status === 200 && sheetText.startsWith('%PDF')
+      && [403, 404].includes(otherSheet.status) && pendingList.find((o) => o.id === orderId)?.status === 'pending' && before?.low === true
+      ? ok('Web の発注は「発注待ち」として記録し、発注書の PDF を作る（在庫管理を使う人が開け、ほかの会社には出さない）')
+      : ng('発注の記録の作り方が違う', JSON.stringify({ made: made.status, body: made.body, sheet: sheet.status, other: otherSheet.status, pending: pendingList.find((o) => o.id === orderId)?.status, low: before?.low }));
+    // もう一度押しても、同じ仕入先の発注待ちを出し直すだけで重ねない
+    const again = await call('a', '/v1/inventory/orders', { method: 'POST', body: JSON.stringify({ supplierId, lines: [{ itemId: item?.id, qty: 8 }] }) }, 'member');
+    const openNow = ((await call('a', '/v1/inventory/orders?open=1', {}, 'member')).body?.orders ?? []).filter((o) => o.supplierId === supplierId);
+    again.body?.orderId === orderId && again.body?.revised === true && openNow.length === 1 && openNow[0]?.lines?.[0]?.qty === 8
+      ? ok('同じ仕入先の発注待ちがあれば、押し直しても新しく作らずに出し直す') : ng('発注が重なった', JSON.stringify({ again: again.body, open: openNow.length }));
+    // 「発注完了」で入荷待ち。入荷待ちを使える数に足して見張る
+    const marked = await call('a', `/v1/inventory/orders/${orderId}/ordered`, { method: 'POST' }, 'member');
+    const after = ((await call('a', '/v1/inventory', {}, 'member')).body?.items ?? []).find((i) => i.id === item?.id);
+    const fc = ((await call('a', '/v1/inventory/forecast', {}, 'member')).body?.rows ?? []).find((r) => r.itemId === item?.id);
+    marked.body?.order?.status === 'ordered' && marked.body.order.dueOn && after?.onOrder === 8 && after.low === false && fc?.proposal === null
+      ? ok('「発注完了」で入荷待ちになり、届く予定の日を持ち、入荷待ちの数を足して残りわずか・発注の案を出さない')
+      : ng('入荷待ちの扱いが違う', JSON.stringify({ marked: marked.body, onOrder: after?.onOrder, low: after?.low, proposal: fc?.proposal }));
+    // 入庫で消し込む（一部入荷 → 入荷済み）
+    await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId: item?.id, qty: 4 }) }, 'member');
+    const part = (await call('a', '/v1/inventory/orders?open=1', {}, 'member')).body?.orders?.find((o) => o.id === orderId);
+    await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId: item?.id, qty: 4 }) }, 'member');
+    const done = (await call('a', '/v1/inventory/orders', {}, 'member')).body?.orders?.find((o) => o.id === orderId);
+    const cancelDone = await call('a', `/v1/inventory/orders/${orderId}/cancel`, { method: 'POST' }, 'member');
+    part?.status === 'partial' && part.lines?.[0]?.received === 4 && done?.status === 'received' && cancelDone.status === 400
+      ? ok('入庫で発注を消し込み、一部入荷・入荷済みにする（閉じた発注は取り消せない）')
+      : ng('消し込みが違う', JSON.stringify({ part: part?.status, received: part?.lines?.[0]?.received, done: done?.status, cancel: cancelDone.status }));
+  } catch (err) {
+    ng('発注の記録の確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    await owner.query(`delete from inventory_orders where tenant_id = 't-alpha' and supplier_name like $1`, [`${tag}%`]);
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from files where tenant_id = 't-alpha' and name like $1`, [`発注書_%${tag}%`]);
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    if (supplierId) await owner.query(`delete from inventory_suppliers where id = $1`, [supplierId]);
     for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
     await owner.end();
   }

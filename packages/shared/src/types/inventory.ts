@@ -61,6 +61,53 @@ export interface InventorySupplier {
   status: 'active' | 'stopped';
 }
 
+/** 発注の状態（第29.14.4節、Q-249）。 */
+export type InventoryOrderStatus = 'pending' | 'ordered' | 'partial' | 'received' | 'cancelled';
+
+/** 発注の状態の呼び方。`pending` はメールなら承認待ち、Web・電話なら発注待ち（まだ発注していない）。 */
+export function inventoryOrderStatusLabel(status: InventoryOrderStatus, method: InventorySupplier['method']): string {
+  if (status === 'pending') return method === 'mail' ? '承認待ち' : '発注待ち';
+  return { ordered: '入荷待ち', partial: '一部入荷', received: '入荷済み', cancelled: '取り消し' }[status];
+}
+
+/** 発注の品目 1 行。数は使う単位。 */
+export interface InventoryOrderLine {
+  id: string;
+  itemId: string;
+  itemName?: string;
+  unit?: string;
+  packUnit?: string;
+  packSize?: number | null;
+  qty: number;
+  /** 届いた数（入庫で消し込んだ数）。 */
+  received: number;
+}
+
+/** 発注 1 件（仕入先ごと。第29.14.4節）。 */
+export interface InventoryOrder {
+  id: string;
+  /** 発注番号（例: `PO-202610-001`）。発注書と同じ。 */
+  number: string;
+  supplierId: string | null;
+  supplierName: string;
+  method: InventorySupplier['method'];
+  status: InventoryOrderStatus;
+  orderedAt: string | null;
+  /** 届く予定の日（YYYY-MM-DD）。 */
+  dueOn: string | null;
+  /** メールの発注の実行（承認と送信）。 */
+  runId: string | null;
+  /** 発注書の PDF（第29.14.5節）。 */
+  fileId: string | null;
+  createdBy: string;
+  createdByName?: string;
+  createdAt: string;
+  closedAt: string | null;
+  lines: InventoryOrderLine[];
+  /** 届く予定の日を過ぎた日数（入荷待ち・一部入荷で過ぎていれば）。 */
+  overdueDays?: number;
+}
+
 /** メーカーの終売の見込み（第29.24.1節、Q-248）。出典で確かめられたものだけを持つ。 */
 export interface InventoryDiscontinued {
   /** `planned` 終売予定・`ended` 終売済み。 */
@@ -241,6 +288,9 @@ export interface InventoryItemView extends InventoryItem {
   nearestExpiry: string | null;
   /** 出庫の用途の既定（その品目で前に選んだ用途。無ければ区分から。第29.9.1節）。 */
   outPurpose?: InventoryOutPurpose;
+  /** 入荷待ちの数（発注して、まだ届いていない数。第29.14.4節）と、いちばん早い届く予定の日。 */
+  onOrder?: number;
+  onOrderDue?: string | null;
 }
 
 /** 棚卸しの対象（第29.10節）。 */

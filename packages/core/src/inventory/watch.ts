@@ -142,10 +142,13 @@ export class InventoryWatch {
     }
     // 販売管理とのつなぎ（第29.20.1節）: 品目を照らせなかった販売
     const unmatched = this.deps.sales ? await this.deps.sales.attention(tenantId).catch(() => ({ count: 0, samples: [] as string[] })) : { count: 0, samples: [] as string[] };
+    // 届く予定の日を過ぎても届いていない発注（第29.14.4節）
+    const late = (await this.deps.service.orders(tenantId, { open: true, today: dateIn('Asia/Tokyo', now) })).filter((o) => (o.overdueDays ?? 0) > 0);
+    const lateLines = late.slice(0, 20).map((o) => `${o.number} ${o.supplierName}: ${o.lines.map((l) => `${l.itemName ?? ''} ${Math.round((l.qty - l.received) * 1000) / 1000} ${l.unit ?? ''}`.trim()).join('・')}（${o.dueOn} の予定から ${o.overdueDays} 日遅れ）`);
     const expiring = rows.flatMap((r) => r.expiring
       .filter((e) => (EXPIRY_NOTICE_DAYS as readonly number[]).includes(e.days) || e.days === 0)
       .map((e) => `${r.name}${e.lot ? `（ロット ${e.lot}）` : ''}: ${qty(r, e.qty)}が${e.days === 0 ? '今日' : ` ${e.days} 日後`}に期限`));
-    if (short.length === 0 && expiring.length === 0 && overdue.length === 0 && unknownMenus.length === 0 && unmatched.count === 0) return 0;
+    if (short.length === 0 && expiring.length === 0 && overdue.length === 0 && unknownMenus.length === 0 && unmatched.count === 0 && lateLines.length === 0) return 0;
     const day = dateIn('Asia/Tokyo', now);
     const title = `在庫の見張り（${day.slice(5).replace('-', '/')}）`;
     // 見出しごとに段落を分け、1 行に 1 つの箇条書きにする（お知らせの画面は Markdown の箇条書きを出す）。20 件を超えた分は数だけを書く
@@ -154,13 +157,22 @@ export class InventoryWatch {
     const body = [
       ...(short.length ? [[`**足りなくなりそうなもの**`, ...short.slice(0, 20).flatMap((r) => [`- ${statusLine(r)}`, ...(proposalLine(r) ? [`  - ${proposalLine(r)}`] : [])]),
         ...(short.length > 20 ? [`- ほか ${short.length - 20} 件`] : [])].join('\n')] : []),
+      ...(lateLines.length ? [section('届いていない発注（届いたら入庫、やめたなら在庫管理の「発注の案」の入荷待ちで取り消し）', lateLines, late.length)] : []),
       ...(expiring.length ? [section('使用期限', expiring.slice(0, 20), expiring.length)] : []),
       ...(overdue.length ? [section('予約の日を過ぎた取り置き（使った・取り消しを在庫管理の「取り置き」で）', overdue)] : []),
       ...(unknownMenus.length ? [section('使う品目の分からない予約のメニュー（秘書に「〇〇では△△を 1 つ使う」と伝えてください）', unknownMenus)] : []),
       ...(unmatched.count ? [section(`品目を照らせなかった販売 ${unmatched.count} 件（在庫管理の「照らせなかった販売」で品目を選ぶと記録します）`, unmatched.samples)] : []),
     ].join('\n\n');
     let sent = 0;
-    for (const u of await this.recipients(tenantId)) if (await this.notify(tenantId, u, title, body, now)) sent++;
+    const to = await this.recipients(tenantId);
+    // 遅れた発注は、発注した人にも知らせる（在庫の知らせの相手でなくても）
+    const orderers = [...new Set(late.map((o) => o.createdBy))].filter((u) => !to.includes(u) && !u.startsWith('app:'));
+    for (const u of to) if (await this.notify(tenantId, u, title, body, now)) sent++;
+    for (const u of orderers) {
+      const mine = late.filter((o) => o.createdBy === u);
+      const own = section('届いていない発注', lateLines.filter((_, k) => late[k] && late[k]!.createdBy === u), mine.length);
+      if (await this.notify(tenantId, u, title, own, now)) sent++;
+    }
     return sent;
   }
 

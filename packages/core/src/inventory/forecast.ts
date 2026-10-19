@@ -65,6 +65,9 @@ export interface ForecastRow {
   weekdayNote: string | null;
   /** 終売の見込み（第29.24.1節）。 */
   discontinued: InventoryDiscontinued | null;
+  /** 入荷待ちの数といちばん早い届く予定の日（第29.14.4節）。 */
+  onOrder?: number;
+  onOrderDue?: string | null;
 }
 
 /**
@@ -156,16 +159,19 @@ export function forecastItem(
     for (let k = 0; k < Math.min(n, HORIZON_DAYS); k++) sum += useOn(k);
     return sum;
   };
+  // 入荷待ちの数は使える数に足して見る（発注してから届くまで「足りなくなりそう」を出さない。第29.14.4節）
+  const onOrder = Math.max(0, item.onOrder ?? 0);
+  const supply = item.available + onOrder;
   let daysLeft: number | null = null;
   if (dailyUse > 0 && weights && calendar) {
-    let rest = item.available;
+    let rest = supply;
     daysLeft = rest <= 0 ? 0 : HORIZON_DAYS;
     for (let k = 0; rest > 0 && k < HORIZON_DAYS; k++) {
       rest -= useOn(k);
       if (rest < 0) { daysLeft = k; break; }
     }
   } else if (dailyUse > 0) {
-    daysLeft = Math.max(0, Math.floor(item.available / dailyUse));
+    daysLeft = Math.max(0, Math.floor(supply / dailyUse));
   }
   const waveNote = weights ? weekdayNote(weights) : '';
   const disc = item.discontinued ?? null;
@@ -184,7 +190,8 @@ export function forecastItem(
     const target = disc
       ? (disc.date ? useWithin(daysBetween(today, disc.date)) : useWithin(leadDays) + threshold)
       : useWithin(leadDays) + dailyUse * COVER_DAYS + threshold;
-    let qty = disc ? Math.ceil(target - item.available) : Math.max(Math.ceil(target - item.available), Math.max(1, threshold));
+    // 入荷待ちの分は差し引き、まかなえていれば案を出さない
+    let qty = disc || onOrder > 0 ? Math.ceil(target - supply) : Math.max(Math.ceil(target - item.available), Math.max(1, threshold));
     let packs: number | null = null;
     if (item.packSize && item.packSize > 0) {
       packs = Math.max(1, Math.ceil(qty / item.packSize));
@@ -207,6 +214,7 @@ export function forecastItem(
     available: item.available, dailyUse, daysLeft, leadDays, low: item.low, runningOut, expiring, proposal,
     forecastNote: factor !== 1 && item.forecast?.note ? item.forecast.note : null,
     weekdayNote: waveNote || null, discontinued: disc,
+    ...(onOrder > 0 ? { onOrder, onOrderDue: item.onOrderDue ?? null } : {}),
   };
 }
 

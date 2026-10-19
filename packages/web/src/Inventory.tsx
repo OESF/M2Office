@@ -144,6 +144,8 @@ function Marks({ item, compact = false }: { item: InventoryItemView; compact?: b
       {item.status === 'active' && item.forecast && item.forecast.factor !== 1 && <ForecastBadge item={item} compact={compact} />}
       {/* メーカーの終売（第29.24.1節） */}
       {item.discontinued && <DiscontinuedBadge item={item} compact={compact} />}
+      {/* 入荷待ち（第29.14.4節） */}
+      {item.onOrder ? <span className="badge ok" title={item.onOrderDue ? `${item.onOrderDue} に届く予定` : undefined}>{compact ? '入荷待ち' : `入荷待ち ${qtyText(item, item.onOrder)}${item.onOrderDue ? `（${item.onOrderDue.slice(5).replace('-', '/')} 予定）` : ''}`}</span> : null}
     </>
   );
 }

@@ -8,7 +8,7 @@
  */
 
 import type { DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
-  Approval, Artifact, Brief, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
+  Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventoryOutPurpose, InventorySettings, InventoryStockRow,
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
@@ -526,6 +526,9 @@ export interface InventoryForecastRow {
     qty: number; packs: number | null; supplierId: string | null; supplierName: string | null;
     method: InventorySupplier['method'] | null; contact: string | null; reason: string;
   } | null;
+  /** 入荷待ちの数といちばん早い届く予定の日（第29.14.4節）。 */
+  onOrder?: number;
+  onOrderDue?: string | null;
 }
 
 /** 在庫の Web への公開のまとまり 1 つ（管理者向け。仕様書 第29.12.1節・第29.12.2節）。 */
@@ -562,8 +565,8 @@ export interface InventorySlipLine {
 
 /** 発注を始めた結果。メールの仕入先なら業務の実行、それ以外は連絡先と伝える内容。 */
 export type InventoryOrderResult =
-  | { method: 'mail'; runId: string; supplier: string }
-  | { method: 'web' | 'phone'; contact: string; supplier: string; text: string };
+  | { method: 'mail'; runId: string; supplier: string; orderId: string; number: string; fileId: string | null }
+  | { method: 'web' | 'phone'; contact: string; supplier: string; text: string; orderId: string; number: string; fileId: string | null; revised?: boolean };
 
 /** 品目の取り込みの結果。 */
 export interface InventoryImportResult {
@@ -2002,6 +2005,14 @@ export const api = {
     /** 発注を始める。メールの仕入先なら「発注の下書き」を起こす（送るのは承認のあと）。 */
     order: (supplierId: string, lines: { itemId: string; qty: number }[]) =>
       call<InventoryOrderResult>('/inventory/orders', { method: 'POST', body: JSON.stringify({ supplierId, lines }) }),
+    /** 発注の記録（`open` なら閉じていないものだけ。第29.14.4節）。 */
+    orders: (open = true) => call<{ orders: InventoryOrder[] }>(`/inventory/orders${open ? '?open=1' : ''}`),
+    /** Web・電話の発注を「発注した」にする。 */
+    markOrdered: (id: string) => call<{ order: InventoryOrder }>(`/inventory/orders/${encodeURIComponent(id)}/ordered`, { method: 'POST' }),
+    /** 発注を取り消す（社内の記録だけ）。 */
+    cancelOrder: (id: string) => call<{ order: InventoryOrder }>(`/inventory/orders/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+    /** 発注書の PDF を開く URL（第29.14.5節）。 */
+    orderSheetUrl: (id: string) => `/v1/inventory/orders/${encodeURIComponent(id)}/sheet`,
     /** 納品書の写真か PDF を渡して入庫する（仕様書 第29.9節）。読めなかったときも結果を返す。 */
     slip: async (file: File, locationId?: string): Promise<InventorySlipResult> => {
       const form = new FormData();

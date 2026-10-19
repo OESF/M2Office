@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import QRCode from 'qrcode';
 import {
   readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
-  MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput, type PublicationView,
+  MOBILE_INVENTORY_PATH, createOrderSheet, orderQuantityText, type ItemInput, type MoveInput, type PublicationView,
 } from '@m2office/core';
 import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, inventoryRuleOf, withoutPurchase, type InventoryItemKind, type InventoryMoveKind, type InventoryOutPurpose, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
@@ -353,27 +353,72 @@ export function inventoryRoute(deps: AppDeps) {
     const supplier = suppliers.find((s) => s.id === str(b.supplierId));
     if (!supplier) return c.json({ error: '仕入先を選んでください' }, 400);
     const items = new Map((await service.list(tenant.id)).map((i) => [i.id, i]));
-    const lines = (Array.isArray(b.lines) ? b.lines : []).flatMap((l) => {
+    const picked = (Array.isArray(b.lines) ? b.lines : []).flatMap((l) => {
       const o = l as { itemId?: unknown; qty?: unknown };
       const item = items.get(str(o.itemId) ?? '');
       const qty = typeof o.qty === 'number' ? o.qty : Number(o.qty);
-      if (!item || !Number.isFinite(qty) || qty <= 0) return [];
-      const amount = item.packUnit && item.packSize ? `${Math.ceil(qty / item.packSize)} ${item.packUnit}（${qty} ${item.unit}）` : `${qty} ${item.unit}`;
-      return [`${item.name}${item.sku ? `（品番 ${item.sku}）` : ''}: ${amount}`];
+      return item && Number.isFinite(qty) && qty > 0 ? [{ item, qty }] : [];
     });
-    if (lines.length === 0) return c.json({ error: '発注する品目と数を選んでください' }, 400);
-    if (supplier.method !== 'mail') {
-      return c.json({ method: supplier.method, contact: supplier.contact, supplier: supplier.name, text: lines.join('\n') });
+    if (picked.length === 0) return c.json({ error: '発注する品目と数を選んでください' }, 400);
+    const lines = picked.map(({ item, qty }) => `${item.name}${item.sku ? `（品番 ${item.sku}）` : ''}: ${orderQuantityText(item, qty)}`);
+    if (supplier.method === 'mail' && !supplier.contact) return c.json({ error: `仕入先「${supplier.name}」のメールアドレスがありません。仕入先に登録してください` }, 400);
+    const view = supplier.method === 'mail' ? await deps.tenantView(tenant.id) : null;
+    const def = view?.resolve(INVENTORY_ORDER.id, INVENTORY_ORDER.version);
+    if (view && (!def || !view.isAvailable(INVENTORY_ORDER.id))) return c.json({ error: '発注の下書きの業務を使えません（Google と接続していないか、業務を止めています）' }, 409);
+    // 同じ仕入先の発注のメールが承認待ちなら、重ねて作らない（同じ発注を二度送らないため）
+    if (supplier.method === 'mail') {
+      const waiting = (await service.orders(tenant.id, { open: true })).find((o) => o.status === 'pending' && o.supplierId === supplier.id && o.runId);
+      if (waiting) return c.json({ error: `${supplier.name}への発注のメール（${waiting.number}）が承認待ちです。承認トレイで確かめてください`, orderId: waiting.id }, 409);
     }
-    if (!supplier.contact) return c.json({ error: `仕入先「${supplier.name}」のメールアドレスがありません。仕入先に登録してください` }, 400);
-    const view = await deps.tenantView(tenant.id);
-    const def = view.resolve(INVENTORY_ORDER.id, INVENTORY_ORDER.version);
-    if (!def || !view.isAvailable(INVENTORY_ORDER.id)) return c.json({ error: '発注の下書きの業務を使えません（Google と接続していないか、業務を止めています）' }, 409);
+    // 発注を記録し（メールは承認待ち・Web と電話は発注待ち。発注待ちがあれば出し直す）、発注書を作る（第29.14.4節・第29.14.5節）
+    const order = await service.createOrder(tenant.id, user.id, { supplierId: supplier.id, lines: picked.map((p) => ({ itemId: p.item.id, qty: p.qty })), status: 'pending' });
+    if ('error' in order) return c.json(order, 400);
+    const sheet = await createOrderSheet({ repo: deps.repo, files: deps.files }, tenant.id, user.id, order, items).catch(() => null);
+    if (sheet) await service.attachToOrder(tenant.id, order.id, { fileId: sheet.id });
+    if (supplier.method !== 'mail' || !def) {
+      return c.json({ method: supplier.method, contact: supplier.contact, supplier: supplier.name, text: lines.join('\n'), orderId: order.id, number: order.number, fileId: sheet?.id ?? null, revised: !!order.revised });
+    }
     const { runId } = await enqueueJob(deps.repo, {
       tenantId: tenant.id, requestedBy: user.id, def, origin: 'menu', actor: { type: 'user', id: user.id },
-      input: { request: `${supplier.name}へ発注する`, supplier: supplier.name, to: supplier.contact, lines: lines.join('\n') },
+      input: {
+        request: `${supplier.name}へ発注する`, supplier: supplier.name, to: supplier.contact, lines: lines.join('\n'), number: order.number,
+        ...(sheet ? { attachment: sheet.id } : {}),
+      },
     });
-    return c.json({ method: 'mail', runId, supplier: supplier.name }, 201);
+    await service.attachToOrder(tenant.id, order.id, { runId });
+    return c.json({ method: 'mail', runId, supplier: supplier.name, orderId: order.id, number: order.number, fileId: sheet?.id ?? null }, 201);
+  });
+
+  /** 発注の一覧（新しい順。`open=1` で発注前・承認待ち・入荷待ち・一部入荷だけ。第29.14.4節）。 */
+  app.get('/orders', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ orders: await service.orders(tenant.id, { open: c.req.query('open') === '1', limit: 100 }) });
+  });
+
+  /** Web・電話の発注を「発注した」にする（入荷待ち）。 */
+  app.post('/orders/:id/ordered', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await service.markOrdered(tenant.id, user.id, c.req.param('id'));
+    return 'error' in r ? c.json(r, r.error === '発注が見つかりません' ? 404 : 400) : c.json({ order: r });
+  });
+
+  /** 発注を取り消す（社内の記録だけ。仕入先には何も送らない）。 */
+  app.post('/orders/:id/cancel', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await service.cancelOrder(tenant.id, user.id, c.req.param('id'));
+    return 'error' in r ? c.json(r, r.error === '発注が見つかりません' ? 404 : 400) : c.json({ order: r });
+  });
+
+  /** 発注書の PDF（在庫管理を使える人なら開ける。第29.14.5節）。 */
+  app.get('/orders/:id/sheet', async (c) => {
+    const { tenant } = c.get('ctx');
+    const o = await service.order(tenant.id, c.req.param('id'));
+    if (!o?.fileId) return c.json({ error: '発注書が見つかりません' }, 404);
+    const bytes = await deps.files.get(tenant.id, o.fileId);
+    if (!bytes) return c.json({ error: '発注書が見つかりません' }, 404);
+    c.header('content-type', 'application/pdf');
+    c.header('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(`発注書_${o.number}.pdf`)}`);
+    return c.body(bytes as unknown as ArrayBuffer);
   });
 
   // ---- 予約との引き当て（第29.13節） ----

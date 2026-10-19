@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { InventoryBooking, InventoryItemView, InventorySupplier } from '@m2office/shared';
+import { inventoryOrderStatusLabel, type InventoryBooking, type InventoryItemView, type InventoryOrder, type InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryForecastRow, type InventoryOrderResult, type InventorySlipResult } from './api.js';
 
 const METHOD_LABELS: Record<InventorySupplier['method'], string> = { mail: 'メール', web: 'Web', phone: '電話' };
@@ -35,10 +35,13 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
   const [qty, setQty] = useState<Record<string, string>>({});
   const [result, setResult] = useState<Record<string, InventoryOrderResult | string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [orders, setOrders] = useState<InventoryOrder[]>([]);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     api.inventory.forecast().then((r) => setRows(r.rows)).catch((e) => setError(describeError(e, '読み込めませんでした')));
+    api.inventory.orders(true).then((r) => setOrders(r.orders)).catch(() => undefined);
   }, []);
+  useEffect(reload, [reload]);
   if (!rows) return <div className="card inventory-new">{error ?? '読み込んでいます…'}</div>;
 
   const short = rows.filter((r) => r.runningOut || r.low);
@@ -48,11 +51,14 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
     const key = r.proposal?.supplierId ?? '';
     groups.set(key, [...(groups.get(key) ?? []), r]);
   }
+  /** その仕入先の発注待ち（まだ発注していない・承認待ち）。 */
+  const waitingFor = (supplierId: string) => orders.find((o) => o.status === 'pending' && o.supplierId === supplierId);
   const start = async (supplierId: string, list: InventoryForecastRow[]) => {
     const lines = list.map((r) => ({ itemId: r.itemId, qty: Number(qty[r.itemId] ?? r.proposal?.qty ?? 0) })).filter((l) => l.qty > 0);
     try {
       const r = await api.inventory.order(supplierId, lines);
       setResult((m) => ({ ...m, [supplierId]: r }));
+      api.inventory.orders(true).then((x) => setOrders(x.orders)).catch(() => undefined);
     } catch (e) {
       setResult((m) => ({ ...m, [supplierId]: describeError(e, '発注を始められませんでした') }));
     }
@@ -75,7 +81,7 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
                 {list.map((r) => (
                   <tr key={r.itemId}>
                     <td><button className="link" onClick={() => onOpenItem(r.itemId)}>{r.name}</button>
-                      <div className="small muted">使える数 {amount(r, r.available)}</div>
+                      <div className="small muted">使える数 {amount(r, r.available)}{r.onOrder ? `・入荷待ち ${amount(r, r.onOrder)}${r.onOrderDue ? `（${r.onOrderDue.slice(5).replace('-', '/')} 予定）` : ''}` : ''}</div>
                       {/* 案の理由（無くなる見込みの日数か、目安）。案が無ければ状況だけ */}
                       <div className="small muted">{r.proposal ? r.proposal.reason : status(r)}</div>
                     </td>
@@ -90,26 +96,38 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
                 ))}
               </tbody>
             </table>
+            {supplierId && waitingFor(supplierId) && (
+              <p className="small muted">発注待ち {waitingFor(supplierId)!.number} があります{p?.method === 'mail' ? '（承認トレイで確かめてください）' : '。押すと、その発注を出し直します'}</p>
+            )}
             {supplierId
-              ? <button className="btn small" onClick={() => void start(supplierId, list)}>
-                {p?.method === 'mail' ? '発注のメールを作る' : '発注の内容を出す'}
+              ? <button className="btn small" disabled={p?.method === 'mail' && !!waitingFor(supplierId)} onClick={() => void start(supplierId, list)}>
+                {p?.method === 'mail' ? '発注のメールを作る' : waitingFor(supplierId) ? '発注の内容を出し直す' : '発注の内容を出す'}
               </button>
               : <p className="small muted">品目を開いて仕入先を選ぶと、発注の案を出せます</p>}
             {typeof res === 'string' && <p className="error small">{res}</p>}
             {res && typeof res !== 'string' && res.method === 'mail' && (
-              <p className="small">発注のメールを作っています。送る前に承認トレイで宛先と本文を確かめてください。</p>
+              <p className="small">
+                {res.number} の発注のメールと発注書を作っています。送る前に承認トレイで宛先と本文を確かめてください。
+                {res.fileId && <> <a href={api.inventory.orderSheetUrl(res.orderId)} target="_blank" rel="noreferrer">発注書を開く</a></>}
+              </p>
             )}
             {res && typeof res !== 'string' && res.method !== 'mail' && (
               <div className="small order-contact">
                 {res.method === 'web'
                   ? <a href={res.contact} target="_blank" rel="noreferrer noopener">{res.supplier} の発注の画面を開く</a>
                   : <a href={`tel:${res.contact}`}>{res.supplier} に電話する（{res.contact}）</a>}
+                {res.fileId && <> ・<a href={api.inventory.orderSheetUrl(res.orderId)} target="_blank" rel="noreferrer">発注書（{res.number}）</a></>}
+                {res.revised && <span className="muted"> ・{res.number} を出し直しました</span>}
                 <pre>{res.text}</pre>
+                <p className="muted">発注したら、下の「発注待ち」で「発注完了」を押してください</p>
               </div>
             )}
           </div>
         );
       })}
+      {/* まだ発注していないもの（発注待ち・承認待ち）と、発注して届くのを待つもの（入荷待ち）を分ける */}
+      {orders.some((o) => o.status === 'pending') && <OpenOrders title="発注待ち" orders={orders.filter((o) => o.status === 'pending')} onChanged={reload} onOpenItem={onOpenItem} />}
+      {orders.some((o) => o.status !== 'pending') && <OpenOrders title="入荷待ち" orders={orders.filter((o) => o.status !== 'pending')} onChanged={reload} onOpenItem={onOpenItem} />}
       {expiring.length > 0 && (
         <div className="order-group">
           <div className="order-head"><strong>使用期限の近いもの</strong></div>
@@ -122,6 +140,69 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 発注待ち・入荷待ちの段（第29.14.4節）。閉じていない発注ごとに、状態・届く予定の日（遅れは赤）・品目と届いた数・発注書を出す。
+ * Web・電話の「発注前」は「発注完了」で入荷待ちにする。届いた分は「残りを入庫する」で入庫し、発注を消し込む。
+ * 操作は右にそろえて間を空けて並べる（2026-10-19 に三浦さんが、詰まって見えると求めた）。
+ */
+function OpenOrders({ title, orders, onChanged, onOpenItem }: { title: string; orders: InventoryOrder[]; onChanged: () => void; onOpenItem: (id: string) => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const act = async (id: string, fn: () => Promise<unknown>, failed: string) => {
+    setBusy(id);
+    setError(null);
+    try { await fn(); onChanged(); } catch (e) { setError(describeError(e, failed)); } finally { setBusy(null); }
+  };
+  /** 届いていない数をそのまま入庫する（入庫で発注を消し込む）。 */
+  const receiveRest = (o: InventoryOrder) => act(o.id, async () => {
+    for (const l of o.lines) {
+      const rest = Math.round((l.qty - l.received) * 1000) / 1000;
+      if (rest > 0) await api.inventory.move({ kind: 'in', itemId: l.itemId, qty: rest, unit: 'unit', reason: `発注 ${o.number}` });
+    }
+  }, '入庫できませんでした');
+  return (
+    <div className="order-group">
+      <div className="order-head"><strong>{title}</strong></div>
+      {error && <p className="error small">{error}</p>}
+      <table className="table">
+        <tbody>
+          {orders.map((o) => (
+            <tr key={o.id}>
+              <td className="nowrap">
+                <div>{o.number}</div>
+                <div className="small muted">{o.supplierName}</div>
+              </td>
+              <td>
+                {o.lines.map((l) => (
+                  <div key={l.id} className="small">
+                    <button className="link" onClick={() => onOpenItem(l.itemId)}>{l.itemName}</button> {l.received > 0 ? `${l.received} / ` : ''}{l.qty} {l.unit}
+                  </div>
+                ))}
+              </td>
+              <td className="small nowrap">
+                <span className={`badge${o.overdueDays ? ' danger' : o.status === 'pending' ? '' : ' ok'}`}>{inventoryOrderStatusLabel(o.status, o.method)}</span>
+                {o.dueOn && <div className={o.overdueDays ? 'danger' : 'muted'}>{o.dueOn.slice(5).replace('-', '/')} 予定{o.overdueDays ? `（${o.overdueDays} 日遅れ）` : ''}</div>}
+              </td>
+              <td className="small order-actions"><div className="order-actions-row">
+                {o.fileId && <a className="btn ghost small" href={api.inventory.orderSheetUrl(o.id)} target="_blank" rel="noreferrer">発注書</a>}
+                {o.status === 'pending' && o.method !== 'mail' && (
+                  <button className="btn small" disabled={busy === o.id} onClick={() => void act(o.id, () => api.inventory.markOrdered(o.id), '記録できませんでした')}>発注完了</button>
+                )}
+                {(o.status === 'ordered' || o.status === 'partial') && (
+                  <button className="btn ghost small" disabled={busy === o.id} onClick={() => void receiveRest(o)}>残りを入庫する</button>
+                )}
+                {!(o.status === 'pending' && o.method === 'mail') && (
+                  <button className="btn ghost small danger" disabled={busy === o.id} onClick={() => void act(o.id, () => api.inventory.cancelOrder(o.id), 'キャンセルできませんでした')}>キャンセル</button>
+                )}
+              </div></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
