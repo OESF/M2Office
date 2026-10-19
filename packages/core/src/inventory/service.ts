@@ -8,7 +8,7 @@
 
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
-  canUseAgent, INVENTORY_EXTENSION_ID,
+  canUseAgent, INVENTORY_EXTENSION_ID, INVENTORY_ITEM_KINDS, inventoryKindLabel, type InventoryItemKind, type InventoryTaxRate,
   type AuditEvent, type InventoryCount, type InventoryCountRow, type InventoryCountScope, type InventoryCountView,
   type InventoryItem, type InventoryItemView, type InventoryLocation, type InventoryMove,
   type InventoryMoveKind, type InventorySettings, type InventoryStockRow, type InventorySupplier,
@@ -36,6 +36,10 @@ export interface ItemInput {
   publicName?: string;
   sku?: string;
   category?: string;
+  /** 区分（第29.6.1節）。作るときに省けば、販売価格があれば販売品、無ければ消耗品。 */
+  kind?: InventoryItemKind;
+  /** 消費税率（販売品だけが使う。10 か 8）。 */
+  taxRate?: InventoryTaxRate;
   unit?: string;
   packUnit?: string;
   packSize?: number | null;
@@ -113,11 +117,12 @@ export interface ImportResult {
 
 /** 取り込みで読む項目。 */
 export type ImportField =
-  | 'name' | 'publicName' | 'sku' | 'category' | 'unit' | 'packUnit' | 'packSize' | 'price' | 'employeePrice' | 'code'
+  | 'name' | 'publicName' | 'sku' | 'category' | 'kind' | 'taxRate' | 'unit' | 'packUnit' | 'packSize' | 'price' | 'employeePrice' | 'code'
   | 'lowThreshold' | 'leadDays' | 'note' | 'qty' | 'warehouse' | 'shelf' | 'lot' | 'expiresOn';
 
 const IMPORT_FIELDS: Record<ImportField, string> = {
-  name: '品名', publicName: '公開する名前', sku: '自社のコード（品番）', category: '分類', unit: '単位', packUnit: '仕入れの単位',
+  name: '品名', publicName: '公開する名前', sku: '自社のコード（品番）', category: '分類', kind: '区分（販売品・消耗品・原材料・その他）', taxRate: '消費税率',
+  unit: '単位', packUnit: '仕入れの単位',
   packSize: '入り数', price: '販売価格', employeePrice: '社員価格', code: 'バーコード（JAN）', lowThreshold: '残りわずかの目安', leadDays: '仕入れにかかる日数',
   note: 'メモ', qty: '在庫の数', warehouse: '倉庫', shelf: '棚', lot: 'ロット', expiresOn: '使用期限',
 };
@@ -128,6 +133,9 @@ const HEADER_WORDS: [ImportField, RegExp][] = [
   ['code', /jan|バーコード|gtin|ean|upc/i],
   ['sku', /^(sku|品番|型番|商品コード|品目コード|コード)$/i],
   ['name', /^(品名|品目|品目名|商品名|名前|名称|商品|アイテム|item|name)$/i],
+  // 区分（販売品・消耗品・原材料・その他）は分類より先に見る（第29.6.1節）
+  ['kind', /^(区分|品目区分|在庫区分|種別)$/],
+  ['taxRate', /消費税率|税率|tax.?rate/i],
   ['category', /分類|カテゴリ|区分|種類|category/i],
   ['packSize', /入数|入り数|入数量/],
   ['packUnit', /仕入(れ)?単位|梱包単位|荷姿/],
@@ -144,6 +152,23 @@ const HEADER_WORDS: [ImportField, RegExp][] = [
   ['expiresOn', /期限|有効期限|使用期限|賞味|消費期限/],
   ['note', /メモ|備考|note/i],
 ];
+
+/** 取り込みの区分の値を 4 つのどれかにする（どれでもなければその他。第29.6.1節）。 */
+export function kindOf(v: string): InventoryItemKind {
+  const s = v.normalize('NFKC').trim();
+  if (/販売|商品|売り物|物販/.test(s)) return 'sale';
+  if (/原材料|材料|原料/.test(s)) return 'material';
+  if (/消耗/.test(s)) return 'supply';
+  return 'other';
+}
+
+/** 取り込みの消費税率の値（10・8・「8%」「軽減」）。読めなければ `null`。 */
+export function taxRateOf(v: string): InventoryTaxRate | null {
+  const s = v.normalize('NFKC');
+  if (/軽減|\b8\b|8\s*%|0?\.08/.test(s)) return 8;
+  if (/\b10\b|10\s*%|0?\.1\b|標準/.test(s)) return 10;
+  return null;
+}
 
 const now = () => new Date().toISOString();
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -337,6 +362,10 @@ export class InventoryService {
       publicName: input.publicName !== undefined ? trimTo(input.publicName, 200) : prev?.publicName ?? '',
       sku: input.sku !== undefined ? trimTo(input.sku, 100) : prev?.sku ?? '',
       category: input.category !== undefined ? trimTo(input.category, 100) : prev?.category ?? '',
+      // 区分は 4 つに固定（第29.6.1節）。作るときに省けば、販売価格があれば販売品、無ければ消耗品
+      kind: input.kind && INVENTORY_ITEM_KINDS.some((k) => k.id === input.kind) ? input.kind
+        : prev?.kind ?? ((input.price ?? null) !== null ? 'sale' : 'supply'),
+      taxRate: input.taxRate === 8 || input.taxRate === 10 ? input.taxRate : prev?.taxRate ?? 10,
       unit,
       packUnit: input.packUnit !== undefined ? trimTo(input.packUnit, 20) : prev?.packUnit ?? '',
       packSize: num(input.packSize, prev?.packSize ?? null),
@@ -1034,6 +1063,8 @@ export class InventoryService {
         ...(text('publicName') !== undefined ? { publicName: text('publicName') } : {}),
         ...(sku ? { sku } : {}),
         ...(text('category') !== undefined ? { category: text('category') } : {}),
+        ...(text('kind') ? { kind: kindOf(text('kind')!) } : {}),
+        ...(text('taxRate') && taxRateOf(text('taxRate')!) ? { taxRate: taxRateOf(text('taxRate')!)! } : {}),
         ...(text('unit') ? { unit: text('unit') } : {}),
         ...(text('packUnit') !== undefined ? { packUnit: text('packUnit') } : {}),
         ...(numOf('packSize') !== undefined ? { packSize: numOf('packSize') } : {}),
@@ -1133,12 +1164,12 @@ export class InventoryService {
     const items = await this.list(tenantId, { includeStopped: true });
     const locs = new Map((await this.deps.store.listLocations(tenantId)).map((l) => [l.id, l]));
     const stock = await this.deps.store.listStock(tenantId);
-    const columns = ['品名', '公開する名前', '自社のコード', 'バーコード', '分類', '単位', '仕入れの単位', '入り数', '販売価格', '社員価格',
+    const columns = ['品名', '公開する名前', '自社のコード', 'バーコード', '分類', '区分', '単位', '仕入れの単位', '入り数', '販売価格', '社員価格', '消費税率',
       '倉庫', '棚', 'ロット', '使用期限', '在庫の数', '使える数', '残りわずかの目安', '状態'];
     const rows: (string | number | null)[][] = [];
     for (const i of items) {
       const mine = stock.filter((s) => s.itemId === i.id);
-      const head = [i.name, i.publicName, i.sku, i.codes.join(' '), i.category, i.unit, i.packUnit, i.packSize, i.price, i.employeePrice];
+      const head = [i.name, i.publicName, i.sku, i.codes.join(' '), i.category, inventoryKindLabel(i.kind), i.unit, i.packUnit, i.packSize, i.price, i.employeePrice, i.kind === 'sale' ? `${i.taxRate}%` : ''];
       const tail = [i.available, i.lowThreshold, i.status === 'active' ? '使う' : '止めた'];
       if (mine.length === 0) rows.push([...head, '', '', '', '', 0, ...tail]);
       for (const s of mine) {

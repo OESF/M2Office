@@ -60,6 +60,23 @@ export interface InventorySupplier {
   status: 'active' | 'stopped';
 }
 
+/** 品目の区分（第29.6.1節、Q-242）。4 つに固定する（会社が増やさない）。 */
+export type InventoryItemKind = 'sale' | 'supply' | 'material' | 'other';
+
+/** 区分の呼び方（並びは画面の並び）。 */
+export const INVENTORY_ITEM_KINDS: { id: InventoryItemKind; label: string }[] = [
+  { id: 'sale', label: '販売品' },
+  { id: 'supply', label: '消耗品' },
+  { id: 'material', label: '原材料' },
+  { id: 'other', label: 'その他' },
+];
+
+/** 区分の呼び方を引く。 */
+export const inventoryKindLabel = (k: InventoryItemKind): string => INVENTORY_ITEM_KINDS.find((x) => x.id === k)?.label ?? 'その他';
+
+/** 販売品の消費税率（%）。10 か 8（軽減税率）。 */
+export type InventoryTaxRate = 10 | 8;
+
 /** 品目（第29.6節）。 */
 export interface InventoryItem {
   id: string;
@@ -69,6 +86,10 @@ export interface InventoryItem {
   /** 自社のコード（任意）。 */
   sku: string;
   category: string;
+  /** 区分（販売品・消耗品・原材料・その他。第29.6.1節）。分類とは別に持つ。 */
+  kind: InventoryItemKind;
+  /** 消費税率（販売品だけが使う。第29.6.1節）。 */
+  taxRate: InventoryTaxRate;
   /** いちばん小さい使う単位（例: 個・回）。在庫はこの単位で持つ。 */
   unit: string;
   /** 仕入れの単位（例: 箱）。単位の換算を使わないなら空。 */
@@ -353,3 +374,53 @@ export interface InventorySaleUnmatched {
   reason: string;
   createdAt: string;
 }
+
+/** 販売品の在庫額（売価で見た目安。第29.6.1節）。在庫の評価（Q-108）ではない。 */
+export interface InventorySaleValue {
+  /** 税込の合計（円）。 */
+  withTax: number;
+  /** 税抜の合計（円）。 */
+  withoutTax: number;
+  /** 数えた販売品の数。 */
+  counted: number;
+  /** 販売価格が無いため数えなかった販売品の数。 */
+  noPrice: number;
+}
+
+/**
+ * 販売品の在庫額を出す（品目ごとに「在庫 − 期限切れ」× 販売価格。税込と税抜は品目の消費税率で直し、端数は税率ごとの合計で 1 回処理する）。
+ *
+ * @param items 数える品目（区分が販売品でないもの・止めた品目は数えない）
+ * @param rounding 会社の端数の扱い
+ * @remarks 販売価格の無い品目は推測で埋めず、`noPrice` に数える
+ */
+export function inventorySaleValue(items: InventoryItemView[], rounding: 'floor' | 'round' | 'ceil' = 'floor'): InventorySaleValue {
+  const r = rounding === 'ceil' ? Math.ceil : rounding === 'round' ? Math.round : Math.floor;
+  const sums = new Map<string, number>();
+  let counted = 0;
+  let noPrice = 0;
+  for (const i of items) {
+    if (i.kind !== 'sale' || i.status !== 'active') continue;
+    if (i.price === null) { noPrice++; continue; }
+    counted++;
+    const qty = Math.max(0, i.onHand - i.expired);
+    const key = `${i.taxRate}:${i.priceTaxIncluded ? 'in' : 'ex'}`;
+    sums.set(key, (sums.get(key) ?? 0) + i.price * qty);
+  }
+  let withTax = 0;
+  let withoutTax = 0;
+  for (const [key, amount] of sums) {
+    const [rate, mode] = key.split(':') as [string, 'in' | 'ex'];
+    const t = Number(rate);
+    const total = Math.round(amount);
+    if (mode === 'in') {
+      const tax = r((total * t) / (100 + t));
+      withTax += total; withoutTax += total - tax;
+    } else {
+      const tax = r((total * t) / 100);
+      withoutTax += total; withTax += total + tax;
+    }
+  }
+  return { withTax, withoutTax, counted, noPrice };
+}
+

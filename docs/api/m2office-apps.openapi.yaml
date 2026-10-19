@@ -178,7 +178,7 @@ paths:
                         unit: 個
                         status: in_stock
                         available: 24
-                        price: { amount: 1980, taxIncluded: true }
+                        price: { amount: 1980, taxIncluded: true, taxRate: 10 }
                         active: true
                         updatedAt: '2026-10-09T14:58:12+09:00'
                       - id: itm_9Lm4
@@ -208,7 +208,7 @@ paths:
                         unit: 個
                         status: in_stock
                         available: 24
-                        price: { amount: 1980, taxIncluded: true }
+                        price: { amount: 1980, taxIncluded: true, taxRate: 10 }
                         active: true
                         updatedAt: '2026-10-10T09:12:00+09:00'
                       - id: itm_5Rt1
@@ -227,7 +227,7 @@ paths:
                         unit: 個
                         status: low
                         available: 4
-                        price: { amount: 1980, taxIncluded: true }
+                        price: { amount: 1980, taxIncluded: true, taxRate: 10 }
                         active: true
                         updatedAt: '2026-10-09T15:03:40+09:00'
                       - id: itm_2Pz8
@@ -1086,6 +1086,7 @@ components:
       properties:
         amount: { type: integer, description: 円 }
         taxIncluded: { type: boolean, description: true なら税込 }
+        taxRate: { type: integer, enum: [10, 8], description: 消費税率（%）。8 は軽減税率。品目の区分が販売品でなければ既定の 10 }
     SaleEvent:
       type: object
       required: [eventId, saleId, status, occurredAt]

@@ -9,8 +9,8 @@
  * @see 仕様書 第29章 在庫管理
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySupplier } from '@m2office/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { INVENTORY_ITEM_KINDS, inventoryKindLabel, inventorySaleValue, type InventoryItem, type InventoryItemKind, type InventoryItemView, type InventoryLocation, type InventoryMove, type InventoryMoveKind, type InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryDetail, type InventoryList } from './api.js';
 import { Stocktake } from './Stocktake.js';
 import { BookingsPanel, OrderPanel, SlipResultPanel, SuppliersPanel } from './InventoryOrders.js';
@@ -66,11 +66,49 @@ function Marks({ item }: { item: InventoryItemView }) {
   );
 }
 
+/** 一覧の絞り込み（第29.6.1節）。その端末で覚えておく。 */
+interface ListFilter {
+  kind: InventoryItemKind | '';
+  category: string;
+  state: '' | 'low' | 'runningOut' | 'expiring' | 'expired';
+}
+const FILTER_KEY = 'm2o.inventory.filter';
+const STATE_LABEL: Record<Exclude<ListFilter['state'], ''>, string> = { low: '残りわずか', runningOut: '無くなる見込み', expiring: '期限が近い（30 日）', expired: '期限切れ' };
+
+/** 覚えておいた絞り込みを読む（読めなければ絞らない）。 */
+function loadFilter(): ListFilter {
+  try {
+    const v = JSON.parse(localStorage.getItem(FILTER_KEY) ?? 'null') as Partial<ListFilter> | null;
+    return { kind: (v?.kind as ListFilter['kind']) ?? '', category: typeof v?.category === 'string' ? v.category : '', state: (v?.state as ListFilter['state']) ?? '' };
+  } catch {
+    return { kind: '', category: '', state: '' };
+  }
+}
+
+/** 品目が絞り込みに当たるか。 */
+function matchesFilter(i: InventoryItemView, f: ListFilter, runningOut: Set<string>, today: string, soon: string): boolean {
+  if (f.kind && i.kind !== f.kind) return false;
+  if (f.category && (i.category || '（分類なし）') !== f.category) return false;
+  if (f.state === 'low') return i.low;
+  if (f.state === 'runningOut') return runningOut.has(i.id);
+  if (f.state === 'expiring') return !!i.nearestExpiry && i.nearestExpiry >= today && i.nearestExpiry <= soon;
+  if (f.state === 'expired') return i.expired > 0;
+  return true;
+}
+
+/** 円の表記。 */
+const yenText = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
+
 /** 一覧・探す（バーコードも）・品目を追加・取り込みと書き出し・場所。 */
 function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string | null) => void; onStocktake: () => void }) {
   const [list, setList] = useState<InventoryList | null>(null);
   const [q, setQ] = useState('');
   const [stopped, setStopped] = useState(false);
+  const [filter, setFilterState] = useState<ListFilter>(loadFilter);
+  const setFilter = (f: ListFilter) => {
+    setFilterState(f);
+    try { localStorage.setItem(FILTER_KEY, JSON.stringify(f)); } catch { /* 覚えられなくても絞り込みは効く */ }
+  };
   const [message, setMessage] = useState<string | null>(null);
   const [adding, setAdding] = useState<{ name: string; code: string } | null>(null);
   // 一覧の上に開く欄。一度に 1 つだけ開き、開いているあいだは品目の一覧を出さない（第29.11節「作業の欄」）
@@ -99,7 +137,25 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
     setPanel(p);
   };
   const working = panel !== null || adding !== null || slip !== null || mobileQr !== null || unknown !== null;
+  // 絞り込み（区分・分類・状態）と、絞り込んだ販売品の在庫額（第29.6.1節）
+  const categories = useMemo(() => [...new Set((list?.items ?? []).map((i) => i.category || '（分類なし）'))].sort((a, b) => a.localeCompare(b, 'ja')), [list]);
+  const shown = useMemo(() => {
+    if (!list) return [];
+    const jst = new Date(Date.now() + 9 * 3_600_000);
+    const today = jst.toISOString().slice(0, 10);
+    const soon = new Date(jst.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+    const out = new Set(list.runningOut ?? []);
+    return list.items.filter((i) => matchesFilter(i, filter, out, today, soon));
+  }, [list, filter]);
+  const saleValue = useMemo(() => (list ? inventorySaleValue(shown, list.taxRounding ?? 'floor') : null), [list, shown]);
   const picker = useRef<HTMLInputElement>(null);
+  const more = useRef<HTMLDetailsElement>(null);
+  // 「その他」は、外を押したら閉じる
+  useEffect(() => {
+    const close = (e: MouseEvent) => { if (more.current && !more.current.contains(e.target as Node)) more.current.removeAttribute('open'); };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, []);
 
   const load = useCallback(() => {
     api.inventory.list({ q, stopped }).then(setList).catch((e) => setMessage(describeError(e, '読み込めませんでした')));
@@ -165,38 +221,51 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
 
   return (
     <div className="inventory">
-      <div className="cards-toolbar">
+      {/* 上の段は 3 つに分ける（2026-10-19 にボタンが多く見にくいと三浦さんが求めた）。
+          1 段目: 探す欄とよく使う操作。たまに使う操作は「その他」にまとめる。2 段目: 欄を開くもの（タブ）。3 段目: 絞り込みと在庫額 */}
+      <div className="inventory-bar">
         <input className="cards-search" type="search" placeholder="品名・コード・バーコード" value={q} aria-label="品目を探す"
           onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void scan(); }} />
-        <button className={adding ? 'btn' : 'btn ghost'} onClick={() => {
+        <button className="btn" onClick={() => {
           if (adding) { setAdding(null); return; }
           closeWork();
           setAdding({ name: q.trim(), code: '' });
         }}>品目を追加</button>
         <button className="btn ghost" onClick={onStocktake}>棚卸し</button>
-        <button className="btn ghost" disabled={busy} onClick={() => picker.current?.click()}>取り込み</button>
-        <button className="btn ghost" onClick={() => void api.inventory.exportFile('csv').catch((e) => setMessage(describeError(e, '書き出せませんでした')))}>書き出し</button>
-        <button className="btn ghost" onClick={() => {
-          if (mobileQr) { URL.revokeObjectURL(mobileQr); setMobileQr(null); return; }
-          void api.inventory.mobileQrUrl().then((url) => { closeWork(); setMobileQr(url); }).catch((e) => setMessage(describeError(e, 'QR を作れませんでした')));
-        }}>スマホで開く</button>
-        {/* 棚のラベルと場所は、ほかの操作と同じ並びに置く（一覧の下の小さな文字では見つけにくかった） */}
-        <button className="btn ghost" disabled={!list || list.locations.length === 0}
-          onClick={() => void api.inventory.downloadLabels().catch((e) => setMessage(describeError(e, 'ラベルを作れませんでした')))}>棚ラベルの印刷</button>
-        <button className={panel === 'places' ? 'btn' : 'btn ghost'} onClick={() => toggle('places')}>場所（{list?.locations.length ?? 0}）</button>
-        <button className={panel === 'orders' ? 'btn' : 'btn ghost'} onClick={() => toggle('orders')}>
-          発注の案
-        </button>
-        <button className={panel === 'suppliers' ? 'btn' : 'btn ghost'} onClick={() => toggle('suppliers')}>仕入先</button>
-        {list?.settings.features.reserve && <button className={panel === 'bookings' ? 'btn' : 'btn ghost'} onClick={() => toggle('bookings')}>取り置き</button>}
-        {list?.admin && list.settings.features.publish && <button className={panel === 'publish' ? 'btn' : 'btn ghost'} onClick={() => toggle('publish')}>Web へ公開</button>}
-        {unmatched > 0 && <button className={panel === 'unmatched' ? 'btn' : 'btn ghost warn'} onClick={() => toggle('unmatched')}>照らせなかった販売（{unmatched}）</button>}
         <button className="btn ghost" disabled={busy} onClick={() => slipPicker.current?.click()}>納品書から入庫</button>
+        <details className="inventory-more" ref={more} onToggle={(e) => {
+          // 開いたときに、左にはみ出すなら左寄せに切り替える（狭い幅で「その他」が行の左に来たとき）
+          const d = e.currentTarget;
+          d.classList.remove('align-left');
+          const menu = d.querySelector('.inventory-more-menu');
+          const box = d.parentElement?.getBoundingClientRect();
+          if (d.open && menu && box && menu.getBoundingClientRect().left < box.left) d.classList.add('align-left');
+        }}>
+          <summary className="btn ghost">その他</summary>
+          <div className="inventory-more-menu" role="menu" onClick={() => more.current?.removeAttribute('open')}>
+            <button role="menuitem" disabled={busy} onClick={() => picker.current?.click()}>取り込み（CSV・Excel）</button>
+            <button role="menuitem" onClick={() => void api.inventory.exportFile('csv').catch((e) => setMessage(describeError(e, '書き出せませんでした')))}>書き出し（CSV）</button>
+            <button role="menuitem" disabled={!list || list.locations.length === 0}
+              onClick={() => void api.inventory.downloadLabels().catch((e) => setMessage(describeError(e, 'ラベルを作れませんでした')))}>棚ラベルの印刷</button>
+            <button role="menuitem" onClick={() => {
+              if (mobileQr) { URL.revokeObjectURL(mobileQr); setMobileQr(null); return; }
+              void api.inventory.mobileQrUrl().then((url) => { closeWork(); setMobileQr(url); }).catch((e) => setMessage(describeError(e, 'QR を作れませんでした')));
+            }}>スマホで開く</button>
+          </div>
+        </details>
         <input ref={slipPicker} type="file" hidden accept="image/png,image/jpeg,image/webp,application/pdf"
           onChange={(e) => void readSlipFile(e.target.files?.[0])} />
         <input ref={picker} type="file" hidden accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={(e) => void importFile(e.target.files?.[0])} />
       </div>
+      <nav className="inventory-tabs" aria-label="在庫の欄">
+        <button className={panel === 'places' ? 'active' : ''} onClick={() => toggle('places')}>場所（{list?.locations.length ?? 0}）</button>
+        <button className={panel === 'orders' ? 'active' : ''} onClick={() => toggle('orders')}>発注の案</button>
+        <button className={panel === 'suppliers' ? 'active' : ''} onClick={() => toggle('suppliers')}>仕入先</button>
+        {list?.settings.features.reserve && <button className={panel === 'bookings' ? 'active' : ''} onClick={() => toggle('bookings')}>取り置き</button>}
+        {list?.admin && list.settings.features.publish && <button className={panel === 'publish' ? 'active' : ''} onClick={() => toggle('publish')}>Web へ公開</button>}
+        {unmatched > 0 && <button className={panel === 'unmatched' ? 'active warn' : 'warn'} onClick={() => toggle('unmatched')}>照らせなかった販売（{unmatched}）</button>}
+      </nav>
       {message && <p className="small muted" role="status">{message}</p>}
       {working && <button className="link-btn inventory-back" onClick={closeWork}>‹ 品目の一覧</button>}
       {panel === 'places' && list && <Places locations={list.locations} admin={list.admin} onChanged={load} />}
@@ -222,17 +291,43 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       )}
       {!working && list && list.items.length === 0 && <p className="muted">{q ? '見つかりませんでした' : '品目はまだありません'}</p>}
       {!working && list && list.items.length > 0 && (
+        <div className="row wrap inventory-filter">
+          <select value={filter.kind} onChange={(e) => setFilter({ ...filter, kind: e.target.value as ListFilter['kind'] })} aria-label="区分で絞る">
+            <option value="">すべての区分</option>
+            {INVENTORY_ITEM_KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
+          </select>
+          <select value={filter.category} onChange={(e) => setFilter({ ...filter, category: e.target.value })} aria-label="分類で絞る">
+            <option value="">すべての分類</option>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={filter.state} onChange={(e) => setFilter({ ...filter, state: e.target.value as ListFilter['state'] })} aria-label="状態で絞る">
+            <option value="">すべての状態</option>
+            {(Object.keys(STATE_LABEL) as Exclude<ListFilter['state'], ''>[]).map((k) => <option key={k} value={k}>{STATE_LABEL[k]}</option>)}
+          </select>
+          {(filter.kind || filter.category || filter.state) && <button className="link-btn small" onClick={() => setFilter({ kind: '', category: '', state: '' })}>絞り込みを外す</button>}
+          {/* 絞り込んだ販売品の在庫額（売価で見た目安。在庫の評価ではない。第29.6.1節） */}
+          {saleValue && (saleValue.counted > 0 || saleValue.noPrice > 0) && (
+            <span className="inventory-value">
+              販売品の在庫額（売価）: <strong>税込 {yenText(saleValue.withTax)}</strong>（税抜 {yenText(saleValue.withoutTax)}）・{saleValue.counted} 品目
+              {saleValue.noPrice > 0 && <span className="muted small">（販売価格の無い {saleValue.noPrice} 品目は数えていません）</span>}
+            </span>
+          )}
+        </div>
+      )}
+      {!working && list && list.items.length > 0 && shown.length === 0 && <p className="muted">絞り込みに当たる品目はありません</p>}
+      {!working && list && shown.length > 0 && (
         <div className="table-scroll"><table className="table inventory-table">
           <thead>
-            <tr><th>品名</th><th className="num">使える数</th><th className="num onhand">在庫</th><th>期限</th><th /></tr>
+            <tr><th>品名</th><th>区分</th><th>分類</th><th className="num">使える数</th><th className="num onhand">在庫</th><th>期限</th><th /></tr>
           </thead>
           <tbody>
-            {list.items.map((i) => (
+            {shown.map((i) => (
               <tr key={i.id} className="clickable" onClick={() => onOpen(i.id)}>
                 <td>
                   <button className="link" onClick={(e) => { e.stopPropagation(); onOpen(i.id); }}>{i.name}</button>
-                  {i.category && <span className="muted small"> {i.category}</span>}
                 </td>
+                <td className="small nowrap">{inventoryKindLabel(i.kind)}</td>
+                <td className="small muted">{i.category}</td>
                 <td className="num">{qtyText(i, i.available)}</td>
                 <td className="num muted onhand">{i.onHand !== i.available ? qtyText(i, i.onHand) : ''}</td>
                 <td className="small date">{i.nearestExpiry ?? ''}</td>
@@ -296,6 +391,8 @@ function NewItem({ initial, onCancel, onSaved }: {
   const [qty, setQty] = useState('');
   const [unit, setUnit] = useState('個');
   const [category, setCategory] = useState('');
+  // 区分（第29.6.1節）。既定は消耗品
+  const [kind, setKind] = useState<InventoryItemKind>('supply');
   const [error, setError] = useState<string | null>(null);
   // 知らないバーコードから作るときは、JAN から商品名を引いて欄に入れておく（第29.6節）。入れ始めた欄は上書きしない
   const [looking, setLooking] = useState<'busy' | 'none' | null>(null);
@@ -316,7 +413,7 @@ function NewItem({ initial, onCancel, onSaved }: {
     try {
       const n = qty.trim() === '' ? null : Number(qty);
       if (n !== null && (!Number.isFinite(n) || n < 0)) { setError('数は 0 以上で入れてください'); return; }
-      const r = await api.inventory.create({ name, unit, category, initialQty: n, ...(initial.code ? { codes: [initial.code] } : {}) });
+      const r = await api.inventory.create({ name, unit, category, kind, initialQty: n, ...(initial.code ? { codes: [initial.code] } : {}) });
       onSaved(r.item.id, r.note);
     } catch (e) {
       setError(describeError(e, '足せませんでした'));
@@ -335,6 +432,9 @@ function NewItem({ initial, onCancel, onSaved }: {
         <input className="num-input" type="number" inputMode="decimal" min={0} placeholder="いまの数" value={qty}
           onChange={(e) => setQty(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save(); }} aria-label="いまの数" />
         <input className="unit-input" placeholder="個・本・冊" value={unit} onChange={(e) => setUnit(e.target.value)} aria-label="単位（数え方）" />
+        <select value={kind} onChange={(e) => setKind(e.target.value as InventoryItemKind)} aria-label="区分">
+          {INVENTORY_ITEM_KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
+        </select>
         <input className="short" placeholder="分類" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="分類" />
         <button className="btn" disabled={!name.trim()} onClick={() => void save()}>追加</button>
         <button className="btn ghost" onClick={onCancel}>キャンセル</button>
@@ -589,7 +689,7 @@ function ItemFields({ item, unitsOn, suppliers, onSaved }: {
   const save = async (extraCode?: string) => {
     try {
       await api.inventory.update(item.id, {
-        name: draft.name, publicName: draft.publicName, sku: draft.sku, category: draft.category, unit: draft.unit, note: draft.note,
+        name: draft.name, publicName: draft.publicName, sku: draft.sku, category: draft.category, kind: draft.kind, taxRate: draft.taxRate, unit: draft.unit, note: draft.note,
         packUnit: draft.packUnit, packSize: numOrNull(draft.packSize), price: numOrNull(draft.price), employeePrice: numOrNull(draft.employeePrice), lowThreshold: numOrNull(draft.lowThreshold),
         supplierId: draft.supplierId || null, leadDays: numOrNull(draft.leadDays),
         ...(extraCode ? { codes: [extraCode] } : {}),
@@ -619,10 +719,34 @@ function ItemFields({ item, unitsOn, suppliers, onSaved }: {
         {field('publicName', '公開する名前')}
         {field('sku', '自社のコード')}
         {field('category', '分類')}
+        <dt>区分</dt>
+        <dd>
+          <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as InventoryItemKind })} aria-label="区分">
+            {INVENTORY_ITEM_KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
+          </select>
+        </dd>
         {field('unit', '単位')}
         {unitsOn && field('packUnit', '仕入れの単位')}
         {unitsOn && field('packSize', '入り数', 'number')}
-        {field('price', '販売価格', 'number')}
+        <dt>販売価格</dt>
+        <dd>
+          {/* 販売価格を入れはじめたら、消耗品のままの品目は販売品にする（選び直せる。第29.6.1節） */}
+          <input type="number" value={draft.price} onChange={(e) => setDraft({
+            ...draft, price: e.target.value,
+            ...(item.price === null && draft.price === '' && e.target.value !== '' && draft.kind === 'supply' ? { kind: 'sale' as const } : {}),
+          })} />
+        </dd>
+        {draft.kind === 'sale' && (
+          <>
+            <dt>消費税率</dt>
+            <dd>
+              <select value={draft.taxRate} onChange={(e) => setDraft({ ...draft, taxRate: Number(e.target.value) === 8 ? 8 : 10 })} aria-label="消費税率">
+                <option value={10}>10%</option>
+                <option value={8}>8%（軽減税率）</option>
+              </select>
+            </dd>
+          </>
+        )}
         {field('employeePrice', '社員価格', 'number')}
         {field('lowThreshold', '残りわずかの目安', 'number')}
         <dt>仕入先</dt>
@@ -658,7 +782,7 @@ function ItemFields({ item, unitsOn, suppliers, onSaved }: {
 function toDraft(i: InventoryItem) {
   const s = (n: number | null) => (n === null ? '' : String(n));
   return {
-    name: i.name, publicName: i.publicName, sku: i.sku, category: i.category, unit: i.unit, packUnit: i.packUnit,
+    name: i.name, publicName: i.publicName, sku: i.sku, category: i.category, kind: i.kind, taxRate: i.taxRate as 10 | 8, unit: i.unit, packUnit: i.packUnit,
     packSize: s(i.packSize), price: s(i.price), employeePrice: s(i.employeePrice), lowThreshold: s(i.lowThreshold), note: i.note,
     supplierId: i.supplierId ?? '', leadDays: s(i.leadDays),
   };

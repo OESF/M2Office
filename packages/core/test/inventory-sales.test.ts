@@ -112,7 +112,7 @@ test('商品の一覧: 承認した範囲だけを返し、分類で絞り、変
   assert.deepEqual(first.body.items.map((x) => x.id).sort(), [a.id, b.id].sort());
   const hc = first.body.items.find((x) => x.id === a.id) as SalesItem;
   assert.equal(hc.code, 'HC-050');
-  assert.deepEqual(hc.price, { amount: 1980, taxIncluded: true });
+  assert.deepEqual(hc.price, { amount: 1980, taxIncluded: true, taxRate: 10 });
   assert.equal(hc.employeePrice, 1500);
   assert.equal('available' in hc, false, '数を渡さないアプリは状態だけ');
 

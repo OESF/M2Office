@@ -352,7 +352,8 @@ export interface SalesItem {
   unit: string;
   status: 'in_stock' | 'low' | 'out';
   available?: number;
-  price?: { amount: number; taxIncluded: boolean } | null;
+  /** 販売価格（`taxRate` は販売品の消費税率。第29.6.1節）。 */
+  price?: { amount: number; taxIncluded: boolean; taxRate: 10 | 8 } | null;
   employeePrice?: number | null;
   active: true;
   updatedAt: string;
@@ -577,7 +578,7 @@ export class InventorySales {
       id: v.id, name: v.name, publicName: v.publicName.trim() || null, code: v.sku.trim() || null, barcodes: [...v.codes], category: v.category.trim() || null,
       unit: v.unit, status: v.available <= 0 ? 'out' : v.low ? 'low' : 'in_stock',
       ...(scope.showCount ? { available: Math.max(0, v.available) } : {}),
-      ...(scope.price ? { price: v.price === null ? null : { amount: Math.round(v.price), taxIncluded: v.priceTaxIncluded } } : {}),
+      ...(scope.price ? { price: v.price === null ? null : { amount: Math.round(v.price), taxIncluded: v.priceTaxIncluded, taxRate: v.taxRate } } : {}),
       ...(scope.employeePrice ? { employeePrice: v.employeePrice === null ? null : Math.round(v.employeePrice) } : {}),
       active: true, updatedAt,
     };

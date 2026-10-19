@@ -466,6 +466,10 @@ export interface InventoryList {
   settings: Pick<InventorySettings, 'features' | 'lowDefault'>;
   /** 見ている人が管理者か（品目の止め・場所の削除）。 */
   admin: boolean;
+  /** 仕入れにかかる日数より早く無くなりそうな品目（一覧の絞り込み。第29.6.1節）。 */
+  runningOut: string[];
+  /** 会社の端数の扱い（販売品の在庫額。第29.6.1節）。 */
+  taxRounding: 'floor' | 'round' | 'ceil';
 }
 
 /** 品目 1 件の詳しい姿。 */

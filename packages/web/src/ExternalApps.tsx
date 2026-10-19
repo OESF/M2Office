@@ -18,9 +18,9 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP'
 
 const STATUS_LABEL = { in_stock: '在庫あり', low: '残りわずか', out: '終了' } as const;
 
-/** 承認する前の、商品の一覧のはじめの選び方（販売品に当たる分類があればその品目。社員価格は渡さない）。 */
+/** 承認する前の、商品の一覧のはじめの選び方（区分が販売品の品目。第29.6.1節。社員価格は渡さない）。 */
 function initialCatalog(items: InventoryItemView[]): InventoryCatalogScope {
-  return { itemIds: items.filter((i) => i.status === 'active' && /販売/.test(i.category)).map((i) => i.id), showCount: true, price: true, employeePrice: false };
+  return { itemIds: items.filter((i) => i.status === 'active' && i.kind === 'sale').map((i) => i.id), showCount: true, price: true, employeePrice: false };
 }
 
 /** 危険度の言い方。 */

@@ -14,7 +14,7 @@ import {
   readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
   MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput, type PublicationView,
 } from '@m2office/core';
-import { INVENTORY_PUBLICATION_MAX, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
+import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, type InventoryItemKind, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -42,6 +42,9 @@ function itemInput(body: Record<string, unknown>): ItemInput {
     if (v !== undefined) out[k] = v;
   }
   if (typeof body['priceTaxIncluded'] === 'boolean') out.priceTaxIncluded = body['priceTaxIncluded'];
+  // 区分と消費税率（第29.6.1節）。知らない値は捨てる
+  if (INVENTORY_ITEM_KINDS.some((k) => k.id === body['kind'])) out.kind = body['kind'] as InventoryItemKind;
+  if (body['taxRate'] === 8 || body['taxRate'] === 10) out.taxRate = body['taxRate'];
   if (body['supplierId'] === null || typeof body['supplierId'] === 'string') out.supplierId = (body['supplierId'] as string | null) || null;
   if (Array.isArray(body['codes'])) out.codes = body['codes'].filter((c): c is string => typeof c === 'string').slice(0, 20);
   return out;
@@ -70,12 +73,20 @@ export function inventoryRoute(deps: AppDeps) {
   /** 品目の一覧と、場所・会社の設定（第29.6節）。 */
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    const [items, locations, settings] = await Promise.all([
+    const [items, locations, settings, forecast, company] = await Promise.all([
       service.list(tenant.id, { q: (c.req.query('q') ?? '').slice(0, 100), includeStopped: c.req.query('stopped') === '1' }),
       service.locations(tenant.id),
       service.settings(tenant.id),
+      // 一覧の「無くなる見込み」の絞り込み（第29.6.1節）。見張りと同じ計算
+      service.forecast(tenant.id).catch(() => []),
+      deps.repo.getTenantSettings(tenant.id).then((s) => s.company),
     ]);
-    return c.json({ items, locations, settings: { features: settings.features, lowDefault: settings.lowDefault }, admin: isAdmin(c) });
+    return c.json({
+      items, locations, settings: { features: settings.features, lowDefault: settings.lowDefault }, admin: isAdmin(c),
+      runningOut: forecast.filter((r) => r.runningOut).map((r) => r.itemId),
+      // 販売品の在庫額の端数の扱い（会社情報の「端数の扱い」。第29.6.1節）
+      taxRounding: company.taxRounding,
+    });
   });
 
   /** 品目 1 件（場所とロットごとの数・最近の記録）。 */

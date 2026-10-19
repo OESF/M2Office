@@ -7653,5 +7653,46 @@ console.log('\n■ 105. 障害の知らせと稼働の報告（対象の会社�
   }
 }
 
+console.log('\n■ 106. 在庫の区分・消費税率・一覧の絞り込みの材料（第29.6.1節、Q-242）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用区分${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const sale = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 茶`, unit: '本', price: 1080 }) }, 'member')).body?.item;
+    const supply = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 紙`, unit: '束' }) }, 'member')).body?.item;
+    const bad = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 謎`, kind: 'asset', taxRate: 5 }) }, 'member')).body?.item;
+    sale?.kind === 'sale' && sale.taxRate === 10 && supply?.kind === 'supply' && bad?.kind === 'supply' && bad.taxRate === 10
+      ? ok('作るときに区分を省けば、販売価格があれば販売品・無ければ消耗品。知らない区分と税率は受けない') : ng('区分の既定が違う', JSON.stringify({ sale: sale?.kind, supply: supply?.kind, bad: [bad?.kind, bad?.taxRate] }));
+    await call('a', `/v1/inventory/items/${sale?.id}`, { method: 'PUT', body: JSON.stringify({ taxRate: 8 }) }, 'member');
+    await call('a', `/v1/inventory/items/${supply?.id}`, { method: 'PUT', body: JSON.stringify({ kind: 'material' }) }, 'member');
+    const list = (await call('a', '/v1/inventory', {}, 'member')).body;
+    const s2 = (list?.items ?? []).find((i) => i.id === sale?.id);
+    const m2 = (list?.items ?? []).find((i) => i.id === supply?.id);
+    s2?.taxRate === 8 && m2?.kind === 'material' && Array.isArray(list?.runningOut) && ['floor', 'round', 'ceil'].includes(list?.taxRounding)
+      ? ok('区分と消費税率を直せ、一覧は絞り込みの材料（無くなる見込み・端数の扱い）を返す') : ng('区分・税率・一覧が違う', JSON.stringify({ tax: s2?.taxRate, kind: m2?.kind, runningOut: list?.runningOut, rounding: list?.taxRounding }));
+    const form = new FormData();
+    form.append('file', new Blob([`品名,区分,消費税率,販売価格\n${tag} 粉,原材料,,\n${tag} 菓子,販売品,8%,300\n${tag} 机,備品,,\n`], { type: 'text/csv' }), 'kinds.csv');
+    const imp = await fetch(`${API}/v1/inventory/import`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } }).then((r) => r.json());
+    const after = ((await call('a', '/v1/inventory', {}, 'member')).body?.items ?? []).filter((i) => i.name.startsWith(tag));
+    const by = (n) => after.find((i) => i.name === `${tag} ${n}`);
+    const exp = await fetch(`${API}/v1/inventory/export?format=csv`, { headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } }).then((r) => r.text());
+    imp.created === 3 && by('粉')?.kind === 'material' && by('菓子')?.kind === 'sale' && by('菓子')?.taxRate === 8 && by('机')?.kind === 'other'
+      && /区分/.test(exp.split('\n')[0]) && /消費税率/.test(exp.split('\n')[0])
+      ? ok('取り込みは区分（4 つのどれでもなければその他）と消費税率を読み、書き出しにも区分と消費税率を出す') : ng('区分の取り込み・書き出しが違う', JSON.stringify({ imp: imp.created, kinds: after.map((i) => [i.name, i.kind, i.taxRate]), head: exp.split('\n')[0] }));
+  } catch (err) {
+    ng('在庫の区分の確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

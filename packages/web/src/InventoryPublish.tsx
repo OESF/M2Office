@@ -16,7 +16,10 @@ import { api, describeError, type InventoryPublicationView } from './api.js';
 
 /** 承認する前のまとまりの、はじめの選び方（品目はすべて・分類と価格あり・状態だけ）。 */
 function initialScope(items: InventoryItemView[]): InventoryPublicationScope {
-  return { itemIds: items.filter((i) => i.status === 'active').map((i) => i.id), fields: ['category', 'price'], showCount: false };
+  // はじめは区分が販売品の品目（第29.6.1節）。販売品が無ければ、使っている品目すべて
+  const active = items.filter((i) => i.status === 'active');
+  const sale = active.filter((i) => i.kind === 'sale');
+  return { itemIds: (sale.length ? sale : active).map((i) => i.id), fields: ['category', 'price'], showCount: false };
 }
 
 /** 2 つの中身が同じか（品目の順は問わない）。 */

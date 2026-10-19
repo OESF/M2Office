@@ -2431,3 +2431,41 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   display: inline-flex; align-items: center; justify-content: center;
   width: 56px; height: 56px; font-size: 26px; color: var(--muted, #bbb); opacity: 0.6;
 }
+
+/* 在庫の一覧の絞り込みと、販売品の在庫額（仕様書 第29.6.1節） */
+.inventory-filter { align-items: center; gap: 8px; margin: 8px 0; }
+.inventory-filter .inventory-value { margin-left: auto; }
+.inventory-table td.nowrap { white-space: nowrap; }
+
+/* 在庫の画面の上の段（2026-10-19。ボタンを 3 段に分けて整理）。1 段目: 探す欄とよく使う操作、2 段目: 欄を開くタブ */
+.inventory-bar { display: flex; flex-wrap: wrap; align-items: center; gap: calc(8px * var(--space-scale)); margin-bottom: calc(6px * var(--space-scale)); }
+.inventory-bar .cards-search { flex: 1 1 240px; }
+.inventory-more { position: relative; }
+.inventory-more > summary { list-style: none; cursor: pointer; display: inline-block; }
+.inventory-more > summary::-webkit-details-marker { display: none; }
+.inventory-more > summary::after { content: ' ▾'; font-size: 0.8em; }
+.inventory-more-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
+  padding: 4px; display: flex; flex-direction: column;
+}
+.inventory-more-menu button {
+  background: none; border: none; text-align: left; padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale));
+  border-radius: 4px; color: inherit; font: inherit; cursor: pointer;
+}
+.inventory-more-menu button:hover:not(:disabled) { background: var(--accent-soft); }
+.inventory-more-menu button:disabled { opacity: .5; cursor: default; }
+.inventory-tabs { display: flex; flex-wrap: wrap; gap: calc(4px * var(--space-scale)); border-bottom: 1px solid var(--line); margin-bottom: calc(8px * var(--space-scale)); }
+.inventory-tabs button {
+  background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--muted); font: inherit; cursor: pointer;
+  padding: calc(6px * var(--space-scale)) calc(10px * var(--space-scale));
+}
+.inventory-tabs button:hover { color: var(--accent); }
+.inventory-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.inventory-tabs button.warn { color: var(--warn, #b45309); }
+.inventory-filter select { padding: calc(4px * var(--space-scale)) calc(8px * var(--space-scale)); border: 1px solid var(--line); border-radius: 4px; background: var(--input-bg); color: inherit; font: inherit; }
+@media (max-width: 640px) {
+  .inventory-bar .btn, .inventory-more > summary { flex: 1 1 auto; text-align: center; }
+  .inventory-filter .inventory-value { margin-left: 0; width: 100%; }
+}
+.inventory-more.align-left .inventory-more-menu { right: auto; left: 0; }
