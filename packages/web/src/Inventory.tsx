@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { INVENTORY_ITEM_KINDS, inventoryCostValue, inventoryKindLabel, inventoryMargin, inventorySaleValue, type InventoryItem, type InventoryItemKind, type InventoryItemView, type InventoryLocation, type InventoryMove, type InventoryMoveKind, type InventorySupplier } from '@m2office/shared';
+import { INVENTORY_ITEM_KINDS, inventoryCostValue, inventoryKindLabel, inventoryMargin, inventoryPurposeLabel, inventorySaleValue, type InventoryItem, type InventoryOutPurpose, type InventoryItemKind, type InventoryItemView, type InventoryLocation, type InventoryMove, type InventoryMoveKind, type InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryDetail, type InventoryList } from './api.js';
 import { Stocktake } from './Stocktake.js';
 import { BookingsPanel, OrderPanel, SlipResultPanel, SuppliersPanel } from './InventoryOrders.js';
@@ -21,8 +21,10 @@ import { UsageChart, UsagePanel } from './InventoryUsage.js';
 import { MarketPanel, MarketSection } from './InventoryMarket.js';
 import { InventorySummary, isOut, needsOrder, type SummaryFilter } from './InventorySummary.js';
 import type { InventorySlipResult } from './api.js';
+import { OutDoneLine, PurposeChips, purposeOf, type OutDone } from './inventory-out.js';
 
-const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '使用', transfer: '移動', adjust: '調整' };
+// 記録の種類 `out` は画面では「出庫」と呼ぶ（第 0.406.0 版。第29.11.1節）
+const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '出庫', transfer: '移動', adjust: '調整' };
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -211,6 +213,9 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
   const [mobileQr, setMobileQr] = useState<string | null>(null);
   // 知らないバーコード。新しい品目にするか、既にある品目に結び付ける（第29.11節）
   const [unknown, setUnknown] = useState<string | null>(null);
+  // 一覧から出庫する欄（行の「出庫」かバーコード。第29.9.1節）。記録した結果の行は「取り消す」を添える
+  const [quick, setQuick] = useState<QuickOutState | null>(null);
+  const [outDone, setOutDone] = useState<OutDone | null>(null);
   /** 開いている作業の欄をすべて閉じる（一覧に戻る）。 */
   const closeWork = () => {
     setPanel(null);
@@ -244,6 +249,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
   const summaryActive: SummaryFilter = filter.category ? null
     : (['out', 'order', 'expired', 'expiring'] as const).find((s) => filter.state === s && !filter.kind) ?? (filter.kind === 'sale' && !filter.state ? 'sale' : null);
   const picker = useRef<HTMLInputElement>(null);
+  const search = useRef<HTMLInputElement>(null);
   const more = useRef<HTMLDetailsElement>(null);
   // 「その他」は、外を押したら閉じる
   useEffect(() => {
@@ -267,14 +273,55 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
     if (!code) return;
     try {
       const r = await api.inventory.lookup(code);
-      if (r.item) { onOpen(r.item.id); return; }
+      // 品目を読んだら出庫の欄を開く（同じ品目なら 1 つ足し、別の品目なら前の品目を記録してから開く。第29.9.1節）
+      if (r.item) {
+        const view = list?.items.find((x) => x.id === r.item!.id) ?? (await api.inventory.list({ q: '', stopped: false })).items.find((x) => x.id === r.item!.id);
+        setQ('');
+        if (view && view.status === 'active') await openQuick(view); else onOpen(r.item.id);
+        return;
+      }
       if (r.location) { setQ(''); setMessage(`棚「${placeName(r.location)}」のラベルです`); return; }
       if (r.parsed.kind !== 'other') { closeWork(); setUnknown(r.parsed.code); }
     } catch (e) {
       setMessage(describeError(e, '読めませんでした'));
     }
   };
-  const scan = () => lookup(q);
+  const scan = () => (!q.trim() && quick ? recordQuick() : lookup(q));
+
+  /** 出庫の欄を開く。同じ品目なら 1 つ足す。別の品目が開いていれば、その品目を記録してから開く。 */
+  const openQuick = async (item: InventoryItemView) => {
+    if (quick?.item.id === item.id) { setQuick({ ...quick, qty: quick.qty + 1 }); search.current?.focus({ preventScroll: true }); return; }
+    if (quick) await recordQuick();
+    setQuick({ item, qty: 1, purpose: purposeOf(item) });
+    // 手元は探す欄に置く（続けて読んだバーコードが入り、空のまま Enter で記録できる）
+    search.current?.focus({ preventScroll: true });
+  };
+  /** 出庫の欄の品目を記録する。 */
+  const recordQuick = async () => {
+    if (!quick) return;
+    const { item, qty, purpose } = quick;
+    try {
+      const r = await api.inventory.move({ kind: 'out', itemId: item.id, qty, unit: 'unit', purpose });
+      setQuick(null);
+      setOutDone({
+        text: [`${item.name} を ${qty} ${item.unit} 出庫しました（${inventoryPurposeLabel(purpose)}）。使える数は ${qtyText(r.item, r.item.available)} です`, ...r.warnings].join('。'),
+        moveId: r.moves[0]?.id ?? null,
+      });
+      load();
+    } catch (e) {
+      setMessage(describeError(e, '記録できませんでした'));
+    }
+  };
+  const undoOut = async () => {
+    if (!outDone?.moveId) return;
+    try {
+      await api.inventory.undo(outDone.moveId);
+      setOutDone({ text: '出庫を取り消しました', moveId: null });
+      load();
+    } catch (e) {
+      setMessage(describeError(e, '取り消せませんでした'));
+    }
+  };
 
   /** 納品書の写真・PDF を渡して入庫する。読めた行はすぐ入庫になり、照らせない行が残る。 */
   const readSlipFile = async (f: File | undefined) => {
@@ -319,8 +366,11 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       {/* 上の段は 3 つに分ける（2026-10-19 にボタンが多く見にくいと三浦さんが求めた）。
           1 段目: 探す欄とよく使う操作。たまに使う操作は「その他」にまとめる。2 段目: 欄を開くもの（タブ）。3 段目: 絞り込みと在庫額 */}
       <div className="inventory-bar">
-        <input className="cards-search" type="search" placeholder="品名・コード・バーコード" value={q} aria-label="品目を探す"
-          onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void scan(); }} />
+        <input ref={search} className="cards-search" type="search" placeholder="品名・コード・バーコード" value={q} aria-label="品目を探す"
+          onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => {
+            if (e.key === 'Enter') void scan();
+            if (e.key === 'Escape' && quick) setQuick(null);
+          }} />
         <button className="btn" onClick={() => {
           if (adding) { setAdding(null); return; }
           closeWork();
@@ -422,11 +472,17 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
       {panel === 'usage' && <UsagePanel itemIds={new Set(shown.map((i) => i.id))} onOpenItem={(id) => onOpen(id)} />}
       {/* 販売品の相場と競合の比較（第29.24節）。一覧の絞り込みがそのまま効く */}
       {panel === 'market' && <MarketPanel items={shown} onOpenItem={(id) => onOpen(id)} admin={!!list?.admin} />}
+      {!working && quick && (
+        <QuickOut state={quick} onChange={setQuick} onRecord={() => void recordQuick()} onClose={() => setQuick(null)} />
+      )}
+      {!working && outDone && <OutDoneLine done={outDone} onUndo={() => void undoOut()} />}
       {!working && list && list.items.length > 0 && shown.length === 0 && <p className="muted">絞り込みに当たる品目はありません</p>}
       {!working && list && shown.length > 0 && (
         <div className="table-scroll"><table className="table inventory-table">
           <thead>
             <tr>
+              {/* 先頭の列で出庫する（いちばん多い操作。2026-10-19 に三浦さんが列にするよう求めた。第29.9.1節） */}
+              <th className="inv-out-col">出庫</th>
               <th>品名</th><th>区分</th><th>分類</th><th className="num">使える数</th><th className="num onhand">在庫</th><th>期限</th>
               {/* はじめは隠す列（表の「列」で選ぶと出る。仕様書 第6.1.2.1節） */}
               {extraColumns.map((c) => <th key={c.label} data-col-default="hidden" className={c.num ? 'num' : undefined}>{c.label}</th>)}
@@ -437,6 +493,12 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
           <tbody>
             {shown.map((i) => (
               <tr key={i.id} className="clickable" onClick={() => onOpen(i.id)}>
+                <td className="inv-out-col">
+                  {i.status === 'active' && (
+                    <button className={`inv-cart${quick?.item.id === i.id ? ' on' : ''}`} onClick={(e) => { e.stopPropagation(); void openQuick(i); }}
+                      aria-label={`${i.name} を出庫`} title="出庫">🛒</button>
+                  )}
+                </td>
                 <td>
                   <button className="link" onClick={(e) => { e.stopPropagation(); onOpen(i.id); }}>{i.name}</button>
                 </td>
@@ -457,6 +519,39 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
           <label className="check"><input type="checkbox" checked={stopped} onChange={(e) => setStopped(e.target.checked)} /> 止めた品目も出す</label>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 一覧から出庫する欄の中身。 */
+interface QuickOutState {
+  item: InventoryItemView;
+  qty: number;
+  purpose: InventoryOutPurpose;
+}
+
+/**
+ * 一覧から出庫する欄（第29.9.1節）。数は 1、用途は品目の既定で開き、Enter か「記録する」で記録する。
+ *
+ * @remarks 数は − ＋ で変える（打つ欄に入れると、続けて読んだバーコードの数字が入ってしまうため）。
+ * 手元は一覧の探す欄に置いたままにし、探す欄が空のときの Enter で記録、Esc で閉じる（一覧の側で受ける）
+ */
+function QuickOut({ state, onChange, onRecord, onClose }: {
+  state: QuickOutState; onChange: (s: QuickOutState) => void; onRecord: () => void; onClose: () => void;
+}) {
+  const { item, qty } = state;
+  return (
+    <div className="card inv-quick" role="dialog" aria-label={`${item.name} を出庫`} onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+      <strong className="inv-quick-name">{item.name}</strong>
+      <span className="small muted">使える数 {qtyText(item, item.available)}</span>
+      <span className="inv-quick-qty">
+        <button className="btn ghost small" onClick={() => onChange({ ...state, qty: Math.max(1, qty - 1) })} aria-label="1 つ減らす">−</button>
+        <strong>{qty}</strong><span className="small">{item.unit}</span>
+        <button className="btn ghost small" onClick={() => onChange({ ...state, qty: qty + 1 })} aria-label="1 つ増やす">＋</button>
+      </span>
+      <PurposeChips value={state.purpose} onChange={(purpose) => onChange({ ...state, purpose })} />
+      <button className="btn" onClick={onRecord}>記録する</button>
+      <button className="btn ghost small" onClick={onClose}>閉じる</button>
     </div>
   );
 }
@@ -690,7 +785,7 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
                 <span className="num">{m.kind === 'transfer' ? qtyText(item, m.delta) : `${m.delta > 0 ? '+' : ''}${qtyText(item, m.delta)}`}</span>
                 <span className="small muted grow">
                   {m.kind === 'transfer' ? `${placeName(locs.get(m.fromLocationId ?? ''))} → ${placeName(locs.get(m.toLocationId ?? ''))}` : placeName(locs.get((m.toLocationId ?? m.fromLocationId) ?? ''))}
-                  {m.lot ? ` ロット ${m.lot}` : ''}{m.reason ? ` ${m.reason}` : ''} {m.createdByName ?? ''}
+                  {m.purpose ? ` ${inventoryPurposeLabel(m.purpose)}` : ''}{m.lot ? ` ロット ${m.lot}` : ''}{m.reason ? ` ${m.reason}` : ''} {m.createdByName ?? ''}
                 </span>
                 {canUndo(m) && <button className="link small" onClick={() => void undo(m.id)}>取り消す</button>}
               </li>
@@ -709,15 +804,19 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
   );
 }
 
-/** 入庫・使用・移動・調整を記録する欄。 */
+/** 入庫・出庫・移動・調整を記録する欄。 */
 function MoveForm({ item, locations, features, onDone }: {
   item: InventoryItemView;
   locations: InventoryLocation[];
   features: InventoryList['settings']['features'];
   onDone: (text: string) => void;
 }) {
-  const [kind, setKind] = useState<InventoryMoveKind>('in');
-  const [qty, setQty] = useState('');
+  // いちばん多い出庫を、数 1 で選んでおく（第29.9.1節）
+  const [kind, setKind] = useState<InventoryMoveKind>('out');
+  const [qty, setQty] = useState('1');
+  const [purpose, setPurpose] = useState<InventoryOutPurpose>(() => purposeOf(item));
+  const [memo, setMemo] = useState(false);
+  useEffect(() => setPurpose(purposeOf(item)), [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [pack, setPack] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -740,12 +839,14 @@ function MoveForm({ item, locations, features, onDone }: {
         ...(from ? { locationId: from } : {}), ...(kind === 'transfer' && to ? { toLocationId: to } : {}),
         ...(withLot && lot ? { lot } : {}), ...(withLot && expiresOn ? { expiresOn } : {}),
         ...(reason ? { reason } : {}),
+        ...(kind === 'out' ? { purpose } : {}),
       });
-      setQty('');
+      setQty(kind === 'out' ? '1' : '');
       setLot('');
       setExpiresOn('');
       setReason('');
-      onDone([`${KIND_LABELS[kind]}を記録しました。使える数は ${qtyText(r.item, r.item.available)} です`, ...r.warnings].join('。'));
+      setMemo(false);
+      onDone([`${KIND_LABELS[kind]}${kind === 'out' ? `（${inventoryPurposeLabel(purpose)}）` : ''}を記録しました。使える数は ${qtyText(r.item, r.item.available)} です`, ...r.warnings].join('。'));
     } catch (e) {
       setError(describeError(e, '記録できませんでした'));
     } finally {
@@ -757,7 +858,7 @@ function MoveForm({ item, locations, features, onDone }: {
     <div className="card inventory-move">
       <div className="row wrap">
         <div className="segmented" role="tablist">
-          {(['in', 'out', 'transfer', 'adjust'] as InventoryMoveKind[]).map((k) => (
+          {(['out', 'in', 'transfer', 'adjust'] as InventoryMoveKind[]).map((k) => (
             <button key={k} role="tab" aria-selected={kind === k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{KIND_LABELS[k]}</button>
           ))}
         </div>
@@ -787,7 +888,11 @@ function MoveForm({ item, locations, features, onDone }: {
       <div className="row wrap">
         {withLot && <input className="short" placeholder="ロット" value={lot} onChange={(e) => setLot(e.target.value)} aria-label="ロット" />}
         {withLot && <input type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} aria-label="使用期限" />}
-        <input className="grow" placeholder={kind === 'adjust' ? '理由（必須）' : '理由'} value={reason} onChange={(e) => setReason(e.target.value)} aria-label="理由" />
+        {kind === 'out' && <PurposeChips value={purpose} onChange={setPurpose} />}
+        {/* 理由の文はふだん出さない。調整は理由が要るので出す。ほかは「メモ」で開く（第29.9.1節） */}
+        {kind === 'adjust' || memo
+          ? <input className="grow" placeholder={kind === 'adjust' ? '理由（必須）' : 'メモ'} value={reason} onChange={(e) => setReason(e.target.value)} aria-label={kind === 'adjust' ? '理由' : 'メモ'} />
+          : <button className="link small" onClick={() => setMemo(true)}>メモ</button>}
         <button className="btn" disabled={busy || !qty || (kind === 'transfer' && !to) || (kind === 'adjust' && !reason.trim())} onClick={() => void save()}>記録する</button>
       </div>
       {error && <p className="error small">{error}</p>}

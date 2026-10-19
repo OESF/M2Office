@@ -2596,3 +2596,16 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   .briefs-list ul { flex-direction: row; flex-wrap: wrap; }
   .briefs-item { width: auto; }
 }
+
+/* 出庫を速く（第29.9.1節）。一覧の先頭の「出庫」の列にカートの印を置き、欄は一覧の上に 1 行で並べる */
+.inventory-table .inv-out-col { width: 1%; text-align: center; white-space: nowrap; }
+.inv-cart { background: none; border: 1px solid transparent; border-radius: 8px; cursor: pointer; font-size: calc(17px * var(--font-scale)); line-height: 1; padding: 3px 6px; }
+.inv-cart:hover, .inv-cart:focus-visible { background: var(--accent-soft); border-color: var(--accent); }
+.inv-cart.on { background: var(--accent-soft); border-color: var(--accent); }
+.inv-quick { display: flex; flex-wrap: wrap; align-items: center; gap: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); border-color: var(--accent); margin-bottom: calc(8px * var(--space-scale)); }
+.inv-quick-name { font-size: calc(15px * var(--font-scale)); }
+.inv-quick-qty { display: inline-flex; align-items: center; gap: calc(6px * var(--space-scale)); font-variant-numeric: tabular-nums; }
+.inv-quick-qty strong { font-size: calc(18px * var(--font-scale)); min-width: 1.5em; text-align: center; }
+.segmented.purposes button { white-space: nowrap; }
+.m-purposes { display: grid; grid-template-columns: repeat(4, 1fr); width: 100%; margin: 10px 0; }
+.m-purposes button { padding: 10px 0; font-size: 15px; }

@@ -11,7 +11,7 @@ import { createPool } from '../repository/pool.js';
 import type {
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryBookingStatus, InventoryCount, InventoryItem, InventoryItemKind, InventoryWeeklyUsage,
   InventoryLocation, InventoryMove, InventoryMoveKind, InventoryPublicationScope, InventoryPublicSnapshot, InventoryReservationLine,
-  InventorySupplier,
+  InventoryOutPurpose, InventorySupplier,
 } from '@m2office/shared';
 
 /** 置き場に渡す品目（バーコードは別に持つ）。 */
@@ -27,6 +27,8 @@ export interface NewMove {
   toLocationId: string | null;
   delta: number;
   reason: string;
+  /** 出庫の用途（第29.9.1節）。出庫のほかは `null`。 */
+  purpose?: InventoryOutPurpose | null;
   source: InventoryMove['source'];
   sourceId: string | null;
   reversalOf: string | null;
@@ -194,6 +196,8 @@ export interface InventoryStore {
 
   /** 入出庫の記録を足し、同じトランザクションでいまの数を直す。 */
   applyMoves(tenantId: string, moves: NewMove[]): Promise<void>;
+  /** 品目ごとの最後の出庫の用途（取り消しを除く。用途の既定に使う。第29.9.1節）。 */
+  lastOutPurposes(tenantId: string, itemIds: string[]): Promise<Map<string, InventoryOutPurpose>>;
   getMove(tenantId: string, id: string): Promise<InventoryMove | null>;
   listMoves(tenantId: string, q: MoveQuery): Promise<InventoryMove[]>;
   /** その記録がすでに取り消されているか。 */
@@ -286,14 +290,14 @@ const ITEM_SELECT = `select i.*, coalesce((select array_agg(c.value order by c.c
 
 interface MoveRow {
   id: string; kind: InventoryMoveKind; item_id: string; item_name: string | null; lot_id: string | null; lot: string | null;
-  from_location_id: string | null; to_location_id: string | null; delta: unknown; reason: string; source: InventoryMove['source'];
+  from_location_id: string | null; to_location_id: string | null; delta: unknown; reason: string; purpose: InventoryOutPurpose | null; source: InventoryMove['source'];
   reversal_of: string | null; created_by: string; created_by_name: string | null; created_at: unknown;
 }
 
 function toMove(r: MoveRow): InventoryMove {
   return {
     id: r.id, kind: r.kind, itemId: r.item_id, itemName: r.item_name ?? undefined, lotId: r.lot_id, lot: r.lot,
-    fromLocationId: r.from_location_id, toLocationId: r.to_location_id, delta: num(r.delta), reason: r.reason,
+    fromLocationId: r.from_location_id, toLocationId: r.to_location_id, delta: num(r.delta), reason: r.reason, purpose: r.purpose ?? null,
     source: r.source, reversalOf: r.reversal_of, createdBy: r.created_by, createdByName: r.created_by_name ?? undefined,
     createdAt: iso(r.created_at),
   };
@@ -393,14 +397,15 @@ export class PostgresInventoryStore implements InventoryStore {
   async weeklyUsage(tenantId: string, itemId: string, since: string): Promise<InventoryWeeklyUsage[]> {
     const rows = await this.q<{ week: string; used: unknown }>(tenantId,
       `select to_char(date_trunc('week', created_at at time zone 'Asia/Tokyo'), 'YYYY-MM-DD') as week, -sum(delta) as used
-         from inventory_moves where tenant_id = $1 and item_id = $2 and kind = 'out' and created_at >= $3 group by 1 order by 1`,
+         from inventory_moves where tenant_id = $1 and item_id = $2 and kind = 'out' and purpose is distinct from 'disposal' and created_at >= $3 group by 1 order by 1`,
       [tenantId, itemId, since]);
     return rows.map((r) => ({ week: r.week, qty: Math.max(0, Number(r.used) || 0) }));
   }
 
   async usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>> {
     const rows = await this.q<{ item_id: string; used: unknown }>(tenantId,
-      `select item_id, -sum(delta) as used from inventory_moves where tenant_id = $1 and kind = 'out' and created_at >= $2 and created_at < $3 group by item_id`,
+      `select item_id, -sum(delta) as used from inventory_moves
+        where tenant_id = $1 and kind = 'out' and purpose is distinct from 'disposal' and created_at >= $2 and created_at < $3 group by item_id`,
       [tenantId, since, until]);
     return new Map(rows.map((r) => [r.item_id, Math.max(0, Number(r.used) || 0)]));
   }
@@ -520,10 +525,10 @@ export class PostgresInventoryStore implements InventoryStore {
       for (const m of moves) {
         await c.query(
           `insert into inventory_moves (id, tenant_id, kind, item_id, lot_id, from_location_id, to_location_id, delta, reason,
-             source, source_id, reversal_of, batch_id, created_by, created_at)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+             source, source_id, reversal_of, batch_id, created_by, created_at, purpose)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
           [m.id, tenantId, m.kind, m.itemId, m.lotId, m.fromLocationId, m.toLocationId, m.delta, m.reason, m.source,
-            m.sourceId, m.reversalOf, m.batchId, m.createdBy, m.createdAt]);
+            m.sourceId, m.reversalOf, m.batchId, m.createdBy, m.createdAt, m.kind === 'out' ? m.purpose ?? null : null]);
         // いまの数を直す。移動は元から引いて先に足す。それ以外は delta の符号で先（入）か元（出）を直す
         const bump = async (loc: string, d: number) => {
           await c.query(
@@ -541,6 +546,15 @@ export class PostgresInventoryStore implements InventoryStore {
         }
       }
     });
+  }
+
+  async lastOutPurposes(tenantId: string, itemIds: string[]): Promise<Map<string, InventoryOutPurpose>> {
+    if (itemIds.length === 0) return new Map();
+    const rows = await this.q<{ item_id: string; purpose: InventoryOutPurpose }>(tenantId,
+      `select distinct on (item_id) item_id, purpose from inventory_moves
+        where tenant_id = $1 and kind = 'out' and reversal_of is null and purpose is not null and item_id = any($2::text[])
+        order by item_id, created_at desc`, [tenantId, itemIds]);
+    return new Map(rows.map((r) => [r.item_id, r.purpose]));
   }
 
   // 外部のアプリからの記録（記録した人が `app:<アプリ>`）は「外部のアプリ（アプリの名前）」と出す（第13.4.1節・第29.20.1節）
@@ -850,7 +864,7 @@ export class MemoryInventoryStore implements InventoryStore {
     const out = new Map<string, number>();
     for (const m of this.moves) {
       const at = (m as { createdAt?: string }).createdAt ?? '';
-      if (m.tenantId !== tenantId || m.itemId !== itemId || m.kind !== 'out' || at < since) continue;
+      if (m.tenantId !== tenantId || m.itemId !== itemId || m.kind !== 'out' || m.purpose === 'disposal' || at < since) continue;
       const week = weekStartJst(at);
       out.set(week, (out.get(week) ?? 0) - m.delta);
     }
@@ -861,7 +875,7 @@ export class MemoryInventoryStore implements InventoryStore {
     const out = new Map<string, number>();
     for (const m of this.moves) {
       const at = (m as { createdAt?: string }).createdAt ?? '';
-      if (m.tenantId !== tenantId || m.kind !== 'out' || at < since || at >= until) continue;
+      if (m.tenantId !== tenantId || m.kind !== 'out' || m.purpose === 'disposal' || at < since || at >= until) continue;
       out.set(m.itemId, (out.get(m.itemId) ?? 0) - m.delta);
     }
     return out;
@@ -967,8 +981,20 @@ export class MemoryInventoryStore implements InventoryStore {
     return {
       id: m.id, kind: m.kind, itemId: m.itemId, itemName: this.items.get(m.itemId)?.name, lotId: m.lotId,
       lot: m.lotId ? this.lots.get(m.lotId)?.lot ?? null : null, fromLocationId: m.fromLocationId, toLocationId: m.toLocationId,
-      delta: m.delta, reason: m.reason, source: m.source, reversalOf: m.reversalOf, createdBy: m.createdBy, createdAt: m.createdAt,
+      delta: m.delta, reason: m.reason, purpose: m.kind === 'out' ? m.purpose ?? null : null, source: m.source, reversalOf: m.reversalOf,
+      createdBy: m.createdBy, createdAt: m.createdAt,
     };
+  }
+
+  async lastOutPurposes(tenantId: string, itemIds: string[]): Promise<Map<string, InventoryOutPurpose>> {
+    const out = new Map<string, InventoryOutPurpose>();
+    const want = new Set(itemIds);
+    // 取り消しの記録は除き、新しいものから見る
+    for (const m of [...this.moves].reverse()) {
+      if (m.tenantId !== tenantId || m.kind !== 'out' || m.reversalOf || !m.purpose || !want.has(m.itemId) || out.has(m.itemId)) continue;
+      out.set(m.itemId, m.purpose);
+    }
+    return out;
   }
 
   async getMove(tenantId: string, id: string): Promise<InventoryMove | null> {

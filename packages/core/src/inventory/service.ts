@@ -8,10 +8,10 @@
 
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
-  canUseAgent, INVENTORY_EXTENSION_ID, INVENTORY_ITEM_KINDS, inventoryKindLabel, type InventoryItemKind, type InventoryTaxRate, type InventoryUsageRow, type InventoryWeeklyUsage,
+  canUseAgent, defaultOutPurpose, INVENTORY_EXTENSION_ID, INVENTORY_ITEM_KINDS, INVENTORY_OUT_PURPOSES, inventoryKindLabel, inventoryPurposeLabel, type InventoryItemKind, type InventoryTaxRate, type InventoryUsageRow, type InventoryWeeklyUsage,
   type AuditEvent, type InventoryCount, type InventoryCountRow, type InventoryCountScope, type InventoryCountView,
   type InventoryItem, type InventoryItemView, type InventoryLocation, type InventoryMove,
-  type InventoryMoveKind, type InventorySettings, type InventoryStockRow, type InventorySupplier,
+  type InventoryMoveKind, type InventoryOutPurpose, type InventorySettings, type InventoryStockRow, type InventorySupplier,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -78,6 +78,8 @@ export interface MoveInput {
   /** 使用期限（YYYY-MM-DD）。入庫のときに記録する。 */
   expiresOn?: string;
   reason?: string;
+  /** 出庫の用途（第29.9.1節）。省けば、販売の通知は販売・予約は社内消費、ほかはその品目の既定（前に選んだ用途か区分から）。 */
+  purpose?: InventoryOutPurpose;
   source?: InventoryMove['source'];
   sourceId?: string;
 }
@@ -234,7 +236,8 @@ export function formatQty(item: Pick<InventoryItem, 'unit' | 'packUnit' | 'packS
 }
 
 /** 記録の種類の呼び方。 */
-export const MOVE_KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '使用', transfer: '移動', adjust: '調整' };
+/** 記録の種類の呼び方。`out` は「出庫」と呼ぶ（第 0.406.0 版。画面・秘書の答え・書き出しでそろえる。第29.11.1節）。 */
+export const MOVE_KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '出庫', transfer: '移動', adjust: '調整' };
 
 /** 在庫管理の処理に要るもの。 */
 export interface InventoryServiceDeps {
@@ -373,9 +376,10 @@ export class InventoryService {
     if (items.length === 0) return [];
     const day = today ?? dateIn('Asia/Tokyo');
     // 予約との引き当てを入れていない会社でも、販売管理の注文の取り置き（第29.20.1節）は使える数から引く
-    const [stock, held] = await Promise.all([
+    const [stock, held, purposes] = await Promise.all([
       this.deps.store.listStock(tenantId, items.map((i) => i.id)),
       this.deps.store.heldByItem(tenantId, settings.features.reserve ? undefined : 'sales'),
+      this.deps.store.lastOutPurposes(tenantId, items.map((i) => i.id)),
     ]);
     const byItem = new Map<string, StockRecord[]>();
     for (const s of stock) byItem.set(s.itemId, [...(byItem.get(s.itemId) ?? []), s]);
@@ -391,6 +395,7 @@ export class InventoryService {
         // 目安は、会社が品目に決めた値（固定）→ 需要の予測の目安 → 会社の既定の順（第29.14節）
         low: i.status === 'active' && available <= effectiveLow(i, settings),
         nearestExpiry: expiries[0] ?? null,
+        outPurpose: defaultOutPurpose(i, purposes.get(i.id)),
       };
     });
   }
@@ -607,9 +612,14 @@ export class InventoryService {
     const known = (id?: string) => (id ? locs.some((l) => l.id === id) : true);
     if (!known(input.locationId) || !known(input.toLocationId)) return { ok: false, error: '場所が見つかりません' };
 
+    if (input.purpose !== undefined && !INVENTORY_OUT_PURPOSES.some((p) => p.id === input.purpose)) return { ok: false, error: '用途は販売・社内消費・廃棄・その他のどれかです' };
+    // 出庫の用途（第29.9.1節）。販売の通知は販売、予約で使ったものは社内消費、ほかは選んだ用途かその品目の既定
+    const purpose = input.kind !== 'out' ? null
+      : input.purpose ?? (input.source === 'sales' ? 'sale' : input.source === 'reservation' ? 'internal'
+        : defaultOutPurpose(item, (await this.deps.store.lastOutPurposes(tenantId, [item.id])).get(item.id)));
     const at = now();
     const base = {
-      itemId: item.id, reason, source: input.source ?? 'manual', sourceId: input.sourceId ?? null, reversalOf: null,
+      itemId: item.id, reason, purpose, source: input.source ?? 'manual', sourceId: input.sourceId ?? null, reversalOf: null,
       batchId: randomUUID(), createdBy: userId, createdAt: at,
     };
     const moves: NewMove[] = [];
@@ -745,7 +755,7 @@ export class InventoryService {
       id: randomUUID(), kind: m.kind, itemId: m.itemId, lotId: m.lotId,
       fromLocationId: m.kind === 'transfer' ? m.toLocationId : m.fromLocationId,
       toLocationId: m.kind === 'transfer' ? m.fromLocationId : m.toLocationId,
-      delta: m.kind === 'transfer' ? m.delta : -m.delta,
+      delta: m.kind === 'transfer' ? m.delta : -m.delta, purpose: m.purpose ?? null,
       reason: opts.reason, source: opts.source, sourceId: opts.sourceId ?? null, reversalOf: m.id, batchId, createdBy: actor, createdAt: at,
     }));
     await this.deps.store.applyMoves(tenantId, moves);
@@ -809,7 +819,8 @@ export class InventoryService {
     // 想定する会社（品目 数十〜数千。第29.1.1節）では、4 週の記録は上限の数に収まる
     const moves = await this.deps.store.listMoves(tenantId, { since, limit: 2000 });
     const used = new Map<string, number>();
-    for (const m of moves) if (m.kind === 'out') used.set(m.itemId, (used.get(m.itemId) ?? 0) - m.delta);
+    // 廃棄は使う速さに入れない（売れた・使った数ではないため。第29.9.1節）
+    for (const m of moves) if (m.kind === 'out' && m.purpose !== 'disposal') used.set(m.itemId, (used.get(m.itemId) ?? 0) - m.delta);
     const bySupplier = new Map(suppliers.map((s) => [s.id, s]));
     const rows = items.map((i) => forecastItem(
       i, used.get(i.id) ?? 0,
@@ -1051,7 +1062,7 @@ export class InventoryService {
     const facts = [];
     for (const r of top) {
       const moves = (await this.deps.store.listMoves(tenantId, { itemId: r.itemId, since, limit: 30 }))
-        .map((m) => ({ 日時: m.createdAt.slice(0, 16), 種類: MOVE_KIND_LABELS[m.kind], 数: m.delta, 理由: m.reason, 取り消し: !!m.reversalOf }));
+        .map((m) => ({ 日時: m.createdAt.slice(0, 16), 種類: MOVE_KIND_LABELS[m.kind], 用途: inventoryPurposeLabel(m.purpose), 数: m.delta, 理由: m.reason, 取り消し: !!m.reversalOf }));
       facts.push({ 品目: r.itemName, 単位: r.unit, ロット: r.lot, 帳簿の数: r.book, 数えた数: r.counted, 差: r.diff, 最近30日の記録: moves });
     }
     try {

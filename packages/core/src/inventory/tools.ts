@@ -5,7 +5,7 @@
  * 品目の名前やメモはデータであり、指示として扱わない（不変則 I-6）。見つからなければ推測で答えない。
  */
 
-import { INVENTORY_MARKET_POSITION_LABEL, INVENTORY_PURCHASE_POSITION_LABEL, type InventoryItemView, type InventoryLocation, type InventoryMarketCheck, type InventoryMoveKind, type InventorySettings } from '@m2office/shared';
+import { INVENTORY_MARKET_POSITION_LABEL, INVENTORY_PURCHASE_POSITION_LABEL, inventoryPurposeLabel, type InventoryItemView, type InventoryOutPurpose, type InventoryLocation, type InventoryMarketCheck, type InventoryMoveKind, type InventorySettings } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { loadFile } from '../files/service.js';
@@ -165,7 +165,7 @@ export const inventoryHistory: Tool = {
         at: m.createdAt, kind: MOVE_KIND_LABELS[m.kind], item: m.itemName ?? it?.name ?? '',
         qty: it ? formatQty(it, m.delta) : String(m.delta),
         from: m.fromLocationId ? placeName(locs.get(m.fromLocationId)) : null, to: m.toLocationId ? placeName(locs.get(m.toLocationId)) : null,
-        lot: m.lot ?? null, reason: m.reason, by: m.createdByName ?? m.createdBy, undo: m.reversalOf ? true : undefined,
+        lot: m.lot ?? null, ...(m.purpose ? { purpose: inventoryPurposeLabel(m.purpose) } : {}), reason: m.reason, by: m.createdByName ?? m.createdBy, undo: m.reversalOf ? true : undefined,
       };
     });
     const total = new Map<string, number>();
@@ -189,9 +189,10 @@ export const inventoryMove: Tool = {
   name: 'inventory.move',
   risk: 'write-internal',
   activityLabel: '在庫を記録しています',
-  helpText: '入庫・使用・移動を在庫に記録します。社内の記録に足すだけで、誰にも送りません',
+  helpText: '入庫・出庫・移動を在庫に記録します。社内の記録に足すだけで、誰にも送りません',
   description: [
-    '在庫に入庫（in）・使用（out）・移動（transfer）を記録する。item は品名・自社のコード・バーコード。',
+    '在庫に入庫（in）・出庫（out）・移動（transfer）を記録する。item は品名・自社のコード・バーコード。',
+    '出庫では purpose に用途を入れる: 売った・販売した → sale、使った・社内で使う → internal、捨てた・期限切れ・壊れた → disposal、どれでもない → other。本人の言葉から決め、確かめない。言葉から分からなければ省く（品目の既定になる）。',
     'qty は正の数。unit を pack にすると仕入れの単位（箱・本など）で数え、入り数で直す。',
     'place は場所（倉庫や棚の名前。省けば今ある場所）、to は移動の先。lot・expiresOn はロットと使用期限（入庫のとき）。',
     '品目が 1 つに決まらなければ記録せず候補を返すので、本人に選んでもらう。',
@@ -206,7 +207,8 @@ export const inventoryMove: Tool = {
       to: { type: 'string', description: '移動の先の場所' },
       lot: { type: 'string', description: 'ロット' },
       expiresOn: { type: 'string', description: '使用期限（YYYY-MM-DD）' },
-      reason: { type: 'string', description: '理由（例: 販売・使用・廃棄・仕入）' },
+      purpose: { type: 'string', description: '出庫の用途（sale 販売・internal 社内消費・disposal 廃棄・other その他）', enum: ['sale', 'internal', 'disposal', 'other'] },
+      reason: { type: 'string', description: 'メモ（任意。用途で足りれば入れない）' },
     },
     required: ['kind', 'item', 'qty'],
   },
@@ -234,12 +236,14 @@ export const inventoryMove: Tool = {
       ...(to ? { toLocationId: to.id } : {}),
       ...(str(args['lot']) ? { lot: str(args['lot']) } : {}),
       ...(toDate(str(args['expiresOn'])) ? { expiresOn: toDate(str(args['expiresOn']))! } : {}),
+      ...(kind === 'out' && ['sale', 'internal', 'disposal', 'other'].includes(str(args['purpose'])) ? { purpose: str(args['purpose']) as InventoryOutPurpose } : {}),
       reason: str(args['reason']), source: 'secretary',
     });
     if (!res.ok) return { recorded: false, reason: res.error };
     const byLoc = new Map(locs.map((l) => [l.id, l]));
     return {
       recorded: true, kind: MOVE_KIND_LABELS[kind as InventoryMoveKind], item: res.item.name,
+      ...(res.moves[0]?.purpose ? { purpose: inventoryPurposeLabel(res.moves[0].purpose) } : {}),
       qty: formatQty(res.item, res.moves.reduce((a, m) => a + Math.abs(m.delta), 0)),
       places: res.moves.map((m) => ({ from: m.fromLocationId ? placeName(byLoc.get(m.fromLocationId)) : null, to: m.toLocationId ? placeName(byLoc.get(m.toLocationId)) : null, lot: m.lot ?? null })),
       availableNow: formatQty(res.item, res.item.available),

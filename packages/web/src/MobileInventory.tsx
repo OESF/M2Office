@@ -6,9 +6,10 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { InventoryCountRow, InventoryCountView, InventoryItemView, InventoryLocation } from '@m2office/shared';
+import { inventoryPurposeLabel, type InventoryCountRow, type InventoryCountView, type InventoryItemView, type InventoryLocation, type InventoryOutPurpose } from '@m2office/shared';
 import { api, describeError, type InventoryDetail, type InventoryList, type InventorySlipResult, type Me } from './api.js';
 import { Scanner } from './Scanner.js';
+import { OutDoneLine, PurposeChips, purposeOf, type OutDone } from './inventory-out.js';
 
 type Mode = 'home' | 'in' | 'out' | 'count' | 'find';
 
@@ -128,7 +129,11 @@ function Picker({ items, onItem, onShelf, busy }: {
   );
 }
 
-/** 入庫・出庫: 読む → 数を合わせる → 記録する。記録したらすぐ次を読める。 */
+/**
+ * 入庫・出庫: 読む → 数を合わせる → 記録する。記録したらすぐ次を読める。
+ *
+ * 出庫は用途を選べ（既定はその品目で前に選んだ用途）、続けて別の品目を読むと前の品目をその数と用途で記録する（第29.9.1節）。
+ */
 function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
   kind: 'in' | 'out'; list: InventoryList; shelf: InventoryLocation | null; onShelf: (l: InventoryLocation) => void; onRecorded: () => void;
 }) {
@@ -137,8 +142,9 @@ function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
   const [qty, setQty] = useState(1);
   const [pack, setPack] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
+  const [done, setDone] = useState<OutDone | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [purpose, setPurpose] = useState<InventoryOutPurpose>('internal');
   const canPack = list.settings.features.units && !!item?.packUnit && !!item?.packSize;
   const [slip, setSlip] = useState<InventorySlipResult | null>(null);
 
@@ -147,7 +153,7 @@ function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
     if (!f) return;
     setBusy(true);
     setError(null);
-    setDone('納品書を読み取っています…');
+    setDone({ text: '納品書を読み取っています…', moveId: null });
     try {
       setSlip(await api.inventory.slip(f, shelf?.id));
       setDone(null);
@@ -160,13 +166,15 @@ function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
     }
   };
 
-  const pick = (i: InventoryItemView, r: Looked | null) => {
+  const pick = async (i: InventoryItemView, r: Looked | null) => {
     // 同じ品目を続けて読んだら 1 つ足す
     if (item?.id === i.id) { setQty((n) => n + 1); return; }
+    // 出庫で別の品目を読んだら、前の品目を記録してから次へ（「記録する」を押さずに進める。第29.9.1節）
+    if (kind === 'out' && item) await record();
     setItem(i);
     setQty(1);
     setPack(false);
-    setDone(null);
+    setPurpose(purposeOf(i));
     setError(null);
     setLot(r ? { ...(r.parsed.lot ? { lot: r.parsed.lot } : {}), ...(r.parsed.expiresOn ? { expiresOn: r.parsed.expiresOn } : {}) } : {});
   };
@@ -177,15 +185,31 @@ function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
     try {
       const r = await api.inventory.move({
         kind, itemId: item.id, qty, unit: pack && canPack ? 'pack' : 'unit',
-        ...(shelf ? { locationId: shelf.id } : {}), ...(kind === 'in' ? lot : {}),
+        ...(shelf ? { locationId: shelf.id } : {}), ...(kind === 'in' ? lot : { purpose }),
       });
-      setDone([`${item.name} を ${pack && canPack ? `${qty} ${item.packUnit}` : `${qty} ${item.unit}`} ${kind === 'in' ? '入庫' : '出庫'}しました。使える数は ${qtyText(r.item, r.item.available)}`, ...r.warnings].join('。'));
+      const how = kind === 'in' ? '入庫' : `出庫（${inventoryPurposeLabel(purpose)}）`;
+      setDone({
+        text: [`${item.name} を ${pack && canPack ? `${qty} ${item.packUnit}` : `${qty} ${item.unit}`} ${how}しました。使える数は ${qtyText(r.item, r.item.available)}`, ...r.warnings].join('。'),
+        moveId: r.moves[0]?.id ?? null,
+      });
       setItem(null);
       onRecorded();
     } catch (e) {
       setError(describeError(e, '記録できませんでした'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** 記録したものを取り消す（その日のうちの取り消し。第29.9節）。 */
+  const undo = async () => {
+    if (!done?.moveId) return;
+    try {
+      await api.inventory.undo(done.moveId);
+      setDone({ text: '取り消しました', moveId: null });
+      onRecorded();
+    } catch (e) {
+      setError(describeError(e, '取り消せませんでした'));
     }
   };
 
@@ -227,11 +251,12 @@ function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
               <button className={pack ? 'on' : ''} onClick={() => setPack(true)}>{item.packUnit}</button>
             </div>
           )}
+          {kind === 'out' && <PurposeChips value={purpose} onChange={setPurpose} className="m-purposes" />}
           <button className="m-primary" disabled={busy} onClick={() => void record()}>記録する</button>
         </div>
       )}
       {error && <p className="m-note error">{error}</p>}
-      {done && <p className="m-done" role="status">{done}</p>}
+      {done && <OutDoneLine done={done} onUndo={() => void undo()} className="m-done" />}
     </div>
   );
 }

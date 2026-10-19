@@ -7899,5 +7899,45 @@ console.log('\n■ 111. ブリーフの画面（本文を本人の成果物と�
   }
 }
 
+console.log('\n■ 112. 出庫の用途（販売・社内消費・廃棄・その他。既定は前に選んだ用途、廃棄は使う速さに入れない。第29.9.1節、Q-247）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用用途${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const sale = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 乳液`, unit: '本', kind: 'sale', price: 2000, initialQty: 100 }) }, 'member')).body?.item;
+    const supply = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 手袋`, unit: '箱', kind: 'supply', initialQty: 100 }) }, 'member')).body?.item;
+    const out = (itemId, qty, purpose) => call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId, qty, ...(purpose ? { purpose } : {}) }) }, 'member');
+    const def = await out(sale?.id, 1);
+    const internal = await out(sale?.id, 2, 'internal');
+    const list = (await call('a', '/v1/inventory', {}, 'member')).body?.items ?? [];
+    const bad = await out(sale?.id, 1, 'gift');
+    const supplyDefault = list.find((i) => i.id === supply?.id)?.outPurpose;
+    def.body?.moves?.[0]?.purpose === 'sale' && internal.body?.moves?.[0]?.purpose === 'internal' && internal.body?.item?.outPurpose === 'internal'
+      && list.find((i) => i.id === sale?.id)?.outPurpose === 'internal' && supplyDefault === 'internal' && bad.status === 400
+      ? ok('出庫は用途を持ち、既定は販売品なら販売・ほかは社内消費、次からは前に選んだ用途。知らない用途は断る')
+      : ng('出庫の用途が違う', JSON.stringify({ def: def.body?.moves?.[0]?.purpose, internal: internal.body?.moves?.[0]?.purpose, supplyDefault, bad: bad.status }));
+    // 廃棄は使う速さに入れない。記録の一覧は用途を返す
+    await out(supply?.id, 28, 'disposal');
+    await out(supply?.id, 7, 'internal');
+    const usage = (await call('a', '/v1/inventory/usage', {}, 'member')).body?.rows ?? [];
+    const row = usage.find((r) => r.itemId === supply?.id);
+    const moves = (await call('a', `/v1/inventory/moves?itemId=${supply?.id}`, {}, 'member')).body?.moves ?? [];
+    row?.daily === 0.25 && moves.some((m) => m.purpose === 'disposal') && moves.some((m) => m.purpose === 'internal')
+      ? ok('廃棄は減り具合の使う速さに入れず、記録の一覧は用途を返す') : ng('廃棄の数え方が違う', JSON.stringify({ row, purposes: moves.map((m) => m.purpose) }));
+  } catch (err) {
+    ng('出庫の用途の確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

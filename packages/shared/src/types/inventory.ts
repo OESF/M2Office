@@ -144,6 +144,29 @@ export interface InventoryLocation {
 /** 入出庫の種類（第29.9節）。 */
 export type InventoryMoveKind = 'in' | 'out' | 'transfer' | 'adjust';
 
+/** 出庫の用途（第29.9.1節、Q-247）。4 つに固定する（会社が増やさない）。 */
+export type InventoryOutPurpose = 'sale' | 'internal' | 'disposal' | 'other';
+
+/** 用途の呼び方（並びは画面の並び）。 */
+export const INVENTORY_OUT_PURPOSES: { id: InventoryOutPurpose; label: string }[] = [
+  { id: 'sale', label: '販売' },
+  { id: 'internal', label: '社内消費' },
+  { id: 'disposal', label: '廃棄' },
+  { id: 'other', label: 'その他' },
+];
+
+/** 用途の呼び方を引く。用途の無い記録（第 0.407.0 版より前のもの）は空。 */
+export const inventoryPurposeLabel = (p: InventoryOutPurpose | null | undefined): string => INVENTORY_OUT_PURPOSES.find((x) => x.id === p)?.label ?? '';
+
+/**
+ * 品目の出庫の用途の既定（第29.9.1節）。その品目で前に選んだ用途、無ければ区分が販売品なら販売、ほかは社内消費。
+ *
+ * @param last その品目の最後の出庫の用途（無ければ `null`）
+ */
+export function defaultOutPurpose(item: Pick<InventoryItemView, 'kind'>, last?: InventoryOutPurpose | null): InventoryOutPurpose {
+  return last ?? (item.kind === 'sale' ? 'sale' : 'internal');
+}
+
 /** 入出庫の記録。追記のみ。 */
 export interface InventoryMove {
   id: string;
@@ -157,6 +180,8 @@ export interface InventoryMove {
   /** 増減の量（使う単位）。移動は動かした量（正）。 */
   delta: number;
   reason: string;
+  /** 出庫の用途（第29.9.1節）。出庫のほかと、第 0.407.0 版より前の出庫は `null`。 */
+  purpose?: InventoryOutPurpose | null;
   /** `sales` は外部のアプリの販売の通知からの販売・返品・取り消し（第29.20.1節）。 */
   source: 'manual' | 'slip' | 'count' | 'reservation' | 'secretary' | 'import' | 'undo' | 'sales' | 'app';
   reversalOf: string | null;
@@ -188,6 +213,8 @@ export interface InventoryItemView extends InventoryItem {
   low: boolean;
   /** 残っているロットのうち、いちばん近い使用期限。 */
   nearestExpiry: string | null;
+  /** 出庫の用途の既定（その品目で前に選んだ用途。無ければ区分から。第29.9.1節）。 */
+  outPurpose?: InventoryOutPurpose;
 }
 
 /** 棚卸しの対象（第29.10節）。 */

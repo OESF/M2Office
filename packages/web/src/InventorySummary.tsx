@@ -75,7 +75,7 @@ export function InventorySummary({ items, runningOut, todayOut, taxRounding, act
         {card(null, '品目数', String(n.all), '使っている品目', 'neutral')}
         {card('out', '在庫切れ', String(n.out), '使える数が 0', n.out ? 'danger' : 'ok')}
         {card('order', '要発注', String(n.order), '残りわずか・無くなる見込み', n.order ? 'danger' : 'ok')}
-        {card(null, '本日の出庫', String(todayOut), '今日の使用の記録', 'accent')}
+        {card(null, '本日の出庫', String(todayOut), '今日の出庫の記録', 'accent')}
         {card('expired', '期限切れ', String(n.expired), '期限の切れたロットあり', n.expired ? 'warn' : 'ok')}
         {card('expiring', '期限が近い', String(n.expiring), '30 日以内', n.expiring ? 'warn' : 'ok')}
         {(value.counted > 0 || value.noPrice > 0) && card('sale', '販売品の在庫額', value.withTax.toLocaleString('ja-JP'), `税込・${value.counted} 品目${value.noPrice ? `（価格なし ${value.noPrice}）` : ''}`, 'accent', '円')}

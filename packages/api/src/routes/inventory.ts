@@ -14,7 +14,7 @@ import {
   readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
   MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput, type PublicationView,
 } from '@m2office/core';
-import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, inventoryRuleOf, withoutPurchase, type InventoryItemKind, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
+import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, inventoryRuleOf, withoutPurchase, type InventoryItemKind, type InventoryMoveKind, type InventoryOutPurpose, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -255,6 +255,8 @@ export function inventoryRoute(deps: AppDeps) {
       ...(str(b['lot']) ? { lot: str(b['lot'])! } : {}),
       ...(str(b['expiresOn']) ? { expiresOn: str(b['expiresOn'])! } : {}),
       ...(str(b['reason']) ? { reason: str(b['reason'])! } : {}),
+      // 出庫の用途（第29.9.1節）。省けばその品目の既定
+      ...(kind === 'out' && str(b['purpose']) ? { purpose: str(b['purpose']) as InventoryOutPurpose } : {}),
       source: 'manual',
     };
     const res = await service.recordMove(tenant.id, user.id, input);

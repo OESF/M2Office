@@ -36,7 +36,7 @@ export function UsagePanel({ itemIds, onOpenItem }: { itemIds: Set<string>; onOp
       {shown.length > 0 && (
         <div className="table-scroll"><table className="table">
           <thead>
-            <tr><th>品名</th><th>区分</th><th className="num">1 日の使用</th><th className="num">前の 4 週から</th><th className="num">あと</th><th className="num">次の 4 週の見込み</th><th>予測</th></tr>
+            <tr><th>品名</th><th>区分</th><th className="num">1 日の出庫</th><th className="num">前の 4 週から</th><th className="num">あと</th><th className="num">次の 4 週の見込み</th><th>予測</th></tr>
           </thead>
           <tbody>
             {shown.map((r) => (
@@ -77,7 +77,7 @@ export function UsageChart({ weekly, usage, unit }: { weekly: InventoryWeeklyUsa
           ? <>1 日 {n1(usage.daily)} {unit}（前の 4 週から <Change pct={usage.changePct} />）{usage.daysLeft !== null && `・あと ${usage.daysLeft} 日`}・次の 4 週の見込み <strong>{n1(usage.next4w)} {unit}</strong>{usage.factor !== 1 && `（${usage.factor} 倍${usage.note ? `。${usage.note}` : ''}）`}</>
           : <span className="muted">最近 4 週は使っていません</span>}
       </p>
-      <svg viewBox={`0 0 ${W} ${H + 18}`} role="img" aria-label={`直近 ${weekly.length} 週の使用と次の 4 週の見込み`} className="usage-svg">
+      <svg viewBox={`0 0 ${W} ${H + 18}`} role="img" aria-label={`直近 ${weekly.length} 週の出庫と次の 4 週の見込み`} className="usage-svg">
         {weekly.map((w, k) => (
           <g key={w.week}>
             <rect x={k * bw + 3} y={y(w.qty)} width={bw - 6} height={H - y(w.qty)} className="usage-bar"><title>{`${w.week} の週: ${n1(w.qty)} ${unit}`}</title></rect>
