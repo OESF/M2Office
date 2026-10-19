@@ -2487,3 +2487,39 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .market-section { margin: calc(12px * var(--space-scale)) 0; }
 .market-sources li { padding: 2px 0; }
 .market-sources .badge { margin-left: 6px; }
+
+/* 在庫のサマリー（2026-10-19。秘書のひとことと数のカード） */
+.inv-summary { margin: calc(4px * var(--space-scale)) 0 calc(10px * var(--space-scale)); }
+.inv-say { display: flex; align-items: flex-start; gap: calc(10px * var(--space-scale)); margin-bottom: calc(10px * var(--space-scale)); }
+.inv-say-face { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 52px; }
+.inv-say-face .avatar { width: 44px; height: 44px; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-soft); }
+.inv-say-face .avatar img { width: 100%; height: 100%; object-fit: cover; }
+.inv-say-bubble {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: calc(8px * var(--space-scale)) calc(14px * var(--space-scale));
+  display: flex; flex-direction: column; gap: 2px; box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+}
+.inv-say-num { color: var(--danger); font-size: 1.25em; margin: 0 2px; }
+.inv-say-num.neutral { color: inherit; }
+.inv-say .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; background: var(--muted); }
+.inv-say .dot.danger { background: var(--danger); }
+.inv-say .dot.warn { background: var(--warn); }
+.inv-say .dot.ok { background: var(--accent); }
+.inv-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: calc(8px * var(--space-scale)); }
+.inv-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; font: inherit; color: inherit;
+  background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: 8px;
+  padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); cursor: pointer;
+}
+.inv-card:disabled { cursor: default; opacity: 1; }
+.inv-card:not(:disabled):hover { background: var(--accent-soft); }
+.inv-card.active { outline: 2px solid var(--accent); outline-offset: -1px; }
+.inv-card-label { font-size: .85em; color: var(--muted); }
+.inv-card-num { font-size: 1.6em; line-height: 1.2; }
+.inv-card-sub { font-size: .75em; color: var(--muted); }
+.inv-card.tone-neutral { border-top-color: var(--muted); }
+.inv-card.tone-danger { border-top-color: var(--danger); }
+.inv-card.tone-danger .inv-card-num { color: var(--danger); }
+.inv-card.tone-warn { border-top-color: var(--warn); }
+.inv-card.tone-warn .inv-card-num { color: var(--warn); }
+.inv-card.tone-ok { border-top-color: var(--accent); }
+.inv-card.tone-accent { border-top-color: var(--accent); }

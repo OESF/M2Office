@@ -80,19 +80,22 @@ export function inventoryRoute(deps: AppDeps) {
   /** 品目の一覧と、場所・会社の設定（第29.6節）。 */
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    const [items, locations, settings, forecast, company] = await Promise.all([
+    const [items, locations, settings, forecast, company, todayOut] = await Promise.all([
       service.list(tenant.id, { q: (c.req.query('q') ?? '').slice(0, 100), includeStopped: c.req.query('stopped') === '1' }),
       service.locations(tenant.id),
       service.settings(tenant.id),
       // 一覧の「無くなる見込み」の絞り込み（第29.6.1節）。見張りと同じ計算
       service.forecast(tenant.id).catch(() => []),
       deps.repo.getTenantSettings(tenant.id).then((s) => s.company),
+      // 在庫のサマリーの「本日の出庫」（第29.11節）
+      service.todayOutCount(tenant.id).catch(() => 0),
     ]);
     return c.json({
       items, locations, settings: { features: settings.features, lowDefault: settings.lowDefault }, admin: isAdmin(c),
       runningOut: forecast.filter((r) => r.runningOut).map((r) => r.itemId),
       // 販売品の在庫額の端数の扱い（会社情報の「端数の扱い」。第29.6.1節）
       taxRounding: company.taxRounding,
+      todayOut,
     });
   });
 

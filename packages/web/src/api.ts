@@ -470,6 +470,8 @@ export interface InventoryList {
   runningOut: string[];
   /** 会社の端数の扱い（販売品の在庫額。第29.6.1節）。 */
   taxRounding: 'floor' | 'round' | 'ceil';
+  /** 今日の出庫（使用）の記録の数（在庫のサマリー）。 */
+  todayOut: number;
 }
 
 /** 品目 1 件の詳しい姿。 */

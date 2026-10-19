@@ -321,6 +321,16 @@ export class InventoryService {
   }
 
   /**
+   * 今日（日本時間）の出庫（使用）の記録の数（在庫のサマリー。第29.11節）。取り消した記録と取り消しの記録は数えない。
+   */
+  async todayOutCount(tenantId: string, today?: string): Promise<number> {
+    const day = today ?? dateIn('Asia/Tokyo');
+    const moves = await this.deps.store.listMoves(tenantId, { since: new Date(Date.parse(`${day}T00:00:00+09:00`)).toISOString(), limit: 2000 });
+    const reversed = new Set(moves.map((m) => m.reversalOf).filter(Boolean));
+    return moves.filter((m) => m.kind === 'out' && !m.reversalOf && !reversed.has(m.id)).length;
+  }
+
+  /**
    * 品目ごとの減り具合と次の 4 週の見込み（第29.14.1節、Q-243）。
    *
    * @remarks 使用は「使用」の記録から取り消しを差し引いたもの（調整は数えない）。並びは「あと何日」の短い順（使っていない品目は後ろ）

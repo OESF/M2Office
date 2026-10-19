@@ -18,6 +18,7 @@ import { PublishPanel } from './InventoryPublish.js';
 import { SalesUnmatchedPanel } from './InventoryUnmatched.js';
 import { UsageChart, UsagePanel } from './InventoryUsage.js';
 import { MarketPanel, MarketSection } from './InventoryMarket.js';
+import { InventorySummary, isOut, needsOrder, type SummaryFilter } from './InventorySummary.js';
 import type { InventorySlipResult } from './api.js';
 
 const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '使用', transfer: '移動', adjust: '調整' };
@@ -72,10 +73,10 @@ function Marks({ item }: { item: InventoryItemView }) {
 interface ListFilter {
   kind: InventoryItemKind | '';
   category: string;
-  state: '' | 'low' | 'runningOut' | 'expiring' | 'expired';
+  state: '' | 'out' | 'order' | 'low' | 'runningOut' | 'expiring' | 'expired';
 }
 const FILTER_KEY = 'm2o.inventory.filter';
-const STATE_LABEL: Record<Exclude<ListFilter['state'], ''>, string> = { low: '残りわずか', runningOut: '無くなる見込み', expiring: '期限が近い（30 日）', expired: '期限切れ' };
+const STATE_LABEL: Record<Exclude<ListFilter['state'], ''>, string> = { out: '在庫切れ', order: '要発注', low: '残りわずか', runningOut: '無くなる見込み', expiring: '期限が近い（30 日）', expired: '期限切れ' };
 
 /** 覚えておいた絞り込みを読む（読めなければ絞らない）。 */
 function loadFilter(): ListFilter {
@@ -91,6 +92,8 @@ function loadFilter(): ListFilter {
 function matchesFilter(i: InventoryItemView, f: ListFilter, runningOut: Set<string>, today: string, soon: string): boolean {
   if (f.kind && i.kind !== f.kind) return false;
   if (f.category && (i.category || '（分類なし）') !== f.category) return false;
+  if (f.state === 'out') return isOut(i);
+  if (f.state === 'order') return needsOrder(i, runningOut);
   if (f.state === 'low') return i.low;
   if (f.state === 'runningOut') return runningOut.has(i.id);
   if (f.state === 'expiring') return !!i.nearestExpiry && i.nearestExpiry >= today && i.nearestExpiry <= soon;
@@ -150,6 +153,9 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
     return list.items.filter((i) => matchesFilter(i, filter, out, today, soon));
   }, [list, filter]);
   const saleValue = useMemo(() => (list ? inventorySaleValue(shown, list.taxRounding ?? 'floor') : null), [list, shown]);
+  // サマリーのどのカードが効いているか
+  const summaryActive: SummaryFilter = filter.category ? null
+    : (['out', 'order', 'expired', 'expiring'] as const).find((s) => filter.state === s && !filter.kind) ?? (filter.kind === 'sale' && !filter.state ? 'sale' : null);
   const picker = useRef<HTMLInputElement>(null);
   const more = useRef<HTMLDetailsElement>(null);
   // 「その他」は、外を押したら閉じる
@@ -271,6 +277,12 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
         {unmatched > 0 && <button className={panel === 'unmatched' ? 'active warn' : 'warn'} onClick={() => toggle('unmatched')}>照らせなかった販売（{unmatched}）</button>}
       </nav>
       {message && <p className="small muted" role="status">{message}</p>}
+      {/* 在庫のサマリー（2026-10-19。いまの状況を一目で）。カードを押すとその状態で絞り込む */}
+      {!working && list && list.items.length > 0 && (
+        <InventorySummary items={list.items} runningOut={list.runningOut ?? []} todayOut={list.todayOut ?? 0} taxRounding={list.taxRounding ?? 'floor'}
+          active={summaryActive} onOrders={() => toggle('orders')}
+          onFilter={(f) => setFilter(f === null ? { kind: '', category: '', state: '' } : f === 'sale' ? { kind: 'sale', category: '', state: '' } : { kind: '', category: '', state: f })} />
+      )}
       {working && <button className="link-btn inventory-back" onClick={closeWork}>‹ 品目の一覧</button>}
       {panel === 'places' && list && <Places locations={list.locations} admin={list.admin} onChanged={load} />}
       {panel === 'orders' && <OrderPanel onOpenItem={(id) => onOpen(id)} />}
@@ -310,8 +322,8 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
             {(Object.keys(STATE_LABEL) as Exclude<ListFilter['state'], ''>[]).map((k) => <option key={k} value={k}>{STATE_LABEL[k]}</option>)}
           </select>
           {(filter.kind || filter.category || filter.state) && <button className="link-btn small" onClick={() => setFilter({ kind: '', category: '', state: '' })}>絞り込みを外す</button>}
-          {/* 絞り込んだ販売品の在庫額（売価で見た目安。在庫の評価ではない。第29.6.1節） */}
-          {saleValue && (saleValue.counted > 0 || saleValue.noPrice > 0) && (
+          {/* 絞り込んだ販売品の在庫額（売価で見た目安。在庫の評価ではない。第29.6.1節）。絞り込んでいないときはサマリーのカードに出る */}
+          {(filter.kind || filter.category || filter.state) && saleValue && (saleValue.counted > 0 || saleValue.noPrice > 0) && (
             <span className="inventory-value">
               販売品の在庫額（売価）: <strong>税込 {yenText(saleValue.withTax)}</strong>（税抜 {yenText(saleValue.withoutTax)}）・{saleValue.counted} 品目
               {saleValue.noPrice > 0 && <span className="muted small">（販売価格の無い {saleValue.noPrice} 品目は数えていません）</span>}

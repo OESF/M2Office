@@ -7709,9 +7709,10 @@ console.log('\n■ 107. 減り具合と次の見込み（第29.14.1節、Q-243�
     const row = usage.find((r) => r.itemId === item?.id);
     const detail = (await call('a', `/v1/inventory/items/${item?.id}`, {}, 'member')).body;
     const other = await call('b', '/v1/inventory/usage', {}, 'member');
+    const summary = (await call('a', '/v1/inventory', {}, 'member')).body;
     row?.daily === 0.25 && row.next4w === 7 && detail?.weekly?.length === 12 && detail.weekly.at(-1)?.qty === 7 && detail.usage?.itemId === item?.id
-      && !(other.body?.rows ?? []).some((r) => r.itemId === item?.id)
-      ? ok('品目ごとの 1 日の使用と次の 4 週の見込み、品目の詳細の週ごとの使用を返し、ほかの会社には出さない') : ng('減り具合が違う', JSON.stringify({ row, weekly: detail?.weekly?.slice(-2), other: other.status }));
+      && !(other.body?.rows ?? []).some((r) => r.itemId === item?.id) && summary?.todayOut >= 2
+      ? ok('品目ごとの 1 日の使用と次の 4 週の見込み、品目の詳細の週ごとの使用、サマリーの本日の出庫を返し、ほかの会社には出さない') : ng('減り具合が違う', JSON.stringify({ row, weekly: detail?.weekly?.slice(-2), other: other.status }));
   } catch (err) {
     ng('減り具合の確認が途中で止まった', String(err));
   } finally {
