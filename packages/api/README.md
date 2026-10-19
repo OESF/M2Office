@@ -186,7 +186,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | 仕入価格（在庫の API 全体） | 品目の `purchasePrice`・`purchaseTaxIncluded`（仕入価格）は、在庫管理の利用範囲の管理者にだけ返す。ほかの人にはどの口の答えからも取り除き、送れば 403（仕様書 第29.6.2節） |
 | `GET /v1/inventory/items/:id` | 品目の詳細（場所とロットごとの数・最近の記録・直近 12 週の週ごとの使用 `weekly`・減り具合 `usage`。仕様書 第29.14.1節） |
 | `GET /v1/inventory/market`・`POST /v1/inventory/market/check`・`GET /v1/inventory/items/:id/market` | 販売品の相場（品目ごとのいちばん新しい結果・まとめて調べている途中か）／相場を調べる（`itemIds`。1 品目は待って結果、ほかは 202 で始める）／品目の結果の履歴（12 か月）。`kind=purchase`（本文は `kind: 'purchase'`）で仕入れの相場（利用範囲の管理者だけ。ほかの人は 403、履歴からも除く。第29.6.2節）。相場の比較を切っている会社と「ローカルだけ」の会社は使えない（第29.24節） |
-| `GET /v1/inventory/usage` | 品目ごとの減り具合（1 日の使用・前の 4 週からの増減・あと何日・次の 4 週の見込み・予測の倍率と理由。第29.14.1節） |
+| `GET /v1/inventory/usage` | 品目ごとの減り具合（1 日の出庫（予約で使った分と廃棄を除く）・前の 4 週からの増減・あと何日（曜日の波を入れる）・次の 4 週の見込み（この先 4 週の取り置き `booked` を含む）・予測の倍率と理由・曜日の重み `weekdays` と `weekdayNote`。第29.14.1節〜第29.14.3節） |
+| `POST /v1/inventory/items/:id/discontinued/dismiss` | 「終売ではない」として終売の見込みを外す（利用範囲の管理者だけ。同じ出典では付け直さない。第29.24.1節）。品目の一覧と詳細は終売の見込み `discontinued` を返す |
 | `POST /v1/inventory/items` ／ `PUT /v1/inventory/items/:id` | 品目を作る・直す（バーコードは `codes` で足す。会社の中で重ならない）。作るときは `initialQty`（いまの数）を入庫として記録し、単位の欄の数ははじめの数として読んで `note` で返す。直すときに単位へ数を入れると 400 |
 | `PUT /v1/inventory/items/:id/status` | 管理者: 品目を止める・使うに戻す（在庫が残れば止められない） |
 | `DELETE /v1/inventory/items/:id/codes/:code` | 品目からバーコードを外す |

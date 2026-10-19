@@ -6,7 +6,7 @@
  * 使う速さは過去 4 週の「使用」の合計から出す。調整（棚卸しの差・廃棄）は使う速さに入れない。
  */
 
-import type { InventoryItemView, InventorySettings, InventorySupplier } from '@m2office/shared';
+import { discontinuedText, type InventoryDiscontinued, type InventoryItemView, type InventorySettings, type InventorySupplier } from '@m2office/shared';
 
 /** 使う速さを出す期間（日）。 */
 export const USAGE_DAYS = 28;
@@ -61,6 +61,60 @@ export interface ForecastRow {
   proposal: OrderProposal | null;
   /** 需要の予測の理由（倍率が 1 でないとき。画面と朝のブリーフに出す。第29.14節）。 */
   forecastNote: string | null;
+  /** 曜日の波の短い言い方（例: 「土日に多い」。第29.14.3節）。重みの無い品目は `null`。 */
+  weekdayNote: string | null;
+  /** 終売の見込み（第29.24.1節）。 */
+  discontinued: InventoryDiscontinued | null;
+}
+
+/**
+ * 先の日ごとの営業日（曜日の波で、あと何日と届くまでに使う分を数えるため。第29.14.3節）。
+ *
+ * `open[k]`・`dows[k]` は明日から k 日目（0 が明日）が営業日か・その曜日（0 = 日曜）。`openLast28` は直近 28 日の営業日の数。
+ */
+export interface ForecastCalendar {
+  open: boolean[];
+  dows: number[];
+  openLast28: number;
+}
+
+/** 曜日の重みを使う最少の条件（出庫のあった日の数と、使いはじめてからの日数。第29.14.3節）。 */
+export const WEEKDAY_MIN_DAYS = 20;
+export const WEEKDAY_MIN_AGE_DAYS = 56;
+/** 曜日の重みを見る期間（週）。 */
+export const WEEKDAY_WEEKS = 12;
+/** 先の日を数える上限（日）。 */
+const HORIZON_DAYS = 90;
+
+/**
+ * 品目の曜日の重みを出す（第29.14.3節）。営業日 1 日あたりの平均に対する、曜日ごとの比。営業しない曜日は 0。
+ *
+ * @param rows その品目の曜日ごとの使用（直近 12 週。予約の外・廃棄を除く）
+ * @param openDows 営業する曜日（0 = 日曜）
+ * @param today 今日（YYYY-MM-DD。使いはじめてからの日数を見る）
+ * @returns 7 つの重み。記録が足りなければ `null`（平らに数える）
+ */
+export function weekdayWeights(rows: { dow: number; qty: number; days: number; first: string }[], openDows: number[], today: string): number[] | null {
+  const open = openDows.length ? openDows : [0, 1, 2, 3, 4, 5, 6];
+  const days = rows.reduce((a, r) => a + r.days, 0);
+  const first = rows.map((r) => r.first).sort()[0];
+  const ageDays = first ? (Date.parse(`${today}T00:00:00+09:00`) - Date.parse(first)) / 86_400_000 : 0;
+  const perDow = Array.from({ length: 7 }, (_, d) => rows.filter((r) => r.dow === d).reduce((a, r) => a + r.qty, 0));
+  const total = open.reduce((a, d) => a + perDow[d]!, 0);
+  if (days < WEEKDAY_MIN_DAYS || ageDays < WEEKDAY_MIN_AGE_DAYS || total <= 0) return null;
+  const avg = total / open.length;
+  return perDow.map((q, d) => (open.includes(d) ? round2(q / avg) : 0));
+}
+
+const DOW_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
+
+/** 曜日の重みの短い言い方（重みが 1.5 以上の曜日を 2 つまで。例: 「土日に多い」「月・金曜に多い」）。目立つ曜日が無ければ空。 */
+export function weekdayNote(weights: number[] | null | undefined): string {
+  if (!weights || weights.length !== 7) return '';
+  const top = weights.map((w, d) => ({ w, d })).filter((x) => x.w >= 1.5).sort((a, b) => b.w - a.w).slice(0, 2).map((x) => x.d).sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+  if (top.length === 0) return '';
+  if (top.length === 2 && top.includes(0) && top.includes(6)) return '土日に多い';
+  return `${top.map((d) => DOW_NAMES[d]).join('・')}曜に多い`;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -85,13 +139,36 @@ export function daysBetween(from: string, to: string): number {
  */
 export function forecastItem(
   item: InventoryItemView, used: number, lots: { lot: string | null; expiresOn: string | null; qty: number }[],
-  supplier: InventorySupplier | null, settings: InventorySettings, today: string,
+  supplier: InventorySupplier | null, settings: InventorySettings, today: string, calendar?: ForecastCalendar,
 ): ForecastRow {
   // 需要の予測の倍率（次の 4 週の見込み）。切っている会社と、予測の無い品目は 1
   const factor = settings.features.forecast !== false ? item.forecast?.factor ?? 1 : 1;
   const dailyUse = round2((Math.max(0, used) / USAGE_DAYS) * factor);
-  const daysLeft = dailyUse > 0 ? Math.max(0, Math.floor(item.available / dailyUse)) : null;
   const leadDays = item.leadDays ?? supplier?.leadDays ?? settings.leadDaysDefault;
+  // 曜日の波（第29.14.3節）。重みのある品目は、明日から日ごとに曜日の量を引いて数える。無ければ平らに割る
+  const weights = calendar && settings.features.forecast !== false && item.forecast?.weekdays?.length === 7 ? item.forecast.weekdays : null;
+  const perOpen = weights && calendar ? (Math.max(0, used) / Math.max(1, calendar.openLast28)) * factor : 0;
+  const useOn = (k: number) => (weights && calendar ? (calendar.open[k] ? perOpen * weights[calendar.dows[k]!]! : 0) : dailyUse);
+  /** 明日から n 日に使う見込みの合計。 */
+  const useWithin = (n: number) => {
+    if (!weights) return dailyUse * Math.max(0, n);
+    let sum = 0;
+    for (let k = 0; k < Math.min(n, HORIZON_DAYS); k++) sum += useOn(k);
+    return sum;
+  };
+  let daysLeft: number | null = null;
+  if (dailyUse > 0 && weights && calendar) {
+    let rest = item.available;
+    daysLeft = rest <= 0 ? 0 : HORIZON_DAYS;
+    for (let k = 0; rest > 0 && k < HORIZON_DAYS; k++) {
+      rest -= useOn(k);
+      if (rest < 0) { daysLeft = k; break; }
+    }
+  } else if (dailyUse > 0) {
+    daysLeft = Math.max(0, Math.floor(item.available / dailyUse));
+  }
+  const waveNote = weights ? weekdayNote(weights) : '';
+  const disc = item.discontinued ?? null;
   const threshold = effectiveLow(item, settings);
   const runningOut = daysLeft !== null && daysLeft <= leadDays;
   const expiring = lots
@@ -100,21 +177,27 @@ export function forecastItem(
     .filter((l) => l.days <= EXPIRY_NOTICE_DAYS[0])
     .sort((a, b) => a.days - b.days);
   let proposal: OrderProposal | null = null;
-  if (settings.features.order && item.status === 'active' && (item.low || runningOut)) {
-    // 届くまでに使う分と、届いてから 2 週間分と、目安の数を持てるだけ
-    const target = dailyUse * (leadDays + COVER_DAYS) + threshold;
-    let qty = Math.max(Math.ceil(target - item.available), Math.max(1, threshold));
+  // 終売済みの品目は発注の案を出さない（仕入れられないため。第29.24.1節）
+  if (settings.features.order && item.status === 'active' && (item.low || runningOut) && disc?.status !== 'ended') {
+    // 届くまでに使う分（曜日の波を入れる）と、届いてから 2 週間分と、目安の数を持てるだけ。
+    // 終売予定の品目は、終売の日までに使う分を上限にする（日付が分からなければ、届いてから 2 週間分を足さない）
+    const target = disc
+      ? (disc.date ? useWithin(daysBetween(today, disc.date)) : useWithin(leadDays) + threshold)
+      : useWithin(leadDays) + dailyUse * COVER_DAYS + threshold;
+    let qty = disc ? Math.ceil(target - item.available) : Math.max(Math.ceil(target - item.available), Math.max(1, threshold));
     let packs: number | null = null;
     if (item.packSize && item.packSize > 0) {
       packs = Math.max(1, Math.ceil(qty / item.packSize));
       qty = packs * item.packSize;
     }
     // 案を出した理由と同じことを書く（無くなる見込みなら日数、そうでなければ目安）
-    const basis = factor !== 1 && item.forecast?.note ? `見込みで 1 日 ${dailyUse} ${item.unit}（${item.forecast.note}）` : `過去 4 週で 1 日 ${dailyUse} ${item.unit}使用`;
-    const reason = runningOut
+    const basis = (factor !== 1 && item.forecast?.note ? `見込みで 1 日 ${dailyUse} ${item.unit}（${item.forecast.note}）` : `過去 4 週で 1 日 ${dailyUse} ${item.unit}使用`)
+      + (waveNote ? `。${waveNote}` : '');
+    const reason = (runningOut
       ? `${basis}。あと ${daysLeft} 日で無くなる見込み（仕入れに ${leadDays} 日）`
-      : `使える数が目安（${threshold} ${item.unit}）以下${dailyUse > 0 ? `。${basis}` : ''}`;
-    proposal = {
+      : `使える数が目安（${threshold} ${item.unit}）以下${dailyUse > 0 ? `。${basis}` : ''}`)
+      + (disc ? `。${discontinuedText(disc)}のため、最後の発注として終売までに使う分だけ（出典: ${disc.source}）` : '');
+    if (qty > 0) proposal = {
       qty, packs, supplierId: supplier?.id ?? null, supplierName: supplier?.name ?? null,
       method: supplier?.method ?? null, contact: supplier?.contact ?? null, reason,
     };
@@ -123,6 +206,7 @@ export function forecastItem(
     itemId: item.id, name: item.name, unit: item.unit, packUnit: item.packUnit, packSize: item.packSize,
     available: item.available, dailyUse, daysLeft, leadDays, low: item.low, runningOut, expiring, proposal,
     forecastNote: factor !== 1 && item.forecast?.note ? item.forecast.note : null,
+    weekdayNote: waveNote || null, discontinued: disc,
   };
 }
 

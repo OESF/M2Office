@@ -1895,6 +1895,8 @@ export const api = {
     },
     get: (id: string) => call<InventoryDetail>(`/inventory/items/${encodeURIComponent(id)}`),
     /** 販売品の相場（第29.24節）。 */
+    /** 「終売ではない」として終売の見込みを外す（管理者だけ。第29.24.1節）。 */
+    dismissDiscontinued: (id: string) => call<{ ok: true }>(`/inventory/items/${encodeURIComponent(id)}/discontinued/dismiss`, { method: 'POST' }),
     market: (kind: 'sale' | 'purchase' = 'sale') => call<{ available: boolean; reason?: string; checks: InventoryMarketCheck[]; running: boolean }>(`/inventory/market${kind === 'purchase' ? '?kind=purchase' : ''}`),
     /** 相場を調べる。1 品目なら結果を待ち、ほかは待たずに始める。 */
     checkMarket: (itemIds?: string[], kind: 'sale' | 'purchase' = 'sale') => call<{ check?: InventoryMarketCheck; started?: number }>('/inventory/market/check', { method: 'POST', body: JSON.stringify({ ...(itemIds ? { itemIds } : {}), kind }) }),

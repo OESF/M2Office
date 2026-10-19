@@ -11,7 +11,7 @@ import { createPool } from '../repository/pool.js';
 import type {
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryBookingStatus, InventoryCount, InventoryItem, InventoryItemKind, InventoryWeeklyUsage,
   InventoryLocation, InventoryMove, InventoryMoveKind, InventoryPublicationScope, InventoryPublicSnapshot, InventoryReservationLine,
-  InventoryOutPurpose, InventorySupplier,
+  InventoryDiscontinued, InventoryOutPurpose, InventorySupplier,
 } from '@m2office/shared';
 
 /** 置き場に渡す品目（バーコードは別に持つ）。 */
@@ -166,12 +166,24 @@ export interface InventoryStore {
   listItems(tenantId: string, opts?: { includeStopped?: boolean }): Promise<InventoryItem[]>;
   getItem(tenantId: string, id: string): Promise<InventoryItem | null>;
   saveItem(tenantId: string, item: ItemRecord, userId: string, at: string): Promise<void>;
-  /** 期間（`since` 以上 `until` 未満）の品目ごとの使用の合計（使う単位。取り消しを差し引く。需要の予測。第29.14節）。 */
+  /** 期間（`since` 以上 `until` 未満）の品目ごとの使用の合計（使う単位。取り消しを差し引く。予約で使った分と廃棄は除く。需要の予測。第29.14節・第29.14.2節）。 */
   usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>>;
   /** 品目の週ごと（月曜はじまり。日本時間）の使用（`since` から。第29.14.1節）。使った週だけを返す。 */
   weeklyUsage(tenantId: string, itemId: string, since: string): Promise<InventoryWeeklyUsage[]>;
-  /** 需要の予測を書く（第29.14節）。`null` なら消す。品目のほかの項目と更新の時刻は変えない。 */
-  setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string } | null): Promise<void>;
+  /** 需要の予測を書く（第29.14節）。`null` なら消す。品目のほかの項目と更新の時刻は変えない。`weekdays` は曜日の重み（第29.14.3節）。 */
+  setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string; weekdays?: number[] | null } | null): Promise<void>;
+  /**
+   * 曜日ごとの使用（`since` から。予約の外・廃棄を除く。日本時間の曜日。第29.14.3節）。
+   *
+   * @returns 品目と曜日（0 = 日曜）ごとの量・出庫のあった日の数・最初の出庫
+   */
+  weekdayUsage(tenantId: string, since: string): Promise<{ itemId: string; dow: number; qty: number; days: number; first: string }[]>;
+  /** 予約の取り置きのうち、`until` までの予約の分（予約の日時が無いものを含む。販売管理の注文は除く。第29.14.2節）。 */
+  heldUntil(tenantId: string, until: string): Promise<Map<string, number>>;
+  /** 終売の見込みを書く（第29.24.1節）。`dismiss` を渡すと、その出典を「終売ではない」として覚える（同じ出典では付け直さない）。 */
+  setDiscontinued(tenantId: string, itemId: string, current: InventoryDiscontinued | null, dismiss?: string): Promise<void>;
+  /** 「終売ではない」とした出典の URL。 */
+  discontinuedDismissed(tenantId: string, itemId: string): Promise<string[]>;
   /** バーコードを足す。すでに別の品目のものなら `false`。 */
   addCode(tenantId: string, itemId: string, value: string, kind: string): Promise<boolean>;
   removeCode(tenantId: string, itemId: string, value: string): Promise<void>;
@@ -271,6 +283,7 @@ interface ItemRow {
   supplier_id: string | null; lead_days: number | null; note: string; status: 'active' | 'stopped'; updated_at: unknown;
   codes: string[] | null;
   forecast_low?: unknown; forecast_factor?: unknown; forecast_note?: string | null; forecast_at?: unknown;
+  forecast_weekdays?: unknown; discontinued?: { current?: InventoryDiscontinued | null } | null;
 }
 
 function toItem(r: ItemRow): InventoryItem {
@@ -281,7 +294,11 @@ function toItem(r: ItemRow): InventoryItem {
     purchasePrice: numOrNull(r.purchase_price), purchaseTaxIncluded: !!r.purchase_tax_included,
     photoFileId: r.photo_file_id, lowThreshold: numOrNull(r.low_threshold), supplierId: r.supplier_id, leadDays: r.lead_days,
     note: r.note, status: r.status, codes: r.codes ?? [], updatedAt: iso(r.updated_at),
-    forecast: r.forecast_at ? { low: numOrNull(r.forecast_low), factor: numOrNull(r.forecast_factor) ?? 1, note: r.forecast_note ?? '', at: iso(r.forecast_at) } : null,
+    forecast: r.forecast_at ? {
+      low: numOrNull(r.forecast_low), factor: numOrNull(r.forecast_factor) ?? 1, note: r.forecast_note ?? '', at: iso(r.forecast_at),
+      weekdays: Array.isArray(r.forecast_weekdays) && r.forecast_weekdays.length === 7 ? r.forecast_weekdays.map(Number) : null,
+    } : null,
+    discontinued: r.discontinued?.current ?? null,
   };
 }
 
@@ -405,15 +422,46 @@ export class PostgresInventoryStore implements InventoryStore {
   async usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>> {
     const rows = await this.q<{ item_id: string; used: unknown }>(tenantId,
       `select item_id, -sum(delta) as used from inventory_moves
-        where tenant_id = $1 and kind = 'out' and purpose is distinct from 'disposal' and created_at >= $2 and created_at < $3 group by item_id`,
+        where tenant_id = $1 and kind = 'out' and purpose is distinct from 'disposal' and source <> 'reservation' and created_at >= $2 and created_at < $3 group by item_id`,
       [tenantId, since, until]);
     return new Map(rows.map((r) => [r.item_id, Math.max(0, Number(r.used) || 0)]));
   }
 
-  async setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string } | null): Promise<void> {
+  async setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string; weekdays?: number[] | null } | null): Promise<void> {
     await this.q(tenantId,
-      `update inventory_items set forecast_low = $3, forecast_factor = $4, forecast_note = $5, forecast_at = $6 where tenant_id = $1 and id = $2`,
-      [tenantId, itemId, f?.low ?? null, f?.factor ?? null, f?.note ?? null, f?.at ?? null]);
+      `update inventory_items set forecast_low = $3, forecast_factor = $4, forecast_note = $5, forecast_at = $6, forecast_weekdays = $7 where tenant_id = $1 and id = $2`,
+      [tenantId, itemId, f?.low ?? null, f?.factor ?? null, f?.note ?? null, f?.at ?? null, f?.weekdays ? JSON.stringify(f.weekdays) : null]);
+  }
+
+  async weekdayUsage(tenantId: string, since: string): Promise<{ itemId: string; dow: number; qty: number; days: number; first: string }[]> {
+    const rows = await this.q<{ item_id: string; dow: number; qty: unknown; days: unknown; first: unknown }>(tenantId,
+      `select item_id, extract(dow from (created_at at time zone 'Asia/Tokyo'))::int as dow, -sum(delta) as qty,
+              count(distinct (created_at at time zone 'Asia/Tokyo')::date) as days, min(created_at) as first
+         from inventory_moves
+        where tenant_id = $1 and kind = 'out' and purpose is distinct from 'disposal' and source <> 'reservation' and created_at >= $2
+        group by 1, 2`, [tenantId, since]);
+    return rows.map((r) => ({ itemId: r.item_id, dow: Number(r.dow), qty: Math.max(0, Number(r.qty) || 0), days: Number(r.days) || 0, first: iso(r.first) }));
+  }
+
+  async heldUntil(tenantId: string, until: string): Promise<Map<string, number>> {
+    const rows = await this.q<{ item_id: string; qty: unknown }>(tenantId,
+      `select item_id, sum(qty) as qty from inventory_reservations
+        where tenant_id = $1 and status = 'held' and source <> 'sales' and (booked_at is null or booked_at <= $2) group by item_id`, [tenantId, until]);
+    return new Map(rows.map((r) => [r.item_id, num(r.qty)]));
+  }
+
+  async setDiscontinued(tenantId: string, itemId: string, current: InventoryDiscontinued | null, dismiss?: string): Promise<void> {
+    await this.q(tenantId,
+      `update inventory_items set discontinued = jsonb_build_object('current', $3::jsonb,
+         'dismissed', coalesce(discontinued->'dismissed', '[]'::jsonb) || case when $4::text is null then '[]'::jsonb else jsonb_build_array($4::text) end)
+        where tenant_id = $1 and id = $2`,
+      [tenantId, itemId, current ? JSON.stringify(current) : 'null', dismiss ?? null]);
+  }
+
+  async discontinuedDismissed(tenantId: string, itemId: string): Promise<string[]> {
+    const rows = await this.q<{ d: unknown }>(tenantId, `select discontinued->'dismissed' as d from inventory_items where tenant_id = $1 and id = $2`, [tenantId, itemId]);
+    const d = rows[0]?.d;
+    return Array.isArray(d) ? d.filter((x): x is string => typeof x === 'string') : [];
   }
 
   async saveItem(tenantId: string, i: ItemRecord, userId: string, at: string): Promise<void> {
@@ -875,15 +923,54 @@ export class MemoryInventoryStore implements InventoryStore {
     const out = new Map<string, number>();
     for (const m of this.moves) {
       const at = (m as { createdAt?: string }).createdAt ?? '';
-      if (m.tenantId !== tenantId || m.kind !== 'out' || m.purpose === 'disposal' || at < since || at >= until) continue;
+      if (m.tenantId !== tenantId || m.kind !== 'out' || m.purpose === 'disposal' || m.source === 'reservation' || at < since || at >= until) continue;
       out.set(m.itemId, (out.get(m.itemId) ?? 0) - m.delta);
     }
     return out;
   }
 
-  async setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string } | null): Promise<void> {
+  async setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string; weekdays?: number[] | null } | null): Promise<void> {
     const i = this.items.get(itemId);
     if (i && i.tenantId === tenantId) i.forecast = f;
+  }
+
+  async weekdayUsage(tenantId: string, since: string): Promise<{ itemId: string; dow: number; qty: number; days: number; first: string }[]> {
+    const acc = new Map<string, { itemId: string; dow: number; qty: number; dates: Set<string>; first: string }>();
+    for (const m of this.moves) {
+      if (m.tenantId !== tenantId || m.kind !== 'out' || m.purpose === 'disposal' || m.source === 'reservation' || m.createdAt < since) continue;
+      const jst = new Date(Date.parse(m.createdAt) + 9 * 3_600_000);
+      const dow = jst.getUTCDay();
+      const k = `${m.itemId}\u0000${dow}`;
+      const cur = acc.get(k) ?? { itemId: m.itemId, dow, qty: 0, dates: new Set<string>(), first: m.createdAt };
+      cur.qty -= m.delta;
+      cur.dates.add(jst.toISOString().slice(0, 10));
+      if (m.createdAt < cur.first) cur.first = m.createdAt;
+      acc.set(k, cur);
+    }
+    return [...acc.values()].map((a) => ({ itemId: a.itemId, dow: a.dow, qty: Math.max(0, a.qty), days: a.dates.size, first: a.first }));
+  }
+
+  async heldUntil(tenantId: string, until: string): Promise<Map<string, number>> {
+    const out = new Map([...this.held].filter(([k]) => k.startsWith(`${tenantId}\u0000`)).map(([k, v]) => [k.split('\u0000')[1]!, v]));
+    for (const r of this.reservations.values()) {
+      if (r.tenantId !== tenantId || r.status !== 'held' || r.source === 'sales' || (r.bookedAt && r.bookedAt > until)) continue;
+      out.set(r.itemId, (out.get(r.itemId) ?? 0) + r.qty);
+    }
+    return out;
+  }
+
+  readonly dismissed = new Map<string, string[]>();
+
+  async setDiscontinued(tenantId: string, itemId: string, current: InventoryDiscontinued | null, dismiss?: string): Promise<void> {
+    const i = this.items.get(itemId);
+    if (!i || i.tenantId !== tenantId) return;
+    i.discontinued = current;
+    if (dismiss) this.dismissed.set(itemId, [...(this.dismissed.get(itemId) ?? []), dismiss]);
+  }
+
+  async discontinuedDismissed(tenantId: string, itemId: string): Promise<string[]> {
+    const i = this.items.get(itemId);
+    return i && i.tenantId === tenantId ? this.dismissed.get(itemId) ?? [] : [];
   }
 
   async addCode(tenantId: string, itemId: string, value: string): Promise<boolean> {

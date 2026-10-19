@@ -61,6 +61,26 @@ export interface InventorySupplier {
   status: 'active' | 'stopped';
 }
 
+/** メーカーの終売の見込み（第29.24.1節、Q-248）。出典で確かめられたものだけを持つ。 */
+export interface InventoryDiscontinued {
+  /** `planned` 終売予定・`ended` 終売済み。 */
+  status: 'planned' | 'ended';
+  /** 終売の日（YYYY-MM-DD）。分からなければ `null`。 */
+  date: string | null;
+  /** 後継品の名前（無ければ空）。 */
+  successor: string;
+  /** 出典の URL（秘書に渡された文書なら空）。 */
+  url: string;
+  /** 出典の名前（サイトの名前、または「仕入先からの知らせ」）。 */
+  source: string;
+  checkedAt: string;
+}
+
+/** 終売の見込みの短い言い方（一覧の印のポップアップ・発注の案の理由）。 */
+export function discontinuedText(d: InventoryDiscontinued): string {
+  return `${d.status === 'ended' ? '終売済み' : '終売予定'}${d.date ? `（${d.date}）` : ''}${d.successor ? `。後継品: ${d.successor}` : ''}`;
+}
+
 /** 品目の区分（第29.6.1節、Q-242）。4 つに固定する（会社が増やさない）。 */
 export type InventoryItemKind = 'sale' | 'supply' | 'material' | 'other';
 
@@ -120,7 +140,13 @@ export interface InventoryItem {
    * 需要の予測（第29.14節、Q-116）。週に 1 回、ワーカーが決め直す。`low` は予測の目安（会社が目安を決めていない品目に効く）、
    * `factor` は次の 4 週の使う速さの倍率（0.5〜3）、`note` は理由（1 行）。予測していなければ無い
    */
-  forecast?: { low: number | null; factor: number; note: string; at: string } | null;
+  forecast?: {
+    low: number | null; factor: number; note: string; at: string;
+    /** 曜日の重み（日曜はじまりの 7 つ。営業日でない曜日は 0。第29.14.3節）。記録の足りない品目は無い（平らに数える）。 */
+    weekdays?: number[] | null;
+  } | null;
+  /** メーカーの終売の見込み（第29.24.1節）。見込みが無ければ `null`。 */
+  discontinued?: InventoryDiscontinued | null;
   supplierId: string | null;
   /** 仕入れにかかる日数。`null` なら仕入先か会社の既定。 */
   leadDays: number | null;
@@ -530,6 +556,11 @@ export interface InventoryUsageRow {
   /** 需要の予測の倍率（予測が無ければ 1）と理由。 */
   factor: number;
   note: string;
+  /** この先 4 週の予約の取り置き（次の 4 週の見込みに含む。第29.14.2節）。 */
+  booked?: number;
+  /** 曜日の重み（日曜はじまりの 7 つ。第29.14.3節）と短い言い方（例: 「土日に多い」）。記録の足りない品目は無い。 */
+  weekdays?: number[] | null;
+  weekdayNote?: string;
 }
 
 /** 週ごとの使用（品目の詳細のグラフ。第29.14.1節）。 */
@@ -559,6 +590,8 @@ export interface InventoryMarketSource {
 export interface InventoryMarketCheck {
   id: string;
   itemId: string;
+  /** この調べもので新しく終売の見込みが付いたか（知らせに使う。残さない。第29.24.1節）。 */
+  discontinuedNew?: boolean;
   /**
    * 販売価格の相場（`sale`）か、仕入れの相場（`purchase`。第29.6.2節）か。仕入れの相場は自社の仕入価格を含むため、
    * 在庫管理の利用範囲の管理者にだけ返す

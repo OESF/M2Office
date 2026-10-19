@@ -7939,5 +7939,59 @@ console.log('\n■ 112. 出庫の用途（販売・社内消費・廃棄・そ�
   }
 }
 
+console.log('\n■ 113. Phase 2 の需要の予測（予約の分を 2 回見込まない・曜日の波・終売。第29.14.2節・第29.14.3節・第29.24.1節、Q-248）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用予測${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { reserve: true, order: true, forecast: true } }) });
+    const item = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 体験セット`, unit: '個', kind: 'supply', initialQty: 100 }) }, 'member')).body?.item;
+    await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId: item?.id, qty: 7, purpose: 'internal' }) }, 'member');
+    const soon = new Date(Date.now() + 3 * 86_400_000 + 9 * 3_600_000).toISOString().slice(0, 10);
+    const near = (await call('a', '/v1/inventory/bookings', { method: 'POST', body: JSON.stringify({ itemId: item?.id, qty: 4, startsAt: `${soon} 14:00`, externalId: `${tag}-N` }) }, 'member')).body?.booking;
+    await call('a', '/v1/inventory/bookings', { method: 'POST', body: JSON.stringify({ itemId: item?.id, qty: 9, startsAt: '2099-01-10 14:00', externalId: `${tag}-F` }) }, 'member');
+    const row1 = ((await call('a', '/v1/inventory/usage', {}, 'member')).body?.rows ?? []).find((r) => r.itemId === item?.id);
+    // 予約で使った出庫は使う速さに入れない
+    await call('a', `/v1/inventory/bookings/${near?.id}/use`, { method: 'POST' }, 'member');
+    const row2 = ((await call('a', '/v1/inventory/usage', {}, 'member')).body?.rows ?? []).find((r) => r.itemId === item?.id);
+    row1?.booked === 4 && row1.next4w === 11 && row2?.daily === row1.daily && row2.daily === 0.25 && !row2.booked
+      ? ok('次の 4 週の見込みにこの先 4 週の取り置きを足し（先の予約は入れない）、予約で使った出庫は使う速さに入れない')
+      : ng('予約の分の数え方が違う', JSON.stringify({ row1, row2 }));
+    // 曜日の重み（週に 1 回の予測が品目に置くもの）を、減り具合と見張りが使う
+    await owner.query(`update inventory_items set forecast_at = now(), forecast_factor = 1, forecast_note = '', forecast_weekdays = '[0, 0.6, 0.6, 0.6, 0.6, 0.6, 3]'::jsonb where id = $1`, [item?.id]);
+    const row3 = ((await call('a', '/v1/inventory/usage', {}, 'member')).body?.rows ?? []).find((r) => r.itemId === item?.id);
+    row3?.weekdayNote === '土曜に多い' && row3.weekdays?.length === 7
+      ? ok('曜日の重みのある品目は、減り具合に曜日の波（「土曜に多い」）と 7 つの重みを返す') : ng('曜日の波が出ない', JSON.stringify(row3));
+    // 終売の見込み: 一覧に出し、終売済みは発注の案を出さない。外すのは管理者だけで、同じ出典では付け直さない
+    const disc = { current: { status: 'ended', date: null, successor: `${tag} 新セット`, url: 'https://maker.example/end', source: 'メーカー', checkedAt: new Date().toISOString() }, dismissed: [] };
+    await owner.query(`update inventory_items set discontinued = $2::jsonb, low_threshold = 1000 where id = $1`, [item?.id, JSON.stringify(disc)]);
+    const listed = ((await call('a', '/v1/inventory', {}, 'member')).body?.items ?? []).find((i) => i.id === item?.id);
+    const fc = (await call('a', '/v1/inventory/forecast', {}, 'member')).body;
+    const fcRow = (fc?.rows ?? fc?.items ?? []).find((r) => r.itemId === item?.id);
+    const byMember = await call('a', `/v1/inventory/items/${item?.id}/discontinued/dismiss`, { method: 'POST' }, 'member');
+    const byAdmin = await call('a', `/v1/inventory/items/${item?.id}/discontinued/dismiss`, { method: 'POST' });
+    const again = await call('a', `/v1/inventory/items/${item?.id}/discontinued/dismiss`, { method: 'POST' });
+    const { rows: stored } = await owner.query(`select discontinued from inventory_items where id = $1`, [item?.id]);
+    listed?.discontinued?.status === 'ended' && fcRow?.proposal === null && byMember.status === 403 && byAdmin.status === 200 && again.status === 400
+      && stored[0]?.discontinued?.current === null && stored[0]?.discontinued?.dismissed?.includes('https://maker.example/end')
+      ? ok('終売の見込みを一覧に出し、終売済みは発注の案を出さない。外すのは管理者だけで、外した出典を覚える')
+      : ng('終売の扱いが違う', JSON.stringify({ listed: listed?.discontinued, fc: fcRow?.proposal, byMember: byMember.status, byAdmin: byAdmin.status, again: again.status, stored: stored[0]?.discontinued }));
+  } catch (err) {
+    ng('Phase 2 の需要の予測の確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    await owner.query(`delete from inventory_reservations where item_id in (${items})`);
+    await owner.query(`delete from inventory_bookings where tenant_id = 't-alpha' and external_id like $1`, [`${tag}%`]);
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

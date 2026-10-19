@@ -10,6 +10,7 @@ import type { InventoryItem, InventorySettings } from '@m2office/shared';
 import type { LlmProvider } from '../llm/provider.js';
 import type { ResearchProvider } from '../research/provider.js';
 import type { InventoryStore } from './store.js';
+import { WEEKDAY_WEEKS, weekdayWeights } from './forecast.js';
 
 /** 倍率の幅。 */
 export const DEMAND_FACTOR_MIN = 0.5;
@@ -104,18 +105,24 @@ export async function askDemandFactors(llm: LlmProvider | null, bases: DemandBas
  * @remarks 予測の目安は「仕入れにかかる日数の間に使う見込みの数」（1 以上）。使っていない品目は目安を出さない（倍率だけ）
  */
 export async function forecastDemand(
-  deps: { store: InventoryStore; llm: LlmProvider | null; leadDaysOf(item: InventoryItem): number; research?: ResearchProvider | null },
+  deps: {
+    store: InventoryStore; llm: LlmProvider | null; leadDaysOf(item: InventoryItem): number; research?: ResearchProvider | null;
+    /** 営業する曜日（0 = 日曜。会社情報。曜日の重みに使う。第29.14.3節）。無ければ月〜金 */
+    openWeekdays?: number[];
+  },
   tenantId: string, settings: InventorySettings, now: Date,
 ): Promise<number> {
   if (!settings.enabled || settings.features.forecast === false) return 0;
   const today = new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
   const day = (offset: number) => new Date(Date.parse(`${today}T00:00:00+09:00`) + offset * 86_400_000).toISOString();
-  const [items, recent, before, lyPrev, lyNext] = await Promise.all([
+  const [items, recent, before, lyPrev, lyNext, byDow] = await Promise.all([
     deps.store.listItems(tenantId),
     deps.store.usageByItem(tenantId, day(-WINDOW_DAYS), day(0)),
     deps.store.usageByItem(tenantId, day(-2 * WINDOW_DAYS), day(-WINDOW_DAYS)),
     deps.store.usageByItem(tenantId, day(-365 - WINDOW_DAYS), day(-365)),
     deps.store.usageByItem(tenantId, day(-365), day(-365 + WINDOW_DAYS)),
+    // 曜日の重み（直近 12 週。予約の外・廃棄を除く。第29.14.3節）
+    deps.store.weekdayUsage(tenantId, day(-WEEKDAY_WEEKS * 7)),
   ]);
   const bases = items.map((i) => demandBase(i, recent.get(i.id) ?? 0, before.get(i.id) ?? 0, lyPrev.get(i.id) ?? 0, lyNext.get(i.id) ?? 0)).filter((b) => b.enough);
   const factors = await askDemandFactors(deps.llm, bases, today, await seasonalTrend(deps.research ?? null, bases, today));
@@ -126,7 +133,8 @@ export async function forecastDemand(
     const f = factors.get(b.itemId) ?? baseFactor(b);
     const daily = b.recentDaily * f.factor;
     const low = daily > 0 ? Math.max(1, Math.ceil(daily * deps.leadDaysOf(item))) : null;
-    await deps.store.setForecast(tenantId, b.itemId, { low, factor: f.factor, note: f.note, at });
+    const weekdays = weekdayWeights(byDow.filter((r) => r.itemId === b.itemId), deps.openWeekdays ?? [1, 2, 3, 4, 5], today);
+    await deps.store.setForecast(tenantId, b.itemId, { low, factor: f.factor, note: f.note, at, weekdays });
     written++;
   }
   return written;
@@ -168,6 +176,8 @@ export async function runDemandForecasts(
     listTenantIds(): Promise<string[]>; settingsOf(tenantId: string): Promise<InventorySettings>; store: InventoryStore; llmFor(tenantId: string): Promise<LlmProvider | null>;
     /** Web の調べもの（販売品の季節の流行。無ければ調べない）。 */
     researchFor?(tenantId: string): Promise<ResearchProvider | null>;
+    /** 営業する曜日（会社情報。曜日の重みに使う。第29.14.3節）。 */
+    openWeekdaysOf?(tenantId: string): Promise<number[]>;
   },
   now: Date = new Date(),
 ): Promise<number> {
@@ -184,6 +194,7 @@ export async function runDemandForecasts(
         store: deps.store, llm: await deps.llmFor(tenantId).catch(() => null),
         research: deps.researchFor ? await deps.researchFor(tenantId).catch(() => null) : null,
         leadDaysOf: (i) => i.leadDays ?? (i.supplierId ? suppliers.get(i.supplierId)?.leadDays ?? null : null) ?? settings.leadDaysDefault,
+        ...(deps.openWeekdaysOf ? { openWeekdays: await deps.openWeekdaysOf(tenantId).catch(() => [1, 2, 3, 4, 5]) } : {}),
       }, tenantId, settings, now);
     } catch {
       // 次の見回りで試す

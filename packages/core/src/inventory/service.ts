@@ -11,7 +11,7 @@ import {
   canUseAgent, defaultOutPurpose, INVENTORY_EXTENSION_ID, INVENTORY_ITEM_KINDS, INVENTORY_OUT_PURPOSES, inventoryKindLabel, inventoryPurposeLabel, type InventoryItemKind, type InventoryTaxRate, type InventoryUsageRow, type InventoryWeeklyUsage,
   type AuditEvent, type InventoryCount, type InventoryCountRow, type InventoryCountScope, type InventoryCountView,
   type InventoryItem, type InventoryItemView, type InventoryLocation, type InventoryMove,
-  type InventoryMoveKind, type InventoryOutPurpose, type InventorySettings, type InventoryStockRow, type InventorySupplier,
+  type InventoryDiscontinued, type InventoryMoveKind, type InventoryOutPurpose, type InventorySettings, type InventoryStockRow, type InventorySupplier,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -20,7 +20,8 @@ import { dateIn } from '../cards/service.js';
 import { weekStartJst, type InventoryStore, type ItemRecord, type NewMove, type StockRecord } from './store.js';
 import { parseCode, type ParsedCode } from './gs1.js';
 import { shelfKeyOf } from './labels.js';
-import { effectiveLow, forecastItem, sortForecast, USAGE_DAYS, type ForecastRow } from './forecast.js';
+import { effectiveLow, forecastItem, sortForecast, USAGE_DAYS, weekdayNote, type ForecastCalendar, type ForecastRow } from './forecast.js';
+import { closedReason } from '../scheduler/business-days.js';
 import { matchLine, readSlip, type SlipLine } from './slip.js';
 
 /** 場所が 1 つも無い会社に作る既定の場所の名前（第29.7節）。 */
@@ -332,6 +333,54 @@ export class InventoryService {
   }
 
   /**
+   * 終売の見込みを付ける（第29.24.1節）。相場の調べもの（`who` は調べた人か `watch`）か、秘書に渡された仕入先の知らせから。
+   *
+   * @returns `changed` は新しく付いた（それまで見込みが無かった）か。「終売ではない」とした出典なら付けずに `changed: false`
+   */
+  async markDiscontinued(tenantId: string, who: string, itemId: string, d: InventoryDiscontinued): Promise<{ ok: true; changed: boolean } | { error: string }> {
+    const item = await this.deps.store.getItem(tenantId, itemId);
+    if (!item) return { error: '品目が見つかりません' };
+    if (d.url && (await this.deps.store.discontinuedDismissed(tenantId, itemId)).includes(d.url)) return { ok: true, changed: false };
+    const prev = item.discontinued ?? null;
+    const same = !!prev && prev.url === d.url && prev.status === d.status && prev.date === d.date && prev.successor === d.successor;
+    if (!same) {
+      await this.deps.store.setDiscontinued(tenantId, itemId, d);
+      await this.audit(tenantId, who, 'inventory.item.discontinued', 'inventory_item', itemId, { status: d.status, date: d.date, source: d.source });
+    }
+    return { ok: true, changed: !prev };
+  }
+
+  /** 「終売ではない」として外す（第29.24.1節）。同じ出典では付け直さない。 */
+  async dismissDiscontinued(tenantId: string, userId: string, itemId: string): Promise<{ ok: true } | { error: string }> {
+    const item = await this.deps.store.getItem(tenantId, itemId);
+    if (!item) return { error: '品目が見つかりません' };
+    if (!item.discontinued) return { error: '終売の見込みはありません' };
+    await this.deps.store.setDiscontinued(tenantId, itemId, null, item.discontinued.url || `manual:${item.discontinued.checkedAt}`);
+    await this.audit(tenantId, userId, 'inventory.item.discontinued_dismiss', 'inventory_item', itemId, { source: item.discontinued.source });
+    return { ok: true };
+  }
+
+  /**
+   * 明日からの営業日と、直近 28 日の営業日の数（曜日の波で数えるため。第29.14.3節）。
+   *
+   * @remarks 営業日は会社情報の営業する曜日と祝日で決める（お知らせで出した休業の期間は見ない）
+   */
+  private async calendar(tenantId: string, today: string): Promise<ForecastCalendar> {
+    const company = (await this.deps.repo.getTenantSettings(tenantId)).company;
+    const dayOf = (k: number) => new Date(Date.parse(`${today}T00:00:00Z`) + k * 86_400_000).toISOString().slice(0, 10);
+    const open: boolean[] = [];
+    const dows: number[] = [];
+    for (let k = 1; k <= 90; k++) {
+      const d = dayOf(k);
+      open.push(closedReason(company, d, false) === null);
+      dows.push(new Date(`${d}T00:00:00Z`).getUTCDay());
+    }
+    let openLast28 = 0;
+    for (let k = -USAGE_DAYS; k < 0; k++) if (closedReason(company, dayOf(k), false) === null) openLast28++;
+    return { open, dows, openLast28 };
+  }
+
+  /**
    * 今日（日本時間）の出庫（使用）の記録の数（在庫のサマリー。第29.11節）。取り消した記録と取り消しの記録は数えない。
    */
   async todayOutCount(tenantId: string, today?: string): Promise<number> {
@@ -349,11 +398,13 @@ export class InventoryService {
   async usage(tenantId: string, opts: { itemIds?: string[]; today?: string } = {}): Promise<InventoryUsageRow[]> {
     const day = opts.today ?? dateIn('Asia/Tokyo');
     const at = (offset: number) => new Date(Date.parse(`${day}T00:00:00+09:00`) + offset * 86_400_000).toISOString();
-    const [items, recent, before, forecast] = await Promise.all([
+    const [items, recent, before, forecast, booked] = await Promise.all([
       this.list(tenantId, { today: day }),
       this.deps.store.usageByItem(tenantId, at(-USAGE_DAYS), at(1)),
       this.deps.store.usageByItem(tenantId, at(-2 * USAGE_DAYS), at(-USAGE_DAYS)),
       this.forecast(tenantId, day),
+      // この先 4 週の予約の取り置き（次の 4 週の見込みに足す。第29.14.2節）
+      this.deps.store.heldUntil(tenantId, at(USAGE_DAYS + 1)),
     ]);
     const settings = await this.settings(tenantId);
     const left = new Map(forecast.map((r) => [r.itemId, r.daysLeft]));
@@ -362,11 +413,15 @@ export class InventoryService {
       const daily = round3(Math.max(0, recent.get(i.id) ?? 0) / USAGE_DAYS);
       const prevDaily = round3(Math.max(0, before.get(i.id) ?? 0) / USAGE_DAYS);
       const factor = settings.features.forecast !== false ? i.forecast?.factor ?? 1 : 1;
+      const held = round3(booked.get(i.id) ?? 0);
+      const weekdays = settings.features.forecast !== false && i.forecast?.weekdays?.length === 7 ? i.forecast.weekdays : null;
       return {
         itemId: i.id, name: i.name, kind: i.kind, category: i.category, unit: i.unit, daily, prevDaily,
         changePct: prevDaily > 0 ? Math.round(((daily - prevDaily) / prevDaily) * 100) : null,
-        daysLeft: left.get(i.id) ?? null, next4w: round1(daily * factor * USAGE_DAYS), factor,
+        daysLeft: left.get(i.id) ?? null, next4w: round1(daily * factor * USAGE_DAYS + held), factor,
         note: factor !== 1 ? i.forecast?.note ?? '' : '',
+        ...(held > 0 ? { booked: held } : {}),
+        ...(weekdays ? { weekdays, weekdayNote: weekdayNote(weekdays) } : {}),
       };
     });
     return rows.sort((a, b) => (a.daysLeft ?? Infinity) - (b.daysLeft ?? Infinity) || b.daily - a.daily);
@@ -819,13 +874,15 @@ export class InventoryService {
     // 想定する会社（品目 数十〜数千。第29.1.1節）では、4 週の記録は上限の数に収まる
     const moves = await this.deps.store.listMoves(tenantId, { since, limit: 2000 });
     const used = new Map<string, number>();
-    // 廃棄は使う速さに入れない（売れた・使った数ではないため。第29.9.1節）
-    for (const m of moves) if (m.kind === 'out' && m.purpose !== 'disposal') used.set(m.itemId, (used.get(m.itemId) ?? 0) - m.delta);
+    // 廃棄は使う速さに入れない（売れた・使った数ではないため。第29.9.1節）。
+    // 予約で使った分も入れない（先の予約は取り置きとして使える数から引いているため。2 回見込まない。第29.14.2節）
+    for (const m of moves) if (m.kind === 'out' && m.purpose !== 'disposal' && m.source !== 'reservation') used.set(m.itemId, (used.get(m.itemId) ?? 0) - m.delta);
     const bySupplier = new Map(suppliers.map((s) => [s.id, s]));
+    const calendar = await this.calendar(tenantId, day);
     const rows = items.map((i) => forecastItem(
       i, used.get(i.id) ?? 0,
       settings.features.lots ? stock.filter((s) => s.itemId === i.id && s.qty > 0) : [],
-      i.supplierId ? bySupplier.get(i.supplierId) ?? null : null, settings, day,
+      i.supplierId ? bySupplier.get(i.supplierId) ?? null : null, settings, day, calendar,
     ));
     return sortForecast(rows);
   }

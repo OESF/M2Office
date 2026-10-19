@@ -167,6 +167,14 @@ export function inventoryRoute(deps: AppDeps) {
     return c.json({ checks: isAdmin(c) ? checks : checks.filter((x) => (x.kind ?? 'sale') === 'sale') });
   });
 
+  /** 「終売ではない」として終売の見込みを外す（利用範囲の管理者だけ。同じ出典では付け直さない。第29.24.1節）。 */
+  app.post('/items/:id/discontinued/dismiss', async (c) => {
+    if (!isAdmin(c)) return c.json({ error: '終売の印を外せるのは管理者だけです' }, 403);
+    const { tenant, user } = c.get('ctx');
+    const r = await service.dismissDiscontinued(tenant.id, user.id, c.req.param('id'));
+    return 'error' in r ? c.json(r, r.error === '品目が見つかりません' ? 404 : 400) : c.json(r);
+  });
+
   /** 品目ごとの減り具合と次の 4 週の見込み（第29.14.1節）。 */
   app.get('/usage', async (c) => c.json({ rows: await service.usage(c.get('ctx').tenant.id) }));
 

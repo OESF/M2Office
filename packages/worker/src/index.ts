@@ -847,6 +847,8 @@ while (running) {
       const n = await withAiUsage({ purpose: 'worker:inventory' }, () => runDemandForecasts({
         listTenantIds: () => repo.listTenantIds(), settingsOf: async (t) => (await repo.getTenantSettings(t)).inventory,
         store: inventory.store, llmFor: (t) => ai.llmFor(t), researchFor: (t) => ai.researchFor(t),
+        // 曜日の重みは会社の営業する曜日で数える（第29.14.3節）
+        openWeekdaysOf: async (t) => (await repo.getTenantSettings(t)).company.businessDays ?? [1, 2, 3, 4, 5],
       }, new Date()));
       if (n > 0) log.info('在庫の需要の予測を決め直しました', { items: n });
     } catch (err) {

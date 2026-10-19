@@ -46,8 +46,12 @@ export function UsagePanel({ itemIds, onOpenItem }: { itemIds: Set<string>; onOp
                 <td className="num">{r.daily > 0 ? `${n1(r.daily)} ${r.unit}` : <span className="muted">使っていない</span>}</td>
                 <td className="num"><Change pct={r.changePct} /></td>
                 <td className="num">{r.daysLeft === null ? <span className="muted">—</span> : `${r.daysLeft} 日`}</td>
-                <td className="num"><strong>{r.next4w > 0 ? `${n1(r.next4w)} ${r.unit}` : '—'}</strong></td>
-                <td className="small">{r.factor !== 1 ? `${r.factor} 倍${r.note ? `（${r.note}）` : ''}` : <span className="muted">いつもどおり</span>}</td>
+                <td className="num"><strong>{r.next4w > 0 ? `${n1(r.next4w)} ${r.unit}` : '—'}</strong>{r.booked ? <span className="muted small"> うち予約 {n1(r.booked)}</span> : null}</td>
+                <td className="small">
+                  {r.factor !== 1 ? `${r.factor} 倍${r.note ? `（${r.note}）` : ''}` : <span className="muted">いつもどおり</span>}
+                  {/* 曜日の波（第29.14.3節） */}
+                  {r.weekdayNote && <span className="badge"> {r.weekdayNote}</span>}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -74,7 +78,7 @@ export function UsageChart({ weekly, usage, unit }: { weekly: InventoryWeeklyUsa
       <h3>減り具合</h3>
       <p className="small">
         {usage && usage.daily > 0
-          ? <>1 日 {n1(usage.daily)} {unit}（前の 4 週から <Change pct={usage.changePct} />）{usage.daysLeft !== null && `・あと ${usage.daysLeft} 日`}・次の 4 週の見込み <strong>{n1(usage.next4w)} {unit}</strong>{usage.factor !== 1 && `（${usage.factor} 倍${usage.note ? `。${usage.note}` : ''}）`}</>
+          ? <>1 日 {n1(usage.daily)} {unit}（前の 4 週から <Change pct={usage.changePct} />）{usage.daysLeft !== null && `・あと ${usage.daysLeft} 日`}・次の 4 週の見込み <strong>{n1(usage.next4w)} {unit}</strong>{usage.booked ? `（うち予約 ${n1(usage.booked)} ${unit}）` : ''}{usage.factor !== 1 && `（${usage.factor} 倍${usage.note ? `。${usage.note}` : ''}）`}{usage.weekdayNote && `・${usage.weekdayNote}`}</>
           : <span className="muted">最近 4 週は使っていません</span>}
       </p>
       <svg viewBox={`0 0 ${W} ${H + 18}`} role="img" aria-label={`直近 ${weekly.length} 週の出庫と次の 4 週の見込み`} className="usage-svg">
@@ -89,6 +93,27 @@ export function UsageChart({ weekly, usage, unit }: { weekly: InventoryWeeklyUsa
         ))}
         <text x={(weekly.length + 2) * bw} y={H + 13} textAnchor="middle" className="usage-label">見込み</text>
       </svg>
+      {usage?.weekdays && <WeekdayBars weights={usage.weekdays} />}
     </div>
+  );
+}
+
+/** 曜日ごとの棒（月曜はじまりの 7 本。重み 1 が営業日の平均。第29.14.3節）。 */
+function WeekdayBars({ weights }: { weights: number[] }) {
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  const names = ['日', '月', '火', '水', '木', '金', '土'];
+  const max = Math.max(1, ...weights);
+  return (
+    <>
+    <div className="muted small weekday-caption">曜日ごと</div>
+    <div className="weekday-bars" role="img" aria-label={`曜日ごとの出庫: ${order.map((d) => `${names[d]} ${weights[d]}`).join('・')}`}>
+      {order.map((d) => (
+        <div key={d} className="weekday-bar" title={`${names[d]}曜: 平均の ${weights[d]} 倍`}>
+          <span className="weekday-fill" style={{ height: `${Math.round((weights[d]! / max) * 100)}%` }} />
+          <span className="weekday-name">{names[d]}</span>
+        </div>
+      ))}
+    </div>
+    </>
   );
 }

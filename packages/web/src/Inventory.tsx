@@ -9,9 +9,9 @@
  * @see 仕様書 第29章 在庫管理
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { INVENTORY_ITEM_KINDS, inventoryCostValue, inventoryKindLabel, inventoryMargin, inventoryPurposeLabel, inventorySaleValue, type InventoryItem, type InventoryOutPurpose, type InventoryItemKind, type InventoryItemView, type InventoryLocation, type InventoryMove, type InventoryMoveKind, type InventorySupplier } from '@m2office/shared';
+import { discontinuedText, INVENTORY_ITEM_KINDS, inventoryCostValue, inventoryKindLabel, inventoryMargin, inventoryPurposeLabel, inventorySaleValue, type InventoryDiscontinued, type InventoryItem, type InventoryOutPurpose, type InventoryItemKind, type InventoryItemView, type InventoryLocation, type InventoryMove, type InventoryMoveKind, type InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryDetail, type InventoryList } from './api.js';
 import { Stocktake } from './Stocktake.js';
 import { BookingsPanel, OrderPanel, SlipResultPanel, SuppliersPanel } from './InventoryOrders.js';
@@ -57,9 +57,10 @@ export function Inventory({ itemId, onOpen, userId }: { itemId: string | null; o
 }
 
 /**
- * 需要の予測の印。一覧では短く（「多め 1.5 倍」）出し、マウスを重ねると詳しい中身を、押すとポップアップで出す（2026-10-19。場所を中身に使う）。
+ * 一覧の印のうち、押すとポップアップで詳しく出すもの（需要の予測・終売）。一覧では短く出し、マウスを重ねると全文、押すと中身を出す
+ * （2026-10-19。場所を中身に使う）。
  */
-function ForecastBadge({ item, compact }: { item: InventoryItemView; compact: boolean }) {
+function PopBadge({ label, full, title, tone = '', children }: { label: string; full: string; title: string; tone?: string; children: ReactNode }) {
   const [at, setAt] = useState<{ top: number; left: number } | null>(null);
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -72,31 +73,62 @@ function ForecastBadge({ item, compact }: { item: InventoryItemView; compact: bo
     window.addEventListener('scroll', away, true);
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key); window.removeEventListener('scroll', away, true); };
   }, [at]);
-  const f = item.forecast!;
-  const up = f.factor > 1;
-  const full = up ? `多めに使う見込み（${f.factor} 倍${f.note ? `。${f.note}` : ''}）` : `少なめの見込み（${f.factor} 倍${f.note ? `。${f.note}` : ''}）`;
-  if (!compact) return <span className="badge" title={f.note || undefined}>{full}</span>;
   return (
     <>
-      <button type="button" ref={ref} className="badge forecast-badge" title={full} aria-expanded={!!at}
+      <button type="button" ref={ref} className={`badge forecast-badge ${tone}`.trim()} title={full} aria-expanded={!!at}
         onClick={(e) => {
           e.stopPropagation();
           if (at) { setAt(null); return; }
           const r = ref.current!.getBoundingClientRect();
           // 下に余白が無ければ上に出す（ポップアップの高さはおよそ 150）
           setAt({ top: r.bottom + 160 > window.innerHeight ? Math.max(8, r.top - 160) : r.bottom + 4, left: Math.max(8, Math.min(r.right - 260, window.innerWidth - 268)) });
-        }}>{up ? '多め' : '少なめ'} {f.factor} 倍</button>
+        }}>{label}</button>
       {at && createPortal(
-        <div className="forecast-pop" role="dialog" aria-label="需要の予測" style={{ top: at.top, left: at.left }} onClick={(e) => e.stopPropagation()}>
-          <strong>需要の予測</strong>
-          <div>{up ? '次の 4 週は、いつもより多めに使う見込みです' : '次の 4 週は、いつもより少なめの見込みです'}（{f.factor} 倍）</div>
-          {f.note && <div>理由: {f.note}</div>}
-          {f.low !== null && <div className="muted small">予測の目安: {f.low} {item.unit}{item.lowThreshold !== null ? '（品目に決めた目安が先に効きます）' : ''}</div>}
-          <div className="muted small">{new Date(f.at).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })} に決め直しました</div>
+        <div className="forecast-pop" role="dialog" aria-label={title} style={{ top: at.top, left: at.left }} onClick={(e) => e.stopPropagation()}>
+          <strong>{title}</strong>
+          {children}
         </div>,
         document.body,
       )}
     </>
+  );
+}
+
+/** 需要の予測の印（倍率が 1 でない品目。第29.14節）。 */
+function ForecastBadge({ item, compact }: { item: InventoryItemView; compact: boolean }) {
+  const f = item.forecast!;
+  const up = f.factor > 1;
+  const full = up ? `多めに使う見込み（${f.factor} 倍${f.note ? `。${f.note}` : ''}）` : `少なめの見込み（${f.factor} 倍${f.note ? `。${f.note}` : ''}）`;
+  if (!compact) return <span className="badge" title={f.note || undefined}>{full}</span>;
+  return (
+    <PopBadge label={`${up ? '多め' : '少なめ'} ${f.factor} 倍`} full={full} title="需要の予測">
+      <div>{up ? '次の 4 週は、いつもより多めに使う見込みです' : '次の 4 週は、いつもより少なめの見込みです'}（{f.factor} 倍）</div>
+      {f.note && <div>理由: {f.note}</div>}
+      {f.low !== null && <div className="muted small">予測の目安: {f.low} {item.unit}{item.lowThreshold !== null ? '（品目に決めた目安が先に効きます）' : ''}</div>}
+      <div className="muted small">{new Date(f.at).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })} に決め直しました</div>
+    </PopBadge>
+  );
+}
+
+/** 終売の見込みの中身（日付・後継品・出典）。 */
+function DiscontinuedBody({ d }: { d: InventoryDiscontinued }) {
+  return (
+    <>
+      <div>{discontinuedText(d)}</div>
+      <div className="small">出典: {d.url ? <a href={d.url} target="_blank" rel="noreferrer">{d.source}</a> : d.source}</div>
+      <div className="muted small">{new Date(d.checkedAt).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })} に確かめました。発注の案は終売までに使う分だけにします</div>
+    </>
+  );
+}
+
+/** 終売の見込みの印（第29.24.1節）。 */
+function DiscontinuedBadge({ item, compact }: { item: InventoryItemView; compact: boolean }) {
+  const d = item.discontinued!;
+  if (!compact) return <span className="badge warn" title={d.source}>{discontinuedText(d)}</span>;
+  return (
+    <PopBadge label="終売" full={`${discontinuedText(d)}（出典: ${d.source}）`} title="メーカーの終売" tone="warn">
+      <DiscontinuedBody d={d} />
+    </PopBadge>
   );
 }
 
@@ -110,6 +142,8 @@ function Marks({ item, compact = false }: { item: InventoryItemView; compact?: b
       {item.low && item.status === 'active' && <span className="badge warn">残りわずか</span>}
       {/* 需要の予測（第29.14節）。倍率が 1 でない品目に、見込みと理由を出す */}
       {item.status === 'active' && item.forecast && item.forecast.factor !== 1 && <ForecastBadge item={item} compact={compact} />}
+      {/* メーカーの終売（第29.24.1節） */}
+      {item.discontinued && <DiscontinuedBadge item={item} compact={compact} />}
     </>
   );
 }
@@ -752,6 +786,16 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
         </div>
       </div>
       {message && <p className="small muted" role="status">{message}</p>}
+      {item.discontinued && (
+        <div className="card inv-discontinued">
+          <strong>メーカーの終売</strong>
+          <DiscontinuedBody d={item.discontinued} />
+          {list.admin && (
+            <button className="btn ghost small" onClick={() => void api.inventory.dismissDiscontinued(item.id)
+              .then(() => { setMessage('終売の印を外しました'); load(); }).catch((e) => setMessage(describeError(e, '外せませんでした')))}>終売ではない</button>
+          )}
+        </div>
+      )}
       {item.status === 'active' && (
         <MoveForm item={item} locations={list.locations} features={list.settings.features}
           onDone={(text) => { setMessage(text); load(); }} />
