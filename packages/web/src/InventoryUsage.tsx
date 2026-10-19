@@ -1,0 +1,94 @@
+/**
+ * @file 在庫の減り具合と需要の予測を見る（仕様書 第29.14.1節、Q-243）。
+ *
+ * 「減り具合」のタブ（品目ごとの 1 日の使用・前の 4 週との増減・あと何日・次の 4 週の見込み・予測の倍率と理由）と、
+ * 品目の詳細の週ごとの使用のグラフ（直近 12 週と次の 4 週の見込み）。数は見張りと同じ計算で、人に入れさせない。
+ */
+import { useEffect, useState } from 'react';
+import { inventoryKindLabel, type InventoryUsageRow, type InventoryWeeklyUsage } from '@m2office/shared';
+import { api, describeError } from './api.js';
+
+/** 数の表記（小数第 1 位まで）。 */
+const n1 = (v: number) => (Math.round(v * 10) / 10).toLocaleString('ja-JP');
+
+/** 前の 4 週との増減の表記。 */
+function Change({ pct }: { pct: number | null }) {
+  if (pct === null) return <span className="muted">—</span>;
+  if (pct === 0) return <span className="muted">±0%</span>;
+  return <span className={pct > 0 ? 'usage-up' : 'usage-down'}>{pct > 0 ? '↑' : '↓'} {Math.abs(pct)}%</span>;
+}
+
+/**
+ * 「減り具合」のタブ。一覧の絞り込み（区分・分類・状態）をそのまま効かせる。
+ *
+ * @param itemIds 一覧の絞り込みに当たる品目
+ */
+export function UsagePanel({ itemIds, onOpenItem }: { itemIds: Set<string>; onOpenItem: (id: string) => void }) {
+  const [rows, setRows] = useState<InventoryUsageRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { api.inventory.usage().then((r) => setRows(r.rows)).catch((e) => setError(describeError(e, '読み込めませんでした'))); }, []);
+  const shown = (rows ?? []).filter((r) => itemIds.has(r.itemId));
+  return (
+    <div className="card inventory-usage">
+      {error && <p className="error small">{error}</p>}
+      {!rows && !error && <p className="muted small">読み込み中…</p>}
+      {rows && shown.length === 0 && <p className="muted small">当たる品目はありません</p>}
+      {shown.length > 0 && (
+        <div className="table-scroll"><table className="table">
+          <thead>
+            <tr><th>品名</th><th>区分</th><th className="num">1 日の使用</th><th className="num">前の 4 週から</th><th className="num">あと</th><th className="num">次の 4 週の見込み</th><th>予測</th></tr>
+          </thead>
+          <tbody>
+            {shown.map((r) => (
+              <tr key={r.itemId} className="clickable" onClick={() => onOpenItem(r.itemId)}>
+                <td><button className="link" onClick={(e) => { e.stopPropagation(); onOpenItem(r.itemId); }}>{r.name}</button></td>
+                <td className="small nowrap">{inventoryKindLabel(r.kind)}</td>
+                <td className="num">{r.daily > 0 ? `${n1(r.daily)} ${r.unit}` : <span className="muted">使っていない</span>}</td>
+                <td className="num"><Change pct={r.changePct} /></td>
+                <td className="num">{r.daysLeft === null ? <span className="muted">—</span> : `${r.daysLeft} 日`}</td>
+                <td className="num"><strong>{r.next4w > 0 ? `${n1(r.next4w)} ${r.unit}` : '—'}</strong></td>
+                <td className="small">{r.factor !== 1 ? `${r.factor} 倍${r.note ? `（${r.note}）` : ''}` : <span className="muted">いつもどおり</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 品目の詳細の、週ごとの使用のグラフ（直近 12 週の棒と、次の 4 週の見込み）。
+ */
+export function UsageChart({ weekly, usage, unit }: { weekly: InventoryWeeklyUsage[]; usage: InventoryUsageRow | null; unit: string }) {
+  if (weekly.length === 0) return null;
+  const nextWeek = usage ? usage.next4w / 4 : 0;
+  const max = Math.max(1, ...weekly.map((w) => w.qty), nextWeek);
+  const W = 560;
+  const H = 120;
+  const slots = weekly.length + 4;
+  const bw = W / slots;
+  const y = (v: number) => H - (v / max) * (H - 16);
+  return (
+    <div className="usage-chart">
+      <h3>減り具合</h3>
+      <p className="small">
+        {usage && usage.daily > 0
+          ? <>1 日 {n1(usage.daily)} {unit}（前の 4 週から <Change pct={usage.changePct} />）{usage.daysLeft !== null && `・あと ${usage.daysLeft} 日`}・次の 4 週の見込み <strong>{n1(usage.next4w)} {unit}</strong>{usage.factor !== 1 && `（${usage.factor} 倍${usage.note ? `。${usage.note}` : ''}）`}</>
+          : <span className="muted">最近 4 週は使っていません</span>}
+      </p>
+      <svg viewBox={`0 0 ${W} ${H + 18}`} role="img" aria-label={`直近 ${weekly.length} 週の使用と次の 4 週の見込み`} className="usage-svg">
+        {weekly.map((w, k) => (
+          <g key={w.week}>
+            <rect x={k * bw + 3} y={y(w.qty)} width={bw - 6} height={H - y(w.qty)} className="usage-bar"><title>{`${w.week} の週: ${n1(w.qty)} ${unit}`}</title></rect>
+            {k % 2 === 0 && <text x={k * bw + bw / 2} y={H + 13} textAnchor="middle" className="usage-label">{w.week.slice(5).replace('-', '/')}</text>}
+          </g>
+        ))}
+        {nextWeek > 0 && Array.from({ length: 4 }, (_, k) => (
+          <rect key={k} x={(weekly.length + k) * bw + 3} y={y(nextWeek)} width={bw - 6} height={H - y(nextWeek)} className="usage-bar next"><title>{`見込み: 1 週 ${n1(nextWeek)} ${unit}`}</title></rect>
+        ))}
+        <text x={(weekly.length + 2) * bw} y={H + 13} textAnchor="middle" className="usage-label">見込み</text>
+      </svg>
+    </div>
+  );
+}

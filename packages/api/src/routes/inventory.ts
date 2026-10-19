@@ -89,6 +89,9 @@ export function inventoryRoute(deps: AppDeps) {
     });
   });
 
+  /** 品目ごとの減り具合と次の 4 週の見込み（第29.14.1節）。 */
+  app.get('/usage', async (c) => c.json({ rows: await service.usage(c.get('ctx').tenant.id) }));
+
   /** 品目 1 件（場所とロットごとの数・最近の記録）。 */
   app.get('/items/:id', async (c) => {
     const { tenant } = c.get('ctx');

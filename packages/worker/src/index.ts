@@ -826,7 +826,7 @@ while (running) {
     try {
       const n = await withAiUsage({ purpose: 'worker:inventory' }, () => runDemandForecasts({
         listTenantIds: () => repo.listTenantIds(), settingsOf: async (t) => (await repo.getTenantSettings(t)).inventory,
-        store: inventory.store, llmFor: (t) => ai.llmFor(t),
+        store: inventory.store, llmFor: (t) => ai.llmFor(t), researchFor: (t) => ai.researchFor(t),
       }, new Date()));
       if (n > 0) log.info('在庫の需要の予測を決め直しました', { items: n });
     } catch (err) {

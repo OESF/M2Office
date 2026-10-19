@@ -2469,3 +2469,14 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   .inventory-filter .inventory-value { margin-left: 0; width: 100%; }
 }
 .inventory-more.align-left .inventory-more-menu { right: auto; left: 0; }
+
+/* 減り具合（仕様書 第29.14.1節） */
+.usage-up { color: var(--warn); }
+.usage-down { color: var(--accent); }
+.usage-chart { margin: calc(12px * var(--space-scale)) 0; }
+.usage-svg { width: 100%; max-width: 640px; height: auto; display: block; }
+.usage-bar { fill: var(--accent); opacity: .75; }
+.usage-bar.next { fill: none; stroke: var(--accent); stroke-dasharray: 3 3; opacity: 1; }
+.usage-label { font-size: 10px; fill: var(--muted); }
+.inventory-usage td:first-child { min-width: 10em; }
+.inventory-usage td.num, .inventory-usage th { white-space: nowrap; }

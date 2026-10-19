@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { createPool } from '../repository/pool.js';
 import type {
-  InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryBookingStatus, InventoryCount, InventoryItem, InventoryItemKind,
+  InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryBookingStatus, InventoryCount, InventoryItem, InventoryItemKind, InventoryWeeklyUsage,
   InventoryLocation, InventoryMove, InventoryMoveKind, InventoryPublicationScope, InventoryPublicSnapshot, InventoryReservationLine,
   InventorySupplier,
 } from '@m2office/shared';
@@ -166,6 +166,8 @@ export interface InventoryStore {
   saveItem(tenantId: string, item: ItemRecord, userId: string, at: string): Promise<void>;
   /** 期間（`since` 以上 `until` 未満）の品目ごとの使用の合計（使う単位。取り消しを差し引く。需要の予測。第29.14節）。 */
   usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>>;
+  /** 品目の週ごと（月曜はじまり。日本時間）の使用（`since` から。第29.14.1節）。使った週だけを返す。 */
+  weeklyUsage(tenantId: string, itemId: string, since: string): Promise<InventoryWeeklyUsage[]>;
   /** 需要の予測を書く（第29.14節）。`null` なら消す。品目のほかの項目と更新の時刻は変えない。 */
   setForecast(tenantId: string, itemId: string, f: { low: number | null; factor: number; note: string; at: string } | null): Promise<void>;
   /** バーコードを足す。すでに別の品目のものなら `false`。 */
@@ -385,6 +387,14 @@ export class PostgresInventoryStore implements InventoryStore {
   async getItem(tenantId: string, id: string): Promise<InventoryItem | null> {
     const rows = await this.q<ItemRow>(tenantId, `${ITEM_SELECT} where i.tenant_id = $1 and i.id = $2`, [tenantId, id]);
     return rows[0] ? toItem(rows[0]) : null;
+  }
+
+  async weeklyUsage(tenantId: string, itemId: string, since: string): Promise<InventoryWeeklyUsage[]> {
+    const rows = await this.q<{ week: string; used: unknown }>(tenantId,
+      `select to_char(date_trunc('week', created_at at time zone 'Asia/Tokyo'), 'YYYY-MM-DD') as week, -sum(delta) as used
+         from inventory_moves where tenant_id = $1 and item_id = $2 and kind = 'out' and created_at >= $3 group by 1 order by 1`,
+      [tenantId, itemId, since]);
+    return rows.map((r) => ({ week: r.week, qty: Math.max(0, Number(r.used) || 0) }));
   }
 
   async usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>> {
@@ -797,6 +807,13 @@ export class PostgresInventoryStore implements InventoryStore {
  *
  * @remarks PostgreSQL 版と同じ決まり（いまの数を記録と同時に直す・会社で絞る）で動く
  */
+/** 日本時間の週の始まり（月曜）の日付（`YYYY-MM-DD`）。 */
+export function weekStartJst(iso: string): string {
+  const d = new Date(Date.parse(iso) + 9 * 3_600_000);
+  const back = (d.getUTCDay() + 6) % 7;
+  return new Date(d.getTime() - back * 86_400_000).toISOString().slice(0, 10);
+}
+
 export class MemoryInventoryStore implements InventoryStore {
   readonly items = new Map<string, InventoryItem & { tenantId: string }>();
   readonly codes = new Map<string, { tenantId: string; itemId: string }>();
@@ -826,6 +843,17 @@ export class MemoryInventoryStore implements InventoryStore {
     const prev = this.items.get(item.id);
     if (prev && prev.tenantId !== tenantId) return;
     this.items.set(item.id, { ...item, codes: [], updatedAt: at, tenantId, forecast: prev?.forecast ?? null });
+  }
+
+  async weeklyUsage(tenantId: string, itemId: string, since: string): Promise<InventoryWeeklyUsage[]> {
+    const out = new Map<string, number>();
+    for (const m of this.moves) {
+      const at = (m as { createdAt?: string }).createdAt ?? '';
+      if (m.tenantId !== tenantId || m.itemId !== itemId || m.kind !== 'out' || at < since) continue;
+      const week = weekStartJst(at);
+      out.set(week, (out.get(week) ?? 0) - m.delta);
+    }
+    return [...out].sort(([a], [b]) => a.localeCompare(b)).map(([week, qty]) => ({ week, qty: Math.max(0, qty) }));
   }
 
   async usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>> {

@@ -424,3 +424,32 @@ export function inventorySaleValue(items: InventoryItemView[], rounding: 'floor'
   return { withTax, withoutTax, counted, noPrice };
 }
 
+/** 品目ごとの減り具合と次の見込み（第29.14.1節、Q-243）。 */
+export interface InventoryUsageRow {
+  itemId: string;
+  name: string;
+  kind: InventoryItemKind;
+  category: string;
+  unit: string;
+  /** 直近 4 週の 1 日あたりの使用（販売品は売れた数）。 */
+  daily: number;
+  /** その前の 4 週の 1 日あたりの使用。 */
+  prevDaily: number;
+  /** 前の 4 週と比べた増減（%）。前の 4 週に使っていなければ `null`。 */
+  changePct: number | null;
+  /** あと何日で無くなるか（使っていなければ `null`）。 */
+  daysLeft: number | null;
+  /** 次の 4 週の見込み（1 日の使用 × 予測の倍率 × 28 日）。 */
+  next4w: number;
+  /** 需要の予測の倍率（予測が無ければ 1）と理由。 */
+  factor: number;
+  note: string;
+}
+
+/** 週ごとの使用（品目の詳細のグラフ。第29.14.1節）。 */
+export interface InventoryWeeklyUsage {
+  /** 週の始まり（月曜。日本時間の `YYYY-MM-DD`）。 */
+  week: string;
+  qty: number;
+}
+

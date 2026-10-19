@@ -7694,5 +7694,34 @@ console.log('\n■ 106. 在庫の区分・消費税率・一覧の絞り込み�
   }
 }
 
+console.log('\n■ 107. 減り具合と次の見込み（第29.14.1節、Q-243）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用減り${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const item = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} 茶`, unit: '本', price: 160, initialQty: 100 }) }, 'member')).body?.item;
+    for (const qty of [3, 4]) await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId: item?.id, qty }) }, 'member');
+    const usage = (await call('a', '/v1/inventory/usage', {}, 'member')).body?.rows ?? [];
+    const row = usage.find((r) => r.itemId === item?.id);
+    const detail = (await call('a', `/v1/inventory/items/${item?.id}`, {}, 'member')).body;
+    const other = await call('b', '/v1/inventory/usage', {}, 'member');
+    row?.daily === 0.25 && row.next4w === 7 && detail?.weekly?.length === 12 && detail.weekly.at(-1)?.qty === 7 && detail.usage?.itemId === item?.id
+      && !(other.body?.rows ?? []).some((r) => r.itemId === item?.id)
+      ? ok('品目ごとの 1 日の使用と次の 4 週の見込み、品目の詳細の週ごとの使用を返し、ほかの会社には出さない') : ng('減り具合が違う', JSON.stringify({ row, weekly: detail?.weekly?.slice(-2), other: other.status }));
+  } catch (err) {
+    ng('減り具合の確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

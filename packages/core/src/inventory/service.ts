@@ -8,7 +8,7 @@
 
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
-  canUseAgent, INVENTORY_EXTENSION_ID, INVENTORY_ITEM_KINDS, inventoryKindLabel, type InventoryItemKind, type InventoryTaxRate,
+  canUseAgent, INVENTORY_EXTENSION_ID, INVENTORY_ITEM_KINDS, inventoryKindLabel, type InventoryItemKind, type InventoryTaxRate, type InventoryUsageRow, type InventoryWeeklyUsage,
   type AuditEvent, type InventoryCount, type InventoryCountRow, type InventoryCountScope, type InventoryCountView,
   type InventoryItem, type InventoryItemView, type InventoryLocation, type InventoryMove,
   type InventoryMoveKind, type InventorySettings, type InventoryStockRow, type InventorySupplier,
@@ -17,7 +17,7 @@ import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
 import { dateIn } from '../cards/service.js';
-import type { InventoryStore, ItemRecord, NewMove, StockRecord } from './store.js';
+import { weekStartJst, type InventoryStore, type ItemRecord, type NewMove, type StockRecord } from './store.js';
 import { parseCode, type ParsedCode } from './gs1.js';
 import { shelfKeyOf } from './labels.js';
 import { effectiveLow, forecastItem, sortForecast, USAGE_DAYS, type ForecastRow } from './forecast.js';
@@ -28,6 +28,8 @@ export const DEFAULT_WAREHOUSE = '倉庫';
 
 /** 取り込める行の上限（想定する会社の品目は数十〜数千。第29.1.1節）。 */
 export const IMPORT_MAX_ROWS = 5000;
+/** 品目の詳細のグラフに出す週の数（第29.14.1節）。 */
+export const WEEKLY_WEEKS = 12;
 
 /** 品目を作る・直すときに受け取る値。省いた項目は変えない（作るときは既定）。 */
 export interface ItemInput {
@@ -91,6 +93,10 @@ export interface ItemDetail {
   item: InventoryItemView;
   stock: InventoryStockRow[];
   moves: InventoryMove[];
+  /** 直近 12 週の週ごとの使用（使っていない週は 0。古い順。第29.14.1節）。 */
+  weekly: InventoryWeeklyUsage[];
+  /** 減り具合と次の 4 週の見込み。 */
+  usage: InventoryUsageRow | null;
 }
 
 /** 納品書からの入庫の結果（第29.9節）。 */
@@ -305,7 +311,44 @@ export class InventoryService {
     const [view] = await this.views(tenantId, [item], settings, today);
     const stock = (await this.deps.store.listStock(tenantId, [itemId])).map(({ itemId: _i, ...s }) => s);
     const moves = await this.deps.store.listMoves(tenantId, { itemId, limit: 50 });
-    return { item: view!, stock, moves };
+    // 直近 12 週の週ごとの使用（第29.14.1節）。使っていない週も 0 で並べる
+    const day = today ?? dateIn('Asia/Tokyo');
+    const thisWeek = weekStartJst(`${day}T12:00:00+09:00`);
+    const weeks = Array.from({ length: WEEKLY_WEEKS }, (_, k) => new Date(Date.parse(`${thisWeek}T00:00:00Z`) - (WEEKLY_WEEKS - 1 - k) * 7 * 86_400_000).toISOString().slice(0, 10));
+    const got = new Map((await this.deps.store.weeklyUsage(tenantId, itemId, new Date(Date.parse(`${weeks[0]}T00:00:00+09:00`)).toISOString())).map((w) => [w.week, w.qty]));
+    const [usage] = await this.usage(tenantId, { itemIds: [itemId], today: day });
+    return { item: view!, stock, moves, weekly: weeks.map((week) => ({ week, qty: round3(got.get(week) ?? 0) })), usage: usage ?? null };
+  }
+
+  /**
+   * 品目ごとの減り具合と次の 4 週の見込み（第29.14.1節、Q-243）。
+   *
+   * @remarks 使用は「使用」の記録から取り消しを差し引いたもの（調整は数えない）。並びは「あと何日」の短い順（使っていない品目は後ろ）
+   */
+  async usage(tenantId: string, opts: { itemIds?: string[]; today?: string } = {}): Promise<InventoryUsageRow[]> {
+    const day = opts.today ?? dateIn('Asia/Tokyo');
+    const at = (offset: number) => new Date(Date.parse(`${day}T00:00:00+09:00`) + offset * 86_400_000).toISOString();
+    const [items, recent, before, forecast] = await Promise.all([
+      this.list(tenantId, { today: day }),
+      this.deps.store.usageByItem(tenantId, at(-USAGE_DAYS), at(1)),
+      this.deps.store.usageByItem(tenantId, at(-2 * USAGE_DAYS), at(-USAGE_DAYS)),
+      this.forecast(tenantId, day),
+    ]);
+    const settings = await this.settings(tenantId);
+    const left = new Map(forecast.map((r) => [r.itemId, r.daysLeft]));
+    const round1 = (n: number) => Math.round(n * 10) / 10;
+    const rows = items.filter((i) => i.status === 'active' && (!opts.itemIds || opts.itemIds.includes(i.id))).map((i): InventoryUsageRow => {
+      const daily = round3(Math.max(0, recent.get(i.id) ?? 0) / USAGE_DAYS);
+      const prevDaily = round3(Math.max(0, before.get(i.id) ?? 0) / USAGE_DAYS);
+      const factor = settings.features.forecast !== false ? i.forecast?.factor ?? 1 : 1;
+      return {
+        itemId: i.id, name: i.name, kind: i.kind, category: i.category, unit: i.unit, daily, prevDaily,
+        changePct: prevDaily > 0 ? Math.round(((daily - prevDaily) / prevDaily) * 100) : null,
+        daysLeft: left.get(i.id) ?? null, next4w: round1(daily * factor * USAGE_DAYS), factor,
+        note: factor !== 1 ? i.forecast?.note ?? '' : '',
+      };
+    });
+    return rows.sort((a, b) => (a.daysLeft ?? Infinity) - (b.daysLeft ?? Infinity) || b.daily - a.daily);
   }
 
   private async views(tenantId: string, items: InventoryItem[], settings: InventorySettings, today?: string): Promise<InventoryItemView[]> {

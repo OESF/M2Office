@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { DataRecipient, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
+import type { DataRecipient, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
@@ -477,6 +477,10 @@ export interface InventoryDetail {
   item: InventoryItemView;
   stock: InventoryStockRow[];
   moves: InventoryMove[];
+  /** 直近 12 週の週ごとの使用（第29.14.1節）。 */
+  weekly: InventoryWeeklyUsage[];
+  /** 減り具合と次の 4 週の見込み。 */
+  usage: InventoryUsageRow | null;
 }
 
 /** 入出庫を記録するときに送る値。 */
@@ -1885,6 +1889,8 @@ export const api = {
       return call<InventoryList>(`/inventory?${p.toString()}`);
     },
     get: (id: string) => call<InventoryDetail>(`/inventory/items/${encodeURIComponent(id)}`),
+    /** 品目ごとの減り具合と次の 4 週の見込み（第29.14.1節）。 */
+    usage: () => call<{ rows: InventoryUsageRow[] }>('/inventory/usage'),
     /**
      * 品目を作る。はじめの数があれば入庫として記録する。
      *
