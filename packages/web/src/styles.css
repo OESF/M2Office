@@ -2518,7 +2518,11 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .inv-card:not(:disabled):hover { background: var(--accent-soft); }
 .inv-card.active { outline: 2px solid var(--accent); outline-offset: -1px; }
 .inv-card-label { font-size: .85em; color: var(--muted); }
-.inv-card-num { font-size: 1.6em; line-height: 1.2; }
+.inv-card-label, .inv-card-sub { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inv-card-num { font-size: 1.6em; line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.inv-card-num.long { font-size: 1.4em; }
+.inv-card-num.longer { font-size: 1.2em; }
+.inv-card-unit { font-size: .6em; font-weight: 600; margin-left: 2px; color: var(--muted); }
 .inv-card-sub { font-size: .75em; color: var(--muted); }
 .inv-card.tone-neutral { border-top-color: var(--muted); }
 .inv-card.tone-danger { border-top-color: var(--danger); }

@@ -45,11 +45,12 @@ export function InventorySummary({ items, runningOut, todayOut, taxRounding, act
     expiring: used.filter((i) => !!i.nearestExpiry && i.nearestExpiry >= today && i.nearestExpiry <= soon).length,
   };
   const value = inventorySaleValue(used, taxRounding);
-  const card = (key: SummaryFilter, label: string, num: string, sub: string, tone: 'neutral' | 'danger' | 'warn' | 'ok' | 'accent') => (
+  // 数は 1 行に収める（単位は小さく添え、桁が多ければ字を小さくする）。説明も 1 行にそろえ、収まらない分は「…」（全文はマウスを重ねると出る）
+  const card = (key: SummaryFilter, label: string, num: string, sub: string, tone: 'neutral' | 'danger' | 'warn' | 'ok' | 'accent', unit = '') => (
     <button type="button" className={`inv-card tone-${tone}${active === key && key ? ' active' : ''}`} disabled={!key}
-      onClick={() => key && onFilter(active === key ? null : key)} aria-pressed={key ? active === key : undefined}>
+      onClick={() => key && onFilter(active === key ? null : key)} aria-pressed={key ? active === key : undefined} title={`${label}: ${num}${unit}（${sub}）`}>
       <span className="inv-card-label">{label}</span>
-      <strong className="inv-card-num">{num}</strong>
+      <strong className={`inv-card-num${num.length >= 9 ? ' longer' : num.length >= 7 ? ' long' : ''}`}>{num}{unit && <span className="inv-card-unit">{unit}</span>}</strong>
       <span className="inv-card-sub">{sub}</span>
     </button>
   );
@@ -77,7 +78,7 @@ export function InventorySummary({ items, runningOut, todayOut, taxRounding, act
         {card(null, '本日の出庫', String(todayOut), '今日の使用の記録', 'accent')}
         {card('expired', '期限切れ', String(n.expired), '期限の切れたロットあり', n.expired ? 'warn' : 'ok')}
         {card('expiring', '期限が近い', String(n.expiring), '30 日以内', n.expiring ? 'warn' : 'ok')}
-        {(value.counted > 0 || value.noPrice > 0) && card('sale', '販売品の在庫額', `${value.withTax.toLocaleString('ja-JP')} 円`, `税込・${value.counted} 品目${value.noPrice ? `（価格なし ${value.noPrice}）` : ''}`, 'accent')}
+        {(value.counted > 0 || value.noPrice > 0) && card('sale', '販売品の在庫額', value.withTax.toLocaleString('ja-JP'), `税込・${value.counted} 品目${value.noPrice ? `（価格なし ${value.noPrice}）` : ''}`, 'accent', '円')}
       </div>
     </section>
   );
