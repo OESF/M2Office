@@ -744,6 +744,12 @@ export class RunEngine {
     if (kind === 'run' && def?.category === 'briefing') {
       const text = answerOfSteps(await repo.listRunSteps(run.tenantId, run.id));
       const day = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric' }).format(new Date(at));
+      // 本文は本人の成果物として残し、ブリーフの画面で過去の分も読めるようにする（第9.5.5.1.2節、Q-246）。
+      // 集めた段の中身は 7 日で消えるが、ここに残した本文は消さない。残せなくても通知は届ける
+      if (text) {
+        await repo.saveBrief(run.tenantId, job.requestedBy, { runId: run.id, agentId: job.agentId, title: `${name}（${day}）`, body: text, createdAt: at })
+          .catch((err: unknown) => this.log.error('ブリーフの本文を残せませんでした', { tenantId: run.tenantId, runId: run.id, err }));
+      }
       await this.notify(run.tenantId, job.requestedBy, {
         kind: 'brief', title: `${name}（${day}）`, body: (text || body).slice(0, BRIEF_NOTICE_MAX), runId: run.id, at,
       });

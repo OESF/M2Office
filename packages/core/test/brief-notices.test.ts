@@ -224,8 +224,9 @@ test('秘書: 「全員に〜伝えて」でお知らせを出す。無いグル
   assert.equal(ok?.action, 'withdraw');
 });
 
-test('ブリーフの業務が終わったら、「完了」を切っている人にも「ブリーフ」の通知として中身ごと届く', async () => {
+test('ブリーフの業務が終わったら、「完了」を切っている人にも「ブリーフ」の通知として中身ごと届き、本文を本人の成果物として残す', async () => {
   const created: Notification[] = [];
+  const saved: { userId: string; runId: string; agentId: string; body?: string }[] = [];
   const steps: Record<string, unknown>[] = [];
   const now = new Date().toISOString();
   const job: Job = { id: 'j1', tenantId: 't', agentId: 'brief-test', agentVersion: 1, requestedBy: 'u', origin: 'schedule', input: {}, createdAt: now };
@@ -241,6 +242,7 @@ test('ブリーフの業務が終わったら、「完了」を切っている�
     findUserById: async () => ({ id: 'u', tenantId: 't', displayName: '三浦', roles: ['member'] }),
     getTenantSettings: async () => DEFAULT_TENANT_SETTINGS, getUserSettings: async () => prefs,
     listUserCompartments: async () => [], listUserGroupIds: async () => [],
+    saveBrief: async (_t: string, userId: string, b: { runId: string; agentId: string; body?: string }) => { saved.push({ userId, ...b }); },
   };
   const def: AgentDefinition = {
     schemaVersion: 1, id: 'brief-test', version: 1, name: '朝のブリーフ', category: 'briefing', description: 'テスト',
@@ -258,6 +260,7 @@ test('ブリーフの業務が終わったら、「完了」を切っている�
   assert.equal(created[0]!.kind, 'brief');
   assert.match(created[0]!.title, /^朝のブリーフ（\d+\/\d+）$/);
   assert.equal(created[0]!.body, '今日は雨です。傘をお持ちください。', '本文にブリーフをそのまま入れる');
+  assert.deepEqual(saved.map((b) => [b.userId, b.runId, b.agentId, b.body]), [['u', 'r1', 'brief-test', '今日は雨です。傘をお持ちください。']], 'ブリーフの画面で読めるよう本文を残す（第9.5.5.1.2節）');
 });
 
 test('前の段の結果: 上限を超えても各段の文を残し、後ろの段を落とさない（第9.3.2節）', async () => {

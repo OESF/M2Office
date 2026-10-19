@@ -7801,5 +7801,103 @@ console.log('\n■ 109. 仕入価格と利益率（見て直せるのは利用�
   }
 }
 
+console.log('\n■ 110. Web への公開と外部のアプリの品目を、区分と分類で選ぶ（条件は覚えるが、あとで当たる品目は承認し直すまで出さない。第29.12.3節、Q-245）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用区分${Date.now().toString(36)}`;
+  const startedAt = new Date().toISOString();
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  let appId = null;
+  const add = async (name, kind, category) => (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} ${name}`, unit: '個', kind, category: `${tag}${category}`, price: kind === 'sale' ? 500 : undefined }) })).body?.item;
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ features: { publish: true } }) });
+    const cosme = await add('化粧水', 'sale', '化粧品');
+    const daily = await add('歯ブラシ', 'sale', '日用品');
+    const supply = await add('手袋', 'supply', '化粧品');
+    const rule = { kinds: ['sale', 'bogus'], categories: [`${tag}化粧品`, `${tag}日用品`], excluded: [] };
+    const pubId = (await call('a', '/v1/inventory/publications', { method: 'POST', body: JSON.stringify({ name: `${tag} 化粧品と日用品` }) })).body?.publication?.id;
+    const pub = await call('a', `/v1/inventory/publications/${pubId}`, { method: 'PUT', body: JSON.stringify({ itemIds: [cosme?.id, daily?.id], fields: [], showCount: false, rule }) });
+    const savedRule = pub.body?.publication?.scope?.rule;
+    const { rows: audit } = await owner.query(`select detail from audit_events where tenant_id = 't-alpha' and action = 'inventory.publication.approve' and target_id = $1 order by at desc limit 1`, [pubId]).catch(() => ({ rows: [] }));
+    pub.status === 200 && JSON.stringify(savedRule?.kinds) === '["sale"]' && savedRule?.categories?.length === 2 && pub.body.publication.scope.itemIds.length === 2
+      ? ok('区分と分類の条件を公開の中身として覚え（知らない区分は捨てる）、選んだ品目だけを承認する') : ng('公開の条件の覚え方が違う', JSON.stringify({ status: pub.status, rule: savedRule, audit: audit[0]?.detail }));
+    // あとで条件に当たる品目を足しても、承認し直すまで公開のデータには出さない
+    const later = await add('ハンドソープ', 'sale', '日用品');
+    const key = pub.body?.publication?.key;
+    const before = await (await fetch(`${API}/v1/public/inventory/${key}.json`)).json().catch(() => ({}));
+    const names = (before.items ?? []).map((r) => r.name);
+    const again = await call('a', `/v1/inventory/publications/${pubId}`, { method: 'PUT', body: JSON.stringify({ itemIds: [cosme?.id, daily?.id, later?.id], fields: [], showCount: false, rule }) });
+    const after = await (await fetch(`${API}/v1/public/inventory/${key}.json`)).json().catch(() => ({}));
+    names.length === 2 && !names.some((n) => n.includes('ハンドソープ')) && !names.some((n) => n.includes('手袋')) && again.status === 200
+      && (after.items ?? []).some((r) => r.name.includes('ハンドソープ'))
+      ? ok('あとで条件に当たる品目は、承認し直すまで公開に出さず、承認し直すと出る') : ng('条件に当たる新しい品目の出方が違う', JSON.stringify({ before: names, after: (after.items ?? []).map((r) => r.name), supply: supply?.id }));
+    // 外部のアプリの「商品の一覧を読む」も同じ条件を覚える
+    appId = (await call('a', '/v1/admin/apps', { method: 'POST', body: JSON.stringify({ name: `${tag} 販売管理` }) })).body?.app?.id;
+    const approved = await call('a', `/v1/admin/apps/${appId}`, { method: 'PUT', body: JSON.stringify({ functions: ['inventory.catalog'], settings: { catalog: { itemIds: [cosme?.id], showCount: false, price: true, employeePrice: false, rule: { kinds: ['sale'], categories: [`${tag}化粧品`], excluded: [] } } } }) });
+    const cat = (approved.body?.app ?? approved.body)?.settings?.catalog;
+    approved.status === 200 && JSON.stringify(cat?.rule?.categories) === JSON.stringify([`${tag}化粧品`]) && cat?.itemIds?.length === 1
+      ? ok('外部のアプリの「商品の一覧を読む」も、区分と分類の条件を覚える') : ng('外部のアプリの条件が違う', JSON.stringify({ status: approved.status, body: approved.body }));
+  } catch (err) {
+    ng('区分と分類で選ぶ確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from inventory_publications where tenant_id = 't-alpha' and created_at >= $1`, [startedAt]);
+    if (appId) { await call('a', `/v1/admin/apps/${appId}/stop`, { method: 'POST', body: '{}' }); await call('a', `/v1/admin/apps/${appId}`, { method: 'DELETE' }); }
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 111. ブリーフの画面（本文を本人の成果物として残し、本人だけが一覧・本文を読み、削除できる。第9.5.5.1.2節、Q-246）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  let runId = null;
+  try {
+    const started = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: 'morning-brief', input: {}, origin: 'menu' }) }, 'member');
+    runId = started.body?.runId;
+    const during = (await call('a', '/v1/briefs?agent=morning-brief', {}, 'member')).body;
+    const deadline = Date.now() + 40000;
+    let listed = null;
+    while (Date.now() < deadline && !listed) {
+      const r = (await call('a', '/v1/briefs?agent=morning-brief', {}, 'member')).body;
+      listed = (r?.items ?? []).find((b) => b.runId === runId) ? r : null;
+      if (!listed) await sleep(1000);
+    }
+    const detail = await call('a', `/v1/briefs/${runId}`, {}, 'member');
+    const byAdmin = await call('a', `/v1/briefs/${runId}`);
+    const adminList = (await call('a', '/v1/briefs?agent=morning-brief')).body;
+    const notBrief = await call('a', '/v1/briefs?agent=minutes', {}, 'member');
+    const otherTenant = await call('b', `/v1/briefs/${runId}`);
+    listed && during?.running?.runId === runId && listed.items[0]?.runId === runId && listed.items[0]?.body === undefined && listed.running === null
+      && typeof detail.body?.brief?.body === 'string' && detail.body.brief.body.length > 0 && detail.body.brief.agentId === 'morning-brief'
+      && byAdmin.status === 404 && !(adminList?.items ?? []).some((b) => b.runId === runId) && notBrief.status === 404 && otherTenant.status === 404
+      ? ok('ブリーフの本文は終わると残り、一覧（本文なし）と本文は本人だけが読める。まとめている間は実行を返す')
+      : ng('ブリーフの残り方・見え方が違う', JSON.stringify({ running: during?.running, listed: !!listed, detail: detail.status, admin: byAdmin.status, notBrief: notBrief.status, other: otherTenant.status }));
+    // 7 日で集めた段の中身を消しても、残した本文は消えない（第14.3.2節の成果物）
+    await owner.query(`update runs set ended_at = now() - interval '8 days' where id = $1`, [runId]);
+    await owner.query(`update run_steps set output = '{"redacted":true}' where run_id = $1`, [runId]);
+    const kept = await call('a', `/v1/briefs/${runId}`, {}, 'member');
+    const delOther = await call('a', `/v1/briefs/${runId}`, { method: 'DELETE' });
+    const del = await call('a', `/v1/briefs/${runId}`, { method: 'DELETE' }, 'member');
+    const gone = await call('a', `/v1/briefs/${runId}`, {}, 'member');
+    kept.status === 200 && kept.body?.brief?.body === detail.body?.brief?.body && delOther.status === 404 && del.status === 200 && gone.status === 404
+      ? ok('集めた段の中身を消しても本文は残り、削除できるのは本人だけ') : ng('ブリーフの削除が違う', JSON.stringify({ kept: kept.status, delOther: delOther.status, del: del.status, gone: gone.status }));
+  } catch (err) {
+    ng('ブリーフの画面の確認が途中で止まった', String(err));
+  } finally {
+    if (runId) await owner.query(`delete from briefs where run_id = $1`, [runId]);
+    // 動かしたブリーフを伝えたことにしておく（秘書が後の節で言い出さないように）
+    await call('a', '/v1/secretary/lookups/claim', { method: 'POST' }, 'member').catch(() => undefined);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

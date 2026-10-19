@@ -65,6 +65,7 @@ function fakeRepo() {
     approvals: [{ id: 'a1', runStepId: 'sa', tenantId: 't', approverRole: ['approver'], approverUserId: null, present: '山田様への返信: …', decision: null, decidedBy: null, comment: null, decidedAt: null, createdAt: at }] as Approval[],
     marked: [] as { runId: string; steps: RunStep[] | null }[],
     notifications: [] as Notification[],
+    briefsDeletedFor: [] as string[],
   };
   const repo = {
     listTenantIds: async () => ['t'],
@@ -83,6 +84,8 @@ function fakeRepo() {
     updateRun: async (r: Run) => { state.runs = state.runs.map((x) => (x.id === r.id ? r : x)); },
     appendAudit: async () => undefined,
     createNotification: async (n: Notification) => { state.notifications.push(n); },
+    listUserRunsForPurge: async () => state.runs.filter((r) => r.status === 'completed'),
+    deleteUserBriefs: async (_t: string, userId: string) => { state.briefsDeletedFor.push(userId); return 1; },
   } as unknown as Repository;
   return { repo, state };
 }
@@ -108,4 +111,12 @@ test('承認待ちのまま 30 日たった実行は期限切れにして止め�
   assert.equal(state.notifications[0]?.userId, 'u-member');
   assert.ok(state.marked.some((m) => m.runId === 'r-wait' && m.steps !== null), '期限切れの実行の中身もすぐに消す');
   assert.ok(REDACTED_PRESENT.includes('消しました'));
+});
+
+test('Google の連携を解除したら、実行の中身と一緒に、残しておいたブリーフの本文も消す（第9.5.5.1.2節）', async () => {
+  const { repo, state } = fakeRepo();
+  const r = new GoogleDataRetention({ repo, isGoogleTool, logger: silentLogger });
+  const n = await r.purgeUser('t', 'u-member', new Date('2026-09-02T00:00:00.000Z'));
+  assert.equal(n, 1);
+  assert.deepEqual(state.briefsDeletedFor, ['u-member']);
 });

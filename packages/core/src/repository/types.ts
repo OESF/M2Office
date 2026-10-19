@@ -5,7 +5,7 @@
  */
 
 import type {
-  Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
+  Approval, Artifact, AuditEvent, Brief, Job, Notification, Run, RunStep, Schedule, Session,
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import type { ConnectorDeclaration } from '../extensions/connectors.js';
@@ -132,6 +132,20 @@ export interface Repository {
   createNotification(n: Notification): Promise<void>;
   /** 本人の通知を新しい順に返す。他人の通知は返さない。 */
   listNotifications(tenantId: string, userId: string, limit: number): Promise<Notification[]>;
+  /** ブリーフの本文を残す（同じ実行なら上書き。第9.5.5.1.2節）。 */
+  saveBrief(tenantId: string, userId: string, b: Brief): Promise<void>;
+  /**
+   * 本人のブリーフを新しい順に返す（本文は省く）。
+   *
+   * @param before この時刻より前のもの（続きを読むとき）
+   */
+  listBriefs(tenantId: string, userId: string, agentId: string, opts: { before?: string; limit: number }): Promise<Brief[]>;
+  /** 本人のブリーフ 1 件（本文つき）。本人のものでなければ `null`。 */
+  getBrief(tenantId: string, userId: string, runId: string): Promise<Brief | null>;
+  /** 本人のブリーフ 1 件を消す。消せたら `true`。 */
+  deleteBrief(tenantId: string, userId: string, runId: string): Promise<boolean>;
+  /** 本人のブリーフをすべて消す（Google の連携の解除・データの削除の求め）。消した数を返す。 */
+  deleteUserBriefs(tenantId: string, userId: string): Promise<number>;
   /**
    * まだ控えを届けていない通知（仕様書 第6.5.5.2節）。古い順に返す。
    *

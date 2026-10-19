@@ -10,7 +10,7 @@
 import pg from 'pg';
 import { createPool } from './pool.js';
 import type {
-  Approval, Artifact, AuditEvent, Job, Notification, Run, RunStep, Schedule, Session,
+  Approval, Artifact, AuditEvent, Brief, Job, Notification, Run, RunStep, Schedule, Session,
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS } from '@m2office/shared';
@@ -874,6 +874,41 @@ export class PostgresRepository implements Repository {
         order by created_at desc limit $3`,
       [tenantId, userId, limit],
     );
+  }
+
+  async saveBrief(tenantId: string, userId: string, b: Brief): Promise<void> {
+    await this.q(tenantId,
+      `insert into briefs (run_id, tenant_id, user_id, agent_id, title, body, created_at) values ($2, $1, $3, $4, $5, $6, $7)
+       on conflict (run_id) do update set title = excluded.title, body = excluded.body`,
+      [tenantId, b.runId, userId, b.agentId, b.title, b.body ?? '', b.createdAt]);
+  }
+
+  async listBriefs(tenantId: string, userId: string, agentId: string, opts: { before?: string; limit: number }): Promise<Brief[]> {
+    return this.q<Brief>(tenantId,
+      `select run_id as "runId", agent_id as "agentId", title, created_at as "createdAt"
+         from briefs where tenant_id = $1 and user_id = $2 and agent_id = $3 and ($4::timestamptz is null or created_at < $4)
+        order by created_at desc limit $5`,
+      [tenantId, userId, agentId, opts.before ?? null, opts.limit]);
+  }
+
+  async getBrief(tenantId: string, userId: string, runId: string): Promise<Brief | null> {
+    const rows = await this.q<Brief>(tenantId,
+      `select run_id as "runId", agent_id as "agentId", title, body, created_at as "createdAt"
+         from briefs where tenant_id = $1 and user_id = $2 and run_id = $3`,
+      [tenantId, userId, runId]);
+    return rows[0] ?? null;
+  }
+
+  async deleteBrief(tenantId: string, userId: string, runId: string): Promise<boolean> {
+    const rows = await this.q<{ run_id: string }>(tenantId,
+      `delete from briefs where tenant_id = $1 and user_id = $2 and run_id = $3 returning run_id`, [tenantId, userId, runId]);
+    return rows.length > 0;
+  }
+
+  async deleteUserBriefs(tenantId: string, userId: string): Promise<number> {
+    const rows = await this.q<{ run_id: string }>(tenantId,
+      `delete from briefs where tenant_id = $1 and user_id = $2 returning run_id`, [tenantId, userId]);
+    return rows.length;
   }
 
   async listUndeliveredNotifications(tenantId: string, limit: number): Promise<Notification[]> {

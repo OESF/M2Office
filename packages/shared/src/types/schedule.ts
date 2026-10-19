@@ -47,6 +47,23 @@ export interface Schedule {
 export type NotificationKind = 'brief' | 'run' | 'approval' | 'failure' | 'security' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'member' | 'print' | 'usage' | 'usageSelf' | 'effect' | 'knowledgeGap' | 'notice' | 'machine' | 'service' | 'support';
 
 /**
+ * 朝のブリーフ・週次ブリーフの 1 回分（仕様書 第9.5.5.1.2節、Q-246）。本人が受け取る成果物として、実行の記録と同じ期間残す。
+ *
+ * 見られるのは本人だけ。Google の連携の解除・データの削除の求めで消す。
+ */
+export interface Brief {
+  /** そのブリーフを作った実行。 */
+  runId: string;
+  /** 業務の ID（`morning-brief`・`weekly-brief`）。 */
+  agentId: string;
+  /** 題名（例: 「朝のブリーフ（10/19）」）。 */
+  title: string;
+  /** 本文（Markdown）。一覧では省く。 */
+  body?: string;
+  createdAt: string;
+}
+
+/**
  * 本人宛の通知。
  *
  * @remarks

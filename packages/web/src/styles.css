@@ -1447,6 +1447,18 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .m-home { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
 .m-big { min-height: 120px; font-size: 22px; font-weight: 700; border-radius: 16px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
 .m-big:active { background: var(--accent-soft); }
+/* はじめの画面の 4 つ。色は動きごとに分け、地は色を薄く混ぜてダークでも沈まないようにする */
+.m-action { --tone: var(--accent); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  background: color-mix(in srgb, var(--tone) 9%, var(--panel)); border-color: color-mix(in srgb, var(--tone) 28%, var(--line));
+  box-shadow: 0 1px 3px var(--shadow-sm); transition: transform .08s ease, background .15s ease; }
+.m-action:active { transform: scale(.97); background: color-mix(in srgb, var(--tone) 18%, var(--panel)); }
+.m-action.in { --tone: var(--ok-strong); }
+.m-action.out { --tone: var(--amber); }
+.m-action.count { --tone: var(--accent); }
+.m-action.find { --tone: #3b82f6; }
+.m-action-icon { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; color: #fff;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--tone) 80%, #fff), var(--tone)); box-shadow: 0 2px 6px color-mix(in srgb, var(--tone) 35%, transparent); }
+.m-action-icon svg { width: 30px; height: 30px; }
 .m-big.wide { width: 100%; min-height: 72px; margin-bottom: 10px; }
 .m-flow-title { font-size: 20px; margin: 4px 0 8px; display: flex; align-items: baseline; gap: 8px; }
 .m-sub { color: var(--muted); font-size: 13px; font-weight: 400; }
@@ -1908,6 +1920,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .publish-name { font-weight: 600; font-size: calc(15px * var(--font-scale)); max-width: 20em; }
 .publish-categories { display: flex; flex-wrap: wrap; gap: calc(4px * var(--space-scale)); padding: calc(4px * var(--space-scale)) 0; }
 .chip-btn { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 1px calc(8px * var(--space-scale)); cursor: pointer; color: inherit; font: inherit; font-size: calc(12px * var(--font-scale)); }
+/* 区分と分類で選ぶボタンの押した状態（第29.12.3節） */
+.chip-btn.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.picker-label { color: var(--muted); font-size: calc(11px * var(--font-scale)); align-self: center; min-width: 2.5em; }
 
 /* Web のコラム（仕様書 第32.18.1節） */
 .columns { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); }
@@ -1924,7 +1939,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .columns-themes-table .ct-actions { width: 1%; white-space: nowrap; text-align: right; }
 .columns-themes-table .ct-actions .btn + .btn { margin-left: 6px; }
 .columns-themes-table .ct-compact { display: none; }
-@container (max-width: 560px) {
+@container (max-width: 460px) {
   .columns-themes-table .ct-source, .columns-themes-table .ct-why { display: none; }
   .columns-themes-table .ct-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; line-height: 1.5; }
   .columns-themes-table .ct-actions .btn { display: block; width: 100%; }
@@ -2559,4 +2574,25 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   position: fixed; z-index: 1000; width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, .16); padding: calc(10px * var(--space-scale)) calc(12px * var(--space-scale));
   display: flex; flex-direction: column; gap: 4px; font-size: calc(13px * var(--font-scale)); text-align: left; white-space: normal;
+}
+
+/* ブリーフの画面（第9.5.5.1.2節）。本文の右に過去の一覧。欄が狭ければ一覧を下へ */
+.briefs-wrap { container-type: inline-size; }
+.briefs-head { display: flex; align-items: center; gap: calc(10px * var(--space-scale)); flex-wrap: wrap; }
+.briefs-head h1 { margin-right: auto; }
+.briefs-running { margin: calc(4px * var(--space-scale)) 0 calc(8px * var(--space-scale)); }
+.briefs { display: grid; grid-template-columns: minmax(0, 1fr) 11em; gap: calc(12px * var(--space-scale)); align-items: start; }
+.briefs-body { min-width: 0; }
+.briefs-meta { display: flex; align-items: baseline; gap: calc(8px * var(--space-scale)); margin-bottom: calc(6px * var(--space-scale)); }
+.briefs-meta .btn { margin-left: auto; }
+.briefs-list { position: sticky; top: 0; max-height: 70vh; overflow-y: auto; border-left: 1px solid var(--line); padding-left: calc(8px * var(--space-scale)); }
+.briefs-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.briefs-item { width: 100%; text-align: left; background: none; border: none; border-radius: 6px; padding: calc(5px * var(--space-scale)) calc(8px * var(--space-scale)); cursor: pointer; color: inherit; font: inherit; font-size: calc(13px * var(--font-scale)); }
+.briefs-item:hover { background: var(--neutral-soft); }
+.briefs-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+@container (max-width: 460px) {
+  .briefs { grid-template-columns: 1fr; }
+  .briefs-list { position: static; max-height: none; border-left: none; border-top: 1px solid var(--line); padding: calc(8px * var(--space-scale)) 0 0; }
+  .briefs-list ul { flex-direction: row; flex-wrap: wrap; }
+  .briefs-item { width: auto; }
 }

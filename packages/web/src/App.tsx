@@ -17,6 +17,7 @@ import {
   api, ApiError, describeError,
   type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryReply,
 } from './api.js';
+import { BriefScreen } from './Briefs.js';
 import { AgentHelpTip, HelpCenter, HelpRating, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
 import { AppLauncher, AppVersionBadge } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
@@ -105,7 +106,7 @@ type MenuItem = { id: string; name: string; description: string; icon: IconName;
 /** 中央キャンバスに何を表示しているか。 */
 type View =
   | { kind: 'home' }
-  | { kind: 'agent'; agent: AgentSummary; fileId?: string }
+  | { kind: 'agent'; agent: AgentSummary; fileId?: string; briefRunId?: string }
   | { kind: 'run'; runId: string }
   | { kind: 'approvals' }
   | { kind: 'history' }
@@ -448,6 +449,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // ピン止めした業務だけを上に出し、ほかはカテゴリーごと・「ほかの業務」にたたむ（仕様書 第6.1.1節「業務の並び」）。
   // 並びはメニューの順のまま。使った回数では変えない。まだ一度も変えていなければ標準の組
   const { top: topAgents, sections } = groupMenu(allMenuAgents, menu);
+  /** ブリーフの画面で、そのブリーフを開く（通知から。第9.5.5.1.2節）。本文を残していないブリーフ（前の版のもの）なら `false`。 */
+  const openBrief = async (runId: string): Promise<boolean> => {
+    const brief = await api.briefs.get(runId).then((r) => r.brief).catch(() => null);
+    const agent = brief ? agents.find((a) => a.id === brief.agentId) : undefined;
+    if (!agent) return false;
+    setView({ kind: 'agent', agent, briefRunId: runId });
+    return true;
+  };
   const openItem = (m: MenuItem) => (m.agent ? setView({ kind: 'agent', agent: m.agent })
     : m.id === INVENTORY_EXTENSION_ID ? setView({ kind: 'inventory', itemId: null })
       : m.id === HR_EXTENSION_ID ? setView({ kind: 'hr', employeeId: null })
@@ -671,7 +680,20 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <main className="canvas">
           {error && <p className="error">{error}</p>}
           {view.kind === 'home' && <Home callMe={callMe || `${me.user.displayName}さん`} notFound={notFound} />}
-          {view.kind === 'agent' && (
+          {view.kind === 'agent' && view.agent.category === 'briefing' && (
+            // ブリーフは直近の本文と過去の一覧を出す（仕様書 第9.5.5.1.2節）
+            <BriefScreen key={view.agent.id} agent={view.agent} initialRunId={view.briefRunId} title={<>
+                {view.agent.name}{' '}
+                <AgentHelpTip
+                  agentId={view.agent.id}
+                  extension={view.agent.extension}
+                  onExample={(input) => setFormFill(
+                    Object.fromEntries(Object.entries(input).map(([k, v]) => [k, String(v ?? '')])),
+                  )}
+                />
+            </>} />
+          )}
+          {view.kind === 'agent' && view.agent.category !== 'briefing' && (
             <>
               {/* 説明は広げず、題名の「？」から出す（仕様書 第6.10.5.1節） */}
               <h1>
@@ -730,7 +752,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'notifications' && (
             <>
               <h1>お知らせ</h1>
-              <Notifications items={notifications} onRead={() => void refresh()} />
+              <Notifications items={notifications} onRead={() => void refresh()} onOpenBrief={openBrief} />
             </>
           )}
           {view.kind === 'cards' && (
@@ -1524,7 +1546,7 @@ const tail = (text: string) => (text.length > CAPTION_MAX ? `…${text.slice(-CA
  *
  * @remarks 本人の受け取り箱の整理なので、消す前に確認を挟まない（ADR-0028）
  */
-function Notifications({ items, onRead }: { items: Notification[]; onRead: () => void }) {
+function Notifications({ items, onRead, onOpenBrief }: { items: Notification[]; onRead: () => void; onOpenBrief?: (runId: string) => Promise<boolean> }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   // 一覧が変わったら、無くなったお知らせを選んだままにしない
@@ -1550,7 +1572,7 @@ function Notifications({ items, onRead }: { items: Notification[]; onRead: () =>
       </div>
       {error && <p className="error">{error}</p>}
       {items.map((n) => (
-        <NoticeRow key={n.id} notice={n} onRead={onRead} selected={selected.has(n.id)} onSelect={() => toggle(n.id)} onDelete={() => remove(() => api.deleteNotification(n.id))} />
+        <NoticeRow key={n.id} notice={n} onRead={onRead} onOpenBrief={onOpenBrief} selected={selected.has(n.id)} onSelect={() => toggle(n.id)} onDelete={() => remove(() => api.deleteNotification(n.id))} />
       ))}
     </>
   );
@@ -1562,8 +1584,10 @@ function Notifications({ items, onRead }: { items: Notification[]; onRead: () =>
  * @remarks
  * 開いたときに読んだことにする。**閉じても読んだままにする**（開き直すたびに未読へ戻さない）。
  */
-function NoticeRow({ notice, onRead, selected, onSelect, onDelete }: {
+function NoticeRow({ notice, onRead, onOpenBrief, selected, onSelect, onDelete }: {
   notice: Notification; onRead: () => void; selected: boolean; onSelect: () => void; onDelete: () => void;
+  /** ブリーフの通知は、ブリーフの画面でそのブリーフを開く（第9.5.5.1.2節）。開けなければ `false` を返し、その場で開く。 */
+  onOpenBrief?: (runId: string) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const unread = !notice.readAt;
@@ -1574,8 +1598,12 @@ function NoticeRow({ notice, onRead, selected, onSelect, onDelete }: {
         <button
           className="fold-head" aria-expanded={open}
           onClick={() => {
-            setOpen(!open);
             if (!open && unread) void api.readNotification(notice.id).then(onRead);
+            if (!open && notice.kind === 'brief' && notice.runId && onOpenBrief) {
+              void onOpenBrief(notice.runId).then((opened) => { if (!opened) setOpen(true); });
+              return;
+            }
+            setOpen(!open);
           }}
         >
           <Icon name={open ? 'caret-down' : 'caret-right'} className="nav-caret" />

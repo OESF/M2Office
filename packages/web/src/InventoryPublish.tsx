@@ -1,8 +1,8 @@
 /**
- * @file 在庫管理のパソコンの画面の「Web へ公開」の欄（仕様書 第29.12節・第29.12.1節・第29.12.2節。段 5）。
+ * @file 在庫管理のパソコンの画面の「Web へ公開」の欄（仕様書 第29.12節・第29.12.1節・第29.12.2節・第29.12.3節。段 5）。
  *
  * 公開は 1 社でいくつものまとまりに分けられる（Web サイトのページごとに違う品目を出すため）。まとまりはタブで切り替える。
- * 管理者が、まとまりごとに公開する品目・分類で分けるか・販売価格を出すか・数か状態かを選び、見本で確かめて「この内容で公開する」を押す。
+ * 管理者が、まとまりごとに公開する品目（区分と分類で選べる）・分類で分けるか・販売価格を出すか・数か状態かを選び、見本で確かめて「この内容で公開する」を押す。
  * 押すことが承認である（社外に出るもの。第9.4.0節）。承認した範囲の数の変化は、承認なしに自動で流れる。
  * 公開したら、Web サイトに貼る iframe の 1 行と公開のデータの URL を出す。説明文を常に出さない（原則 u11）。
  */
@@ -13,19 +13,22 @@ import {
   INVENTORY_PUBLIC_STATUS_LABELS, type InventoryItemView, type InventoryPublicationScope, type InventoryPublicField, type InventoryPublicSnapshot,
 } from '@m2office/shared';
 import { api, describeError, type InventoryPublicationView } from './api.js';
+import { InventoryItemPicker, withRuleItems } from './InventoryItemPicker.js';
 
 /** 承認する前のまとまりの、はじめの選び方（品目はすべて・分類と価格あり・状態だけ）。 */
 function initialScope(items: InventoryItemView[]): InventoryPublicationScope {
-  // はじめは区分が販売品の品目（第29.6.1節）。販売品が無ければ、使っている品目すべて
+  // はじめは区分が販売品の条件（第29.6.1節・第29.12.3節）。販売品が無ければ、条件なしで使っている品目すべて
   const active = items.filter((i) => i.status === 'active');
   const sale = active.filter((i) => i.kind === 'sale');
-  return { itemIds: (sale.length ? sale : active).map((i) => i.id), fields: ['category', 'price'], showCount: false };
+  if (sale.length === 0) return { itemIds: active.map((i) => i.id), fields: ['category', 'price'], showCount: false };
+  return { itemIds: sale.map((i) => i.id), fields: ['category', 'price'], showCount: false, rule: { kinds: ['sale'], categories: [], excluded: [] } };
 }
 
-/** 2 つの中身が同じか（品目の順は問わない）。 */
+/** 2 つの中身が同じか（品目と条件の順は問わない）。 */
 function sameScope(a: InventoryPublicationScope, b: InventoryPublicationScope): boolean {
   const set = (x: string[]) => [...x].sort().join('\u0000');
-  return set(a.itemIds) === set(b.itemIds) && set(a.fields) === set(b.fields) && a.showCount === b.showCount;
+  const rule = (s: InventoryPublicationScope) => (s.rule ? [set(s.rule.kinds), set(s.rule.categories), set(s.rule.excluded)].join('\u0001') : '');
+  return set(a.itemIds) === set(b.itemIds) && set(a.fields) === set(b.fields) && a.showCount === b.showCount && rule(a) === rule(b);
 }
 
 /** 日本時間の日時。 */
@@ -106,7 +109,11 @@ function PublicationEditor({ view: initial, items, onChanged }: {
 }) {
   const [view, setView] = useState(initial);
   const active = useMemo(() => items.filter((i) => i.status === 'active'), [items]);
-  const [scope, setScope] = useState<InventoryPublicationScope>(initial.publication.scope ?? initialScope(items));
+  // 条件で選んでいれば、承認のあとに足した品目で条件に当たるものを選んだ状態で並べる（出すのは承認し直したとき。第29.12.3節）
+  const [scope, setScope] = useState<InventoryPublicationScope>(() =>
+    (initial.publication.scope ? withRuleItems(initial.publication.scope, active).picked : initialScope(items)));
+  // 品目が読み直されたら、条件に当たる品目を選び直す（条件なしなら何もしない）
+  useEffect(() => { setScope((s) => withRuleItems(s, active).picked); }, [active]);
   const [name, setName] = useState(initial.publication.name);
   const [preview, setPreview] = useState<InventoryPublicSnapshot | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -124,15 +131,11 @@ function PublicationEditor({ view: initial, items, onChanged }: {
   const pub = view.publication;
   const live = pub.status === 'live';
   const unchanged = live && !!pub.scope && sameScope(pub.scope, scope);
-  const chosen = new Set(scope.itemIds);
-  const notInScope = pub.scope ? active.filter((i) => !pub.scope!.itemIds.includes(i.id)).length : 0;
-  const categories = [...new Set(active.map((i) => i.category).filter(Boolean))];
+  // 承認のあとに足した品目のうち、まだ出ていないもの（条件で選んでいれば条件に当たるものだけ）
+  const notInScope = !pub.scope ? 0 : pub.scope.rule ? withRuleItems(pub.scope, active).added
+    : active.filter((i) => !pub.scope!.itemIds.includes(i.id)).length;
   const setField = (f: InventoryPublicField, on: boolean) =>
     setScope({ ...scope, fields: on ? [...new Set([...scope.fields, f])] : scope.fields.filter((x) => x !== f) });
-  const toggleItem = (id: string, on: boolean) =>
-    setScope({ ...scope, itemIds: on ? [...scope.itemIds, id] : scope.itemIds.filter((x) => x !== id) });
-  const selectCategory = (cat: string) =>
-    setScope({ ...scope, itemIds: [...new Set([...scope.itemIds, ...active.filter((i) => i.category === cat).map((i) => i.id)])] });
 
   const act = async (fn: () => Promise<InventoryPublicationView>, failed: string) => {
     setBusy(true);
@@ -185,29 +188,7 @@ function PublicationEditor({ view: initial, items, onChanged }: {
       </div>
 
       <div className="publish-body">
-        <div className="publish-items">
-          <div className="publish-items-head">
-            <span className="small">品目 {scope.itemIds.length} / {active.length}</span>
-            <button className="link small" onClick={() => setScope({ ...scope, itemIds: active.map((i) => i.id) })}>すべて</button>
-            <button className="link small" onClick={() => setScope({ ...scope, itemIds: [] })}>外す</button>
-          </div>
-          {categories.length > 1 && (
-            <div className="publish-categories">
-              {categories.map((c) => <button key={c} className="chip-btn small" onClick={() => selectCategory(c)}>{c}</button>)}
-            </div>
-          )}
-          <ul>
-            {active.map((i) => (
-              <li key={i.id}>
-                <label className="check">
-                  <input type="checkbox" checked={chosen.has(i.id)} onChange={(e) => toggleItem(i.id, e.target.checked)} />
-                  <span>{i.publicName || i.name}</span>
-                  {i.category && <span className="muted small">{i.category}</span>}
-                </label>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <InventoryItemPicker items={active} value={scope} onChange={setScope} nameOf={(i) => i.publicName || i.name} />
         <div className="publish-preview" aria-label="見本">
           {preview && preview.items.length > 0 ? <PreviewTable snapshot={preview} /> : <p className="muted small">品目を選んでください</p>}
         </div>

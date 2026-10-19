@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { APP_JOB_RISKS, type AppFunctionId, type AppFunctionInfo, type AppSettingOptions, type AppSettings, type ExternalApp, type InventoryCatalogScope, type InventoryItemView, type RiskLevel } from '@m2office/shared';
 import { api, describeError, type InventorySalesItemView } from './api.js';
 import { copyText } from './clipboard.js';
+import { InventoryItemPicker, withRuleItems } from './InventoryItemPicker.js';
 import { PageTitle } from './help.js';
 
 /** 日本時間の日時。 */
@@ -18,9 +19,10 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP'
 
 const STATUS_LABEL = { in_stock: '在庫あり', low: '残りわずか', out: '終了' } as const;
 
-/** 承認する前の、商品の一覧のはじめの選び方（区分が販売品の品目。第29.6.1節。社員価格は渡さない）。 */
+/** 承認する前の、商品の一覧のはじめの選び方（区分が販売品の条件。第29.6.1節・第29.12.3節。社員価格は渡さない）。 */
 function initialCatalog(items: InventoryItemView[]): InventoryCatalogScope {
-  return { itemIds: items.filter((i) => i.status === 'active' && i.kind === 'sale').map((i) => i.id), showCount: true, price: true, employeePrice: false };
+  const sale = items.filter((i) => i.status === 'active' && i.kind === 'sale').map((i) => i.id);
+  return { itemIds: sale, showCount: true, price: true, employeePrice: false, ...(sale.length ? { rule: { kinds: ['sale'], categories: [], excluded: [] } } : {}) };
 }
 
 /** 危険度の言い方。 */
@@ -343,10 +345,11 @@ function CatalogEditor({ scope, items, onChange }: { scope: InventoryCatalogScop
     }, 300);
     return () => clearTimeout(t);
   }, [scope]);
-  const chosen = new Set(scope.itemIds);
-  const categories = [...new Set(active.map((i) => i.category).filter(Boolean))];
-  const toggleItem = (id: string, on: boolean) => onChange({ ...scope, itemIds: on ? [...scope.itemIds, id] : scope.itemIds.filter((x) => x !== id) });
-  const selectCategory = (cat: string) => onChange({ ...scope, itemIds: [...new Set([...scope.itemIds, ...active.filter((i) => i.category === cat).map((i) => i.id)])] });
+  // 条件で選んでいれば、あとで足した品目で条件に当たるものを選んだ状態にする（渡すのは承認し直したとき。第29.12.3節）
+  useEffect(() => {
+    const { picked, added } = withRuleItems(scope, active);
+    if (added > 0 || picked.itemIds.length !== scope.itemIds.length) onChange(picked);
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="app-setting">
       <h4 className="app-section-title">商品の一覧で渡すもの</h4>
@@ -359,29 +362,7 @@ function CatalogEditor({ scope, items, onChange }: { scope: InventoryCatalogScop
         <label className="check"><input type="checkbox" checked={scope.employeePrice} onChange={(e) => onChange({ ...scope, employeePrice: e.target.checked })} />社員価格</label>
       </div>
       <div className="publish-body">
-        <div className="publish-items">
-          <div className="publish-items-head">
-            <span className="small">品目 {scope.itemIds.length} / {active.length}</span>
-            <button className="link small" onClick={() => onChange({ ...scope, itemIds: active.map((i) => i.id) })}>すべて</button>
-            <button className="link small" onClick={() => onChange({ ...scope, itemIds: [] })}>外す</button>
-          </div>
-          {categories.length > 1 && (
-            <div className="publish-categories">
-              {categories.map((c) => <button key={c} className="chip-btn small" onClick={() => selectCategory(c)}>{c}</button>)}
-            </div>
-          )}
-          <ul>
-            {active.map((i) => (
-              <li key={i.id}>
-                <label className="check">
-                  <input type="checkbox" checked={chosen.has(i.id)} onChange={(e) => toggleItem(i.id, e.target.checked)} />
-                  <span>{i.name}</span>
-                  {i.category && <span className="muted small">{i.category}</span>}
-                </label>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <InventoryItemPicker items={active} value={scope} onChange={onChange} />
         <div className="publish-preview" aria-label="見本">
           {preview && preview.length > 0 ? (
             <table className="table">

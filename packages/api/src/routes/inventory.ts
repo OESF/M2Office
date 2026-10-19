@@ -14,7 +14,7 @@ import {
   readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
   MOBILE_INVENTORY_PATH, type ItemInput, type MoveInput, type PublicationView,
 } from '@m2office/core';
-import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, withoutPurchase, type InventoryItemKind, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
+import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, inventoryRuleOf, withoutPurchase, type InventoryItemKind, type InventoryMoveKind, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -585,6 +585,7 @@ export function inventoryRoute(deps: AppDeps) {
     itemIds: Array.isArray(body['itemIds']) ? body['itemIds'].filter((x): x is string => typeof x === 'string').slice(0, 5000) : [],
     fields: Array.isArray(body['fields']) ? body['fields'].filter((x): x is InventoryPublicField => x === 'category' || x === 'price') : [],
     showCount: body['showCount'] === true,
+    rule: inventoryRuleOf(body['rule']),
   });
   const publisher = deps.inventory.publisher;
 

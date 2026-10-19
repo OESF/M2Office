@@ -300,6 +300,53 @@ export interface InventoryBooking {
 /** Web への公開に出せる項目（第29.12.1節）。名前と状態はいつも出す。 */
 export type InventoryPublicField = 'category' | 'price';
 
+/**
+ * 区分と分類で品目を選ぶ条件（第29.12.3節、Q-245）。Web への公開と外部のアプリの「商品の一覧を読む」で使う。
+ *
+ * 条件は選び方を覚えるだけで、出す・渡すのは承認した `itemIds` だけ。あとで条件に当たる品目を足すと、
+ * 画面では選んだ状態で並ぶが、承認し直すまで出さない（社外への送信の境界。第9.4.0節）。
+ */
+export interface InventoryItemRule {
+  /** 区分（空なら区分では絞らない）。 */
+  kinds: InventoryItemKind[];
+  /** 分類（空なら分類では絞らない）。区分と両方あれば「かつ」。 */
+  categories: string[];
+  /** 条件に当たっても 1 つずつ外した品目。 */
+  excluded: string[];
+}
+
+/** 品目が条件に当たるか（外した品目かどうかは見ない）。 */
+export function inventoryRuleMatches(rule: Pick<InventoryItemRule, 'kinds' | 'categories'>, item: Pick<InventoryItemView, 'kind' | 'category'>): boolean {
+  return (rule.kinds.length === 0 || rule.kinds.includes(item.kind))
+    && (rule.categories.length === 0 || rule.categories.includes(item.category));
+}
+
+/**
+ * 条件から選ぶ品目を出す（当たる品目から、外した品目を除く）。
+ *
+ * @param items 使っている品目（止めた品目を除いたもの）
+ */
+export function inventoryRuleItemIds(rule: InventoryItemRule, items: Pick<InventoryItemView, 'id' | 'kind' | 'category'>[]): string[] {
+  const excluded = new Set(rule.excluded);
+  return items.filter((i) => inventoryRuleMatches(rule, i) && !excluded.has(i.id)).map((i) => i.id);
+}
+
+/**
+ * 受け取った条件を整える（知らない区分・空の分類を捨てる）。区分も分類も無ければ `null`（条件なし）。
+ *
+ * @remarks API の本文を読むときに使う。品目が止められたかどうかは見ない（承認のときに `itemIds` の側で除く）
+ */
+export function inventoryRuleOf(v: unknown): InventoryItemRule | null {
+  if (!v || typeof v !== 'object') return null;
+  const b = v as Record<string, unknown>;
+  const known = new Set(INVENTORY_ITEM_KINDS.map((k) => k.id));
+  const strs = (x: unknown, max: number) => (Array.isArray(x) ? [...new Set(x.filter((y): y is string => typeof y === 'string' && y.trim() !== ''))].slice(0, max) : []);
+  const kinds = strs(b['kinds'], 4).filter((k): k is InventoryItemKind => known.has(k as InventoryItemKind));
+  const categories = strs(b['categories'], 200);
+  if (kinds.length === 0 && categories.length === 0) return null;
+  return { kinds, categories, excluded: strs(b['excluded'], 5000) };
+}
+
 /** 管理者が承認する公開の中身（第29.12節）。 */
 export interface InventoryPublicationScope {
   /** 公開する品目。承認のあとに足した品目は、承認し直すまで出さない。 */
@@ -307,6 +354,8 @@ export interface InventoryPublicationScope {
   fields: InventoryPublicField[];
   /** 使える数を出すか。`false` なら状態（在庫あり・残りわずか・終了）だけ。 */
   showCount: boolean;
+  /** 区分と分類で選んだときの条件（第29.12.3節）。1 つずつ選んだときは無い。 */
+  rule?: InventoryItemRule | null;
 }
 
 /** 公開する状態。 */
@@ -362,6 +411,8 @@ export interface InventoryCatalogScope {
   price: boolean;
   /** 社員価格を渡すか（既定は渡さない）。 */
   employeePrice: boolean;
+  /** 区分と分類で選んだときの条件（第29.12.3節）。1 つずつ選んだときは無い。 */
+  rule?: InventoryItemRule | null;
 }
 
 /** 照らせなかった販売の行（品目を選べば、その時点で記録する。第29.20.1節）。金額とお客様の情報は持たない。 */

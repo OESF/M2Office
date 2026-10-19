@@ -1,5 +1,5 @@
 /**
- * @file スマホ用の在庫のページ（仕様書 第29.11.1節）。入庫・使用・棚卸し（差を見て確定するまで）・探す。
+ * @file スマホ用の在庫のページ（仕様書 第29.11.1節）。入庫・出庫・棚卸し（差を見て確定するまで）・探す。
  *
  * 棚の前で品物を片手に持って使う。ワークスペースの枠（左のメニュー・秘書の欄）を出さず、大きなボタンだけにする。
  * 棚のラベルの QR（`/m/inventory?shelf=…`）から開けば、その棚が選ばれた状態で始まる。説明文を常に出さない（原則 u11）。
@@ -11,6 +11,14 @@ import { api, describeError, type InventoryDetail, type InventoryList, type Inve
 import { Scanner } from './Scanner.js';
 
 type Mode = 'home' | 'in' | 'out' | 'count' | 'find';
+
+/** はじめの画面の大きなボタン。色とアイコンで、読まなくても見分けられるようにする。 */
+const HOME_ACTIONS: { mode: Exclude<Mode, 'home'>; label: string; tone: string; icon: JSX.Element }[] = [
+  { mode: 'in', label: '入庫', tone: 'in', icon: <><path d="M3 14h5l1.5 2.5h5L16 14h5v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><path d="M12 3v9m-4-4l4 4 4-4" /></> },
+  { mode: 'out', label: '出庫', tone: 'out', icon: <><path d="M3 14h5l1.5 2.5h5L16 14h5v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><path d="M12 12V3m-4 4l4-4 4 4" /></> },
+  { mode: 'count', label: '棚卸し', tone: 'count', icon: <><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1" /><path d="M8.5 12.5l2.5 2.5 4.5-5" /></> },
+  { mode: 'find', label: '探す', tone: 'find', icon: <><circle cx="10.5" cy="10.5" r="6" /><path d="M15 15l5 5" /></> },
+];
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
 const placeName = (l: InventoryLocation | undefined | null) => (l ? (l.shelf ? `${l.warehouse} ${l.shelf}` : l.warehouse) : '');
@@ -53,7 +61,7 @@ export function MobileInventory({ me }: { me: Me }) {
       <header className="m-head">
         {mode !== 'home'
           ? <button className="m-back" onClick={back} aria-label="戻る">←</button>
-          : <span className="m-title">在庫</span>}
+          : <span className="m-title">在庫管理</span>}
         <span className="m-tenant">{me.tenant.name}</span>
         {list && list.locations.length > 1 && (
           <select className="m-shelf" value={shelf?.id ?? ''} onChange={(e) => choose(e.target.value)} aria-label="棚">
@@ -65,10 +73,14 @@ export function MobileInventory({ me }: { me: Me }) {
       {message && <p className="m-note" role="status">{message}</p>}
       {mode === 'home' && (
         <div className="m-home">
-          <button className="m-big" onClick={() => setMode('in')}>入庫</button>
-          <button className="m-big" onClick={() => setMode('out')}>使用</button>
-          <button className="m-big" onClick={() => setMode('count')}>棚卸し</button>
-          <button className="m-big" onClick={() => setMode('find')}>探す</button>
+          {HOME_ACTIONS.map((a) => (
+            <button key={a.mode} className={`m-big m-action ${a.tone}`} onClick={() => setMode(a.mode)}>
+              <span className="m-action-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{a.icon}</svg>
+              </span>
+              {a.label}
+            </button>
+          ))}
         </div>
       )}
       {(mode === 'in' || mode === 'out') && list && (
@@ -116,7 +128,7 @@ function Picker({ items, onItem, onShelf, busy }: {
   );
 }
 
-/** 入庫・使用: 読む → 数を合わせる → 記録する。記録したらすぐ次を読める。 */
+/** 入庫・出庫: 読む → 数を合わせる → 記録する。記録したらすぐ次を読める。 */
 function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
   kind: 'in' | 'out'; list: InventoryList; shelf: InventoryLocation | null; onShelf: (l: InventoryLocation) => void; onRecorded: () => void;
 }) {
@@ -167,7 +179,7 @@ function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
         kind, itemId: item.id, qty, unit: pack && canPack ? 'pack' : 'unit',
         ...(shelf ? { locationId: shelf.id } : {}), ...(kind === 'in' ? lot : {}),
       });
-      setDone([`${item.name} を ${pack && canPack ? `${qty} ${item.packUnit}` : `${qty} ${item.unit}`} ${kind === 'in' ? '入庫' : '使用'}しました。使える数は ${qtyText(r.item, r.item.available)}`, ...r.warnings].join('。'));
+      setDone([`${item.name} を ${pack && canPack ? `${qty} ${item.packUnit}` : `${qty} ${item.unit}`} ${kind === 'in' ? '入庫' : '出庫'}しました。使える数は ${qtyText(r.item, r.item.available)}`, ...r.warnings].join('。'));
       setItem(null);
       onRecorded();
     } catch (e) {
@@ -179,7 +191,7 @@ function MoveFlow({ kind, list, shelf, onShelf, onRecorded }: {
 
   return (
     <div className="m-flow">
-      <h2 className="m-flow-title">{kind === 'in' ? '入庫' : '使用'}{shelf ? <span className="m-sub">{placeName(shelf)}</span> : null}</h2>
+      <h2 className="m-flow-title">{kind === 'in' ? '入庫' : '出庫'}{shelf ? <span className="m-sub">{placeName(shelf)}</span> : null}</h2>
       <Picker items={list.items} onItem={pick} onShelf={onShelf} busy={busy} />
       {kind === 'in' && (
         <label className="m-secondary m-file">

@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  APP_FUNCTIONS, APP_JOB_RISKS, EXTERNAL_APP_MAX, type AppFunctionId, type AppFunctionRequirement, type AppSettingOptions, type AppSettings, type AuditEvent,
+  APP_FUNCTIONS, APP_JOB_RISKS, EXTERNAL_APP_MAX, inventoryRuleOf, type AppFunctionId, type AppFunctionRequirement, type AppSettingOptions, type AppSettings, type AuditEvent,
   type ExternalApp, type InventoryCatalogScope, type RiskLevel, type TenantSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
@@ -211,7 +211,8 @@ export class ExternalApps {
       // 止めた品目・知らない品目は範囲に入れない
       const active = new Set(this.deps.activeItemIds ? await this.deps.activeItemIds(tenantId) : c.itemIds);
       const itemIds = [...new Set(c.itemIds)].filter((x) => active.has(x));
-      settings.catalog = { itemIds, showCount: !!c.showCount, price: !!c.price, employeePrice: !!c.employeePrice };
+      const rule = inventoryRuleOf(c.rule);
+      settings.catalog = { itemIds, showCount: !!c.showCount, price: !!c.price, employeePrice: !!c.employeePrice, ...(rule ? { rule } : {}) };
     }
     const needs = functions.map((f) => APP_FUNCTIONS.find((x) => x.id === f)?.needs).find((n) => n && !functions.includes(n));
     if (needs) return { error: `「${APP_FUNCTIONS.find((x) => x.id === needs)!.label}」も選んでください（本人の権限で行う機能のため）` };

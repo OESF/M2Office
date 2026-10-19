@@ -14,7 +14,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import type { InventoryCatalogScope, InventoryItemView, InventorySaleUnmatched } from '@m2office/shared';
+import { inventoryRuleOf, type InventoryCatalogScope, type InventoryItemView, type InventorySaleUnmatched } from '@m2office/shared';
 import { createPool } from '../repository/pool.js';
 import type { Repository } from '../repository/types.js';
 import { dateIn } from '../cards/service.js';
@@ -547,7 +547,8 @@ function eventHash(e: SaleEventInput): string {
 export function catalogScopeOf(body: unknown): InventoryCatalogScope {
   const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
   const ids = Array.isArray(b['itemIds']) ? b['itemIds'].filter((x): x is string => typeof x === 'string').slice(0, 5000) : [];
-  return { itemIds: [...new Set(ids)], showCount: b['showCount'] === true, price: b['price'] === true, employeePrice: b['employeePrice'] === true };
+  const rule = inventoryRuleOf(b['rule']);
+  return { itemIds: [...new Set(ids)], showCount: b['showCount'] === true, price: b['price'] === true, employeePrice: b['employeePrice'] === true, ...(rule ? { rule } : {}) };
 }
 
 // ---- 処理 ----

@@ -8,7 +8,7 @@
 
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
-  INVENTORY_PUBLICATION_MAX, INVENTORY_PUBLIC_STATUS_LABELS, type AuditEvent, type InventoryItemView, type InventoryPublication, type InventoryPublicationScope,
+  INVENTORY_PUBLICATION_MAX, INVENTORY_PUBLIC_STATUS_LABELS, inventoryRuleOf, type AuditEvent, type InventoryItemView, type InventoryPublication, type InventoryPublicationScope,
   type InventoryPublicField, type InventoryPublicRow, type InventoryPublicSnapshot, type InventoryPublicStatus,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
@@ -233,6 +233,7 @@ export class InventoryPublisher {
     });
     await this.audit(tenantId, userId, 'inventory.publication.approve', id, {
       name: prev.name, items: checked.itemIds.length, fields: checked.fields, showCount: checked.showCount, resumed: prev.status === 'stopped',
+      ...(checked.rule ? { kinds: checked.rule.kinds, categories: checked.rule.categories } : {}),
     });
     await this.refreshOne(tenantId, id);
     return (await this.view(tenantId, id))!;
@@ -349,7 +350,8 @@ export class InventoryPublisher {
     const itemIds = [...new Set(Array.isArray(scope?.itemIds) ? scope.itemIds : [])].filter((id) => typeof id === 'string' && active.has(id));
     if (itemIds.length === 0) return { error: '公開する品目を選んでください' };
     const fields = FIELDS.filter((f) => Array.isArray(scope.fields) && scope.fields.includes(f));
-    return { itemIds, fields, showCount: scope.showCount === true };
+    const rule = inventoryRuleOf(scope.rule);
+    return { itemIds, fields, showCount: scope.showCount === true, ...(rule ? { rule } : {}) };
   }
 
   private async audit(tenantId: string, userId: string, action: string, id: string, detail: Record<string, unknown>): Promise<void> {

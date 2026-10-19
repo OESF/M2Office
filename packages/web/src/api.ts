@@ -8,7 +8,7 @@
  */
 
 import type { DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
-  Approval, Artifact, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
+  Approval, Artifact, Brief, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventorySettings, InventoryStockRow,
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
@@ -2734,6 +2734,14 @@ export const api = {
       body: JSON.stringify({ agentId, input, origin }),
     }),
   jobs: () => call<{ items: { run: Run; job: { agentId: string } | null }[] }>('/jobs'),
+  /** 朝のブリーフ・週次ブリーフ（仕様書 第9.5.5.1.2節）。見られるのは本人だけ。 */
+  briefs: {
+    /** 新しい順に 30 件（本文は省く）と、いままとめている実行。`before` で続きを読む。 */
+    list: (agentId: string, before?: string) => call<{ items: Brief[]; more: boolean; running: { runId: string; status: string; startedAt: string } | null }>(
+      `/briefs?agent=${encodeURIComponent(agentId)}${before ? `&before=${encodeURIComponent(before)}` : ''}`),
+    get: (runId: string) => call<{ brief: Brief }>(`/briefs/${encodeURIComponent(runId)}`),
+    remove: (runId: string) => call<{ ok: true }>(`/briefs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
+  },
   run: (id: string) => call<RunDetail>(`/runs/${id}`),
   /** 実行を途中で止める（仕様書 第9.3.1節）。止められるのは依頼した本人だけ。 */
   cancelRun: (id: string) =>

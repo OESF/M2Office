@@ -143,7 +143,7 @@ export class GoogleDataRetention {
   }
 
   /**
-   * 利用者が Google の連携を解除したとき、その人の実行から Google 由来の中身を消す（期間を待たない）。
+   * 利用者が Google の連携を解除したとき、その人の実行から Google 由来の中身と、残しておいたブリーフの本文を消す（期間を待たない）。
    *
    * @remarks 実行中・承認待ちの実行は対象外（Q-54 で扱いを決める）。
    * @returns 中身を消した実行の数
@@ -153,6 +153,8 @@ export class GoogleDataRetention {
     for (const run of await this.deps.repo.listUserRunsForPurge(tenantId, userId)) {
       if (await this.process(run, 'disconnect', now)) n++;
     }
+    // 残しておいたブリーフの本文も消す（予定やメールから作った文を含むため。第9.5.5.1.2節）
+    await this.deps.repo.deleteUserBriefs(tenantId, userId);
     return n;
   }
 
