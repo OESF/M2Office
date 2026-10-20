@@ -70,7 +70,8 @@ export function UsageChart({ weekly, usage, unit }: { weekly: InventoryWeeklyUsa
   const max = Math.max(1, ...weekly.map((w) => w.qty), nextWeek);
   const W = 560;
   const H = 120;
-  const slots = weekly.length + 4;
+  // 実績の週と、来週の見込みの 1 本（4 週の見込みは同じ高さになるため 1 本にまとめる）
+  const slots = weekly.length + 1;
   const bw = W / slots;
   const y = (v: number) => H - (v / max) * (H - 16);
   return (
@@ -81,17 +82,20 @@ export function UsageChart({ weekly, usage, unit }: { weekly: InventoryWeeklyUsa
           ? <>1 日 {n1(usage.daily)} {unit}（前の 4 週から <Change pct={usage.changePct} />）{usage.daysLeft !== null && `・あと ${usage.daysLeft} 日`}・次の 4 週の見込み <strong>{n1(usage.next4w)} {unit}</strong>{usage.booked ? `（うち予約 ${n1(usage.booked)} ${unit}）` : ''}{usage.factor !== 1 && `（${usage.factor} 倍${usage.note ? `。${usage.note}` : ''}）`}{usage.weekdayNote && `・${usage.weekdayNote}`}</>
           : <span className="muted">最近 4 週は使っていません</span>}
       </p>
-      <svg viewBox={`0 0 ${W} ${H + 18}`} role="img" aria-label={`直近 ${weekly.length} 週の出庫と次の 4 週の見込み`} className="usage-svg">
+      <svg viewBox={`0 0 ${W} ${H + 18}`} role="img" aria-label={`直近 ${weekly.length} 週の出庫と来週の見込み`} className="usage-svg">
         {weekly.map((w, k) => (
           <g key={w.week}>
             <rect x={k * bw + 3} y={y(w.qty)} width={bw - 6} height={H - y(w.qty)} className="usage-bar"><title>{`${w.week} の週: ${n1(w.qty)} ${unit}`}</title></rect>
             {k % 2 === 0 && <text x={k * bw + bw / 2} y={H + 13} textAnchor="middle" className="usage-label">{w.week.slice(5).replace('-', '/')}</text>}
           </g>
         ))}
-        {nextWeek > 0 && Array.from({ length: 4 }, (_, k) => (
-          <rect key={k} x={(weekly.length + k) * bw + 3} y={y(nextWeek)} width={bw - 6} height={H - y(nextWeek)} className="usage-bar next"><title>{`見込み: 1 週 ${n1(nextWeek)} ${unit}`}</title></rect>
-        ))}
-        <text x={(weekly.length + 2) * bw} y={H + 13} textAnchor="middle" className="usage-label">見込み</text>
+        {nextWeek > 0 && (
+          <>
+            <rect x={weekly.length * bw + 3} y={y(nextWeek)} width={bw - 6} height={H - y(nextWeek)} className="usage-bar next"><title>{`来週の見込み: ${n1(nextWeek)} ${unit}`}</title></rect>
+            <text x={weekly.length * bw + bw / 2} y={y(nextWeek) - 4} textAnchor="middle" className="usage-label">{n1(nextWeek)}</text>
+          </>
+        )}
+        <text x={weekly.length * bw + bw / 2} y={H + 13} textAnchor="middle" className="usage-label">来週</text>
       </svg>
       {usage?.weekdays && <WeekdayBars weights={usage.weekdays} />}
     </div>

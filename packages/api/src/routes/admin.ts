@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
-import {
+import { maskClientId,
   agentDisplayName,
   isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE, DEFAULT_QUOTE_STYLE
@@ -227,6 +227,8 @@ export function adminRoute(deps: AppDeps) {
     const view = await deps.tenantView(tenant.id);
     return c.json({
       ...settings,
+      // Yahoo!ショッピングの Client ID は末尾だけを出す（第29.11.3節）
+      inventory: { ...settings.inventory, yahooClientId: maskClientId(settings.inventory.yahooClientId) },
       catalog: view.agents.map((a) => ({
         id: a.id, name: a.name, description: a.description,
         usesWriteInternal: a.tools.some((t) => view.registry.get(t)?.risk === 'write-internal'),

@@ -22,7 +22,7 @@ export interface OAuthPending {
    * 本人の Google の接続としては保存しない、会社の接続の許可。問い合わせの窓口のアカウント（仕様書 第33.18節）と、
    * Webの分析の担当の許可（第34.18節）。`canva` は本人の Canva の接続（第41.19.3節）。
    */
-  purpose?: 'inquiry-mailbox' | 'web-review' | 'canva';
+  purpose?: 'inquiry-mailbox' | 'web-review' | 'canva' | 'google-login-audit';
   /** ログインを始めたブラウザの印のハッシュ（ログインのときだけ。引換券を、そのブラウザでしか使えないようにする。第16.1.2節）。 */
   browser?: string;
   expiresAt: number;

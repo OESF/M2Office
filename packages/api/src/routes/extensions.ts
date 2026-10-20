@@ -12,10 +12,10 @@
 import { randomUUID } from 'node:crypto';
 import { bodyLimit } from 'hono/body-limit';
 import { Hono } from 'hono';
-import {
+import { maskClientId,
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
-import {
+import { type BookingSourceRecord,
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
   ensureHrCompartment, detectKind, MAX_FILE_BYTES, LAW_BOOK, itemRule, createPkce, buildGoogleAuthUrl, revokeGoogleToken, MAILBOX_SCOPES, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
@@ -120,7 +120,8 @@ export function extensionsRoute(deps: AppDeps) {
           cards: { defaultScope: settings.cards.defaultScope, mailSignature: settings.cards.mailSignature, bulkMailAdminApproval: settings.cards.bulkMailAdminApproval, optOuts },
         } : {}),
         // 在庫管理: 機能の入り切りと既定の目安（第29.4.1節）
-        ...(e.pkg.manifest.id === INVENTORY_EXTENSION_ID ? { inventory: settings.inventory } : {}),
+        // Client ID は末尾だけを出す（第29.11.3節）
+        ...(e.pkg.manifest.id === INVENTORY_EXTENSION_ID ? { inventory: { ...settings.inventory, yahooClientId: maskClientId(settings.inventory.yahooClientId) } } : {}),
         // 人事・給与: 事業所・保険・締めと支払・手続きを行う人（第30.8.1節）
         ...(e.pkg.manifest.id === HR_EXTENSION_ID ? { hr: settings.hr } : {}),
         // サイネージ: 画像の秒数・背景色（第31.4節）
@@ -613,16 +614,22 @@ export function extensionsRoute(deps: AppDeps) {
     const count = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max ? v : undefined);
     if (count(body['lowDefault'], 1_000_000) !== undefined) next.lowDefault = count(body['lowDefault'], 1_000_000)!;
     if (count(body['leadDaysDefault'], 365) !== undefined) next.leadDaysDefault = Math.round(count(body['leadDaysDefault'], 365)!);
+    // Yahoo!ショッピングの Client ID（第29.11.3節）。空で外す。英数字と記号（- _ .）だけを受ける
+    if (typeof body['yahooClientId'] === 'string') {
+      const id = body['yahooClientId'].trim();
+      if (id && !/^[A-Za-z0-9._-]{8,200}$/.test(id)) return c.json({ error: 'Client ID の形が正しくありません（英数字と - _ . だけ）' }, 400);
+      next.yahooClientId = id;
+    }
     if (body['countEveryDays'] === null) next.countEveryDays = null;
     else if (count(body['countEveryDays'], 366)) next.countEveryDays = Math.round(count(body['countEveryDays'], 366)!);
     await deps.repo.saveTenantSettings(tenant.id, 'inventory', next, user.id);
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
       targetType: 'settings', targetId: 'inventory',
-      detail: { features: next.features, lowDefault: next.lowDefault, leadDaysDefault: next.leadDaysDefault, countEveryDays: next.countEveryDays },
+      detail: { features: next.features, lowDefault: next.lowDefault, leadDaysDefault: next.leadDaysDefault, countEveryDays: next.countEveryDays, yahooClientId: !!next.yahooClientId },
       occurredAt: new Date().toISOString(),
     });
-    return c.json({ ok: true, inventory: next });
+    return c.json({ ok: true, inventory: { ...next, yahooClientId: maskClientId(next.yahooClientId) } });
   });
 
   /**
@@ -876,6 +883,33 @@ export function extensionsRoute(deps: AppDeps) {
     const body = await c.req.json<{ status?: unknown }>().catch(() => ({ status: undefined }));
     if (body.status !== 'active' && body.status !== 'stopped') return c.json({ error: 'status は active か stopped です' }, 400);
     await deps.inventory.bookings.setSourceStatus(tenant.id, user.id, c.req.param('id'), body.status);
+    return c.json({ ok: true });
+  });
+
+  /** 削除した直後の予約の受け口（「取り消す」を受けるため。削除した人と時刻・消した行。1 時間で忘れる）。 */
+  const removedSources = new Map<string, { tenantId: string; userId: string; at: number; row: BookingSourceRecord }>();
+  const SOURCE_UNDO_MS = 60 * 60_000;
+
+  /** 予約の受け口を削除する（その URL への通知は受け取らない。届いた予約と取り置きは残す。第29.13.1節）。 */
+  app.delete(`/${INVENTORY_EXTENSION_ID}/booking-sources/:id`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const row = await deps.inventory.bookings.deleteSource(tenant.id, user.id, c.req.param('id'));
+    if (!row) return c.json({ error: '受け口が見つかりません' }, 404);
+    const cutoff = Date.now() - SOURCE_UNDO_MS;
+    for (const [k, v] of removedSources) if (v.at < cutoff) removedSources.delete(k);
+    removedSources.set(row.id, { tenantId: tenant.id, userId: user.id, at: Date.now(), row });
+    return c.json({ ok: true, name: row.name });
+  });
+
+  /** 削除した直後の予約の受け口を、同じ URL のまま元に戻す（削除した本人が 1 時間のうち）。 */
+  app.post(`/${INVENTORY_EXTENSION_ID}/booking-sources/:id/restore`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const rec = removedSources.get(c.req.param('id'));
+    if (!rec || rec.tenantId !== tenant.id || rec.userId !== user.id || Date.now() - rec.at > SOURCE_UNDO_MS) {
+      return c.json({ error: '取り消せるのは、自分が削除した直後（1 時間のうち）の受け口だけです' }, 400);
+    }
+    removedSources.delete(rec.row.id);
+    await deps.inventory.bookings.restoreSource(tenant.id, user.id, rec.row);
     return c.json({ ok: true });
   });
 

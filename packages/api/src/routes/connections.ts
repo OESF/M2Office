@@ -16,6 +16,7 @@ import {
   fetchGooglePhoto, googleGrantedScopes, googleScopeLabel, googleUserInfo, isGoogleClientError, refreshGoogleAccessToken,
   revokeGoogleToken, toolGoogleScopes, buildDataRecipients,
   GoogleOAuthError, MAILBOX_SCOPES, GOOGLE_CONTACTS_SCOPE, CHAT_DM_SETUP_SCOPE, parseServiceAccountKey, checkChatAppKey,
+  GOOGLE_LOGIN_KIND, GOOGLE_LOGIN_SCOPES, googleLoginConnection,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
 import { agentDisplayName, WEB_REVIEW_SCOPES } from '@m2office/shared';
@@ -371,6 +372,62 @@ export function connectionsRoute(deps: AppDeps) {
     return c.json({ ok: true, clientEmail: key.clientEmail });
   });
 
+  // ---- Google Workspace のログインの記録（不正の兆しの見張りの段 3。仕様書 第16.8.6節、ADR-0092） ----
+
+  /** 担当の許可の状態（担当・接続した日時・読めているか）。トークンは返さない。使えない会社は `state: 'na'`。 */
+  app.get('/google/login-audit', async (c) => {
+    const { tenant } = c.get('ctx');
+    const [conn, users, read] = await Promise.all([
+      googleLoginConnection(deps.repo, tenant.id), deps.repo.listUsers(tenant.id), deps.security.googleStatus(tenant.id).catch(() => null),
+    ]);
+    return c.json({
+      state: conn.state, email: conn.email, connectedAt: conn.connectedAt,
+      assignee: conn.assigneeId ? users.find((u) => u.id === conn.assigneeId)?.displayName ?? null : null,
+      read,
+    });
+  });
+
+  /**
+   * 担当の許可をつなぐ。Google の認可の画面の URL を返す（アカウントを選ばせ、ログインの記録の読み取りだけを求める。前に許した権限は引き継がない）。
+   * 開発の見本の会社では、認可を経ずに見本の口をつなぐ。
+   *
+   * @remarks 許可できるのは Google Workspace の特権管理者か、レポートを見る権限を持つ Google の管理者だけ（Google の側で確かめる）。
+   * つないだ M2Office の管理者が担当になり、替えると前の担当の許可では読まない
+   */
+  app.post('/google/login-audit/connect', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const conn = await googleLoginConnection(deps.repo, tenant.id);
+    if (conn.state === 'na') return c.json({ error: 'Google Workspace の会社のドメインでログインしている会社だけが使えます' }, 409);
+    if (deps.connector.sourceFor(tenant.id) === 'mock') {
+      await deps.repo.saveTenantCredential({
+        tenantId: tenant.id, kind: GOOGLE_LOGIN_KIND, secretEnc: null, meta: { email: user.email.toLowerCase(), mock: true }, updatedBy: user.id, updatedAt: new Date().toISOString(),
+      });
+      await audit(deps, tenant.id, user.id, 'connection.google.login_audit', GOOGLE_LOGIN_KIND, { email: user.email.toLowerCase() });
+      return c.json({ connected: true });
+    }
+    const client = await googleClient(deps, tenant.id);
+    if (!client) return c.json({ error: '先に OAuth クライアントを登録してください' }, 409);
+    const { verifier, challenge } = createPkce();
+    const state = deps.oauth.states.issue({
+      tenantId: tenant.id, userId: user.id, codeVerifier: verifier, returnTo: returnTo(c, '/admin/connectors/google'), purpose: 'google-login-audit',
+    });
+    const url = buildGoogleAuthUrl({
+      clientId: client.clientId, redirectUri: deps.oauth.redirectUri, scopes: GOOGLE_LOGIN_SCOPES, state, codeChallenge: challenge, selectAccount: true, onlyTheseScopes: true,
+    });
+    return c.json({ url });
+  });
+
+  /** 担当の許可を外す（切断）。Google の許可も取り消し、ログインの記録を読まなくなる（見つけた兆しは消さない）。 */
+  app.delete('/google/login-audit', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const cred = await deps.repo.getTenantCredential(tenant.id, GOOGLE_LOGIN_KIND);
+    if (!cred) return c.json({ ok: true });
+    if (cred.secretEnc) await revokeGoogleToken(deps.box.decrypt(cred.secretEnc)).catch(() => false);
+    await deps.repo.deleteTenantCredential(tenant.id, GOOGLE_LOGIN_KIND);
+    await audit(deps, tenant.id, user.id, 'connection.google.login_audit_delete', GOOGLE_LOGIN_KIND, { email: typeof cred.meta['email'] === 'string' ? cred.meta['email'] : '' });
+    return c.json({ ok: true });
+  });
+
   /** 会社の Chat アプリの鍵を消す（通知の控えは送れなくなる。画面内のお知らせはそのまま）。 */
   app.delete('/google/chat-app', async (c) => {
     const { tenant, user } = c.get('ctx');
@@ -551,7 +608,7 @@ export function oauthCallbackRoute(deps: AppDeps) {
     const pending = deps.oauth.states.take(state);
     // 会社の接続（第12.11.6節）の要求の state では受けない（取り違えを防ぐ）
     if (!pending || pending.connectionId || pending.purpose === 'canva') return c.text('この接続の要求は無効か、期限が切れています。M2Office の画面からもう一度「Google と接続する」を押してください。', 400);
-    const back = (result: string) => c.redirect(`${pending.returnTo}${pending.returnTo.includes('?') ? '&' : '?'}${pending.purpose === 'inquiry-mailbox' ? 'mailbox' : pending.purpose === 'web-review' ? 'webreview' : 'google'}=${result}`);
+    const back = (result: string) => c.redirect(`${pending.returnTo}${pending.returnTo.includes('?') ? '&' : '?'}${pending.purpose === 'inquiry-mailbox' ? 'mailbox' : pending.purpose === 'web-review' ? 'webreview' : pending.purpose === 'google-login-audit' ? 'loginaudit' : 'google'}=${result}`);
     if (c.req.query('error')) return back('cancelled');
     // 問い合わせの窓口のアカウント（仕様書 第33.18節）。本人の接続ではなく、会社の接続として預ける
     if (pending.purpose === 'inquiry-mailbox') {
@@ -600,6 +657,38 @@ export function oauthCallbackRoute(deps: AppDeps) {
         return back('connected');
       } catch (err) {
         deps.log.warn('Webの分析の許可をつなげませんでした', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
+        return back(isGoogleClientError(err) ? 'client' : 'failed');
+      }
+    }
+    // Google Workspace のログインの記録の担当の許可（不正の兆しの見張りの段 3。仕様書 第16.8.6節）。本人の接続ではなく、会社の接続として預ける
+    if (pending.purpose === 'google-login-audit') {
+      const code = c.req.query('code');
+      if (!code) return back('failed');
+      const tenant = await deps.repo.findTenantById(pending.tenantId);
+      if (!tenant || !isOperational(tenant)) return back('failed');
+      try {
+        const client = await googleClient(deps, pending.tenantId);
+        if (!client) return back('client');
+        const tokens = await exchangeGoogleCode({ ...client, code, redirectUri: deps.oauth.redirectUri, codeVerifier: pending.codeVerifier });
+        const [scopes, info] = await Promise.all([googleGrantedScopes(tokens.accessToken).catch(() => tokens.scopes), googleUserInfo(tokens.accessToken)]);
+        // 読み取りの許可が無ければ預けない。会社の Google Workspace のドメインのアカウントでなければ預けない
+        if (!GOOGLE_LOGIN_SCOPES.every((s) => scopes.includes(s)) || !info.email) {
+          await revokeGoogleToken(tokens.refreshToken).catch(() => false);
+          return back('scopes');
+        }
+        const email = info.email.toLowerCase();
+        if (!tenant.workspaceDomain || email.split('@')[1] !== tenant.workspaceDomain.trim().toLowerCase()) {
+          await revokeGoogleToken(tokens.refreshToken).catch(() => false);
+          return back('domain');
+        }
+        await deps.repo.saveTenantCredential({
+          tenantId: pending.tenantId, kind: GOOGLE_LOGIN_KIND, secretEnc: deps.box.encrypt(tokens.refreshToken), meta: { email },
+          updatedBy: pending.userId, updatedAt: new Date().toISOString(),
+        });
+        await audit(deps, pending.tenantId, pending.userId, 'connection.google.login_audit', GOOGLE_LOGIN_KIND, { email });
+        return back('connected');
+      } catch (err) {
+        deps.log.warn('Google のログインの記録の許可をつなげませんでした', { tenantId: pending.tenantId, err: err instanceof Error ? err.message : String(err) });
         return back(isGoogleClientError(err) ? 'client' : 'failed');
       }
     }

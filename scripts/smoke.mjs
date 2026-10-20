@@ -4043,6 +4043,21 @@ console.log('\n■ 60. 在庫管理（内蔵の拡張。第29章、ADR-0045）')
     await call('a', `/v1/admin/extensions/inventory/booking-sources/${src.body?.source?.id}/status`, { method: 'PUT', body: JSON.stringify({ status: 'stopped' }) });
     const stopped = await hook({ ...pii, id: `${tag}-EXT2` });
     stopped.status === 404 ? ok('止めた受け口は受け取らない') : ng(`止めた受け口が受け取った（${stopped.status}）`);
+    // 受け口の削除（第29.13.1節）: 管理者だけ。削除した URL は受け取らず、届いた予約は残る。削除した本人の「取り消す」で同じ URL のまま戻る
+    const srcId = src.body?.source?.id;
+    await call('a', `/v1/admin/extensions/inventory/booking-sources/${srcId}/status`, { method: 'PUT', body: JSON.stringify({ status: 'active' }) });
+    const delByMember = await call('a', `/v1/admin/extensions/inventory/booking-sources/${srcId}`, { method: 'DELETE' }, 'member');
+    const delSrc = await call('a', `/v1/admin/extensions/inventory/booking-sources/${srcId}`, { method: 'DELETE' });
+    const afterDel = await hook({ ...pii, id: `${tag}-EXT3` });
+    const listDel = (await call('a', '/v1/admin/extensions/inventory/booking-sources')).body?.sources ?? [];
+    const keptBooking = (await owner.query(`select count(*)::int as n from inventory_bookings where external_id = $1`, [`${tag}-EXT`])).rows[0].n;
+    const otherRestore = await call('b', `/v1/admin/extensions/inventory/booking-sources/${srcId}/restore`, { method: 'POST' });
+    const restoredSrc = await call('a', `/v1/admin/extensions/inventory/booking-sources/${srcId}/restore`, { method: 'POST' });
+    const afterRestore = await hook({ ...pii, id: `${tag}-EXT3` });
+    delByMember.status === 403 && delSrc.status === 200 && afterDel.status === 404 && !listDel.some((s) => s.id === srcId) && keptBooking === 1
+      && otherRestore.status === 400 && restoredSrc.status === 200 && afterRestore.status === 200
+      ? ok('予約の受け口は管理者が削除でき、その URL は受け取らなくなる（届いた予約は残る）。削除した本人の「取り消す」で同じ URL のまま戻る')
+      : ng('受け口の削除が違う', JSON.stringify({ member: delByMember.status, del: delSrc.status, afterDel: afterDel.status, listed: listDel.some((s) => s.id === srcId), kept: keptBooking, other: otherRestore.status, restored: restoredSrc.status, afterRestore: afterRestore.status }));
 
     // JAN から商品名を引く（第29.6節）。検査数字の誤ったコードは外へ調べに行かず、見つからないとして 200 を返す
     // （正しいコードは本物の Google 検索になり、結果が外部で変わるため、通しの確認では使わない。単体テストで確かめる）
@@ -8052,6 +8067,175 @@ console.log('\n■ 114. 発注の記録と発注書（入荷待ちは見張り�
     await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
     if (supplierId) await owner.query(`delete from inventory_suppliers where id = $1`, [supplierId]);
     for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 115. スマホでバーコードを読んで品目を登録する（読んだだけでは作らず「決定」で作る・同じ名前は結び付けを先に・作った本人だけが取り消せる。第29.11.2節、Q-250）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用登録${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const reg = (body, who = 'member') => call('a', '/v1/inventory/register', { method: 'POST', body: JSON.stringify(body) }, who);
+    // 商品名の見つからないバーコード（見本の調べもの）→ 名前だけでは作らない（案を返す）→「決定」（create）で作る → もう一度読むと登録済み
+    const notFound = await reg({ code: `${tag}-A` });
+    const proposal = await reg({ code: `${tag}-A`, name: `${tag} 綿棒` });
+    const notYet = (await owner.query(`select count(*)::int as n from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`])).rows[0].n;
+    const made = await reg({ code: `${tag}-A`, name: `${tag} 綿棒`, create: true, kind: 'sale', unit: '箱', price: 500, qty: 2 });
+    const known = await reg({ code: `${tag}-A` });
+    notFound.body?.kind === 'notFound' && proposal.body?.kind === 'proposal' && notYet === 0
+      && made.status === 201 && made.body?.kind === 'created' && made.body.item?.codes?.includes(`${tag}-A`)
+      && made.body.item.kind === 'sale' && made.body.item.unit === '箱' && made.body.item.price === 500 && made.body.item.onHand === 2
+      && known.body?.kind === 'known' && known.body.item?.id === made.body.item.id
+      ? ok('読んだだけ・名前を入れただけでは作らず、「決定」で区分・単位・価格・いまの数を付けて作り、もう一度読むと登録済みと答える')
+      : ng('登録の流れが違う', JSON.stringify({ notFound: notFound.body, proposal: proposal.body?.kind, notYet, made: made.body?.item ? { kind: made.body.item.kind, unit: made.body.item.unit, price: made.body.item.price, onHand: made.body.item.onHand } : made.body, known: known.body?.kind }));
+    // 同じ名前でバーコードの無い品目があれば、作らずに候補を出す。別の品目として作ることもできる
+    const plain = (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name: `${tag} ガーゼ`, unit: '枚' }) }, 'member')).body?.item;
+    const similar = await reg({ code: `${tag}-B`, name: `${tag} ガーゼ`, create: true, kind: 'supply', unit: '枚' });
+    const forced = await reg({ code: `${tag}-B`, name: `${tag} ガーゼ`, create: true, kind: 'supply', unit: '枚', force: true });
+    similar.body?.kind === 'similar' && similar.body.similar?.some((i) => i.id === plain?.id) && forced.body?.kind === 'created' && forced.body.item?.id !== plain?.id
+      ? ok('同じ名前でバーコードの無い品目があれば「決定」でも作らずに結び付けを先に出し、別の品目としても作れる')
+      : ng('同じ名前の扱いが違う', JSON.stringify({ similar: similar.body?.kind, forced: forced.body?.kind }));
+    // 取り消し: 作った本人だけ。入れた数を戻して止める
+    const id = made.body?.item?.id;
+    await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'in', itemId: id, qty: 3 }) }, 'member');
+    const byOther = await call('a', `/v1/inventory/register/${id}/undo`, { method: 'POST' });
+    const undone = await call('a', `/v1/inventory/register/${id}/undo`, { method: 'POST' }, 'member');
+    const after = await call('a', `/v1/inventory/items/${id}`, {}, 'member');
+    const again = await reg({ code: `${tag}-A` });
+    byOther.status === 400 && undone.status === 200 && after.status === 404 && again.body?.kind === 'notFound'
+      ? ok('登録の取り消しは作った本人だけができ、入れた数を戻して品目を削除する（バーコードも外れ、読み直すと知らないバーコード）')
+      : ng('登録の取り消しが違う', JSON.stringify({ other: byOther.status, undone: undone.status, after: after.status, again: again.body?.kind }));
+  } catch (err) {
+    ng('登録の確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 116. JAN 検索の Yahoo!ショッピングの Client ID（管理者が在庫管理の設定で入れる・画面には末尾だけ。第29.11.3節、Q-251）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const byMember = await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ yahooClientId: 'dj00smokeTEST1234' }) }, 'member');
+    const bad = await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ yahooClientId: 'あいう' }) });
+    const put = await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ yahooClientId: 'dj00smokeTEST1234' }) });
+    const { rows: stored } = await owner.query(`select inventory->>'yahooClientId' as id from tenant_settings where tenant_id = 't-alpha'`);
+    const list = (await call('a', '/v1/inventory', {}, 'member')).body;
+    const adminSettings = (await call('a', '/v1/admin/settings')).body;
+    const exts = JSON.stringify((await call('a', '/v1/admin/extensions')).body);
+    const cleared = await call('a', '/v1/admin/extensions/inventory/settings', { method: 'PUT', body: JSON.stringify({ yahooClientId: '' }) });
+    const listAfter = (await call('a', '/v1/inventory', {}, 'member')).body;
+    byMember.status === 403 && bad.status === 400 && put.status === 200 && put.body?.inventory?.yahooClientId === '••••1234' && stored[0]?.id === 'dj00smokeTEST1234'
+      && list?.yahooCredit === true && adminSettings?.inventory?.yahooClientId === '••••1234' && !exts.includes('dj00smokeTEST1234')
+      && cleared.status === 200 && (listAfter?.yahooCredit === false || !!process.env.YAHOO_CLIENT_ID)
+      ? ok('Client ID は管理者だけが入れられ、画面には末尾だけを出す。入れるとクレジットを出し、削除すると出さない')
+      : ng('Client ID の扱いが違う', JSON.stringify({ member: byMember.status, bad: bad.status, put: put.body?.inventory?.yahooClientId, stored: !!stored[0]?.id, credit: list?.yahooCredit, admin: adminSettings?.inventory?.yahooClientId, leaked: exts.includes('dj00smokeTEST1234'), after: listAfter?.yahooCredit }));
+  } catch (err) {
+    ng('Client ID の確認が途中で止まった', String(err));
+  } finally {
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 117. 品目の削除（管理者だけ・在庫が残れば断る・記録の無い品目は行ごと・記録のある品目は記録を残して出さない・取り消し。第29.6.3節、Q-252）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用削除${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select tenant_id, inventory from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await call('a', '/v1/admin/extensions/inventory/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const make = async (name, body = {}) => (await call('a', '/v1/inventory/items', { method: 'POST', body: JSON.stringify({ name, ...body }) }, 'member')).body?.item;
+    const rows = async (id) => (await owner.query(`select deleted_at from inventory_items where id = $1`, [id])).rows;
+    // 記録の無い品目: 管理者だけが削除でき、行ごと消えてバーコードも外れる。取り消すと戻る
+    const a1 = await make(`${tag} 綿棒`, { codes: [`${tag}-A`] });
+    const byMember = await call('a', `/v1/inventory/items/${a1?.id}`, { method: 'DELETE' }, 'member');
+    const del1 = await call('a', `/v1/inventory/items/${a1?.id}`, { method: 'DELETE' });
+    const gone = await call('a', `/v1/inventory/items/${a1?.id}`, {}, 'member');
+    const look1 = await call('a', `/v1/inventory/lookup?code=${encodeURIComponent(`${tag}-A`)}`, {}, 'member');
+    const purgedRows = await rows(a1?.id);
+    const restoreByMember = await call('a', `/v1/inventory/items/${a1?.id}/restore`, { method: 'POST' }, 'member');
+    const restored = await call('a', `/v1/inventory/items/${a1?.id}/restore`, { method: 'POST' });
+    const look2 = await call('a', `/v1/inventory/lookup?code=${encodeURIComponent(`${tag}-A`)}`, {}, 'member');
+    byMember.status === 403 && del1.status === 200 && del1.body?.purged === true && gone.status === 404 && look1.body?.item === null && purgedRows.length === 0
+      && restoreByMember.status === 400 && restored.status === 200 && look2.body?.item?.id === a1?.id
+      ? ok('記録の無い品目は管理者だけが削除でき、行ごと消えてバーコードも外れる。削除した本人の「取り消す」で品目とバーコードが戻る')
+      : ng('記録の無い品目の削除が違う', JSON.stringify({ member: byMember.status, del: del1.status, purged: del1.body?.purged, gone: gone.status, look1: look1.body?.item?.id ?? null, rows: purgedRows.length, rm: restoreByMember.status, restored: restored.status, look2: look2.body?.item?.id }));
+    // 記録のある品目: 在庫が残れば断る。0 にすれば削除でき、記録は残したまま一覧（止めた品目も）・品目・ほかの会社のどこにも出さない
+    const b1 = await make(`${tag} ガーゼ`, { codes: [`${tag}-B`], initialQty: 2 });
+    const left = await call('a', `/v1/inventory/items/${b1?.id}`, { method: 'DELETE' });
+    await call('a', '/v1/inventory/moves', { method: 'POST', body: JSON.stringify({ kind: 'out', itemId: b1?.id, qty: 2 }) }, 'member');
+    const otherTenant = await call('b', `/v1/inventory/items/${b1?.id}`, { method: 'DELETE' });
+    const del2 = await call('a', `/v1/inventory/items/${b1?.id}`, { method: 'DELETE' });
+    const listed = (await call('a', '/v1/inventory?stopped=1', {}, 'member')).body?.items ?? [];
+    const kept = await rows(b1?.id);
+    const moves = (await owner.query(`select count(*)::int as n from inventory_moves where item_id = $1`, [b1?.id])).rows[0].n;
+    const b2 = await make(`${tag} ガーゼ（新）`, { codes: [`${tag}-B`] });
+    left.status === 400 && /在庫が/.test(left.body?.error ?? '') && [403, 404].includes(otherTenant.status) && del2.status === 200 && del2.body?.purged === false
+      && !listed.some((i) => i.id === b1?.id) && kept.length === 1 && kept[0].deleted_at && moves === 2 && b2?.codes?.includes(`${tag}-B`)
+      ? ok('在庫が残る品目は断り、0 にすれば削除できる。記録は残したまま一覧（止めた品目も）に出さず、同じバーコードを新しい品目に付け直せる。ほかの会社からは削除できない')
+      : ng('記録のある品目の削除が違う', JSON.stringify({ left: left.status, other: otherTenant.status, del: del2.status, purged: del2.body?.purged, listed: listed.some((i) => i.id === b1?.id), kept: kept.length, moves, b2: b2?.codes }));
+  } catch (err) {
+    ng('削除の確認が途中で止まった', String(err));
+  } finally {
+    const items = `select id from inventory_items where tenant_id = 't-alpha' and name like '${tag}%'`;
+    for (const t of ['inventory_stock', 'inventory_moves', 'inventory_lots', 'inventory_codes']) await owner.query(`delete from ${t} where item_id in (${items})`);
+    await owner.query(`delete from inventory_items where tenant_id = 't-alpha' and name like $1`, [`${tag}%`]);
+    for (const r of saved) await owner.query(`update tenant_settings set inventory = $2 where tenant_id = $1`, [r.tenant_id, r.inventory ? JSON.stringify(r.inventory) : null]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 118. 不正の兆しの見張りの段 3（Google のログインの記録の担当の許可: 管理者だけ・状態・切断・ダッシュボード。第16.8.6節、ADR-0092）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: before } = await owner.query(`select tenant_id, kind, secret_enc, meta, updated_by, updated_at from tenant_credentials where tenant_id = 't-alpha' and kind = 'google_login_audit'`);
+  try {
+    await owner.query(`delete from tenant_credentials where tenant_id = 't-alpha' and kind = 'google_login_audit'`);
+    const byMember = await call('a', '/v1/admin/connections/google/login-audit', {}, 'member');
+    const off = (await call('a', '/v1/admin/connections/google/login-audit')).body;
+    const connectByMember = await call('a', '/v1/admin/connections/google/login-audit/connect', { method: 'POST' }, 'member');
+    // 見本の会社は Google の認可を経ずにつなぐ
+    const connected = await call('a', '/v1/admin/connections/google/login-audit/connect', { method: 'POST' });
+    const on = (await call('a', '/v1/admin/connections/google/login-audit')).body;
+    const live = (await call('a', '/v1/admin/dashboard/live')).body;
+    const other = (await call('b', '/v1/admin/connections/google/login-audit')).body;
+    const { rows: acts } = await owner.query(`select action from audit_events where tenant_id = 't-alpha' and action like 'connection.google.login_audit%' order by occurred_at desc limit 1`);
+    byMember.status === 403 && off?.state === 'disconnected' && connectByMember.status === 403 && connected.body?.connected === true
+      && on?.state === 'connected' && on.assignee && !JSON.stringify(on).includes('secret') && live?.security?.google === 'connected'
+      && other?.state !== 'connected' && acts[0]?.action === 'connection.google.login_audit'
+      ? ok('Google のログインの記録の担当の許可は管理者だけがつなぎ、担当と状態を返し（鍵は返さない）、ダッシュボードの見張りに「接続中」と出す。ほかの会社には及ばない')
+      : ng('担当の許可の扱いが違う', JSON.stringify({ member: byMember.status, off: off?.state, cm: connectByMember.status, connected: connected.body, on, live: live?.security?.google, other: other?.state, act: acts[0]?.action }));
+    const removed = await call('a', '/v1/admin/connections/google/login-audit', { method: 'DELETE' });
+    const after = (await call('a', '/v1/admin/connections/google/login-audit')).body;
+    const { rows: left } = await owner.query(`select 1 from tenant_credentials where tenant_id = 't-alpha' and kind = 'google_login_audit'`);
+    removed.status === 200 && after?.state === 'disconnected' && left.length === 0
+      ? ok('切断すると担当の許可を消し、未接続に戻る') : ng('切断が違う', JSON.stringify({ removed: removed.status, after: after?.state, left: left.length }));
+  } catch (err) {
+    ng('段 3 の確認が途中で止まった', String(err));
+  } finally {
+    await owner.query(`delete from tenant_credentials where tenant_id = 't-alpha' and kind = 'google_login_audit'`);
+    for (const r of before) {
+      await owner.query(`insert into tenant_credentials (tenant_id, kind, secret_enc, meta, updated_by, updated_at) values ($1,$2,$3,$4,$5,$6)`,
+        [r.tenant_id, r.kind, r.secret_enc, r.meta, r.updated_by, r.updated_at]);
+    }
     await owner.end();
   }
 }

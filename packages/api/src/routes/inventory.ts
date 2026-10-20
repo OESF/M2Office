@@ -14,7 +14,7 @@ import {
   readSheet, renderSheet, renderShelfLabels, saveFile, detectKind, enqueueJob, toInstant, IMPORT_MAX_ROWS, INVENTORY_ORDER, MAX_FILE_BYTES, MIME,
   MOBILE_INVENTORY_PATH, createOrderSheet, orderQuantityText, type ItemInput, type MoveInput, type PublicationView,
 } from '@m2office/core';
-import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, inventoryRuleOf, withoutPurchase, type InventoryItemKind, type InventoryMoveKind, type InventoryOutPurpose, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
+import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, inventoryRuleOf, withoutPurchase, type InventoryItem, type InventoryItemKind, type InventoryMoveKind, type InventoryOutPurpose, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { tenantOrigin } from '../tenant-origin.js';
@@ -118,6 +118,8 @@ export function inventoryRoute(deps: AppDeps) {
       // 販売品の在庫額の端数の扱い（会社情報の「端数の扱い」。第29.6.1節）
       taxRounding: company.taxRounding,
       todayOut,
+      // JAN から商品名を引くのに Yahoo!ショッピングを使うか（使うなら画面の下にクレジットを出す。第29.11.3節）
+      yahooCredit: await deps.inventory.jan.yahooEnabledFor(tenant.id),
     });
   });
 
@@ -205,6 +207,46 @@ export function inventoryRoute(deps: AppDeps) {
     return c.json({ item: res.item });
   });
 
+  // ---- 品目の削除（第29.6.3節、Q-252） ----
+
+  /** 削除した直後の品目（「取り消す」を受けるため。削除した人と時刻・削除する前の品目。1 時間で忘れる）。 */
+  const recentDeletions = new Map<string, { tenantId: string; userId: string; at: number; item: InventoryItem; purged: boolean }>();
+  const DELETE_UNDO_MS = 60 * 60_000;
+  /** 削除して、取り消せるように覚える。 */
+  const deleteAndRemember = async (tenantId: string, userId: string, id: string) => {
+    const res = await service.deleteItem(tenantId, userId, id);
+    if ('error' in res) return res;
+    const cutoff = Date.now() - DELETE_UNDO_MS;
+    for (const [k, v] of recentDeletions) if (v.at < cutoff) recentDeletions.delete(k);
+    recentDeletions.set(id, { tenantId, userId, at: Date.now(), item: res.item, purged: res.purged });
+    return res;
+  };
+
+  /**
+   * 品目を削除する（管理者）。在庫が 0 で、取り置き・入荷待ちの発注が無いときだけ。記録の無い品目は行ごと消し、
+   * 記録のある品目は記録を残してどこにも出さない。バーコードは外す。確かめの画面は挟まず、直後に「取り消す」で戻せる。
+   */
+  app.delete('/items/:id', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    if (!isAdmin(c)) return c.json({ error: '品目を削除できるのは管理者です' }, 403);
+    const res = await deleteAndRemember(tenant.id, user.id, c.req.param('id'));
+    if ('error' in res) return c.json({ error: res.error }, res.error === '品目が見つかりません' ? 404 : 400);
+    return c.json({ ok: true, name: res.item.name, purged: res.purged });
+  });
+
+  /** 削除した直後の品目を元に戻す（削除した本人が 1 時間のうち）。ほかの品目に付いたバーコードは戻さず、返す。 */
+  app.post('/items/:id/restore', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const id = c.req.param('id');
+    const rec = recentDeletions.get(id);
+    if (!rec || rec.tenantId !== tenant.id || rec.userId !== user.id || Date.now() - rec.at > DELETE_UNDO_MS) {
+      return c.json({ error: '取り消せるのは、自分が削除した直後（1 時間のうち）の品目だけです' }, 400);
+    }
+    recentDeletions.delete(id);
+    const res = await service.restoreItem(tenant.id, user.id, rec.item, rec.purged);
+    return c.json(res);
+  });
+
   /** 品目を止める・使うに戻す（管理者。第29.16節）。 */
   app.put('/items/:id/status', async (c) => {
     const { tenant, user } = c.get('ctx');
@@ -229,6 +271,101 @@ export function inventoryRoute(deps: AppDeps) {
     const code = (c.req.query('code') ?? '').slice(0, 200);
     if (!code) return c.json({ error: 'code を入れてください' }, 400);
     return c.json(await service.lookup(tenant.id, code));
+  });
+
+  // ---- スマホでバーコードを読んで品目を登録する（第29.11.2節、Q-250） ----
+
+  /** 登録した直後の品目（「取り消す」を受けるため。作った人と時刻。1 時間で忘れる）。 */
+  const recentRegistrations = new Map<string, { tenantId: string; userId: string; at: number }>();
+  const REGISTER_UNDO_MS = 60 * 60_000;
+  /** 名前を比べる形（空白と全角・半角の違いを無くす）。 */
+  const nameKey = (v: string) => v.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+
+  /**
+   * バーコードを読んで品目を登録する（第29.11.2節）。**読んだだけでは作らない。** 知っているバーコードなら品目を返すだけ。
+   * 知らなければ JAN で商品名を調べて「作る案」（`proposal`）を返し、画面で名前・区分・単位・いまの数を整えて「決定」したときに
+   * `create: true` で作る。作る前に同じ名前でバーコードの無い品目があれば、作らずに候補（`similar`）を返す。
+   *
+   * 本文: `code`（読んだ値）・`name`（見つからなかったとき・名前を直したとき）・`force`（同じ名前があっても別の品目として作る）・
+   * `create`（作る）。作るときは `kind`・`unit`・`price`（販売品）・`category`・`qty`（いまの数。入庫として記録）・`locationId`（棚）も受ける
+   */
+  app.post('/register', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const b = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const raw = (str(b['code']) ?? '').trim().slice(0, 200);
+    if (!raw) return c.json({ error: 'バーコードを読んでください' }, 400);
+    const looked = await service.lookup(tenant.id, raw);
+    if (looked.location) return c.json({ kind: 'location', location: looked.location });
+    const items = await service.list(tenant.id, { includeStopped: true });
+    if (looked.item) return c.json({ kind: 'known', item: items.find((i) => i.id === looked.item!.id) ?? looked.item });
+    const code = looked.parsed.code;
+    const create = b['create'] === true;
+    let name = (str(b['name']) ?? '').trim().slice(0, 100);
+    let category = (str(b['category']) ?? '').trim().slice(0, 40);
+    let maker = '';
+    if (!name) {
+      if (create) return c.json({ error: '品名を入れてください' }, 400);
+      // JAN・GTIN なら商品名を Web で調べる（外へ渡すのはバーコードの数字だけ）
+      const digits = code.replace(/\D/g, '');
+      const jan = looked.parsed.kind !== 'other' || /^\d{8,14}$/.test(digits)
+        ? await deps.inventory.jan.lookup(tenant.id, digits).catch(() => ({ found: false as const }))
+        : { found: false as const };
+      if (!jan.found || !('name' in jan) || !jan.name) return c.json({ kind: 'notFound', code });
+      name = jan.name.slice(0, 100);
+      category = ('category' in jan && jan.category) ? String(jan.category).slice(0, 40) : '';
+      maker = ('maker' in jan && jan.maker) ? String(jan.maker).slice(0, 60) : '';
+    }
+    // 同じ名前（または名前を含み合う）でバーコードの無い品目があれば、作らずに結び付けを先に出す（二重に作らないため）
+    if (b['force'] !== true) {
+      const k = nameKey(name);
+      const similar = items.filter((i) => i.status === 'active' && i.codes.length === 0 && k.length >= 2
+        && (nameKey(i.name) === k || nameKey(i.name).includes(k) || k.includes(nameKey(i.name)))).slice(0, 5);
+      if (similar.length) return c.json({ kind: 'similar', code, name, category, maker, similar });
+    }
+    // 決定されるまでは作らない（画面で名前・区分・単位・いまの数を整えてもらう）
+    if (!create) return c.json({ kind: 'proposal', code, name, category, maker });
+    const input = itemInput(b);
+    const res = await service.createItem(tenant.id, user.id, {
+      name, category, kind: input.kind ?? 'supply', unit: (input.unit ?? '').trim() || '個', codes: [code],
+      ...(input.price !== undefined ? { price: input.price } : {}),
+    }, null);
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    recentRegistrations.set(res.item.id, { tenantId: tenant.id, userId: user.id, at: Date.now() });
+    // いまの数は棚を付けて入庫として記録する（読んだ棚があればその棚）
+    const qty = numOrNull(b['qty']);
+    if (qty && qty > 0) {
+      const moved = await service.recordMove(tenant.id, user.id, {
+        kind: 'in', itemId: res.item.id, qty, unit: 'unit', reason: 'はじめの数', source: 'manual',
+        ...(str(b['locationId']) ? { locationId: str(b['locationId'])! } : {}),
+      });
+      if (!moved.ok) return c.json({ kind: 'created', item: res.item, maker, warning: `品目は登録しましたが、いまの数を入れられませんでした: ${moved.error}` }, 201);
+      return c.json({ kind: 'created', item: moved.item ?? res.item, maker }, 201);
+    }
+    return c.json({ kind: 'created', item: res.item, maker }, 201);
+  });
+
+  /**
+   * 登録した直後の品目を取り消す（作った本人が 1 時間のうちだけ）。入れた数を戻し（その日のうちの取り消し）、品目を削除する
+   * （止めるとバーコードが残り、読み直すと「登録済み」と出るため。第29.6.3節）。
+   */
+  app.post('/register/:id/undo', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const id = c.req.param('id');
+    const rec = recentRegistrations.get(id);
+    if (!rec || rec.tenantId !== tenant.id || rec.userId !== user.id || Date.now() - rec.at > REGISTER_UNDO_MS) {
+      return c.json({ error: '取り消せるのは、自分が登録した直後（1 時間のうち）の品目だけです' }, 400);
+    }
+    const moves = await service.history(tenant.id, { itemId: id, limit: 50 });
+    const reversed = new Set(moves.map((m) => m.reversalOf).filter(Boolean));
+    for (const m of moves) {
+      if (m.reversalOf || reversed.has(m.id) || m.createdBy !== user.id) continue;
+      const r = await service.undo(tenant.id, user.id, m.id);
+      if (!r.ok) return c.json({ error: r.error }, 400);
+    }
+    const res = await deleteAndRemember(tenant.id, user.id, id);
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    recentRegistrations.delete(id);
+    return c.json({ ok: true });
   });
 
   /** 場所を足す。 */

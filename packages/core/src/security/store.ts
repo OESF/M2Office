@@ -15,7 +15,18 @@ export type SecurityViewKind = 'contact' | 'inquiry' | 'member' | 'contract' | '
 /** 兆しの型。 */
 export type SecuritySignalType =
   | 'export' | 'export_burst' | 'bulk_mail' | 'mass_view' | 'login_disabled' | 'session_disabled' | 'login_burst' | 'login_flood'
-  | 'admin_added' | 'permission_burst' | 'new_device' | 'auto_signout';
+  | 'admin_added' | 'permission_burst' | 'new_device' | 'auto_signout'
+  // Google アカウントの異変（段 3。第16.8.6.2節）
+  | 'google_hijacked' | 'google_password_leak' | 'google_suspicious_login' | 'google_gov_attack' | 'google_forwarding'
+  | 'google_login_blocked' | 'google_cookie_signout' | 'google_risky_blocked' | 'google_2sv_off' | 'google_recovery_changed' | 'google_login_failures';
+
+/** Google のログインの記録を読んだ様子（段 3。どこまで読んだか・読めなかった時刻・読めないことを知らせた日）。 */
+export interface GoogleReadState {
+  readAt: string | null;
+  errorAt: string | null;
+  /** 読めないことを知らせた日（日本時間の YYYY-MM-DD。1 日 1 回まで）。 */
+  errorNotifiedOn: string | null;
+}
 
 /** 見つけた兆し。 */
 export interface SecuritySignal {
@@ -64,6 +75,10 @@ export interface SecurityStore {
   viewCounts(tenantId: string, since: string): Promise<{ userId: string; hour: string; n: number }[]>;
   /** この時刻より前の開いた数を消す（7 日で消す）。 */
   pruneViews(tenantId: string, before: string): Promise<void>;
+  /** Google のログインの記録を読んだ様子（段 3。移行 155）。 */
+  googleState(tenantId: string): Promise<GoogleReadState>;
+  /** Google のログインの記録を読んだ様子を直す（渡した項目だけ）。 */
+  setGoogleState(tenantId: string, patch: Partial<GoogleReadState>): Promise<void>;
 }
 
 interface SignalRow { id: string; type: SecuritySignalType; severity: 'high' | 'medium'; user_id: string | null; key: string; detail: Record<string, unknown> | null; created_at: unknown }
@@ -164,6 +179,26 @@ export class PostgresSecurityStore implements SecurityStore {
   async pruneViews(tenantId: string, before: string): Promise<void> {
     await this.q(tenantId, 'delete from security_view_counts where tenant_id = $1 and hour < $2', [tenantId, before]);
   }
+
+  async googleState(tenantId: string): Promise<GoogleReadState> {
+    const [r] = await this.q<{ google_read_at: unknown; google_error_at: unknown; google_error_notified_on: string | null }>(tenantId,
+      'select google_read_at, google_error_at, google_error_notified_on from security_watch_state where tenant_id = $1', [tenantId]);
+    return {
+      readAt: r?.google_read_at ? iso(r.google_read_at) : null, errorAt: r?.google_error_at ? iso(r.google_error_at) : null,
+      errorNotifiedOn: r?.google_error_notified_on ?? null,
+    };
+  }
+
+  async setGoogleState(tenantId: string, patch: Partial<GoogleReadState>): Promise<void> {
+    const cur = await this.googleState(tenantId);
+    const next = { ...cur, ...patch };
+    // 見回りの時刻（last_scan_at）は見回りの終わりに書く。まだ行が無ければ、いまの時刻で作っておく
+    await this.q(tenantId,
+      `insert into security_watch_state (tenant_id, last_scan_at, google_read_at, google_error_at, google_error_notified_on) values ($1, now(), $2, $3, $4)
+       on conflict (tenant_id) do update set google_read_at = excluded.google_read_at, google_error_at = excluded.google_error_at,
+         google_error_notified_on = excluded.google_error_notified_on`,
+      [tenantId, next.readAt, next.errorAt, next.errorNotifiedOn]);
+  }
 }
 
 /** メモリの見張りの置き場（試験用）。端末と監査ログの数は、渡したものを読む。 */
@@ -234,5 +269,15 @@ export class MemorySecurityStore implements SecurityStore {
       const [t, , hour] = k.split('\u0000') as [string, string, string];
       if (t === tenantId && hour < before) this.views.delete(k);
     }
+  }
+
+  readonly google = new Map<string, GoogleReadState>();
+
+  async googleState(tenantId: string): Promise<GoogleReadState> {
+    return this.google.get(tenantId) ?? { readAt: null, errorAt: null, errorNotifiedOn: null };
+  }
+
+  async setGoogleState(tenantId: string, patch: Partial<GoogleReadState>): Promise<void> {
+    this.google.set(tenantId, { ...(await this.googleState(tenantId)), ...patch });
   }
 }

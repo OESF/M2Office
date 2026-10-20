@@ -5,7 +5,7 @@
  */
 
 export { PostgresInventoryStore, MemoryInventoryStore } from './store.js';
-export type { InventoryStore, PublicationRecord, ItemRecord, NewMove, StockRecord, LotRecord, MoveQuery, CountEntry, CountLineRecord, BookingRecord, ReservationRecord, MenuItemRecord, BookingQuery } from './store.js';
+export type { InventoryStore, BookingSourceRecord, PublicationRecord, ItemRecord, NewMove, StockRecord, LotRecord, MoveQuery, CountEntry, CountLineRecord, BookingRecord, ReservationRecord, MenuItemRecord, BookingQuery } from './store.js';
 export { parseCode, gs1Date, validGtin, type ParsedCode } from './gs1.js';
 export {
   InventoryService, inventoryAccess, formatQty, toNumber, toDate, splitUnit, UNIT_IS_NAME, MOVE_KIND_LABELS, DEFAULT_WAREHOUSE, IMPORT_MAX_ROWS,

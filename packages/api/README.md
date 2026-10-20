@@ -190,6 +190,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/items/:id/discontinued/dismiss` | 「終売ではない」として終売の見込みを外す（利用範囲の管理者だけ。同じ出典では付け直さない。第29.24.1節）。品目の一覧と詳細は終売の見込み `discontinued` を返す |
 | `POST /v1/inventory/items` ／ `PUT /v1/inventory/items/:id` | 品目を作る・直す（バーコードは `codes` で足す。会社の中で重ならない）。作るときは `initialQty`（いまの数）を入庫として記録し、単位の欄の数ははじめの数として読んで `note` で返す。直すときに単位へ数を入れると 400 |
 | `PUT /v1/inventory/items/:id/status` | 管理者: 品目を止める・使うに戻す（在庫が残れば止められない） |
+| `DELETE /v1/inventory/items/:id` ／ `POST /v1/inventory/items/:id/restore` | 管理者: 品目を削除する（在庫・取り置き・入荷待ちの発注が残れば 400。記録の無い品目は行ごと消し `purged: true`、記録のある品目は記録を残して出さない。バーコードは外す）／削除した直後に元に戻す（削除した本人が 1 時間のうち。ほかの品目に付いたバーコードは戻さず `codesTaken` で返す。第29.6.3節） |
 | `DELETE /v1/inventory/items/:id/codes/:code` | 品目からバーコードを外す |
 | `GET /v1/inventory/lookup` | 読んだ値（`code`。GS1・JAN・棚のラベル）から品目か棚を引く。GS1 なら使用期限とロットも返す |
 | `GET /v1/inventory/jan/:code` | JAN（GTIN）から商品名・メーカー・分類を Gemini の Google 検索で引く（第29.6節）。一致を確かめられたときだけ `found: true`。見つからない・調べられない（鍵が無い・「ローカルだけ」の会社）ときも 200 で `found: false`。同じ会社の同じコードは 24 時間使い回す |
@@ -201,6 +202,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/inventory/locations/labels.pdf` | 棚のラベル（QR）を A4 に 3 列 × 7 段で並べた PDF（`ids` で場所を絞る）。QR にはその棚を開くスマホ用のページの URL（会社のホスト＋`/m/inventory?shelf=…`）を入れる（第29.7節） |
 | `GET /v1/inventory/suppliers` ／ `POST /v1/inventory/suppliers` | 仕入先の一覧 ／ 足す・直す（`id`・`name`・`method`: mail・web・phone・`contact`・`leadDays`。第29.4.1節） |
 | `GET /v1/inventory/forecast` | 見張りの結果（使える数・1 日に使う数・あと何日・仕入れの日数・期限の近いロット・発注の案。急ぐ順。第29.14節） |
+| `POST /v1/inventory/register`・`POST /v1/inventory/register/:id/undo` | バーコードを読んで品目を登録する（知っていれば品目、知らなければ JAN で商品名を調べて案（`proposal`）を返すだけ。`create: true` と区分・単位・価格・いまの数を付けたときに作る。同じ名前でバーコードの無い品目があれば作らずに候補）／作った直後の取り消し（作った本人が 1 時間のうち。入れた数を戻して品目を削除する。第29.11.2節） |
 | `POST /v1/inventory/orders` | 発注を始める（`supplierId`・`lines`: itemId と qty）。発注を記録し（`orderId`・発注番号 `number`）、発注書の PDF（`fileId`）を作る。メールの仕入先は付属の業務「発注の下書き」を起こし発注書を添える（送るのは本人の承認のあと。201 と `runId`。送れたら入荷待ち）。Web・電話の仕入先は連絡先と伝える内容を返す（「発注した」で入荷待ち） |
 | `GET /v1/inventory/orders`・`POST /v1/inventory/orders/:id/ordered`・`POST /v1/inventory/orders/:id/cancel`・`GET /v1/inventory/orders/:id/sheet` | 発注の記録（`open=1` で閉じていないもの。遅れた日数 `overdueDays`）／Web・電話の発注を入荷待ちにする／取り消す（社内の記録だけ）／発注書の PDF（在庫管理を使える人。第29.14.4節・第29.14.5節） |
 | `POST /v1/inventory/slips` | 納品書の写真か PDF（`file`・`locationId`）を読み取り、照らせた行を入庫にする。結果は入庫にした行と照らせなかった行（理由と候補）。読めなければ 422。ファイルは会社のファイルとして残す（第29.9節） |
@@ -341,6 +343,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `DELETE /v1/me/canva`、`POST /v1/me/canva/connect`、`GET /v1/oauth/canva/callback` | 本人の Canva の接続（状態 ／ 切断 ／ つなぐ（PKCE）／ Canva からの戻り）。運営が設定していなければ `configured: false` |
 | `GET /v1/admin/connections/recipients` | 管理者: データの渡し先（委託先）の一覧（渡し先・使い道・渡すもの・場所・契約・いま使っているか。仕様書 第16.11.3節 G-3） |
 | `PUT /v1/admin/connections/google/picker` | 管理者: ドライブの写真を選ぶ画面（Google Picker）の API キー（空なら消す） |
+| `GET・DELETE /v1/admin/connections/google/login-audit` ／ `POST …/connect` | 管理者: Google Workspace のログインの記録の担当の許可（不正の兆しの見張りの段 3）。状態（`state`: na・disconnected・connected、担当・読めているか `read`）／ 切断（Google の許可も取り消す）／ つなぐ（Google の認可の画面の URL。見本の会社ではすぐつなぐ）。戻りは `/v1/oauth/google/callback`（読み取りの許可と会社のドメインを確かめる。仕様書 第16.8.6節） |
 | `PUT・DELETE /v1/admin/connections/google/chat-app` | 管理者: 通知を送る会社の Chat アプリの鍵（サービスアカウントの JSON。本文 `key`）。保存の前に Google でアプリとして認証できるかを確かめる。鍵は返さない（仕様書 第6.5.5.2.1節） |
 | `POST` ／ `DELETE /v1/print-designs/:id/signage`、`POST /v1/print-designs/:id/announcement` | サイネージに流す（掲示の始まりより前なら始まりから）／ 止める ／ お知らせの作成の下書きにする（第41.18節。1 つの物を返すときに `links` でつなげる先を使えるかを添える） |
 | `GET /v1/print-designs/:id/thumb` ／ `GET /v1/print-designs/:id/versions/:vid/preview\|png\|pdf\|bleed` | 一覧の小さな画像 ／ 版の書き出し（案の画像・PNG・実寸の PDF・入稿用の PDF。`page` はパンフレットの面） |
@@ -429,6 +432,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/extensions/business-cards/opt-outs` ／ `POST …/opt-outs/remove` | 管理者: まとめてのメールの配信を停止したアドレスの一覧（`q` で探す）と、停止を外す（`email`。本人から求められたとき。監査ログ `mail.opt_out.remove` にはアドレスそのものを残さない） |
 | `GET /v1/admin/extensions/inventory/booking-sources` ／ `POST` | 管理者: 予約の受け口の一覧 ／ 作る（`name`）。作ったときだけ送り先の URL（鍵を含む）を返す。鍵はハッシュだけを持つ |
 | `PUT /v1/admin/extensions/inventory/booking-sources/:id/status` ／ `mapping` | 管理者: 受け口を止める・再開する（`status`）／ 項目の対応を直す・やり直す（`mapping`。`null` で次の予約から推論し直す） |
+| `DELETE /v1/admin/extensions/inventory/booking-sources/:id` ／ `POST …/:id/restore` | 管理者: 受け口を削除する（その URL への通知は 404。届いた予約と取り置きは残す）／ 削除した直後に同じ URL のまま元に戻す（削除した本人が 1 時間のうち。第29.13.1節） |
 | `POST /v1/admin/extensions/hr/proposal` | 管理者: 就業規則・賃金規程（`file`: PDF・Word・文字・写真）から、人事・給与の設定の案を作る（第30.8.2節。項目・今・案・規程の抜き書き・採らない理由。保存しない。読めなければ 422）。JSON で `knowledgeId` を送ると、知識に登録した社内規程から作る |
 | `GET /v1/admin/extensions/hr/rule-checks` ／ `POST …/rule-checks/:itemId/:version/dismiss` | 管理者: 社内規程の登録・改定で見つかった今の設定との食い違い（残した答えを、いまの設定と並べ直す。第11.11.2節）／ 見終えた |
 | `PUT /v1/admin/extensions/hr/settings` | 管理者: 人事・給与の会社の設定（`office`・`health`・`socialApply`・`pay`・`procedures`・`work`・`agreement`・`leave`・`payroll`・`transfer`（振込元。番号の桁を確かめる）・`duties`（納期の特例・定期健康診断の月）・`notice`（労働条件通知書の会社の定め）・`insurance`（事業所整理記号・事業所番号・特定適用事業所 auto・yes・no・通常の労働者の週の所定労働時間 10〜60）・`labor`（雇用保険の事業の種類・労災保険の事業の種類の番号・労働保険番号）。第30.8.1節）。`GET /v1/admin/extensions/hr/labor-industries` で労災保険率表の事業の種類、`GET /v1/admin/extensions/hr/allowances` で手当の扱い（雇用条件の手当の名前と、割増の基礎・所得税の対象・設定したか）。送った項目だけを変える。人事・給与を `PUT /v1/admin/extensions/hr/enabled` で入れると、区画 `hr` が無ければ作り、入れた管理者を入れる |

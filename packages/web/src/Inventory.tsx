@@ -2,7 +2,7 @@
  * @file 在庫管理のパソコンの画面。品目の一覧と検索・バーコードで引く（USB のリーダー）・スマホで開く・品目を追加・知らないバーコードの結び付け・
  * 取り込みと書き出し・場所と棚のラベル・棚卸しへの入口・品目の詳細と入出庫の記録と取り消し。
  *
- * 数は使える数（在庫 − 引き当て − 期限切れ）を先に出す。説明文を常に出さない（原則 u11）。分からなければ秘書に聞けばよい。
+ * 数は使える数（在庫 − 取り置き − 期限切れ）を先に出す。説明文を常に出さない（原則 u11）。分からなければ秘書に聞けばよい。
  * USB のバーコードリーダーは文字を打って Enter を押すため、探す欄でそのまま読める。
  * カメラで読むのはスマホ用のページ（`/m/inventory`。MobileInventory.tsx）で行う（仕様書 第29.11.1節）。
  *
@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom';
 import { discontinuedText, INVENTORY_ITEM_KINDS, inventoryCostValue, inventoryKindLabel, inventoryMargin, inventoryPurposeLabel, inventorySaleValue, type InventoryDiscontinued, type InventoryItem, type InventoryOutPurpose, type InventoryItemKind, type InventoryItemView, type InventoryLocation, type InventoryMove, type InventoryMoveKind, type InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryDetail, type InventoryList } from './api.js';
 import { Stocktake } from './Stocktake.js';
+import { Scanner } from './Scanner.js';
 import { BookingsPanel, OrderPanel, SlipResultPanel, SuppliersPanel } from './InventoryOrders.js';
 import { PublishPanel } from './InventoryPublish.js';
 import { SalesUnmatchedPanel } from './InventoryUnmatched.js';
@@ -22,6 +23,7 @@ import { MarketPanel, MarketSection } from './InventoryMarket.js';
 import { InventorySummary, isOut, needsOrder, type SummaryFilter } from './InventorySummary.js';
 import type { InventorySlipResult } from './api.js';
 import { OutDoneLine, PurposeChips, purposeOf, type OutDone } from './inventory-out.js';
+import { YahooCredit } from './yahoo-credit.js';
 
 // 記録の種類 `out` は画面では「出庫」と呼ぶ（第 0.406.0 版。第29.11.1節）
 const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '出庫', transfer: '移動', adjust: '調整' };
@@ -51,9 +53,38 @@ export function Inventory({ itemId, onOpen, userId }: { itemId: string | null; o
   const [flash, setFlash] = useState<string | null>(null);
   // 棚卸しは一覧の中で開く（数えている間に品目の詳細へ移らないため）
   const [counting, setCounting] = useState(false);
+  // 削除した直後の品目（一覧の上に「取り消す」を出す。第29.6.3節）と、取り消したあとに一覧を読み直すための値
+  const [deleted, setDeleted] = useState<{ id: string; name: string } | null>(null);
+  const [deletedNote, setDeletedNote] = useState<string | null>(null);
+  const [listKey, setListKey] = useState(0);
   if (counting && !itemId) return <Stocktake userId={userId} onBack={() => setCounting(false)} />;
-  if (itemId) return <ItemView id={itemId} onBack={() => { setFlash(null); onOpen(null); }} userId={userId} initialMessage={flash} />;
-  return <ListView onOpen={(id, note) => { setFlash(note ?? null); onOpen(id); }} onStocktake={() => setCounting(true)} />;
+  if (itemId) {
+    return <ItemView id={itemId} onBack={() => { setFlash(null); onOpen(null); }} userId={userId} initialMessage={flash}
+      onDeleted={(d) => { setDeleted(d); setDeletedNote(null); setFlash(null); onOpen(null); }} />;
+  }
+  const restore = async (d: { id: string; name: string }) => {
+    try {
+      const r = await api.inventory.restore(d.id);
+      setDeleted(null);
+      setDeletedNote(r.codesTaken.length
+        ? `「${d.name}」を元に戻しました。バーコード ${r.codesTaken.join('・')} はほかの品目に付いているため戻していません`
+        : `「${d.name}」を元に戻しました`);
+      setListKey((k) => k + 1);
+    } catch (e) {
+      setDeletedNote(describeError(e, '元に戻せませんでした'));
+    }
+  };
+  return (
+    <>
+      {deleted && (
+        <p className="small inventory-deleted" role="status">
+          「{deleted.name}」を削除しました <button className="link small" onClick={() => void restore(deleted)}>取り消す</button>
+        </p>
+      )}
+      {deletedNote && <p className="small muted" role="status">{deletedNote}</p>}
+      <ListView key={listKey} onOpen={(id, note) => { setFlash(note ?? null); setDeleted(null); setDeletedNote(null); onOpen(id); }} onStocktake={() => setCounting(true)} />
+    </>
+  );
 }
 
 /**
@@ -145,6 +176,8 @@ function Marks({ item, compact = false }: { item: InventoryItemView; compact?: b
       {/* メーカーの終売（第29.24.1節） */}
       {item.discontinued && <DiscontinuedBadge item={item} compact={compact} />}
       {/* 入荷待ち（第29.14.4節） */}
+      {/* 取り置き（予約との引き当て。第29.13節）。一覧の「状態」に数を出す（品目の詳細は上の数の並びに出す） */}
+      {compact && item.reserved > 0 && <span className="badge">取り置き {qtyText(item, item.reserved)}</span>}
       {item.onOrder ? <span className="badge ok" title={item.onOrderDue ? `${item.onOrderDue} に届く予定` : undefined}>{compact ? '入荷待ち' : `入荷待ち ${qtyText(item, item.onOrder)}${item.onOrderDue ? `（${item.onOrderDue.slice(5).replace('-', '/')} 予定）` : ''}`}</span> : null}
     </>
   );
@@ -213,7 +246,7 @@ const EXTRA_COLUMNS: { label: string; num?: boolean; adminOnly?: boolean; cell: 
   { label: '利益', num: true, adminOnly: true, cell: (i) => { const m = inventoryMargin(i); return m ? yenText(m.profit) : ''; } },
   { label: '利益率', num: true, adminOnly: true, cell: (i) => { const m = inventoryMargin(i); return m ? `${m.rate}%` : ''; } },
   { label: '在庫額（仕入価格）', num: true, adminOnly: true, cell: (i) => { const v = inventoryCostValue(i); return v === null ? '' : yenText(v); } },
-  { label: '引き当て', num: true, cell: (i) => (i.reserved ? qtyText(i, i.reserved) : '') },
+  { label: '取り置き', num: true, cell: (i) => (i.reserved ? qtyText(i, i.reserved) : '') },
   { label: '期限切れの数', num: true, cell: (i) => (i.expired ? qtyText(i, i.expired) : '') },
   {
     label: '残りわずかの目安', num: true,
@@ -324,10 +357,12 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
   };
   const scan = () => (!q.trim() && quick ? recordQuick() : lookup(q));
 
-  /** 出庫の欄を開く。同じ品目なら 1 つ足す。別の品目が開いていれば、その品目を記録してから開く。 */
-  const openQuick = async (item: InventoryItemView) => {
+  /**
+   * 出庫の欄を開く。同じ品目なら 1 つ足す。別の品目を選んだら選び直す（前の品目は記録しない。
+   * 記録するのは「記録する」か Enter を押したときだけ。2026-10-20 に三浦さんが求めた）。
+   */
+  const openQuick = (item: InventoryItemView) => {
     if (quick?.item.id === item.id) { setQuick({ ...quick, qty: quick.qty + 1 }); search.current?.focus({ preventScroll: true }); return; }
-    if (quick) await recordQuick();
     setQuick({ item, qty: 1, purpose: purposeOf(item) });
     // 手元は探す欄に置く（続けて読んだバーコードが入り、空のまま Enter で記録できる）
     search.current?.focus({ preventScroll: true });
@@ -555,6 +590,8 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
           <label className="check"><input type="checkbox" checked={stopped} onChange={(e) => setStopped(e.target.checked)} /> 止めた品目も出す</label>
         </div>
       )}
+      {/* Yahoo!ショッピングで JAN から商品名を引く画面（知らないバーコードから品目を作る欄）だけに出す（第29.11.3節） */}
+      {list?.yahooCredit && adding && /^\d{8,14}$/.test(adding.code) && <YahooCredit />}
     </div>
   );
 }
@@ -586,7 +623,7 @@ function QuickOut({ state, onChange, onRecord, onClose }: {
         <button className="btn ghost small" onClick={() => onChange({ ...state, qty: qty + 1 })} aria-label="1 つ増やす">＋</button>
       </span>
       <PurposeChips value={state.purpose} onChange={(purpose) => onChange({ ...state, purpose })} />
-      <button className="btn" onClick={onRecord}>記録する</button>
+      <button className="btn" onClick={onRecord}>決定</button>
       <button className="btn ghost small" onClick={onClose}>閉じる</button>
     </div>
   );
@@ -734,7 +771,11 @@ function Places({ locations, admin, onChanged }: { locations: InventoryLocation[
 }
 
 /** 品目の詳細: 記録する・場所とロットごとの数・項目・最近の記録。 */
-function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; onBack: () => void; userId: string; initialMessage?: string | null }) {
+function ItemView({ id, onBack, userId, initialMessage = null, onDeleted }: {
+  id: string; onBack: () => void; userId: string; initialMessage?: string | null;
+  /** 削除したとき（一覧に戻り、「取り消す」を出す）。 */
+  onDeleted: (d: { id: string; name: string }) => void;
+}) {
   const [detail, setDetail] = useState<InventoryDetail | null>(null);
   const [list, setList] = useState<InventoryList | null>(null);
   const [suppliers, setSuppliers] = useState<InventorySupplier[]>([]);
@@ -772,6 +813,15 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
       setMessage(describeError(e, '変えられませんでした'));
     }
   };
+  /** 削除する（確かめの画面は挟まず、一覧の上の「取り消す」で戻せる。第29.6.3節）。 */
+  const remove = async () => {
+    try {
+      const r = await api.inventory.remove(item.id);
+      onDeleted({ id: item.id, name: r.name });
+    } catch (e) {
+      setMessage(describeError(e, '削除できませんでした'));
+    }
+  };
 
   return (
     <div className="inventory">
@@ -781,7 +831,7 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
         <div className="inventory-figures">
           <span><span className="muted small">使える数</span> <strong>{qtyText(item, item.available)}</strong></span>
           {item.onHand !== item.available && <span className="muted small">在庫 {qtyText(item, item.onHand)}</span>}
-          {item.reserved > 0 && <span className="muted small">引き当て {qtyText(item, item.reserved)}</span>}
+          {item.reserved > 0 && <span className="muted small">取り置き {qtyText(item, item.reserved)}</span>}
           {/* 利益と利益率（利用範囲の管理者だけ。第29.6.2節） */}
           {list.admin && margin && <span className="muted small">利益 {yenText(margin.profit)}（利益率 {margin.rate}%・税抜）</span>}
           <Marks item={item} />
@@ -844,6 +894,10 @@ function ItemView({ id, onBack, userId, initialMessage = null }: { id: string; o
           {item.status === 'active'
             ? <button className="link danger" onClick={() => void setStatus('stopped')}>この品目を止める</button>
             : <button className="link" onClick={() => void setStatus('active')}>使うに戻す</button>}
+          {/* 終売で在庫の無くなった品目は、削除を目立たせる（第29.6.3節） */}
+          {item.discontinued && Math.abs(item.onHand) < 0.0005
+            ? <button className="btn ghost small danger" onClick={() => void remove()}>削除</button>
+            : <button className="link danger" onClick={() => void remove()}>削除</button>}
         </div>
       )}
     </div>
@@ -939,7 +993,7 @@ function MoveForm({ item, locations, features, onDone }: {
         {kind === 'adjust' || memo
           ? <input className="grow" placeholder={kind === 'adjust' ? '理由（必須）' : 'メモ'} value={reason} onChange={(e) => setReason(e.target.value)} aria-label={kind === 'adjust' ? '理由' : 'メモ'} />
           : <button className="link small" onClick={() => setMemo(true)}>メモ</button>}
-        <button className="btn" disabled={busy || !qty || (kind === 'transfer' && !to) || (kind === 'adjust' && !reason.trim())} onClick={() => void save()}>記録する</button>
+        <button className="btn" disabled={busy || !qty || (kind === 'transfer' && !to) || (kind === 'adjust' && !reason.trim())} onClick={() => void save()}>決定</button>
       </div>
       {error && <p className="error small">{error}</p>}
     </div>
@@ -954,6 +1008,8 @@ function ItemFields({ item, unitsOn, suppliers, onSaved, admin = false }: {
 }) {
   const [draft, setDraft] = useState(() => toDraft(item));
   const [code, setCode] = useState('');
+  // パソコンのカメラでバーコードを読む欄を開いているか（第29.11節。USB のリーダーが無い会社のため）
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setDraft(toDraft(item)), [item]);
   const changed = JSON.stringify(draft) !== JSON.stringify(toDraft(item));
@@ -1051,6 +1107,9 @@ function ItemFields({ item, unitsOn, suppliers, onSaved, admin = false }: {
           ))}
           <input className="short" placeholder="読むか打つ" value={code} onChange={(e) => setCode(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && code.trim()) void save(code.trim()); }} aria-label="バーコードを足す" />
+          {!scanning && <button className="btn ghost small" onClick={() => setScanning(true)}>カメラで読む</button>}
+          {/* 読めたら品目に付けて閉じる（ノートパソコンの内蔵カメラなど。スマホと同じ読み取りの部品） */}
+          {scanning && <Scanner onCode={(c) => { setScanning(false); void save(c.trim()); }} onClose={() => setScanning(false)} />}
         </dd>
         <dt>メモ</dt>
         <dd><textarea value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} /></dd>

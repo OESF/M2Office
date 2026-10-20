@@ -10,7 +10,7 @@
 import type { DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
-  InventoryItem, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventoryOutPurpose, InventorySettings, InventoryStockRow,
+  InventoryItem, InventoryItemKind, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventoryOutPurpose, InventorySettings, InventoryStockRow,
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
   HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline, PayAdjustment, BonusPlan,
@@ -472,6 +472,8 @@ export interface InventoryList {
   taxRounding: 'floor' | 'round' | 'ceil';
   /** 今日の出庫（使用）の記録の数（在庫のサマリー）。 */
   todayOut: number;
+  /** JAN から商品名を引くのに Yahoo!ショッピングを使うか（使うなら画面の下にクレジットを出す。第29.11.3節）。 */
+  yahooCredit?: boolean;
 }
 
 /** 品目 1 件の詳しい姿。 */
@@ -498,6 +500,29 @@ export interface InventoryMoveRequest {
   reason?: string;
   /** 出庫の用途（第29.9.1節）。省けば品目の既定。 */
   purpose?: InventoryOutPurpose;
+}
+
+/** バーコードを読んで品目を登録した結果（第29.11.2節）。 */
+export type InventoryRegisterResult =
+  | { kind: 'known'; item: InventoryItemView }
+  | { kind: 'location'; location: InventoryLocation }
+  | { kind: 'notFound'; code: string }
+  | { kind: 'similar'; code: string; name: string; category: string; maker: string; similar: InventoryItemView[] }
+  | { kind: 'proposal'; code: string; name: string; category: string; maker: string }
+  | { kind: 'created'; item: InventoryItemView; maker: string; warning?: string };
+
+/** 登録で「決定」したときに渡す値（第29.11.2節）。 */
+export interface InventoryRegisterCreate {
+  name: string;
+  category?: string;
+  kind: InventoryItemKind;
+  unit: string;
+  price?: number;
+  /** いまの数（入庫として記録する）。 */
+  qty?: number;
+  locationId?: string;
+  /** 同じ名前の品目があっても別の品目として作る。 */
+  force?: boolean;
 }
 
 /** 入出庫の記録の結果。 */
@@ -750,6 +775,19 @@ export interface SecurityWatchStatus {
   signals24h: number;
   high24h: number;
   last: { label: string; at: string; severity: 'high' | 'medium' } | null;
+  /** Google のログインの記録（段 3。第16.8.6節）。使えない会社は `null`。古い API では無い。 */
+  google?: 'connected' | 'disconnected' | 'error' | null;
+}
+
+/** Google のログインの記録の担当の許可（不正の兆しの見張りの段 3。仕様書 第16.8.6節）。 */
+export interface GoogleLoginAuditStatus {
+  /** 使えない会社（Google Workspace の会社のドメインでない）・未接続・接続中。 */
+  state: 'na' | 'disconnected' | 'connected';
+  email: string | null;
+  assignee: string | null;
+  connectedAt: string | null;
+  /** 読めているか（読めていなければ `error`）。 */
+  read: 'connected' | 'disconnected' | 'error' | null;
 }
 
 /** 接続先 1 つの状態（仕様書 第6.7.6節）。直近 15 分の呼び出しの成否と時間から決める。 */
@@ -1919,6 +1957,10 @@ export const api = {
     /** 品目を止める・使うに戻す（管理者）。 */
     setStatus: (id: string, status: 'active' | 'stopped') =>
       call<{ ok: true }>(`/inventory/items/${encodeURIComponent(id)}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+    /** 品目を削除する（管理者。第29.6.3節）。在庫が 0 で、取り置き・入荷待ちの発注が無いときだけ。 */
+    remove: (id: string) => call<{ ok: true; name: string; purged: boolean }>(`/inventory/items/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 削除した直後の品目を元に戻す（削除した本人が 1 時間のうち）。戻せなかったバーコードを返す。 */
+    restore: (id: string) => call<{ ok: true; codesTaken: string[] }>(`/inventory/items/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
     removeCode: (id: string, code: string) =>
       call<{ ok: true }>(`/inventory/items/${encodeURIComponent(id)}/codes/${encodeURIComponent(code)}`, { method: 'DELETE' }),
     /** 読んだバーコード・QR から品目か棚を引く（仕様書 第29.11節）。 */
@@ -1926,6 +1968,12 @@ export const api = {
       parsed: { code: string; gtin: string | null; expiresOn: string | null; lot: string | null; kind: 'gs1' | 'ean' | 'other' };
       item: InventoryItem | null; location: InventoryLocation | null;
     }>(`/inventory/lookup?code=${encodeURIComponent(code)}`),
+    /** バーコードを読んで調べる（スマホの登録。第29.11.2節）。知らなければ JAN で商品名を調べて案を返す（作らない）。 */
+    register: (code: string, opts: { name?: string; force?: boolean } = {}) => call<InventoryRegisterResult>('/inventory/register', { method: 'POST', body: JSON.stringify({ code, ...opts }) }),
+    /** 「決定」で品目を作る。 */
+    registerCreate: (code: string, input: InventoryRegisterCreate) => call<InventoryRegisterResult>('/inventory/register', { method: 'POST', body: JSON.stringify({ code, ...input, create: true }) }),
+    /** 登録した直後の品目を取り消す（入れた数を戻して削除する。作った本人が 1 時間のうち）。 */
+    registerUndo: (itemId: string) => call<{ ok: true }>(`/inventory/register/${encodeURIComponent(itemId)}/undo`, { method: 'POST' }),
     addLocation: (warehouse: string, shelf: string) =>
       call<{ location: InventoryLocation }>('/inventory/locations', { method: 'POST', body: JSON.stringify({ warehouse, shelf }) }),
     removeLocation: (id: string) => call<{ ok: true }>(`/inventory/locations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -2435,6 +2483,12 @@ export const api = {
     /** 通知の控えを送る会社の Chat アプリの鍵（サービスアカウントの JSON）を登録する・消す（第6.5.5.2.1節）。 */
     saveChatAppKey: (key: string) => call<{ ok: true; clientEmail: string }>('/admin/connections/google/chat-app', { method: 'PUT', body: JSON.stringify({ key }) }),
     deleteChatAppKey: () => call<{ ok: true }>('/admin/connections/google/chat-app', { method: 'DELETE' }),
+    /** Google のログインの記録の担当の許可の状態（不正の兆しの見張りの段 3）。 */
+    googleLoginAudit: () => call<GoogleLoginAuditStatus>('/admin/connections/google/login-audit'),
+    /** 担当の許可をつなぐ（Google の認可の画面の URL。見本の会社ではすぐつなぐ）。 */
+    connectGoogleLoginAudit: () => call<{ url?: string; connected?: true }>('/admin/connections/google/login-audit/connect', { method: 'POST' }),
+    /** 担当の許可を切断する（Google の許可も取り消す）。 */
+    disconnectGoogleLoginAudit: () => call<{ ok: true }>('/admin/connections/google/login-audit', { method: 'DELETE' }),
     saveGoogleClient: (v: { clientId: string; clientSecret?: string }) =>
       call<{ ok: true; verdict: GoogleClientVerdict; message: string; users: number; stoppedRuns: number }>(
         '/admin/connections/google', { method: 'PUT', body: JSON.stringify(v) },
@@ -2609,6 +2663,12 @@ export const api = {
       call<{ source: InventoryBookingSource; url: string }>('/admin/extensions/inventory/booking-sources', { method: 'POST', body: JSON.stringify({ name }) }),
     setBookingSourceStatus: (id: string, status: 'active' | 'stopped') =>
       call<{ ok: true }>(`/admin/extensions/inventory/booking-sources/${encodeURIComponent(id)}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+    /** 予約の受け口を削除する（届いた予約と取り置きは残す。第29.13.1節）。 */
+    deleteBookingSource: (id: string) =>
+      call<{ ok: true; name: string }>(`/admin/extensions/inventory/booking-sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 削除した直後の予約の受け口を、同じ URL のまま元に戻す（削除した本人が 1 時間のうち）。 */
+    restoreBookingSource: (id: string) =>
+      call<{ ok: true }>(`/admin/extensions/inventory/booking-sources/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
     /** 受け口の型を直す（`null` なら次の通知から AI が推測し直す）。 */
     setBookingSourceMapping: (id: string, mapping: InventoryBookingMapping | null) =>
       call<{ ok: true }>(`/admin/extensions/inventory/booking-sources/${encodeURIComponent(id)}/mapping`, { method: 'PUT', body: JSON.stringify({ mapping }) }),

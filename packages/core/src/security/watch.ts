@@ -8,6 +8,8 @@
  * - 同じ人に 1 時間のうちに、まとまりの違う重さ高が 2 つ重なったら（持ち出しと権限の変化など）、その人の端末を自動ですべてログアウトする
  *   （アカウントは止めない。Q-218）
  * - ログインの拒否が同じアドレスで 10 分に 5 回に達したら、そのアドレスのログインを 30 分受けない（Q-219）
+ * - 段 3: 担当の管理者の許可で Google Workspace のログインの記録を読み、Google が異変と判断したものと乗っ取りの後によく行われる操作を
+ *   兆しにする（第16.8.6節）。Google が乗っ取り・パスワードの漏洩でアカウントを止めたときは、重なりを待たずにその人の端末をすべてログアウトする（Q-225）
  *
  * 判定に推論を使わない。場所・IP を持たず、1 人ずつのログイン時刻を集計しない（第6.7.10節）。中身は知らせにも記録にも入れない。
  */
@@ -18,6 +20,7 @@ import type { Repository } from '../repository/types.js';
 import { closedReason } from '../scheduler/business-days.js';
 import { deviceOf } from '../dashboard/presence.js';
 import type { SecuritySignal, SecuritySignalType, SecurityStore, SecurityViewKind } from './store.js';
+import { GOOGLE_LOGIN_EVENTS, GOOGLE_LOGIN_MAX_BACK_MS, GOOGLE_LOGIN_OVERLAP_MS, GOOGLE_SIGNOUT_NOW, type GoogleLoginAccess, type GoogleLoginEvent } from './google-login.js';
 
 /** 1 回で大量とみなす書き出し・一斉メールの件数。 */
 export const SECURITY_EXPORT_ROWS = 500;
@@ -55,6 +58,8 @@ export interface SecurityWatchDeps {
   store: SecurityStore;
   /** 休業の期間か（お知らせの作成で覚えた休業。第6.6.1節）。 */
   closedOn?: (tenantId: string, day: string) => Promise<boolean>;
+  /** Google のログインの記録の読み方（段 3。第16.8.6節）。省けば読まない。 */
+  google?: (tenantId: string) => Promise<GoogleLoginAccess>;
 }
 
 /** 見回りの結果。 */
@@ -77,6 +82,8 @@ export interface SecurityWatchStatus {
   high24h: number;
   /** いちばん新しい兆し（型の言い方と時刻だけ）。 */
   last: { label: string; at: string; severity: 'high' | 'medium' } | null;
+  /** Google のログインの記録（段 3）。接続中・未接続・読めていない。使えない会社（Google Workspace の会社のドメインでない）は `null`。 */
+  google: 'connected' | 'disconnected' | 'error' | null;
 }
 
 /** 秘書に見せる兆し（人の名前を添える）。 */
@@ -100,6 +107,10 @@ const FAMILY: Record<SecuritySignalType, string> = {
   export: 'exfiltration', export_burst: 'exfiltration', bulk_mail: 'exfiltration', mass_view: 'exfiltration',
   login_disabled: 'login', session_disabled: 'login', login_burst: 'login', login_flood: 'login',
   admin_added: 'permission', permission_burst: 'permission', new_device: 'device', auto_signout: 'response',
+  // Google アカウントの異変は「Google」のまとまり（M2Office の中の持ち出し・権限の変化と重なれば自動でログアウト。第16.8.6.2節）
+  google_hijacked: 'google', google_password_leak: 'google', google_suspicious_login: 'google', google_gov_attack: 'google', google_forwarding: 'google',
+  google_login_blocked: 'google', google_cookie_signout: 'google', google_risky_blocked: 'google', google_2sv_off: 'google', google_recovery_changed: 'google',
+  google_login_failures: 'google',
 };
 const isUser = (e: AuditEvent) => e.actorType === 'user' && !e.actorId.startsWith('app:') && e.actorId !== 'system';
 
@@ -110,6 +121,11 @@ export const SECURITY_SIGNAL_LABELS: Record<SecuritySignalType, string> = {
   login_burst: 'ログインの拒否が続いた', login_flood: 'ログインの拒否が多い',
   admin_added: '管理者が増えた', permission_burst: '権限の変更が続いた', new_device: '新しい端末でのログイン',
   auto_signout: '自動でログアウトさせた',
+  google_hijacked: 'Google が乗っ取りの疑いでアカウントを止めた', google_password_leak: 'パスワードの漏洩で Google がアカウントを止めた',
+  google_suspicious_login: 'Google が不審と判断したログインが通った', google_gov_attack: '政府の支援を受けた攻撃者に狙われている疑い',
+  google_forwarding: '社外へのメールの自動転送を入れた', google_login_blocked: '不審なログインを Google が止めた',
+  google_cookie_signout: '盗まれた疑いのあるログイン状態を Google がログアウトさせた', google_risky_blocked: '危ない操作を Google が止めた',
+  google_2sv_off: '2 段階認証を切った', google_recovery_changed: '再設定用の連絡先を変えた', google_login_failures: 'Google のログインの失敗が続いた',
 };
 
 /**
@@ -142,7 +158,7 @@ export class SecurityWatch {
     });
     const users = await this.deps.repo.listUsers(tenantId);
     const byEmail = new Map(users.map((u) => [u.email.toLowerCase(), u]));
-    const drafts: { type: SecuritySignalType; severity: 'high' | 'medium'; userId: string | null; key: string; at: string; detail: Record<string, unknown>; self?: boolean }[] = [];
+    const drafts: { type: SecuritySignalType; severity: 'high' | 'medium'; userId: string | null; key: string; at: string; detail: Record<string, unknown>; self?: boolean; signoutNow?: boolean }[] = [];
     const within = (e: AuditEvent, ms: number) => now.getTime() - Date.parse(e.occurredAt) <= ms;
 
     // 1. 大量の持ち出し
@@ -220,8 +236,12 @@ export class SecurityWatch {
       }
     }
 
+    // 6. Google アカウントの異変（段 3。第16.8.6節）。M2Office の利用者だけ（Q-226）
+    drafts.push(...await this.readGoogle(tenantId, users, now));
+
     // 2. ふだんと違う時間は重さを 1 段上げる。「これは大丈夫」と言われた人と型は知らせない
     const found: SecuritySignal[] = [];
+    const signedOut: string[] = [];
     for (const d of drafts) {
       if (d.userId && await this.deps.store.isSuppressed(tenantId, d.userId, d.type, now.toISOString())) continue;
       const off = await this.offHours(tenantId, d.at);
@@ -239,24 +259,20 @@ export class SecurityWatch {
       } else {
         await this.notifyAdmins(tenantId, users, s, now);
       }
+      // Google が乗っ取り・パスワードの漏洩でアカウントを止めたら、重なりを待たずに M2Office の端末をすべてログアウトする（Q-225）
+      if (d.signoutNow && d.userId && !signedOut.includes(d.userId)) {
+        const out = await this.autoSignOut(tenantId, users, d.userId, [d.type], `${d.userId}:google:${d.key}`, now);
+        if (out) { signedOut.push(d.userId); found.push(out); }
+      }
     }
 
     // 同じ人に 1 時間のうちに、まとまりの違う重さ高が 2 つ重なったら、その人の端末を自動ですべてログアウトする（Q-218）
-    const signedOut: string[] = [];
     const recent = await this.deps.store.recentSignals(tenantId, new Date(now.getTime() - HOUR).toISOString(), 200);
     for (const [userId, list] of groupBy(recent.filter((s) => s.userId && s.severity === 'high' && s.type !== 'auto_signout'), (s) => s.userId!)) {
       if (new Set(list.map((s) => FAMILY[s.type])).size < 2) continue;
-      if (recent.some((s) => s.type === 'auto_signout' && s.userId === userId)) continue;
-      const n = await this.signOutAll(tenantId, userId, now);
-      const s: SecuritySignal = {
-        id: randomUUID(), type: 'auto_signout', severity: 'high', userId, key: `${userId}:${hourBucket(now)}`,
-        detail: { sessions: n, because: [...new Set(list.map((x) => x.type))] }, createdAt: now.toISOString(),
-      };
-      if (!(await this.deps.store.addSignal(tenantId, s))) continue;
-      signedOut.push(userId);
-      found.push(s);
-      await this.audit(tenantId, 'security.auto_signout', s);
-      await this.notifyAdmins(tenantId, users, s, now);
+      if (signedOut.includes(userId) || recent.some((s) => s.type === 'auto_signout' && s.userId === userId)) continue;
+      const out = await this.autoSignOut(tenantId, users, userId, [...new Set(list.map((x) => x.type))], `${userId}:${hourBucket(now)}`, now);
+      if (out) { signedOut.push(userId); found.push(out); }
     }
     await this.deps.store.markScan(tenantId, now.toISOString());
     return { found, signedOut };
@@ -274,6 +290,7 @@ export class SecurityWatch {
     return {
       state, lastScanAt, signals24h: list.length, high24h: list.filter((s) => s.severity === 'high').length,
       last: newest ? { label: SECURITY_SIGNAL_LABELS[newest.type], at: newest.createdAt, severity: newest.severity } : null,
+      google: await this.googleStatus(tenantId),
     };
   }
 
@@ -374,6 +391,86 @@ export class SecurityWatch {
     return list.length;
   }
 
+  /** Google のログインの記録を読めているか（使えない会社は `null`）。 */
+  async googleStatus(tenantId: string): Promise<SecurityWatchStatus['google']> {
+    if (!this.deps.google) return null;
+    const access = await this.deps.google(tenantId).catch(() => null);
+    if (!access || access.state === 'na') return null;
+    if (access.state === 'disconnected') return 'disconnected';
+    const g = await this.deps.store.googleState(tenantId);
+    return g.errorAt && (!g.readAt || g.errorAt > g.readAt) ? 'error' : 'connected';
+  }
+
+  /**
+   * Google のログインの記録を、前に読んだ時刻の続きから読み、兆しの下書きにする（段 3。第16.8.6節）。
+   *
+   * 読む範囲は 15 分重ね、同じ記録は Google の記録の番号（兆しの鍵）で二重に数えない。読めなければ兆しにせず、
+   * 担当と管理者に 1 日 1 回まで知らせる（読めなかった間を推測で埋めない）。IP などの値は読まない（第16.8.6.3節）。
+   */
+  private async readGoogle(tenantId: string, users: User[], now: Date): Promise<{
+    type: SecuritySignalType; severity: 'high' | 'medium'; userId: string | null; key: string; at: string; detail: Record<string, unknown>; signoutNow?: boolean;
+  }[]> {
+    if (!this.deps.google) return [];
+    const access = await this.deps.google(tenantId).catch(() => null);
+    if (!access || access.state !== 'connected') return [];
+    const g = await this.deps.store.googleState(tenantId);
+    const back = Math.max(g.readAt ? Date.parse(g.readAt) - GOOGLE_LOGIN_OVERLAP_MS : now.getTime() - HOUR, now.getTime() - GOOGLE_LOGIN_MAX_BACK_MS);
+    let events: GoogleLoginEvent[];
+    try {
+      events = await access.source.list(new Date(back).toISOString(), now.toISOString());
+    } catch (err) {
+      const today = jst(now).day;
+      await this.deps.store.setGoogleState(tenantId, { errorAt: now.toISOString(), ...(g.errorNotifiedOn === today ? {} : { errorNotifiedOn: today }) });
+      if (g.errorNotifiedOn !== today) await this.notifyGoogleError(tenantId, users, access, err instanceof Error ? err.message : '', now);
+      return [];
+    }
+    await this.deps.store.setGoogleState(tenantId, { readAt: now.toISOString(), errorAt: null });
+    const byEmail = new Map(users.map((u) => [u.email.toLowerCase(), u]));
+    const out: Awaited<ReturnType<SecurityWatch['readGoogle']>> = [];
+    for (const e of events) {
+      const u = byEmail.get(e.email);
+      if (!u) continue; // M2Office を使っていない人は、Google から管理者への知らせに任せる（Q-226）
+      const m = e.name === 'login_success' ? (e.suspicious ? { type: 'google_suspicious_login' as const, severity: 'high' as const } : null) : GOOGLE_LOGIN_EVENTS[e.name];
+      if (!m) continue;
+      out.push({ type: m.type, severity: m.severity, userId: u.id, key: e.id, at: e.at, detail: { google: e.name }, ...(GOOGLE_SIGNOUT_NOW.includes(m.type) ? { signoutNow: true } : {}) });
+    }
+    // ログインの失敗は、同じ人が 10 分に 5 回以上のときだけ（兆し 3 と同じ数）
+    for (const [email, list] of groupBy(events.filter((e) => e.name === 'login_failure'), (e) => e.email)) {
+      const u = byEmail.get(email);
+      if (!u) continue;
+      const times = list.map((e) => Date.parse(e.at)).sort((a, b) => a - b);
+      for (let i = SECURITY_LOGIN_BURST - 1; i < times.length; i++) {
+        if (times[i]! - times[i - SECURITY_LOGIN_BURST + 1]! > 10 * MIN) continue;
+        const at = new Date(times[i]!).toISOString();
+        out.push({ type: 'google_login_failures', severity: 'medium', userId: u.id, key: `${email}:${Math.floor(times[i]! / HOUR)}`, at, detail: { google: 'login_failure', times: SECURITY_LOGIN_BURST } });
+        break;
+      }
+    }
+    return out;
+  }
+
+  /** Google のログインの記録を読めないことを、担当と管理者に知らせる（1 日 1 回まで）。 */
+  private async notifyGoogleError(tenantId: string, users: User[], access: Extract<GoogleLoginAccess, { state: 'connected' }>, reason: string, now: Date): Promise<void> {
+    const to = users.filter((u) => isAdmin(u) || u.id === access.assigneeId);
+    for (const u of to) {
+      await this.deps.repo.createNotification({
+        id: randomUUID(), tenantId, userId: u.id, kind: 'security', title: 'Google のログインの記録を読めていません',
+        body: `不正の兆しの見張りが、Google のログインの記録を読めませんでした${reason ? `（${reason}）` : ''}。読めない間の Google の異変は見張れていません。\n\n担当（${access.email || '担当の管理者'}）が管理者ページの「接続」→「Google Workspace」で接続し直してください。`,
+        runId: null, readAt: null, createdAt: now.toISOString(),
+      });
+    }
+  }
+
+  /** その人の端末を自動ですべてログアウトし、兆しと監査ログに残して管理者に知らせる（アカウントは止めない）。 */
+  private async autoSignOut(tenantId: string, users: User[], userId: string, because: SecuritySignalType[], key: string, now: Date): Promise<SecuritySignal | null> {
+    const n = await this.signOutAll(tenantId, userId, now);
+    const s: SecuritySignal = { id: randomUUID(), type: 'auto_signout', severity: 'high', userId, key, detail: { sessions: n, because }, createdAt: now.toISOString() };
+    if (!(await this.deps.store.addSignal(tenantId, s))) return null;
+    await this.audit(tenantId, 'security.auto_signout', s);
+    await this.notifyAdmins(tenantId, users, s, now);
+    return s;
+  }
+
   private async signOutAll(tenantId: string, userId: string, now: Date): Promise<number> {
     const sessions = await this.deps.repo.listSessions(tenantId, userId, now);
     for (const s of sessions) await this.deps.repo.revokeSession(tenantId, s.id, now);
@@ -411,7 +508,7 @@ const isAdmin = (u: User) => u.status === 'active' && u.roles.includes('admin');
 /** 記録に残すのは数と時間の帯だけ（メールアドレスや中身は入れない）。 */
 function pickCounts(d: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const k of ['count', 'times', 'sessions', 'offHours', 'action', 'because']) if (d[k] !== undefined) out[k] = d[k];
+  for (const k of ['count', 'times', 'sessions', 'offHours', 'action', 'because', 'google']) if (d[k] !== undefined) out[k] = d[k];
   return out;
 }
 
@@ -478,10 +575,35 @@ function sentencesOf(s: SecuritySignal, nameOf: (id: string) => string): { title
       return { title: `${label}: ${who}`, body: `${who}が 10 分に ${n} 件の権限の変更をしました${off}（${when}）。乗っ取りや内部の人の不正のことがあります。監査ログで中身を確かめられます。${action}` };
     case 'new_device':
       return { title: `${label}: ${who}`, body: `${who}が、ほかの端末を使っている間に、新しい端末でログインしました${off}（${when}）。アカウントの貸し借りや乗っ取りのことがあります。${action}` };
-    case 'auto_signout':
-      return { title: `${label}: ${who}`, body: `${who}に重い兆しが重なったため、その人の端末をすべてログアウトさせました（${when}）。アカウントは止めていません。止めるときは、管理者ページの「ユーザーと権限」で行います。` };
+    case 'auto_signout': {
+      const byGoogle = Array.isArray(s.detail['because']) && (s.detail['because'] as string[]).some((t) => GOOGLE_SIGNOUT_NOW.includes(t as SecuritySignalType));
+      return { title: `${label}: ${who}`, body: byGoogle
+        ? `Google が${who}のアカウントを止めたため、M2Office の端末もすべてログアウトさせました（${when}）。アカウントは止めていません。${GOOGLE_ADVICE}`
+        : `${who}に重い兆しが重なったため、その人の端末をすべてログアウトさせました（${when}）。アカウントは止めていません。止めるときは、管理者ページの「ユーザーと権限」で行います。` };
+    }
+    case 'google_hijacked': case 'google_password_leak': case 'google_suspicious_login': case 'google_gov_attack': case 'google_forwarding':
+    case 'google_login_blocked': case 'google_cookie_signout': case 'google_risky_blocked': case 'google_2sv_off': case 'google_recovery_changed': case 'google_login_failures':
+      return { title: `${label}: ${who}`, body: `${who}の Google アカウントで「${label}」がありました${off}（${when}）。${GOOGLE_MEANING[s.type]}${GOOGLE_ADVICE}${s.type === 'google_hijacked' || s.type === 'google_password_leak' ? '' : action}` };
   }
 }
+
+/** Google の異変で勧める対応（M2Office から Google のアカウントは操作しない。第16.8.6.2節）。 */
+const GOOGLE_ADVICE = 'Google の管理コンソールで、パスワードの再設定とログイン状態の取り消しを確かめてください（どこから入られたかも管理コンソールで分かります）。';
+
+/** Google の異変ごとの、考えられること。 */
+const GOOGLE_MEANING: Partial<Record<SecuritySignalType, string>> = {
+  google_hijacked: 'Google がアカウントの乗っ取りを疑って止めました。M2Office の端末もすべてログアウトさせました。',
+  google_password_leak: 'パスワードが漏れたため、Google がアカウントを止めました。M2Office の端末もすべてログアウトさせました。',
+  google_suspicious_login: 'Google が不審と判断したログインが通っています。乗っ取られたおそれがあります。',
+  google_gov_attack: '政府の支援を受けた攻撃者に狙われているおそれがあると、Google が判断しました。',
+  google_forwarding: '社外へのメールの自動転送は、乗っ取りの後に情報を持ち出す手口としてよく使われます。',
+  google_login_blocked: 'Google が不審なログインを止めました。パスワードが知られているおそれがあります。',
+  google_cookie_signout: 'ログイン状態が盗まれたおそれがあるとして、Google がログアウトさせました。',
+  google_risky_blocked: 'Google が危ない操作を止めました。乗っ取りの試みのおそれがあります。',
+  google_2sv_off: '2 段階認証を切ると、パスワードだけで入られます。乗っ取りの後によく行われる操作です。',
+  google_recovery_changed: '再設定用の連絡先を変えるのは、乗っ取りの後にアカウントを取り返されないようにする手口としてよく使われます。',
+  google_login_failures: '同じアカウントで、Google のログインの失敗が 10 分に 5 回以上ありました。パスワードの総当たりのおそれがあります。',
+};
 
 function groupBy<T>(list: T[], keyOf: (x: T) => string): Map<string, T[]> {
   const out = new Map<string, T[]>();

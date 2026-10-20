@@ -387,6 +387,12 @@ function SecurityWatchCard({ status, board }: { status: SecurityWatchStatus; boa
               : <span className="muted">まだ見回っていません</span>}
         </div>
         {status.lastScanAt && <div className="muted small">最後の見回り {ago(status.lastScanAt)}前</div>}
+        {/* Google のログインの記録（段 3。第16.8.6節）。使えない会社では出さない */}
+        {status.google && (
+          <div className="muted small">
+            Google のログイン: {status.google === 'connected' ? '接続中' : status.google === 'error' ? <span className="warn-text">読めていません</span> : '未接続'}
+          </div>
+        )}
         {!board && (
           <div className="small">
             この 24 時間の兆し {status.signals24h} 件

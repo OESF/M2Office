@@ -35,7 +35,15 @@ export interface InventorySettings {
   countEveryDays: number | null;
   /** 在庫の正を M2Office にするか（ほかのソフトとのつなぎは Phase 2）。 */
   stockOfRecord: 'm2office' | 'other';
+  /**
+   * JAN から商品名を引く Yahoo!ショッピングの商品検索の Client ID（第29.11.3節）。会社が Yahoo!デベロッパーネットワークで取って管理者ページで入れる。
+   * 空なら運営の環境変数（`YAHOO_CLIENT_ID`）、それも無ければ使わない。画面には末尾だけを出す（`maskClientId`）。
+   */
+  yahooClientId?: string;
 }
+
+/** Client ID を画面に出す形（末尾 4 文字だけ。空なら空）。 */
+export const maskClientId = (id: string | undefined): string => (id ? `••••${id.slice(-4)}` : '');
 
 /** 在庫管理の既定の設定。既定は切り（第29.2節）。 */
 export const DEFAULT_INVENTORY_SETTINGS: InventorySettings = {

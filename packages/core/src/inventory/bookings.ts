@@ -14,7 +14,7 @@ import type {
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
-import type { InventoryStore, MenuItemRecord } from './store.js';
+import type { BookingSourceRecord, InventoryStore, MenuItemRecord } from './store.js';
 import type { InventoryService } from './service.js';
 
 /** 受け取る通知の本文の上限（バイト）。 */
@@ -190,6 +190,24 @@ export class InventoryBookings {
   async setSourceStatus(tenantId: string, userId: string, id: string, status: 'active' | 'stopped'): Promise<void> {
     await this.deps.store.updateBookingSource(tenantId, id, { status });
     await this.audit(tenantId, userId, status === 'stopped' ? 'inventory.booking_source.stop' : 'inventory.booking_source.resume', id, {});
+  }
+
+  /**
+   * 受け口を削除する（管理者。第29.13.1節）。その URL への通知は受け取らなくなる。受け口から届いた予約と取り置きは残す
+   * （取り置きの欄から「使った」「取り消し」で片付けられる）。
+   *
+   * @returns 取り消すときに使う、消した行（鍵のハッシュを含む。画面に出さない）。無ければ `null`
+   */
+  async deleteSource(tenantId: string, userId: string, id: string): Promise<BookingSourceRecord | null> {
+    const removed = await this.deps.store.removeBookingSource(tenantId, id);
+    if (removed) await this.audit(tenantId, userId, 'inventory.booking_source.delete', id, { name: removed.name });
+    return removed;
+  }
+
+  /** 削除した受け口を、同じ URL のまま元に戻す（削除の直後の「取り消す」）。 */
+  async restoreSource(tenantId: string, userId: string, r: BookingSourceRecord): Promise<void> {
+    await this.deps.store.restoreBookingSource(tenantId, r);
+    await this.audit(tenantId, userId, 'inventory.booking_source.restore', r.id, { name: r.name });
   }
 
   /** 受け口の型（項目の対応）を直す（管理者）。`null` にすると、次の通知から AI が推測し直す。 */

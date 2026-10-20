@@ -5,6 +5,7 @@
  * - 「〇〇さんの端末をすべてログアウトして」: その人の端末をすべてログアウトする（アカウントは止めない）
  * - 「これは大丈夫」「〇〇さんのは大丈夫」: 同じ人・同じ型の兆しを 30 日知らせない（いちばん新しい兆しに当てる）
  * - 「〇〇さんを止めて」: アカウントを止めるのは管理者ページの「ユーザーと権限」で行うと案内する（業務の中断と名刺の整理が連動するため）
+ * - Google のログインの記録（段 3）を読めていなければ、「セキュリティの知らせは？」の答えに一言添える（担当がいなければ、Google の管理者の人に接続してもらうよう伝える）
  *
  * 推論を使わずに見分ける（決まった言い方だけ）。管理者でなければ、見張りの中身を答えない。
  */
@@ -61,11 +62,15 @@ export async function answerSecurity(deps: SecuritySecretaryDeps, tenantId: stri
   const admin = !!me && me.status === 'active' && me.roles.includes('admin');
   if (req.kind === 'list') {
     if (!admin) return 'セキュリティの知らせは、管理者だけが見られます。';
-    const list = await deps.watch.recent(tenantId, now);
-    if (list.length === 0) return 'この 7 日に、不正の兆しは見つかっていません。';
+    const [list, google] = await Promise.all([deps.watch.recent(tenantId, now), deps.watch.googleStatus(tenantId).catch(() => null)]);
+    // Google のログインの記録（段 3。第16.8.6節）を読めていなければ一言添える。画面に説明を常に出さず、聞かれたときに伝える（原則 u11）
+    const googleNote = google === 'disconnected'
+      ? 'Google のログインの記録はまだ見張っていません。Google の管理者の人に、管理者ページの「接続」→「Google Workspace」の「Google のログインの記録」で接続してもらってください。'
+      : google === 'error' ? 'Google のログインの記録を読めていません。担当の人に、管理者ページの「接続」→「Google Workspace」で接続し直してもらってください。' : null;
+    if (list.length === 0) return ['この 7 日に、不正の兆しは見つかっていません。', ...(googleNote ? [googleNote] : [])].join('\n');
     const lines = list.slice(0, 10).map((s) => `・${when(s.createdAt)} ${SECURITY_SIGNAL_LABELS[s.type]}${s.userName ? `（${s.userName}さん）` : ''}${s.severity === 'high' ? ' 【重い】' : ''}${s.detail['offHours'] ? '（深夜か休業日）' : ''}`);
     return [`この 7 日の不正の兆しは ${list.length} 件です。`, ...lines,
-      '覚えが無ければ「〇〇さんの端末をすべてログアウトして」、問題が無ければ「〇〇さんのは大丈夫」と伝えてください。'].join('\n');
+      '覚えが無ければ「〇〇さんの端末をすべてログアウトして」、問題が無ければ「〇〇さんのは大丈夫」と伝えてください。', ...(googleNote ? [googleNote] : [])].join('\n');
   }
   const target = req.kind === 'dismiss' && req.name === null ? null : findUsers(users, req.name ?? '');
   if (target && target.length === 0) return req.kind === 'stop' ? null : `「${req.name}」さんが見つかりません。表示名で教えてください。`;

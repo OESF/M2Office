@@ -179,9 +179,23 @@ export interface OrderRecord {
   lines: { id: string; itemId: string; qty: number }[];
 }
 
+/** 予約の受け口の行のすべて（削除の取り消しで作り直すため。鍵のハッシュを含むので画面に出さない）。 */
+export type BookingSourceRecord = InventoryBookingSource & { hookHash: string; createdBy: string };
+
 export interface InventoryStore {
+  /** 品目の一覧。削除した品目（第29.6.3節）は出さない。 */
   listItems(tenantId: string, opts?: { includeStopped?: boolean }): Promise<InventoryItem[]>;
+  /** 品目を 1 つ。削除した品目は `null`。 */
   getItem(tenantId: string, id: string): Promise<InventoryItem | null>;
+  /** 品目に記録（入出庫・棚卸し・発注・引き当て）が 1 つでもあるか（削除のとき、行ごと消せるかを決める。第29.6.3節）。 */
+  itemHasRecords(tenantId: string, itemId: string): Promise<boolean>;
+  /** 記録の無い品目を行ごと消す（バーコード・ロット・いまの数・メニューの対応・相場の記録も消える）。 */
+  purgeItem(tenantId: string, itemId: string): Promise<void>;
+  /**
+   * 品目に「削除した」印を付ける・外す（`at` が `null` なら外す）。付けるときはバーコードとメニューの対応を外す。
+   * 記録の残る品目に使う（品目の行を残し、過去の記録から品名を引けるようにする）。
+   */
+  setItemDeleted(tenantId: string, itemId: string, at: string | null, userId: string): Promise<void>;
   saveItem(tenantId: string, item: ItemRecord, userId: string, at: string): Promise<void>;
   /** 期間（`since` 以上 `until` 未満）の品目ごとの使用の合計（使う単位。取り消しを差し引く。予約で使った分と廃棄は除く。需要の予測。第29.14節・第29.14.2節）。 */
   usageByItem(tenantId: string, since: string, until: string): Promise<Map<string, number>>;
@@ -272,6 +286,10 @@ export interface InventoryStore {
   updateBookingSource(tenantId: string, id: string, patch: { mapping?: InventoryBookingMapping | null; status?: 'active' | 'stopped'; lastReceivedAt?: string }): Promise<void>;
   /** 鍵のハッシュから受け口を引く（会社の判定より前。会社をまたいで 1 行だけ）。 */
   findBookingSourceByHash(hookHash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null>;
+  /** 予約の受け口を消し、消した行を返す（無ければ `null`）。受け口から届いた予約と取り置きは残す（第29.13.1節）。 */
+  removeBookingSource(tenantId: string, id: string): Promise<BookingSourceRecord | null>;
+  /** 消した受け口を、同じ鍵のまま作り直す（削除の取り消し）。 */
+  restoreBookingSource(tenantId: string, r: BookingSourceRecord): Promise<void>;
   /** 予約を足すか直す（出どころ＋予約番号で 1 件）。直したときは元の ID を返す。 */
   upsertBooking(tenantId: string, b: BookingRecord): Promise<string>;
   getBooking(tenantId: string, id: string): Promise<InventoryBooking | null>;
@@ -437,13 +455,39 @@ export class PostgresInventoryStore implements InventoryStore {
 
   async listItems(tenantId: string, opts: { includeStopped?: boolean } = {}): Promise<InventoryItem[]> {
     const rows = await this.q<ItemRow>(tenantId,
-      `${ITEM_SELECT} where i.tenant_id = $1 ${opts.includeStopped ? '' : `and i.status = 'active'`} order by i.category, i.name`, [tenantId]);
+      `${ITEM_SELECT} where i.tenant_id = $1 and i.deleted_at is null ${opts.includeStopped ? '' : `and i.status = 'active'`} order by i.category, i.name`, [tenantId]);
     return rows.map(toItem);
   }
 
   async getItem(tenantId: string, id: string): Promise<InventoryItem | null> {
-    const rows = await this.q<ItemRow>(tenantId, `${ITEM_SELECT} where i.tenant_id = $1 and i.id = $2`, [tenantId, id]);
+    const rows = await this.q<ItemRow>(tenantId, `${ITEM_SELECT} where i.tenant_id = $1 and i.id = $2 and i.deleted_at is null`, [tenantId, id]);
     return rows[0] ? toItem(rows[0]) : null;
+  }
+
+  async itemHasRecords(tenantId: string, itemId: string): Promise<boolean> {
+    const rows = await this.q<{ has: boolean }>(tenantId,
+      `select exists (select 1 from inventory_moves where tenant_id = $1 and item_id = $2)
+           or exists (select 1 from inventory_count_lines where tenant_id = $1 and item_id = $2)
+           or exists (select 1 from inventory_order_lines where tenant_id = $1 and item_id = $2)
+           or exists (select 1 from inventory_reservations where tenant_id = $1 and item_id = $2) as has`, [tenantId, itemId]);
+    return !!rows[0]?.has;
+  }
+
+  async purgeItem(tenantId: string, itemId: string): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      await c.query(`delete from inventory_market_checks where tenant_id = $1 and item_id = $2`, [tenantId, itemId]);
+      await c.query(`delete from inventory_items where tenant_id = $1 and id = $2`, [tenantId, itemId]);
+    });
+  }
+
+  async setItemDeleted(tenantId: string, itemId: string, at: string | null, userId: string): Promise<void> {
+    await this.tx(tenantId, async (c) => {
+      await c.query(`update inventory_items set deleted_at = $3, deleted_by = $4 where tenant_id = $1 and id = $2`, [tenantId, itemId, at, at ? userId : null]);
+      if (at) {
+        await c.query(`delete from inventory_codes where tenant_id = $1 and item_id = $2`, [tenantId, itemId]);
+        await c.query(`delete from inventory_menu_items where tenant_id = $1 and item_id = $2`, [tenantId, itemId]);
+      }
+    });
   }
 
   async weeklyUsage(tenantId: string, itemId: string, since: string): Promise<InventoryWeeklyUsage[]> {
@@ -531,7 +575,7 @@ export class PostgresInventoryStore implements InventoryStore {
   async findItemByCode(tenantId: string, value: string): Promise<InventoryItem | null> {
     const rows = await this.q<ItemRow>(tenantId,
       `${ITEM_SELECT} where i.tenant_id = $1 and (i.id in (select item_id from inventory_codes where tenant_id = $1 and value = $2)
-         or (i.sku <> '' and i.sku = $2)) order by i.status limit 1`, [tenantId, value]);
+         or (i.sku <> '' and i.sku = $2)) and i.deleted_at is null order by i.status limit 1`, [tenantId, value]);
     return rows[0] ? toItem(rows[0]) : null;
   }
 
@@ -841,6 +885,23 @@ export class PostgresInventoryStore implements InventoryStore {
     await this.q(tenantId, `update inventory_booking_sources set ${sets.join(', ')} where tenant_id = $1 and id = $2`, params);
   }
 
+  async removeBookingSource(tenantId: string, id: string): Promise<BookingSourceRecord | null> {
+    const rows = await this.q<{ id: string; name: string; hook_hash: string; mapping: InventoryBookingMapping | null; status: 'active' | 'stopped'; created_by: string; created_at: unknown; last_received_at: unknown }>(
+      tenantId, `delete from inventory_booking_sources where tenant_id = $1 and id = $2 returning *`, [tenantId, id]);
+    const r = rows[0];
+    return r ? {
+      id: r.id, name: r.name, hookHash: r.hook_hash, mapping: r.mapping, status: r.status, createdBy: r.created_by,
+      createdAt: iso(r.created_at), lastReceivedAt: r.last_received_at ? iso(r.last_received_at) : null,
+    } : null;
+  }
+
+  async restoreBookingSource(tenantId: string, r: BookingSourceRecord): Promise<void> {
+    await this.q(tenantId,
+      `insert into inventory_booking_sources (id, tenant_id, name, hook_hash, mapping, status, created_by, created_at, last_received_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict (id) do nothing`,
+      [r.id, tenantId, r.name, r.hookHash, r.mapping === null ? null : JSON.stringify(r.mapping), r.status, r.createdBy, r.createdAt, r.lastReceivedAt]);
+  }
+
   async findBookingSourceByHash(hookHash: string): Promise<{ id: string; tenantId: string; status: 'active' | 'stopped' } | null> {
     // 会社の判定より前に呼ぶ。鍵のハッシュで 1 行だけ返す関数を使う（移行 040）
     const client = await this.pool.connect();
@@ -1005,7 +1066,7 @@ export function weekStartJst(iso: string): string {
 }
 
 export class MemoryInventoryStore implements InventoryStore {
-  readonly items = new Map<string, InventoryItem & { tenantId: string }>();
+  readonly items = new Map<string, InventoryItem & { tenantId: string; deletedAt?: string | null }>();
   readonly codes = new Map<string, { tenantId: string; itemId: string }>();
   readonly suppliers = new Map<string, InventorySupplier & { tenantId: string }>();
   readonly locations = new Map<string, InventoryLocation & { tenantId: string; removed: boolean }>();
@@ -1020,19 +1081,47 @@ export class MemoryInventoryStore implements InventoryStore {
   }
 
   async listItems(tenantId: string, opts: { includeStopped?: boolean } = {}): Promise<InventoryItem[]> {
-    return [...this.items.values()].filter((i) => i.tenantId === tenantId && (opts.includeStopped || i.status === 'active'))
+    return [...this.items.values()].filter((i) => i.tenantId === tenantId && !i.deletedAt && (opts.includeStopped || i.status === 'active'))
       .map((i) => this.withCodes(i)).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
   }
 
   async getItem(tenantId: string, id: string): Promise<InventoryItem | null> {
     const i = this.items.get(id);
-    return i && i.tenantId === tenantId ? this.withCodes(i) : null;
+    return i && i.tenantId === tenantId && !i.deletedAt ? this.withCodes(i) : null;
+  }
+
+  async itemHasRecords(tenantId: string, itemId: string): Promise<boolean> {
+    const mine = (r: { tenantId: string; itemId: string }) => r.tenantId === tenantId && r.itemId === itemId;
+    return this.moves.some(mine) || [...this.countLines.values()].some(mine) || [...this.orderLines.values()].some(mine)
+      || [...this.reservations.values()].some(mine);
+  }
+
+  async purgeItem(tenantId: string, itemId: string): Promise<void> {
+    const i = this.items.get(itemId);
+    if (!i || i.tenantId !== tenantId) return;
+    this.items.delete(itemId);
+    this.dropCodesAndMenus(tenantId, itemId);
+    for (const [k, l] of this.lots) if (l.tenantId === tenantId && l.itemId === itemId) this.lots.delete(k);
+    for (const [k, s] of this.stock) if (s.tenantId === tenantId && s.itemId === itemId) this.stock.delete(k);
+  }
+
+  async setItemDeleted(tenantId: string, itemId: string, at: string | null): Promise<void> {
+    const i = this.items.get(itemId);
+    if (!i || i.tenantId !== tenantId) return;
+    this.items.set(itemId, { ...i, deletedAt: at });
+    if (at) this.dropCodesAndMenus(tenantId, itemId);
+  }
+
+  /** 品目のバーコードとメニューの対応を外す。 */
+  private dropCodesAndMenus(tenantId: string, itemId: string): void {
+    for (const [k, v] of this.codes) if (v.tenantId === tenantId && v.itemId === itemId) this.codes.delete(k);
+    for (const [k, rows] of this.menuItems) if (k.startsWith(`${tenantId}\u0000`)) this.menuItems.set(k, rows.filter((r) => r.itemId !== itemId));
   }
 
   async saveItem(tenantId: string, item: ItemRecord, _userId: string, at: string): Promise<void> {
     const prev = this.items.get(item.id);
     if (prev && prev.tenantId !== tenantId) return;
-    this.items.set(item.id, { ...item, codes: [], updatedAt: at, tenantId, forecast: prev?.forecast ?? null });
+    this.items.set(item.id, { ...item, codes: [], updatedAt: at, tenantId, forecast: prev?.forecast ?? null, deletedAt: prev?.deletedAt ?? null });
   }
 
   async weeklyUsage(tenantId: string, itemId: string, since: string): Promise<InventoryWeeklyUsage[]> {
@@ -1192,7 +1281,7 @@ export class MemoryInventoryStore implements InventoryStore {
   async findItemByCode(tenantId: string, value: string): Promise<InventoryItem | null> {
     const hit = this.codes.get(`${tenantId}\u0000${value}`);
     if (hit) return this.getItem(tenantId, hit.itemId);
-    const bySku = [...this.items.values()].find((i) => i.tenantId === tenantId && i.sku && i.sku === value);
+    const bySku = [...this.items.values()].find((i) => i.tenantId === tenantId && !i.deletedAt && i.sku && i.sku === value);
     return bySku ? this.withCodes(bySku) : null;
   }
 
@@ -1356,17 +1445,29 @@ export class MemoryInventoryStore implements InventoryStore {
     const c = this.counts.get(id);
     if (c && c.tenantId === tenantId && c.status === 'open') Object.assign(c, { status, closedBy: userId, closedAt: at });
   }
-  readonly bookingSources = new Map<string, InventoryBookingSource & { tenantId: string; hookHash: string }>();
+  readonly bookingSources = new Map<string, InventoryBookingSource & { tenantId: string; hookHash: string; createdBy?: string }>();
   readonly bookings = new Map<string, Omit<BookingRecord, 'at'> & { tenantId: string; updatedAt: string }>();
   readonly reservations = new Map<string, ReservationRecord & { tenantId: string; status: InventoryReservationLine['status'] }>();
   readonly menuItems = new Map<string, MenuItemRecord[]>();
 
   async listBookingSources(tenantId: string): Promise<InventoryBookingSource[]> {
-    return [...this.bookingSources.values()].filter((s) => s.tenantId === tenantId).map(({ tenantId: _t, hookHash: _h, ...s }) => s);
+    return [...this.bookingSources.values()].filter((s) => s.tenantId === tenantId).map(({ tenantId: _t, hookHash: _h, createdBy: _c, ...s }) => s);
   }
 
   async createBookingSource(tenantId: string, s: { id: string; name: string; hookHash: string; createdBy: string; at: string }): Promise<void> {
-    this.bookingSources.set(s.id, { id: s.id, name: s.name, mapping: null, status: 'active', createdAt: s.at, lastReceivedAt: null, tenantId, hookHash: s.hookHash });
+    this.bookingSources.set(s.id, { id: s.id, name: s.name, mapping: null, status: 'active', createdAt: s.at, lastReceivedAt: null, tenantId, hookHash: s.hookHash, createdBy: s.createdBy });
+  }
+
+  async removeBookingSource(tenantId: string, id: string): Promise<BookingSourceRecord | null> {
+    const s = this.bookingSources.get(id);
+    if (!s || s.tenantId !== tenantId) return null;
+    this.bookingSources.delete(id);
+    const { tenantId: _t, ...rest } = s;
+    return { ...rest, createdBy: s.createdBy ?? '' };
+  }
+
+  async restoreBookingSource(tenantId: string, r: BookingSourceRecord): Promise<void> {
+    if (!this.bookingSources.has(r.id)) this.bookingSources.set(r.id, { ...r, tenantId });
   }
 
   async updateBookingSource(tenantId: string, id: string, patch: { mapping?: InventoryBookingMapping | null; status?: 'active' | 'stopped'; lastReceivedAt?: string }): Promise<void> {

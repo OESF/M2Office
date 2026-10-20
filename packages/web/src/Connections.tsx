@@ -12,7 +12,7 @@
 
 import { copyText } from './clipboard.js';
 import { useEffect, useRef, useState } from 'react';
-import { api, describeError, type ConnectionHealth, type ConnectionSettings, type GoogleClientVerdict } from './api.js';
+import { api, describeError, type ConnectionHealth, type ConnectionSettings, type GoogleClientVerdict, type GoogleLoginAuditStatus } from './api.js';
 import { HealthList } from './health.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
@@ -387,6 +387,60 @@ function ChatAppKey({ data, onSaved }: { data: { registered: boolean; clientEmai
   );
 }
 
+/**
+ * Google のログインの記録（不正の兆しの見張りの段 3。仕様書 第16.8.6節）。担当（Google の管理者である M2Office の管理者）の許可と、読めているか。
+ *
+ * @remarks 読み取りだけの許可を、本人の Google の接続とは別に預ける。戻ってきたら結果（`?loginaudit=`）を出す。
+ * Google Workspace の会社のドメインでログインしていない会社では出さない
+ */
+function GoogleLoginAudit() {
+  const [status, setStatus] = useState<GoogleLoginAuditStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result] = useState(() => {
+    const r = new URLSearchParams(location.search).get('loginaudit');
+    if (r) history.replaceState(null, '', location.pathname);
+    return r;
+  });
+  const RESULT_TEXT: Record<string, string> = {
+    connected: '接続しました', cancelled: '接続をキャンセルしました', scopes: 'ログインの記録を見る許可が足りません。Google の管理者のアカウントで、許可してください',
+    domain: '会社の Google Workspace のドメインのアカウントではありません', client: '会社の Google 接続の設定に誤りがあります', failed: '接続できませんでした',
+  };
+  const load = () => void api.admin.googleLoginAudit().then(setStatus).catch(() => setStatus(null));
+  useEffect(load, []);
+  const connect = () => {
+    setBusy(true); setError(null);
+    api.admin.connectGoogleLoginAudit().then((r) => { if (r.url) location.href = r.url; else load(); })
+      .catch((e) => setError(describeError(e, '接続できませんでした'))).finally(() => setBusy(false));
+  };
+  const disconnect = () => {
+    if (!window.confirm('Google のログインの記録を切断しますか。Google アカウントの異変を見張らなくなります')) return;
+    setBusy(true); setError(null);
+    api.admin.disconnectGoogleLoginAudit().then(load).catch((e) => setError(describeError(e, '切断できませんでした'))).finally(() => setBusy(false));
+  };
+  if (!status || status.state === 'na') return null;
+  return (
+    <div className="field">
+      <label>Google のログインの記録（不正の兆しの見張り）</label>
+      <div className="row wrap">
+        {status.state === 'connected'
+          ? <>
+              {status.read === 'error' ? <span className="badge warn">読めていません</span> : <span className="badge ok">接続中</span>}
+              <span className="small">担当: {status.assignee ?? '（分かりません）'}（{status.email}）</span>
+              <button className="btn ghost small" disabled={busy} onClick={connect}>{status.read === 'error' ? '接続し直す' : '担当を替える'}</button>
+              <button className="link danger small" disabled={busy} onClick={disconnect}>切断</button>
+            </>
+          : <>
+              <span className="muted small">未接続</span>
+              <button className="btn ghost small" disabled={busy} onClick={connect}>{busy ? '接続しています…' : '接続'}</button>
+            </>}
+      </div>
+      {result && <p className={result === 'connected' ? 'ok-msg small' : 'error small'}>{RESULT_TEXT[result] ?? '接続できませんでした'}</p>}
+      {error && <p className="error small">{error}</p>}
+    </div>
+  );
+}
+
 function GoogleCard({ data, page, onSaved }: {
   data: ConnectionSettings['google']; page: string; onSaved: () => void;
 }) {
@@ -464,6 +518,8 @@ function GoogleCard({ data, page, onSaved }: {
         {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
         {registered && <PickerKey registered={!!data.pickerKeyRegistered} onSaved={onSaved} />}
         {registered && <ChatAppKey data={data.chatApp ?? null} onSaved={onSaved} />}
+        {/* 見本データで動く会社は、クライアントの登録が無くても見本の口でつなげる */}
+        {(registered || data.workspaceSource === 'mock') && <GoogleLoginAudit />}
         {data.workspaceSource === 'mock' && (
           <p className="warn-msg small">この会社の業務は見本データで動きます</p>
         )}

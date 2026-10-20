@@ -587,6 +587,51 @@ export class InventoryService {
     return { ok: true };
   }
 
+  /**
+   * 品目を削除する（第29.6.3節）。在庫が 0 で、取り置き中の引き当て・入荷待ちの発注が無いときだけ。
+   * 記録の無い品目は行ごと消し、記録のある品目は記録を残して「削除した」印を付ける（どこにも出さない）。どちらもバーコードを外す。
+   *
+   * @returns 取り消すときに使う、削除する前の品目（バーコードを含む）と、行ごと消したか
+   * @remarks 管理者か、スマホで登録した本人の取り消し（呼ぶ側で確かめる）。監査ログに残す
+   */
+  async deleteItem(tenantId: string, userId: string, itemId: string): Promise<{ ok: true; item: InventoryItem; purged: boolean } | { error: string }> {
+    const item = await this.deps.store.getItem(tenantId, itemId);
+    if (!item) return { error: '品目が見つかりません' };
+    const [view] = await this.views(tenantId, [item], await this.settings(tenantId));
+    if (view && round3(view.onHand) !== 0) return { error: `在庫が ${formatQty(item, view.onHand)} 残っているため削除できません。出庫か調整で 0 にしてから削除してください` };
+    if (view && round3(view.reserved) > 0) return { error: `取り置きが ${formatQty(item, view.reserved)} あるため削除できません` };
+    if (view && round3(view.onOrder ?? 0) > 0) return { error: `入荷待ちの発注が ${formatQty(item, view.onOrder ?? 0)} あるため削除できません。発注をキャンセルしてから削除してください` };
+    const purged = !(await this.deps.store.itemHasRecords(tenantId, itemId));
+    if (purged) await this.deps.store.purgeItem(tenantId, itemId);
+    else await this.deps.store.setItemDeleted(tenantId, itemId, now(), userId);
+    this.touch(tenantId);
+    await this.audit(tenantId, userId, 'inventory.item.delete', 'inventory_item', itemId, { name: item.name, codes: item.codes, purged });
+    return { ok: true, item, purged };
+  }
+
+  /**
+   * 削除した品目を元に戻す（削除の直後の「取り消す」。第29.6.3節）。バーコードがほかの品目に付いていれば、それだけは戻さない。
+   *
+   * @param item 削除する前の品目（`deleteItem` の答え）
+   * @param purged 行ごと消したか（消したなら作り直す）
+   * @returns 戻せなかったバーコード
+   */
+  async restoreItem(tenantId: string, userId: string, item: InventoryItem, purged: boolean): Promise<{ ok: true; codesTaken: string[] }> {
+    if (purged) {
+      const { codes: _c, updatedAt: _u, ...rec } = item;
+      await this.deps.store.saveItem(tenantId, rec, userId, now());
+    } else {
+      await this.deps.store.setItemDeleted(tenantId, item.id, null, userId);
+    }
+    const codesTaken: string[] = [];
+    for (const code of item.codes) {
+      if (!(await this.deps.store.addCode(tenantId, item.id, code, parseCode(code).kind))) codesTaken.push(code);
+    }
+    this.touch(tenantId);
+    await this.audit(tenantId, userId, 'inventory.item.restore', 'inventory_item', item.id, { name: item.name, codesTaken });
+    return { ok: true, codesTaken };
+  }
+
   /** バーコードを外す。 */
   async removeCode(tenantId: string, itemId: string, code: string): Promise<void> {
     await this.deps.store.removeCode(tenantId, itemId, code);

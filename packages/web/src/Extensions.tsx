@@ -991,6 +991,28 @@ function ColumnBgmFields({ onError }: { onError: (m: string) => void }) {
   );
 }
 
+/**
+ * JAN から商品名を引く Yahoo!ショッピングの Client ID（第29.11.3節）。入れたものは末尾だけを出し、入れ直す・削除できる。
+ */
+function YahooClientIdField({ current, busy, onChanged }: { current: string; busy: boolean; onChanged: () => void }) {
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const save = (yahooClientId: string) => {
+    setError(null);
+    api.admin.setInventorySettings({ yahooClientId }).then(() => { setDraft(''); onChanged(); }).catch((e) => setError(describeError(e, '保存できませんでした')));
+  };
+  return (
+    <div className="row wrap">
+      <label>JAN 検索（Yahoo!ショッピングの Client ID）
+        <input className="mono" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={current ? `設定済み（${current}）` : 'Client ID'} autoComplete="off" spellCheck={false} />
+      </label>
+      <button className="btn small" disabled={busy || !draft.trim()} onClick={() => save(draft.trim())}>{current ? '入れ直す' : '保存'}</button>
+      {current && <button className="btn ghost small danger" disabled={busy} onClick={() => save('')}>削除</button>}
+      {error && <span className="error small">{error}</span>}
+    </div>
+  );
+}
+
 function InventoryFields({ settings, busy, onChanged }: { settings: InventorySettings; busy: boolean; onChanged: () => void }) {
   const [low, setLow] = useState(String(settings.lowDefault));
   const [lead, setLead] = useState(String(settings.leadDaysDefault));
@@ -1016,6 +1038,7 @@ function InventoryFields({ settings, busy, onChanged }: { settings: InventorySet
         <label>仕入れにかかる日数 <input type="number" min={0} className="num" value={lead} onChange={(e) => setLead(e.target.value)}
           onBlur={() => saveNumber(lead, 'leadDaysDefault', settings.leadDaysDefault)} /> 日</label>
       </div>
+      <YahooClientIdField current={settings.yahooClientId ?? ''} busy={busy} onChanged={onChanged} />
       {settings.features.reserve && <BookingSources />}
     </div>
   );
@@ -1242,6 +1265,8 @@ function BookingSources() {
   const [sources, setSources] = useState<InventoryBookingSource[] | null>(null);
   const [name, setName] = useState('');
   const [created, setCreated] = useState<{ name: string; url: string } | null>(null);
+  // 削除した直後の受け口（「取り消す」を出す）
+  const [removed, setRemoved] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = () => void api.admin.bookingSources().then((r) => setSources(r.sources)).catch((e) => setError(describeError(e, '読み込めませんでした')));
   useEffect(load, []);
@@ -1257,8 +1282,14 @@ function BookingSources() {
           <button type="button" role="switch" aria-checked={s.status !== 'stopped'} aria-label={`${s.name}を${s.status === 'stopped' ? '再開する' : '止める'}`}
             title={s.status === 'stopped' ? '止めています' : '受け付けています'} className={s.status === 'stopped' ? 'switch' : 'switch on'}
             onClick={() => act(() => api.admin.setBookingSourceStatus(s.id, s.status === 'stopped' ? 'active' : 'stopped'))}><span /></button>
+          <button className="btn ghost small danger" onClick={() => act(async () => { await api.admin.deleteBookingSource(s.id); setRemoved({ id: s.id, name: s.name }); })}>削除</button>
         </div>
       ))}
+      {removed && (
+        <p className="small" role="status">
+          「{removed.name}」を削除しました <button className="link small" onClick={() => act(async () => { await api.admin.restoreBookingSource(removed.id); setRemoved(null); })}>取り消す</button>
+        </p>
+      )}
       {created && (
         <div className="booking-created">
           <div>{created.name}の送り先（この画面を閉じると二度と出ません）</div>

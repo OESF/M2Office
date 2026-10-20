@@ -20,7 +20,7 @@ import {
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
-  SecurityWatch, PostgresSecurityStore,
+  SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -204,6 +204,8 @@ const securityStore = new PostgresSecurityStore(process.env['DATABASE_URL'] ?? '
 const security = new SecurityWatch({
   repo, store: securityStore,
   closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
+  // 段 3: Google Workspace のログインの記録を、担当の管理者の許可で読む（第16.8.6節）
+  google: googleLoginAccessFrom({ repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) }),
 });
 // 証拠保全の組み立て（第16.10.5節）。ローカルの形は機械のログのファイル（M2O_LOG_DIR）も入れる
 const evidence = new EvidenceBuilder({

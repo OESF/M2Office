@@ -57,6 +57,8 @@ export function googleScopeLabel(name: string): string {
     'directory.readonly': '社内の人を探す',
     'analytics.readonly': 'Google アナリティクスの数字を見る',
     'webmasters.readonly': 'Search Console の数字を見る',
+    // 不正の兆しの見張りの段 3（第16.8.6節）。担当の Google の管理者だけが許可する
+    'admin.reports.audit.readonly': 'Google のログインの記録を見る',
     'meetings.space.readonly': '参加した会議の文字起こしを読む',
     contacts: 'Google の連絡先に名刺を入れる（使う人だけ）',
     'chat.spaces.create': 'Chat アプリとの個別メッセージを用意する（通知を Chat で受け取る人だけ）',
