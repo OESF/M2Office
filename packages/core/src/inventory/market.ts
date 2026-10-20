@@ -49,6 +49,22 @@ export function marketSummary(prices: number[], ours: number | null): Pick<Inven
   return { median, min: p[0]!, max: p.at(-1)!, offers: p.length, diffPct, position };
 }
 
+/**
+ * 調べた結果の自社の価格・差・位置・ひとことを、品目のいまの価格で出し直す（相場・出典は調べた時のまま）。
+ *
+ * @remarks 調べたあとに販売価格・仕入価格を入れた・直したときに、表が古い価格（または「自社の価格が無い」）のまま残らないようにする
+ */
+export function withCurrentPrice(c: InventoryMarketCheck, item: InventoryItemView): InventoryMarketCheck {
+  const kind = c.kind ?? 'sale';
+  const ours = kind === 'purchase' ? purchaseExTax(item) : item.price === null ? null : taxIncluded(item.price, item.priceTaxIncluded, item.taxRate);
+  if (ours === c.ourPrice) return c;
+  if (c.status !== 'found' || c.median === null) return { ...c, ourPrice: ours };
+  const diffPct = ours === null ? null : Math.round(((ours - c.median) / c.median) * 1000) / 10;
+  const position = diffPct === null ? null : diffPct > MARKET_FAIR_PCT ? 'high' : diffPct < -MARKET_FAIR_PCT ? 'low' : 'fair';
+  const cheapest = c.sources.slice().sort((a, b) => a.price - b.price)[0]?.shop ?? null;
+  return { ...c, ourPrice: ours, diffPct, position, comment: marketComment({ median: c.median, min: c.min, offers: c.offers, diffPct, position }, cheapest, kind) };
+}
+
 /** ひとこと（数から決まった言い方で作る。推論に書かせない）。 */
 export function marketComment(s: Pick<InventoryMarketCheck, 'median' | 'min' | 'diffPct' | 'position' | 'offers'>, cheapest: string | null, kind: 'sale' | 'purchase' = 'sale'): string {
   if (s.median === null) return '同じ商品と確かめられる価格は見つかりませんでした';
@@ -393,12 +409,31 @@ export class InventoryMarketService {
   /** まとめて調べている途中か。 */
   isRunning(tenantId: string): boolean { return this.running.has(tenantId); }
 
-  /** 品目ごとのいちばん新しい結果（相場の種類ごと）。 */
-  latest(tenantId: string, kind: 'sale' | 'purchase' = 'sale'): Promise<InventoryMarketCheck[]> { return this.deps.store.latest(tenantId, kind); }
+  /**
+   * 品目ごとのいちばん新しい結果（相場の種類ごと）。自社の価格・差・位置・ひとことは、**いまの価格**で出し直す
+   * （調べたあとに価格を入れた・直した品目が「自社の価格が無い」のまま残らないように。2026-10-20）。
+   */
+  async latest(tenantId: string, kind: 'sale' | 'purchase' = 'sale'): Promise<InventoryMarketCheck[]> {
+    const [checks, items] = await Promise.all([this.deps.store.latest(tenantId, kind), this.deps.inventory.list(tenantId, { includeStopped: true })]);
+    const byId = new Map(items.map((i) => [i.id, i]));
+    return checks.map((c) => { const i = byId.get(c.itemId); return i ? withCurrentPrice(c, i) : c; });
+  }
 
-  /** 品目の結果の履歴（12 か月）。 */
-  history(tenantId: string, itemId: string, now: Date = new Date()): Promise<InventoryMarketCheck[]> {
-    return this.deps.store.history(tenantId, itemId, new Date(now.getTime() - MARKET_KEEP_MONTHS * 31 * 86_400_000).toISOString());
+  /** 品目の結果の履歴（12 か月）。相場の種類ごとのいちばん新しい結果だけを、いまの価格で出し直す（前の結果は調べた時のまま）。 */
+  async history(tenantId: string, itemId: string, now: Date = new Date()): Promise<InventoryMarketCheck[]> {
+    const [checks, items] = await Promise.all([
+      this.deps.store.history(tenantId, itemId, new Date(now.getTime() - MARKET_KEEP_MONTHS * 31 * 86_400_000).toISOString()),
+      this.deps.inventory.list(tenantId, { includeStopped: true }),
+    ]);
+    const item = items.find((i) => i.id === itemId);
+    if (!item) return checks;
+    const seen = new Set<string>();
+    return checks.map((c) => {
+      const k = c.kind ?? 'sale';
+      if (seen.has(k)) return c;
+      seen.add(k);
+      return withCurrentPrice(c, item);
+    });
   }
 
   /**

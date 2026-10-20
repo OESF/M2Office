@@ -3,7 +3,7 @@ id: admin-connectors
 title: 接続の設定（管理者）
 audience: admin
 category: admin
-related: [admin-setup, admin-extensions]
+related: [admin-setup, admin-extensions, admin-security-watch]
 group: 設定
 order: 1
 ---
@@ -55,6 +55,8 @@ M2Office を社内の機械（Mac mini・Mac Studio など）に入れて使う�
 **通知を従業員の Chat に届けるには、会社の Chat アプリの鍵も登録してください。** Chat アプリを設定したのと同じ Google Cloud のプロジェクトで、サービスアカウントを作り、その鍵（JSON）を作って、「Chat アプリの鍵」に貼るかファイルを選んで「登録」を押します。登録のときに、Google で Chat アプリとして認証できるかを確かめます（できなければ登録しません）。Workspace の管理者の承認は要りません。鍵は暗号化して預かり、画面には出しません。登録すると、従業員は個人設定の「通知」で「Chat」を入れられます。届くのは、お知らせの種類・題名と画面へのリンクだけです。
 
 **議事録を Meet の文字起こしから作るには、会社の Google Cloud で「Google Meet REST API」も有効にしてください。** 有効でないと、議事録の作成が Meet の文字起こしを読むところで「API が有効になっていません」と止まります。会議で文字起こしを有効にしておく必要もあります。
+
+**不正の兆しの見張りで Google のログインの記録を読むには、会社の Google Cloud で「Admin SDK API」も有効にしてください。** 有効でないと、つないでもダッシュボードの見張りの囲みに「Google のログイン: 読めていません」と出ます。許可できるのは、Google Workspace の特権管理者（またはレポートを見られる Google の管理者）だけです。つなぎ方と確かめ方は、記事「不正の兆しの見張り（管理者）」にあります。
 
 **Chat に投稿するには、会社の Google Cloud で Chat アプリの設定も要ります。** Google Chat API を有効にしたうえで、その API の構成の画面でアプリの名前・画像・説明を入れて保存してください。設定が無いと、業務がチャットに共有するところで「Chat アプリが設定されていません」と止まります。
 確かめられるのは、クライアント ID とシークレットの組までです。リダイレクト URI の登録漏れなどは、手順 5 で自分で接続して確かめてください。

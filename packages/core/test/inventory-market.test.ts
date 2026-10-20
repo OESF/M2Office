@@ -107,3 +107,25 @@ test('仕入れの相場: ケースの価格を入り数で割って 1 つあた
   assert.equal(purchaseExTax({ purchasePrice: 660, purchaseTaxIncluded: true, taxRate: 10 }), 600);
   assert.equal(marketComment(marketSummary([500, 500], 600), '卸 A', 'purchase'), '仕入れの相場（1 つ 500 円・税抜）より 20% 高く仕入れている。最安は 1 つ 500 円（卸 A）');
 });
+
+test('調べたあとに価格を入れた・直した品目は、いちばん新しい結果の自社の価格・差・位置をいまの価格で出す（前の結果は調べた時のまま）', async () => {
+  const repo = { getTenantSettings: async () => ({ ...DEFAULT_TENANT_SETTINGS, inventory: { ...DEFAULT_TENANT_SETTINGS.inventory, enabled: true } }), listUserGroupIds: async () => [], appendAudit: async () => undefined } as unknown as Repository;
+  const inventory = new InventoryService({ store: new MemoryInventoryStore(), repo });
+  const saved = await inventory.saveItem('t1', 'u1', { name: '薬用トニック 180g', kind: 'sale' });
+  assert.ok('item' in saved);
+  const id = saved.item.id;
+  const store = new MemoryMarketStore();
+  const market = new InventoryMarketService({ inventory, repo, store, research: async () => research(), llm: async () => llm({}) });
+  const base = { itemId: id, kind: 'sale' as const, status: 'found' as const, median: 1000, min: 900, max: 1200, offers: 3, sources: [{ shop: 'A 店', price: 900, url: 'https://a.example', title: 'a' }], checkedBy: 'u1' };
+  await store.add('t1', { ...base, id: 'old', checkedAt: '2026-09-01T00:00:00Z', ourPrice: null, diffPct: null, position: null, comment: '相場は 1,000 円（3 件）' });
+  await store.add('t1', { ...base, id: 'new', checkedAt: '2026-10-01T00:00:00Z', ourPrice: null, diffPct: null, position: null, comment: '相場は 1,000 円（3 件）' } as never);
+  // 調べたあとに販売価格（税込 1,320 円）を入れた
+  await inventory.saveItem('t1', 'u1', { id, name: '薬用トニック 180g', kind: 'sale', price: 1320, priceTaxIncluded: true });
+  const [latest] = await market.latest('t1');
+  assert.equal(latest?.ourPrice, 1320);
+  assert.equal(latest?.diffPct, 32);
+  assert.equal(latest?.position, 'high');
+  assert.match(latest?.comment ?? '', /より 32% 高い/);
+  const hist = await market.history('t1', id, new Date('2026-10-20T00:00:00Z'));
+  assert.deepEqual(hist.map((c) => [c.id, c.ourPrice]), [['new', 1320], ['old', null]], '前の結果は調べた時のまま');
+});
