@@ -17,6 +17,7 @@ import { YearEndTab } from './YearEnd.js';
 import { SocialTab } from './SocialInsurance.js';
 import { LaborTab } from './LaborInsurance.js';
 import { ShiftTab } from './ShiftPlan.js';
+import { BackButton } from './back-button.js';
 
 const label = <T extends string>(list: { id: T; label: string }[], id: T) => list.find((x) => x.id === id)?.label ?? id;
 /** 日本時間の今日（YYYY-MM-DD）。 */
@@ -916,7 +917,7 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const current = d.terms[0] ?? null;
   return (
     <div className="hr">
-      <div className="row"><button className="btn ghost small" onClick={onBack}>← 一覧</button></div>
+      <BackButton label="従業員の一覧" onClick={onBack} />
       <div className="row hr-head">
         <PhotoBox employeeId={id} photoAt={d.employee.photoAt ?? null} onChanged={load} onError={setError} />
         <h2>{d.employee.name}{d.employee.leftOn ? <span className="small muted">（退職 {d.employee.leftOn}）</span> : null}</h2>
@@ -1016,6 +1017,7 @@ function EmployeeDetail({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
         </div>
       )}
+      <BackButton label="従業員の一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }

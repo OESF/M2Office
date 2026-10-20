@@ -14,6 +14,7 @@ import {
   opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
   type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
+import { BackButton } from './back-button.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
 const ROLE_LABEL: Record<OperatorRole, string> = { admin: '運営管理者', support: 'サポート', monitor: '監視' };
@@ -550,7 +551,7 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
   const rate = (f: number, n: number) => (n ? `${Math.round((f / n) * 1000) / 10}%` : '—');
   return (
     <>
-      <p><a className="link" href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>← 会社一覧</a></p>
+      <BackButton label="会社の一覧" onClick={onBack} />
       {error && <p className="error">{error}</p>}
       {d && (
         <>
@@ -622,6 +623,7 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
           </div>
         </>
       )}
+      <BackButton label="会社の一覧" onClick={onBack} place="bottom" />
     </>
   );
 }

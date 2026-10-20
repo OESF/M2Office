@@ -11,6 +11,7 @@ import {
   type Contract, type ContractKind, type ContractStatus,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
+import { BackButton } from './back-button.js';
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const dayLabel = (d: string | null) => (d ? d.replace(/-/g, '/') : '');
@@ -191,7 +192,7 @@ function ContractView({ id, onBack, onOpen, changeKey, userId }: { id: string; o
     api.contracts.get(id).then((r) => { setC(r.contract); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
   }, [id]);
   useEffect(load, [load, changeKey]);
-  if (error) return <div className="contracts"><button className="link small" onClick={onBack}>‹ 契約の一覧</button><p className="error">{error}</p></div>;
+  if (error) return <div className="contracts"><BackButton label="契約の一覧" onClick={onBack} /><p className="error">{error}</p></div>;
   if (!c) return <div className="contracts"><p className="muted">読み込み中…</p></div>;
 
   const save = (patch: Record<string, unknown>, ok = '保存しました') => {
@@ -211,7 +212,7 @@ function ContractView({ id, onBack, onOpen, changeKey, userId }: { id: string; o
   return (
     <div className="contracts">
       <div className="row">
-        <button className="link small" onClick={onBack}>‹ 契約の一覧</button>
+        <BackButton label="契約の一覧" onClick={onBack} />
         <button className="btn ghost small" onClick={load}>更新</button>
         <NoteText note={note} />
       </div>
@@ -262,6 +263,7 @@ function ContractView({ id, onBack, onOpen, changeKey, userId }: { id: string; o
           }
         }}>削除</button>
       </div>
+      <BackButton label="契約の一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }

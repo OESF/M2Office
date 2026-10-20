@@ -14,6 +14,7 @@ import {
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
 import { pickDriveImage } from './google-picker.js';
+import { BackButton } from './back-button.js';
 
 type Item = PrintDesign & { state: PrintState };
 type Filter = 'all' | PrintState;
@@ -242,7 +243,7 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
     }
   };
 
-  if (error) return <div className="prd"><button className="link" onClick={onBack}>← 一覧へ</button><p className="error">{error}</p></div>;
+  if (error) return <div className="prd"><BackButton label="販促物の一覧" onClick={onBack} /><p className="error">{error}</p></div>;
   if (!data) return <p className="muted">読み込み中…</p>;
   const { design: d, state, versions } = data;
   const current = versions.find((v) => v.id === d.currentVersionId) ?? null;
@@ -252,7 +253,7 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
 
   return (
     <div className="prd prd-detail">
-      <button className="link" onClick={onBack}>← 一覧へ</button>
+      <BackButton label="販促物の一覧" onClick={onBack} />
       <div className="row wrap prd-head">
         <TitleField d={d} disabled={busy} onSave={(title) => act(() => api.printDesigns.setPost(d.id, { title }), '直せませんでした')} />
         <span className="badge">{PRINT_KIND_LABELS[d.kind]}</span>
@@ -347,6 +348,7 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
           if (confirm(`「${d.title}」を削除しますか？`)) void api.printDesigns.remove(d.id).then(onBack).catch((e) => setNote({ kind: 'error', text: describeError(e, '削除できませんでした') }));
         }}>削除</button>
       </div>
+      <BackButton label="販促物の一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }

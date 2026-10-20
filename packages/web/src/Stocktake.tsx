@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { InventoryCountRow, InventoryCountScope, InventoryCountView, InventoryItemView, InventoryLocation } from '@m2office/shared';
 import { api, describeError } from './api.js';
+import { BackButton } from './back-button.js';
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
 const placeName = (l: InventoryLocation | undefined) => (l ? (l.shelf ? `${l.warehouse} ${l.shelf}` : l.warehouse) : '—');
@@ -39,12 +40,13 @@ export function Stocktake({ userId, onBack }: { userId: string; onBack: () => vo
   if (view === undefined) return <p className="muted">{message ?? '読み込んでいます…'}</p>;
   return (
     <div className="inventory stocktake">
-      <button className="link small" onClick={onBack}>← 在庫</button>
+      <BackButton label="品目の一覧" onClick={onBack} />
       {message && <p className="small muted" role="status">{message}</p>}
       {view
         ? <Counting view={view} locations={locations} items={items} userId={userId} admin={admin}
           onChanged={setView} onDone={(text) => { setMessage(text); load(); }} />
         : <StartForm locations={locations} items={items} onStarted={(v) => { setMessage(null); setView(v); }} />}
+      <BackButton label="品目の一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }

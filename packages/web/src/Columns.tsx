@@ -16,6 +16,7 @@ import {
 } from '@m2office/shared';
 import { api, describeError, type ColumnDetail } from './api.js';
 import { Markdown } from './help.js';
+import { BackButton } from './back-button.js';
 
 /**
  * 開いた一覧を画面の中まで送る（ref に渡す。開いた所が画面の外で、開いたことに気づかないのを防ぐ）。
@@ -330,7 +331,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
   return (
     <div className="columns">
       <div className="cards-toolbar">
-        <button className="btn ghost small" onClick={onBack}>一覧に戻る</button>
+        <BackButton label="コラムの一覧" onClick={onBack} />
         <span className={STATUS_BADGE[column.status]}>{WEB_COLUMN_STATUS_LABELS[column.status]}</span>
         {column.wpEditUrl && <a className="btn ghost small" href={column.wpEditUrl} target="_blank" rel="noreferrer">WordPress で開く</a>}
         {current && <button className="btn ghost small" onClick={() => void copy('html')}>HTML をコピー</button>}
@@ -532,6 +533,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
         </>
       )}
 
+      <BackButton label="コラムの一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }

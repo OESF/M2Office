@@ -24,6 +24,7 @@ import { InventorySummary, isOut, needsOrder, type SummaryFilter } from './Inven
 import type { InventorySlipResult } from './api.js';
 import { OutDoneLine, PurposeChips, purposeOf, type OutDone } from './inventory-out.js';
 import { YahooCredit } from './yahoo-credit.js';
+import { BackButton } from './back-button.js';
 
 // 記録の種類 `out` は画面では「出庫」と呼ぶ（第 0.406.0 版。第29.11.1節）
 const KIND_LABELS: Record<InventoryMoveKind, string> = { in: '入庫', out: '出庫', transfer: '移動', adjust: '調整' };
@@ -491,7 +492,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
           active={summaryActive} onOrders={() => toggle('orders')}
           onFilter={(f) => setFilter(f === null ? { kind: '', category: '', state: '' } : f === 'sale' ? { kind: 'sale', category: '', state: '' } : { kind: '', category: '', state: f })} />
       )}
-      {working && <button className="link-btn inventory-back" onClick={closeWork}>‹ 品目の一覧</button>}
+      {working && <BackButton label="品目の一覧" onClick={closeWork} />}
       {panel === 'places' && list && <Places locations={list.locations} admin={list.admin} onChanged={load} />}
       {panel === 'orders' && <OrderPanel onOpenItem={(id) => onOpen(id)} />}
       {panel === 'suppliers' && <SuppliersPanel />}
@@ -590,6 +591,8 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
           <label className="check"><input type="checkbox" checked={stopped} onChange={(e) => setStopped(e.target.checked)} /> 止めた品目も出す</label>
         </div>
       )}
+      {/* 作業の欄の終わりにも戻るボタン（長い欄で上までスクロールしなくて済むように。第6.1.2.2節） */}
+      {working && <BackButton label="品目の一覧" onClick={closeWork} place="bottom" />}
       {/* Yahoo!ショッピングで JAN から商品名を引く画面（知らないバーコードから品目を作る欄）だけに出す（第29.11.3節） */}
       {list?.yahooCredit && adding && /^\d{8,14}$/.test(adding.code) && <YahooCredit />}
     </div>
@@ -825,7 +828,7 @@ function ItemView({ id, onBack, userId, initialMessage = null, onDeleted }: {
 
   return (
     <div className="inventory">
-      <button className="link small" onClick={onBack}>← 一覧</button>
+      <BackButton label="品目の一覧" onClick={onBack} />
       <div className="inventory-head">
         <h2>{item.name}</h2>
         <div className="inventory-figures">
@@ -900,6 +903,7 @@ function ItemView({ id, onBack, userId, initialMessage = null, onDeleted }: {
             : <button className="link danger" onClick={() => void remove()}>削除</button>}
         </div>
       )}
+      <BackButton label="品目の一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }

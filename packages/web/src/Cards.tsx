@@ -14,6 +14,7 @@ import { ContactInquiries } from './Inquiries.js';
 import { ApiError, api, describeError, type CardDetail, type CardList, type CardMeetings, type CardSummary, type CardsGooglePush } from './api.js';
 import { BulkMailView } from './BulkMail.js';
 import { cropCard, prepareCardPhoto } from './card-image.js';
+import { BackButton } from './back-button.js';
 
 /**
  * ファイルを選ぶときに受け付ける形式（第27.4節）。
@@ -529,7 +530,7 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
 
   if (!d) return (
     <div className="cards">
-      <button className="link" onClick={onBack}>← 名刺管理</button>
+      <BackButton label="名刺の一覧" onClick={onBack} />
       {message ? <p className="error">{message}</p> : <p className="muted">読み込み中…</p>}
     </div>
   );
@@ -539,7 +540,7 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
 
   return (
     <div className="cards card-detail">
-      <button className="link" onClick={onBack}>← 名刺管理</button>
+      <BackButton label="名刺の一覧" onClick={onBack} />
       {message && <p className="error">{message}</p>}
       {notice && <p className="ok-msg">{notice}</p>}
       <div className="card-head">
@@ -680,6 +681,7 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
         </>
       )}
       <p className="small muted">{d.ownerName ? `取り込んだ人: ${d.ownerName}` : ''}{d.updatedByName ? `　最後に直した人: ${d.updatedByName}` : ''}</p>
+      <BackButton label="名刺の一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }

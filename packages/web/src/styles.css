@@ -2669,3 +2669,19 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .inventory-deleted { margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 /* パソコンの品目の詳細でカメラで読む欄（第29.11節）。横に広げすぎない */
 .inventory dd .scanner { max-width: 420px; }
+
+/*
+ * 一覧へ戻るボタン（第6.1.2.2節）。題名の下の小さな文字のリンクでは見つけにくいため、枠のあるボタンにする。
+ * 詳しい画面と作業の欄の上と下に置く（下は上との間を空ける）
+ */
+.back-btn {
+  display: inline-flex; align-items: center; gap: 2px; align-self: flex-start;
+  padding: calc(6px * var(--space-scale)) calc(14px * var(--space-scale)); border: 1.5px solid var(--accent); border-radius: 999px;
+  background: var(--panel); color: var(--accent); font-weight: 600; font-size: calc(14px * var(--font-scale)); line-height: 1.4; cursor: pointer;
+}
+.back-btn:hover { background: var(--accent-soft); }
+.back-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.back-top { margin: 0 0 calc(12px * var(--space-scale)); }
+.back-bottom { margin: calc(24px * var(--space-scale)) 0 calc(8px * var(--space-scale)); }
+/* 横に並ぶ行の中（状態の印などと並べるとき）は、下の余白を取らない */
+.row > .back-btn.back-top, .cards-toolbar > .back-btn.back-top { margin-bottom: 0; }

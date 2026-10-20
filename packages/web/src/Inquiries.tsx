@@ -15,6 +15,7 @@ import {
   type Inquiry, type InquiryChannel, type InquiryDetail, type InquiryMailSkipped, type InquiryReply, type InquiryStatus, type InquiryTemperature,
 } from '@m2office/shared';
 import { api, describeError, type InquiryRecorded } from './api.js';
+import { BackButton } from './back-button.js';
 
 const when = (iso: string) => new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const dayLabel = (d: string) => { const [, m, dd] = d.split('-'); return `${Number(m)}/${Number(dd)}`; };
@@ -233,7 +234,7 @@ function InquiryView({ id, onBack, onContact, onOpen, changeKey, admin, members,
     }
   };
 
-  if (error) return <div className="inquiries"><button className="link small" onClick={onBack}>‹ 問い合わせの一覧</button><p className="error">{error}</p></div>;
+  if (error) return <div className="inquiries"><BackButton label="問い合わせの一覧" onClick={onBack} /><p className="error">{error}</p></div>;
   if (!d) return <div className="inquiries"><p className="muted">読み込み中…</p></div>;
   const { inquiry: i, events, tasks } = d;
   const save = (patch: Parameters<typeof api.inquiries.update>[1]) => void act(() => api.inquiries.update(i.id, patch), '保存しました', '保存できませんでした');
@@ -242,7 +243,7 @@ function InquiryView({ id, onBack, onContact, onOpen, changeKey, admin, members,
   return (
     <div className="inquiries">
       <div className="row">
-        <button className="link small" onClick={onBack}>‹ 問い合わせの一覧</button>
+        <BackButton label="問い合わせの一覧" onClick={onBack} />
         <button className="btn ghost small" onClick={load}>更新</button>
         <NoteText note={note} />
       </div>
@@ -344,6 +345,7 @@ function InquiryView({ id, onBack, onContact, onOpen, changeKey, admin, members,
           onClick={() => { if (window.confirm('この問い合わせを削除しますか。会話の履歴と次にやることも削除します')) void act(() => api.inquiries.remove(i.id).then(onBack), null, '削除できませんでした'); }}>削除</button>
         {admin && <ErasePerson inquiryId={i.id} onDone={onBack} />}
       </div>
+      <BackButton label="問い合わせの一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }

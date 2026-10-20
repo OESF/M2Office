@@ -12,6 +12,7 @@ import {
   type Member, type MemberAudience, type MemberMessage, type MemberPoint, type MemberRank, type MemberReward,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
+import { BackButton } from './back-button.js';
 
 const dayLabel = (iso: string | null) => (iso ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric' }).format(new Date(iso)) : '—');
 /** 誕生日（MM-DD）を「3/14」に。 */
@@ -172,12 +173,12 @@ function MemberView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () 
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const act = (f: () => Promise<unknown>, ok: string) => f().then(() => { setNote({ kind: 'ok', text: ok }); load(); }).catch((e) => setNote({ kind: 'error', text: describeError(e, 'できませんでした') }));
 
-  if (error) return <div className="mbr"><button className="link small" onClick={onBack}>‹ 会員の一覧</button><p className="error">{error}</p></div>;
+  if (error) return <div className="mbr"><BackButton label="会員の一覧" onClick={onBack} /><p className="error">{error}</p></div>;
   if (!d) return <p className="muted">読み込み中…</p>;
   const m: Member = d.member;
   return (
     <div className="mbr">
-      <div className="row wrap"><button className="link small" onClick={onBack}>‹ 会員の一覧</button><NoteText note={note} /></div>
+      <div className="row wrap"><BackButton label="会員の一覧" onClick={onBack} /><NoteText note={note} /></div>
       <div className="mbr-head">
         <div>
           <h2>No. {m.number} {m.nickname} <RankBadge rank={m.rank} /> {m.line && <span className="badge">LINE</span>}</h2>
@@ -228,6 +229,7 @@ function MemberView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () 
         </table>
       )}
       <div className="row wrap"><button className="btn ghost small danger" onClick={() => void act(async () => { await api.members.remove(m.id); onBack(); }, '削除しました')}>削除（退会）</button></div>
+      <BackButton label="会員の一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }

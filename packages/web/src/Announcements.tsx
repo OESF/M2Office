@@ -15,6 +15,7 @@ import {
 import { api, describeError } from './api.js';
 import { copyText } from './clipboard.js';
 import { Markdown } from './help.js';
+import { BackButton } from './back-button.js';
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
 const md = (d: string | null) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '');
@@ -129,7 +130,7 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
   return (
     <div className="announcements">
       <div className="row wrap">
-        <button className="link small" onClick={onBack}>一覧に戻る</button>
+        <BackButton label="お知らせの一覧" onClick={onBack} />
         <span className={STATUS_BADGE[a.status]}>{ANNOUNCEMENT_STATUS_LABELS[a.status]}</span>
       </div>
       <div className="card announcements-head">
@@ -251,6 +252,7 @@ function Detail({ id, onBack, onApprovals, changeKey }: { id: string; onBack: ()
         )}
         <NoteText note={note} />
       </div>
+      <BackButton label="お知らせの一覧" onClick={onBack} place="bottom" />
     </div>
   );
 }
