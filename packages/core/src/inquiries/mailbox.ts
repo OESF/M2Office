@@ -50,11 +50,25 @@ export interface Mailbox {
   get(id: string): Promise<MailItem | null>;
   /** 差出人に使えるアドレス（本来のアドレスと、Gmail に登録した別名。小文字）。 */
   sendAs(): Promise<string[]>;
-  send(m: { from: string; to: string; subject: string; body: string; inReplyTo: string | null; references: string | null; threadId: string | null; listUnsubscribe?: string | null }): Promise<{ messageId: string }>;
+  send(m: {
+    from: string; to: string; subject: string; body: string; inReplyTo: string | null; references: string | null; threadId: string | null; listUnsubscribe?: string | null;
+    /** HTML の本文（文字だけの本文と一緒に送る。外部のアプリからの配信。第13.4.4節）。 */
+    html?: string | null;
+    /** HTML に埋め込む画像（`cid`）。 */
+    inline?: { cid: string; mime: string; bytes: Uint8Array }[];
+    /** 足す見出し（`X-` で始まる名前だけ）。 */
+    headers?: Record<string, string>;
+  }): Promise<{ messageId: string }>;
+  /** この日時より後に送ったメールのおよその数（Gmail の 1 日の上限に合わせて送る量を抑えるため。第13.4.4節）。 */
+  countSent(since: Date): Promise<number>;
 }
 
-/** 窓口のアカウントを読めない（預けていない・許可が取り消された・Google に届かない）。 */
-export class MailboxUnavailableError extends Error {}
+/** 窓口のアカウントを読めない（預けていない・許可が取り消された・Google に届かない）。`status` は Gmail の答えの番号（届かなければ無い）。 */
+export class MailboxUnavailableError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+  }
+}
 
 /** `名前 <addr>` から名前とアドレスを取り出す。 */
 export function parseAddress(v: string): { name: string; address: string } {
@@ -116,7 +130,7 @@ export class GoogleMailbox implements Mailbox {
         signal: AbortSignal.timeout(20_000),
       }).catch((err: unknown) => { throw new MailboxUnavailableError(`Gmail に届きませんでした（${err instanceof Error ? err.message : String(err)}）`); });
       if (res.status === 401 && attempt === 0) continue;
-      if (!res.ok) throw new MailboxUnavailableError(`Gmail が断りました（${res.status}）`);
+      if (!res.ok) throw new MailboxUnavailableError(`Gmail が断りました（${res.status}）`, res.status);
       return (await res.json()) as T;
     }
     throw new MailboxUnavailableError('Gmail に断られました（401）');
@@ -142,8 +156,18 @@ export class GoogleMailbox implements Mailbox {
     return [...new Set([this.address, ...(r.sendAs ?? []).filter((x) => !x.verificationStatus || x.verificationStatus === 'accepted').map((x) => x.sendAsEmail.toLowerCase())])];
   }
 
+  async countSent(since: Date): Promise<number> {
+    const q = `in:sent after:${Math.floor(since.getTime() / 1000)}`;
+    const r = await this.call<{ resultSizeEstimate?: number }>(`/messages?q=${encodeURIComponent(q)}&maxResults=1`);
+    return r.resultSizeEstimate ?? 0;
+  }
+
   async send(m: Parameters<Mailbox['send']>[0]): Promise<{ messageId: string }> {
-    const raw = buildRawMessage({ from: m.from, to: [m.to], cc: [], subject: m.subject, body: m.body, inReplyTo: m.inReplyTo, references: m.references, ...(m.listUnsubscribe ? { listUnsubscribe: m.listUnsubscribe } : {}) });
+    const raw = buildRawMessage({
+      from: m.from, to: [m.to], cc: [], subject: m.subject, body: m.body, inReplyTo: m.inReplyTo, references: m.references,
+      ...(m.listUnsubscribe ? { listUnsubscribe: m.listUnsubscribe } : {}), ...(m.html ? { html: m.html } : {}), ...(m.inline?.length ? { inline: m.inline } : {}),
+      ...(m.headers ? { headers: m.headers } : {}),
+    });
     const r = await this.call<{ id: string }>('/messages/send', { method: 'POST', body: JSON.stringify({ raw, ...(m.threadId ? { threadId: m.threadId } : {}) }) });
     return { messageId: r.id };
   }
@@ -155,6 +179,9 @@ const MOCK_BASE = Date.now();
 /** 見本の箱が送ったメール（会社ごと。プロセスの記憶だけ。外には何も送らない）。 */
 const mockSent = new Map<string, MailItem[]>();
 
+/** 見本の箱に、あとから届いたことにするメール（自動テストで、配信の停止の返信や送れなかった知らせを試すため）。 */
+const mockArrived = new Map<string, MailItem[]>();
+
 /**
  * 開発の見本の会社の窓口のアカウント。問い合わせ 2 通（Web のフォームの通知・別名に届いた直接のメール）と、
  * 問い合わせでないもの 2 通（メールマガジン・営業の売り込み）を返す。送ったメールは記憶に置くだけ。
@@ -165,6 +192,19 @@ export class MockMailbox implements Mailbox {
   /** 見本の箱が送ったメールを消す（自動テストで、前のテストの送信を持ち越さないため）。 */
   static clear(): void {
     mockSent.clear();
+    mockArrived.clear();
+  }
+
+  /** 見本の箱の受信トレイに 1 通届いたことにする（自動テスト用）。 */
+  static deliver(address: string, item: Omit<MailItem, 'threadId' | 'fromName' | 'replyAddress' | 'messageIdHeader' | 'references' | 'bulk'> & Partial<MailItem>): void {
+    const list = mockArrived.get(address) ?? [];
+    list.push({ threadId: `thread-${item.id}`, fromName: '', replyAddress: item.fromAddress, messageIdHeader: `<${item.id}@mock>`, references: '', bulk: false, ...item });
+    mockArrived.set(address, list);
+  }
+
+  /** 見本の箱が送ったメール（自動テスト用）。 */
+  static sent(address: string): MailItem[] {
+    return [...(mockSent.get(address) ?? [])];
   }
 
   private get domain(): string {
@@ -202,12 +242,12 @@ export class MockMailbox implements Mailbox {
   }
 
   async list(folder: 'inbox' | 'sent', since: Date, limit: number): Promise<string[]> {
-    const items = folder === 'inbox' ? this.inbox() : (mockSent.get(this.address) ?? []);
+    const items = folder === 'inbox' ? [...this.inbox(), ...(mockArrived.get(this.address) ?? [])] : (mockSent.get(this.address) ?? []);
     return items.filter((m) => m.date > since.toISOString()).sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit).map((m) => m.id);
   }
 
   async get(id: string): Promise<MailItem | null> {
-    return [...this.inbox(), ...(mockSent.get(this.address) ?? [])].find((m) => m.id === id) ?? null;
+    return [...this.inbox(), ...(mockArrived.get(this.address) ?? []), ...(mockSent.get(this.address) ?? [])].find((m) => m.id === id) ?? null;
   }
 
   async sendAs(): Promise<string[]> {
@@ -220,9 +260,14 @@ export class MockMailbox implements Mailbox {
     list.push({
       id, threadId: m.threadId ?? `thread-${id}`, from: m.from, fromName: '', fromAddress: m.from, replyAddress: m.from, to: [m.to.toLowerCase()],
       subject: m.subject, date: new Date().toISOString(), messageIdHeader: `<${id}@mock>`, references: m.references ?? '', body: m.body, bulk: false,
-    });
+      ...(m.html ? { html: m.html } : {}), ...(m.headers ? { headers: m.headers } : {}), ...(m.listUnsubscribe ? { listUnsubscribe: m.listUnsubscribe } : {}),
+    } as MailItem);
     mockSent.set(this.address, list);
     return { messageId: id };
+  }
+
+  async countSent(since: Date): Promise<number> {
+    return (mockSent.get(this.address) ?? []).filter((m) => m.date > since.toISOString()).length;
   }
 }
 

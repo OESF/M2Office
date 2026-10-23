@@ -28,6 +28,9 @@ export const SEALED_COLUMNS = [
   { table: 'user_connections', column: 'access_token_enc' },
   { table: 'user_connections', column: 'refresh_token_enc' },
   { table: 'canva_connections', column: 'refresh_token_enc' },
+  // 外部のアプリからの配信（第13.4.4節。移行 157）
+  { table: 'delivery_recipients', column: 'contact_enc' },
+  { table: 'delivery_stops', column: 'email_enc' },
 ];
 
 /** 設定の文字列を 32 バイトの鍵にする（box.ts と同じ）。 */

@@ -9,8 +9,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { agentDisplayName, isValidAvatar, needsCompartments, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type User } from '@m2office/shared';
-import {
+import { agentDisplayName, isValidAvatar, needsCompartments, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type RuntimeEnvironment, type User } from '@m2office/shared';
+import { runtimeEnvironment,
   ACTIVE_WINDOW_MIN, HEALTH_WINDOW_MIN, agentFace, assignAgentFaces, buildPresence, healthView, summarizePresence, stepLabel,
   type HealthView, type TenantExtensions,
 } from '@m2office/core';
@@ -247,6 +247,13 @@ export function dashboardRoute(deps: AppDeps) {
   }
 
   /** 「いま」の中身を組み立てる。`/live` と SSE の双方が使う。 */
+  /** Node.js の知らせ（ローカルの形だけ。サポートの終わり・セキュリティの修正。第8.6.7.1節）。読めなければ出さない。 */
+  async function nodeNotices(): Promise<{ nodeWarn: RuntimeEnvironment['nodeWarn']; nodeSecurity: RuntimeEnvironment['nodeSecurity'] }> {
+    if (deps.ai.deployment() !== 'onsite') return { nodeWarn: null, nodeSecurity: null };
+    const env = await deps.runtime.store.read().then((beats) => runtimeEnvironment(beats, null, { deployment: 'onsite', debug: false, inference: null })).catch(() => null);
+    return { nodeWarn: env?.nodeWarn ?? null, nodeSecurity: env?.nodeSecurity ?? null };
+  }
+
   async function live(tenantId: string) {
     const view = await deps.tenantView(tenantId);
     const agentName = (id: string) => nameOfAgent(view, id);
@@ -439,6 +446,8 @@ export function dashboardRoute(deps: AppDeps) {
       connections: await connections(tenantId),
       // 不正の兆しの見張りの様子（第6.7.4.2.2節）。数と時刻だけ（中身は秘書と監査ログで見る）
       security: await deps.security.status(tenantId).catch(() => null),
+      // Node.js の更新が要るか・セキュリティの修正があるか（ローカルの形だけ。第8.6.7.1節）
+      ...(await nodeNotices()),
       events: events.map((e) => eventView(e, nameOf, runAgent, agentName)).filter((e) => e !== null),
     };
   }

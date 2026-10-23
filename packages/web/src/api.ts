@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
+import type { RuntimeEnvironment, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemKind, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventoryOutPurpose, InventorySettings, InventoryStockRow,
@@ -170,6 +170,8 @@ function machineFns(base: string) {
   return {
     /** 機械の様子。 */
     machine: () => call<MachineView>(base),
+    /** 動いている環境（仕様書 第8.6.7.1節）。 */
+    runtime: () => call<RuntimeEnvironment>(`${base}/runtime`),
     /** 機械のシステムログ（仕様書 第16.10.4節）。 */
     systemLogs: (q: SystemLogQuery) => call<SystemLogPage>(`${base}/logs?${logQuery(q)}`),
     systemLogDigests: (q: SystemLogQuery) => call<{ items: SystemLogDigestView[] }>(`${base}/logs/digests?${logQuery(q)}`),
@@ -766,6 +768,10 @@ export interface DashboardLive {
   connections?: ConnectionHealth[];
   /** 不正の兆しの見張りの様子（仕様書 第6.7.4.2.2節）。古い API と読めなかったときは無い。 */
   security?: SecurityWatchStatus | null;
+  /** Node.js の更新が要るか（ローカルの形だけ。仕様書 第8.6.7.1節）。古い API と要らないときは無い。 */
+  nodeWarn?: { expired: boolean; end: string | null; version: string } | null;
+  /** セキュリティの修正がある部分（ローカルの形だけ。第8.6.7.1節）。 */
+  nodeSecurity?: NodeSecurityNotice | null;
 }
 
 /** 不正の兆しの見張りの様子（仕様書 第16.8節）。数と時刻だけ。 */
@@ -2454,6 +2460,8 @@ export const api = {
     /** この内容で許す（機能と機能ごとの設定を承認する）。 */
     approveApp: (id: string, functions: AppFunctionId[], settings: AppSettings) =>
       call<ExternalApp>(`/admin/apps/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ functions, settings }) }),
+    /** そのアプリから届いた配信の依頼（宛先は出さない）。 */
+    appDeliveries: (id: string) => call<{ items: DeliveryView[] }>(`/admin/apps/${encodeURIComponent(id)}/deliveries`),
     /** 鍵を出し直す（前の鍵はすぐ使えなくなる）。 */
     rekeyApp: (id: string) => call<{ app: ExternalApp; key: string }>(`/admin/apps/${encodeURIComponent(id)}/rekey`, { method: 'POST' }),
     /** 外部のアプリを止める・動かす。 */

@@ -13,6 +13,7 @@ import { WORKSPACE_TOOLS } from './workspace.js';
 import { FILE_TOOLS } from './files.js';
 import { QUOTE_TOOLS } from './quote.js';
 import { SCHEDULE_TOOLS } from '../scheduling/external.js';
+import { DELIVERY_TOOLS } from '../deliveries/tools.js';
 import { RECRUIT_TOOLS } from './recruit.js';
 import { RESEARCH_TOOLS } from './research.js';
 import { GOOGLE_TOOLS } from './google.js';
@@ -219,6 +220,7 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...QUOTE_TOOLS,
   // 社外の参加者を含む日程調整（AG-03。第9.5.3.1節）
   ...SCHEDULE_TOOLS,
+  ...DELIVERY_TOOLS,
   // 採用支援（AG-16。第9.6.6節）
   ...RECRUIT_TOOLS,
   // Webの分析（内蔵の拡張。第34.18節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く

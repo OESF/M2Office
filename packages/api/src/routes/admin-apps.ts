@@ -29,6 +29,8 @@ function approvalOf(body: unknown): { functions: AppFunctionId[]; settings: AppS
   if (j) settings.jobs = { agentIds: strs(j['agentIds']), maxRisk: (typeof j['maxRisk'] === 'string' ? j['maxRisk'] : 'read') as RiskLevel };
   const g = obj(s['signage']);
   if (g) settings.signage = { all: g['all'] === true, screenIds: strs(g['screenIds']) };
+  const d = obj(s['deliveries']);
+  if (d) settings.deliveries = { maxRecipients: Number(d['maxRecipients']) };
   return { functions, settings };
 }
 
@@ -80,6 +82,12 @@ export function adminAppsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const res = await apps.approve(tenant.id, user.id, c.req.param('id'), approvalOf(await c.req.json().catch(() => ({}))));
     return 'error' in res ? c.json(res, 400) : c.json(res);
+  });
+
+  /** そのアプリから届いた配信の依頼（新しい順に 50 件。宛先は出さず、人数と結果の数だけ。第13.4.4節）。 */
+  app.get('/:id/deliveries', async (c) => {
+    const { tenant } = c.get('ctx');
+    return c.json({ items: await deps.deliveries.list(tenant.id, c.req.param('id')) });
   });
 
   /** 鍵を出し直す（前の鍵はすぐ使えなくなる）。新しい鍵はこの答えでだけ返す。 */

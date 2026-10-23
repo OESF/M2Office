@@ -85,6 +85,7 @@ git status --short                       # 未コミットの変更・未追跡�
 | 3 | 型とビルドが通る | `npm run typecheck` と `npm run build -w packages/web` |
 | 4 | テナント境界のテストが通る | `npm run smoke`。**開発サーバー（`npm run dev`）とデータベースが動いているときだけ**実行できる。動いていなければ、起動してよいかを尋ねる。勝手に起動・再起動しない |
 | 4.1 | 依存の脆弱性と静的解析 | `npm run security:check`（「高」以上が無いこと。窓口に届かなければ「未確認」）。GitHub の Security の画面で CodeQL の新しい指摘が無いか（見られなければ「未確認」）（リリース規定 第6.1節の 9） |
+| 4.2 | Node.js のサポートの表 | `packages/shared/src/types/runtime.ts` の `NODE_RELEASE_LINES` を、公式の予定（https://raw.githubusercontent.com/nodejs/Release/main/schedule.json）と見比べる。違えば直してテストを流し直す（届かなければ「未確認」）。動いている Node.js のサポートの終わりまで 6 か月を切っていれば、更新を「配備で行うこと」に書く。セキュリティの修正の下限（`secure`）も、公式のセキュリティの発表（https://nodejs.org/en/blog/vulnerability）と見比べ、新しい発表があれば直して M2Medical に値を伝える（リリース規定 第6.1節の 10） |
 | 5 | データの移行と巻き戻しの手順 | 手順 1 で拾った移行について、巻き戻しの方法（移行を逆にする SQL、または前の版に戻しても動くこと）をリリースノートに書けるか |
 | 6 | 利用者に見える変更について、ヘルプを更新した | 画面・文言・挙動の変更に対応する `docs/help/*.md` の変更があるか |
 | 7 | README を更新した | 手順 5 |

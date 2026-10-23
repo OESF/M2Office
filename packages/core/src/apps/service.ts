@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  APP_FUNCTIONS, APP_JOB_RISKS, EXTERNAL_APP_MAX, inventoryRuleOf, type AppFunctionId, type AppFunctionRequirement, type AppSettingOptions, type AppSettings, type AuditEvent,
+  APP_FUNCTIONS, APP_JOB_RISKS, DELIVERY_MAX_RECIPIENTS, EXTERNAL_APP_MAX, inventoryRuleOf, type AppFunctionId, type AppFunctionRequirement, type AppSettingOptions, type AppSettings, type AuditEvent,
   type ExternalApp, type InventoryCatalogScope, type RiskLevel, type TenantSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
@@ -47,6 +47,8 @@ const FUNCTION_ROUTES: { fn: AppFunctionId; method: string; path: RegExp }[] = [
   { fn: 'jobs.run', method: 'GET', path: /^\/v1\/runs\/[^/]+$/ },
   { fn: 'signage.interrupt', method: 'POST', path: /^\/v1\/signage\/interrupts(?:\/[^/]+\/clear)?$/ },
   { fn: 'signage.status', method: 'GET', path: /^\/v1\/signage\/screens$/ },
+  { fn: 'deliveries.send', method: 'POST', path: /^\/v1\/deliveries$/ },
+  { fn: 'deliveries.send', method: 'GET', path: /^\/v1\/deliveries\/(?:stops|[^/]+\/results)$/ },
 ];
 
 /** 内蔵の拡張を入れているか（機能を選べる条件）。 */
@@ -229,7 +231,8 @@ export class ExternalApps {
       ...(settings.notices ? { noticeAll: settings.notices.all, noticeGroups: settings.notices.groupIds.length } : {}),
       ...(settings.reservations ? { reservationAll: settings.reservations.all, reservationItems: settings.reservations.itemIds.length } : {}),
       ...(settings.knowledgeRules ? { ruleCompartments: settings.knowledgeRules.compartments } : {}),
-      ...(settings.jobs ? { jobAgents: settings.jobs.agentIds, jobMaxRisk: settings.jobs.maxRisk } : {}), ...(settings.catalog ? { catalogItems: settings.catalog.itemIds.length, showCount: settings.catalog.showCount, price: settings.catalog.price, employeePrice: settings.catalog.employeePrice } : {}),
+      ...(settings.jobs ? { jobAgents: settings.jobs.agentIds, jobMaxRisk: settings.jobs.maxRisk } : {}),
+      ...(settings.deliveries ? { deliveryMax: settings.deliveries.maxRecipients } : {}), ...(settings.catalog ? { catalogItems: settings.catalog.itemIds.length, showCount: settings.catalog.showCount, price: settings.catalog.price, employeePrice: settings.catalog.employeePrice } : {}),
     });
     return (await this.view(tenantId, id))!;
   }
@@ -364,6 +367,12 @@ export class ExternalApps {
       if (!g.all && screenIds.length === 0) return { error: 'サイネージの機能で使ってよい画面を選んでください' };
       if (screenIds.some((x) => !known.has(x))) return { error: 'サイネージの画面が見つかりません' };
       out.signage = { all: !!g.all, screenIds: g.all ? [] : screenIds };
+    }
+    // 配信を頼む（第13.4.4節）: 1 回の上限
+    if (functions.includes('deliveries.send')) {
+      const max = Math.floor(Number((input.deliveries ?? { maxRecipients: DELIVERY_MAX_RECIPIENTS }).maxRecipients));
+      if (!(max >= 1 && max <= DELIVERY_MAX_RECIPIENTS)) return { error: `「配信を頼む」の 1 回の上限は 1〜${DELIVERY_MAX_RECIPIENTS} 人にしてください` };
+      out.deliveries = { maxRecipients: max };
     }
     return out;
   }

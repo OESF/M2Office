@@ -3,7 +3,7 @@ id: admin-developer-case-medical
 title: 使い方の例 M2Medical（ナレッジの検索）（管理者）
 audience: admin
 category: admin
-related: [admin-developer, admin-knowledge]
+related: [admin-developer, admin-knowledge, admin-developer-case-delivery]
 group: 開発者
 order: 3
 ---
@@ -24,4 +24,4 @@ M2Medical から、M2Office の**会社のナレッジ**（就業規則・給与
 - 確認コードは「お知らせ」にだけ届き、Chat などには写しません。10 分で切れ、試せるのは 5 回までです
 - 結び付きは、本人が個人設定の「サービスとの接続」から削除できます。削除したあとの検索は 410 になります
 - 結び付きごとの検索は 1 分 10 回までです
-- M2Office は、患者の情報や M2Medical の資料を受け取りません
+- ナレッジの検索では、M2Office は患者の情報や M2Medical の資料を受け取りません（声掛けの配信は、記事「使い方の例 M2Medical（声掛けの配信）」）

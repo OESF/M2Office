@@ -105,9 +105,9 @@ console.log('\n■ 1. 疎通と一覧');
   const { body } = await call('a', '/v1/agents');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
-  // 段取りの報告（第10.14節）はメニューに出ない中の業務
-  official.length === 18 && official.filter((a) => a.menu === false).map((a) => a.id).sort().join() === 'scheduling-confirm,secretary-plan-report'
-    ? ok(`公式の業務エージェントが 18 件（うち中の業務 2。${official.map((a) => a.name).join(' / ')}）`)
+  // 段取りの報告（第10.14節）・日程調整の招待・外部のアプリからの配信（第13.4.4節）はメニューに出ない中の業務
+  official.length === 19 && official.filter((a) => a.menu === false).map((a) => a.id).sort().join() === 'delivery-send,scheduling-confirm,secretary-plan-report'
+    ? ok(`公式の業務エージェントが 19 件（うち中の業務 3。${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -8235,6 +8235,81 @@ console.log('\n■ 118. 不正の兆しの見張りの段 3（Google のログ�
     for (const r of before) {
       await owner.query(`insert into tenant_credentials (tenant_id, kind, secret_enc, meta, updated_by, updated_at) values ($1,$2,$3,$4,$5,$6)`,
         [r.tenant_id, r.kind, r.secret_enc, r.meta, r.updated_by, r.updated_at]);
+    }
+    await owner.end();
+  }
+}
+
+console.log('\n■ 119. 動いている環境（API とワーカーが知らせを置く・クラウドの形では会社の管理者に出さない。第8.6.7.1節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  try {
+    const { rows } = await owner.query(`select role, version, node, at, os_name, cores, mem_total from runtime_beats order by role`);
+    const fresh = (r) => r && Date.now() - new Date(r.at).getTime() < 15 * 60_000;
+    const api = rows.find((r) => r.role === 'api');
+    const worker = rows.find((r) => r.role === 'worker');
+    api && worker && fresh(api) && fresh(worker) && /^v\d+\./.test(api.node) && /^v\d+\./.test(worker.node) && api.os_name && Number(api.cores) > 0 && Number(api.mem_total) > 0
+      ? ok('API とワーカーが、版・Node.js の版・OS・CPU・メモリーの知らせを置いている（15 分以内）')
+      : ng('動いている環境の知らせが無いか古い', JSON.stringify(rows));
+    const { rows: cols } = await owner.query(`select column_name from information_schema.columns where table_name = 'runtime_beats'`);
+    !cols.some((c) => /key|secret|token|tenant|user/.test(c.column_name))
+      ? ok('知らせの表は、秘密の値・会社・人を持たない') : ng('知らせの表に持たない値の列がある', JSON.stringify(cols.map((c) => c.column_name)));
+    const byMember = await call('a', '/v1/admin/machine/runtime', {}, 'member');
+    const byAdmin = await call('a', '/v1/admin/machine/runtime');
+    const live = (await call('a', '/v1/admin/dashboard/live')).body;
+    byMember.status === 403 && byAdmin.status === 404 && (live?.nodeWarn ?? null) === null
+      ? ok('クラウドの形では、会社の管理者に環境を出さない（運営の画面だけ）。ダッシュボードにも Node.js の知らせを出さない')
+      : ng('クラウドの形の環境の扱いが違う', JSON.stringify({ member: byMember.status, admin: byAdmin.status, nodeWarn: live?.nodeWarn }));
+  } catch (err) {
+    ng('動いている環境の確認が途中で止まった', String(err));
+  } finally {
+    await owner.end();
+  }
+}
+
+console.log('\n■ 120. 外部のアプリからの配信の依頼（断りは accepted: false と reason・結果と停止を取りに来る口・宛先は暗号化の列だけ・表は会社ごと。第13.4.4節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  let appId = null;
+  try {
+    const made = await call('a', '/v1/admin/apps', { method: 'POST', body: JSON.stringify({ name: 'スモークの配信' }) });
+    appId = made.body?.app?.id;
+    const appKey = made.body?.key;
+    const asApp = (path, init = {}) => fetch(`${API}${path}`, { ...init, headers: { 'x-tenant': 'a', authorization: `Bearer ${appKey}`, 'content-type': 'application/json' } })
+      .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+    // 承認する前は道を使えない
+    const before = await asApp('/v1/deliveries/stops');
+    const approve = await call('a', `/v1/admin/apps/${appId}`, { method: 'PUT', body: JSON.stringify({ functions: ['deliveries.send'], settings: { deliveries: { maxRecipients: 10 } } }) });
+    // 受け付けない依頼（承認の業務を始めない）: LINE と、形の違う宛先の ID
+    const base = { title: 'x', channel: 'mail', sendAt: null, template: { subject: 's', html: '', text: 't', line: null }, values: {}, logo: null };
+    const line = await asApp('/v1/deliveries', { method: 'POST', body: JSON.stringify({ ...base, requestId: 'smoke-line', channel: 'line', recipients: [{ recipientId: 'r1', name: 'x', email: 'x@example.com' }] }) });
+    const badId = await asApp('/v1/deliveries', { method: 'POST', body: JSON.stringify({ ...base, requestId: 'smoke-id', recipients: [{ recipientId: 'a b', name: 'x', email: 'x@example.com' }] }) });
+    const stops = await asApp('/v1/deliveries/stops');
+    const badAfter = await asApp('/v1/deliveries/stops?after=x');
+    const noResults = await asApp('/v1/deliveries/smoke-none/results');
+    const deliveriesList = await call('a', `/v1/admin/apps/${appId}/deliveries`);
+    const byMember = await call('a', `/v1/admin/apps/${appId}/deliveries`, {}, 'member');
+    const { rows: cols } = await owner.query(`select table_name, column_name from information_schema.columns where table_name in ('delivery_recipients', 'ext_apps', 'deliveries')`);
+    const names = cols.filter((c) => c.table_name === 'delivery_recipients').map((c) => c.column_name);
+    const leftover = cols.filter((c) => /^callback/.test(c.column_name)).map((c) => `${c.table_name}.${c.column_name}`);
+    const { rows: rls } = await owner.query(`select relname from pg_class where relname in ('deliveries', 'delivery_recipients', 'delivery_stops', 'delivery_state') and relrowsecurity`);
+    before.status === 403 && approve.status === 200
+      && line.status === 422 && line.body?.accepted === false && /LINE/.test(line.body?.reason ?? '') && badId.status === 400 && badId.body?.accepted === false
+      && stops.status === 200 && Array.isArray(stops.body?.stops) && badAfter.status === 400 && noResults.status === 404
+      && deliveriesList.status === 200 && Array.isArray(deliveriesList.body?.items) && byMember.status === 403
+      && names.includes('contact_enc') && !names.some((n) => /^(name|email|address)$/.test(n)) && leftover.length === 0 && rls.length === 4
+      ? ok('承認した機能だけで使え、断りは accepted: false と reason。結果と停止を取りに来る口がある。宛先は暗号化の列だけで持ち、表は会社ごとに分ける')
+      : ng('配信の依頼の扱いが違う', JSON.stringify({ before: before.status, approve: approve.status, line: [line.status, line.body], badId: badId.status, stops: stops.status, badAfter: badAfter.status, noResults: noResults.status, list: deliveriesList.status, member: byMember.status, names, leftover, rls: rls.length }));
+  } catch (err) {
+    ng('配信の依頼の確認が途中で止まった', String(err));
+  } finally {
+    if (appId) {
+      await call('a', `/v1/admin/apps/${appId}/stop`, { method: 'POST', body: '{}' }).catch(() => undefined);
+      await call('a', `/v1/admin/apps/${appId}`, { method: 'DELETE' }).catch(() => undefined);
     }
     await owner.end();
   }

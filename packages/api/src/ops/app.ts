@@ -8,7 +8,7 @@
 
 import { Hono, type Context, type Next } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import {
+import { runtimeEnvironment, inferenceText, localLlmFromEnv, deploymentFromEnv,
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, OPERATOR_ROLES,
   parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
   OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS,
@@ -466,6 +466,18 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
 
   // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）
   app.get('/v1/ops/server', async (c) => c.json({ status: await store.serverStatus() }));
+  /**
+   * 動いている環境（第8.6.7.1節）。クラウドの形では、OS・メモリー・CPU・Node.js の版は運営の機械の情報なので、運営の画面だけに出す（2026-10-22 に三浦さんが決めた）。
+   *
+   * @remarks 外へは見に行かない。秘密の値・業務の中身・個人の情報は返さない
+   */
+  app.get('/v1/ops/runtime', async (c) => {
+    const { beats, postgres } = await store.runtimeBeats().catch(() => ({ beats: [], postgres: null }));
+    return c.json(runtimeEnvironment(beats, postgres, {
+      deployment: deploymentFromEnv(process.env) === 'onsite' ? 'onsite' : 'cloud', debug: process.env['M2O_DEBUG'] === 'true',
+      inference: inferenceText(localLlmFromEnv(process.env), 'cloud'),
+    }));
+  });
 
   // 障害・計画停止の知らせ（第16.11.3節 G-9）。運営者なら誰でも出せる（急ぐため）。対象の会社の管理者に知らせ、会社の監査ログに残す
   app.get('/v1/ops/incidents', async (c) => c.json({ incidents: await store.listIncidents(Number(c.req.query('limit') ?? 100)) }));

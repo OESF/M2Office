@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { describeError, type MachineApi, type MachineView } from './api.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SystemLogs, type LogSource } from './SystemLogs.js';
+import { RuntimeCard } from './runtime-card.js';
 
 /** バイトを GB・MB で表す。 */
 const bytesText = (b: number) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`);
@@ -38,6 +39,8 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
   return (
     <>
       <PageTitle trail={['機械']} help={help ?? null} />
+      {/* 動いている環境（第8.6.7.1節）。いちばん上に置く */}
+      <RuntimeCard load={fns.runtime} />
       {error && <p className="error">{error}</p>}
       {data && (
         <>

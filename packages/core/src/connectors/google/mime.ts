@@ -189,18 +189,30 @@ export function encodeAddress(v: string): string {
  * 本文は UTF-8 のプレーンテキストを base64 で送る（日本語を 7 ビットの経路でも崩さないため）。
  * 返信のときは `inReplyTo`（元のメールの `Message-ID`）と `references` を付け、同じスレッドに置く。
  * `From` は、`from` を渡したときだけ付ける（別名から送るとき。問い合わせの窓口のアカウント。第33.18節）。渡さなければ Gmail が本人のアドレスを入れる。
+ * `html` を渡すと、文字だけの本文と HTML の両方を付ける（`multipart/alternative`）。`inline` は HTML から `cid:` で指す埋め込みの画像
+ * （`multipart/related`。外部のアプリからの配信のロゴ。第13.4.4節）。中身は書き換えない。
  */
 export function buildRawMessage(m: {
   to: string[]; cc: string[]; subject: string; body: string;
   /** 差出人（Gmail の「送信元として使うアドレス」に登録した別名だけが使える）。 */
   from?: string | null;
   inReplyTo?: string | null; references?: string | null;
-  /** 配信の停止の URL（第27.9.1節）。`http(s)` の URL だけを見出しに入れる（開発は http）。 */
+  /**
+   * 配信の停止の先（第27.9.1節・第13.4.4節）。`http(s)` の URL なら押すだけで止まる形（RFC 8058）も付け、
+   * `mailto:` なら返信で止める形だけを付ける（ローカルの形は院外から開けるページを持てないため）。
+   */
   listUnsubscribe?: string | null;
   /** 添えるファイル（`multipart/mixed` にする。第9.5.8節）。 */
   attachments?: { name: string; mime: string; bytes: Uint8Array }[];
+  /** HTML の本文（文字だけの本文 `body` と一緒に送る）。 */
+  html?: string | null;
+  /** HTML に埋め込む画像（`cid` で指す）。 */
+  inline?: { cid: string; mime: string; bytes: Uint8Array }[];
+  /** 足す見出し（`X-` で始まる名前だけ。外部のアプリからの配信の宛先の ID `X-M2O-Recipient` など）。 */
+  headers?: Record<string, string>;
 }): string {
-  const unsubscribe = m.listUnsubscribe && /^https?:\/\/\S+$/.test(m.listUnsubscribe) ? oneLine(m.listUnsubscribe) : null;
+  const http = m.listUnsubscribe && /^https?:\/\/\S+$/.test(m.listUnsubscribe) ? oneLine(m.listUnsubscribe) : null;
+  const mailto = !http && m.listUnsubscribe && /^mailto:[^\s<>]+$/.test(m.listUnsubscribe) ? oneLine(m.listUnsubscribe) : null;
   const lines: string[] = [
     ...(m.from ? [`From: ${encodeAddress(m.from)}`] : []),
     `To: ${m.to.map(encodeAddress).join(', ')}`,
@@ -208,18 +220,38 @@ export function buildRawMessage(m: {
     `Subject: ${encodeHeaderWord(m.subject)}`,
     ...(m.inReplyTo ? [`In-Reply-To: ${oneLine(m.inReplyTo)}`] : []),
     ...(m.references ? [`References: ${oneLine(m.references)}`] : []),
-    // 押すだけで止まる配信の停止（RFC 8058）
-    ...(unsubscribe ? [`List-Unsubscribe: <${unsubscribe}>`, 'List-Unsubscribe-Post: List-Unsubscribe=One-Click'] : []),
+    // 押すだけで止まる配信の停止（RFC 8058）か、返信で止める宛先
+    ...(http ? [`List-Unsubscribe: <${http}>`, 'List-Unsubscribe-Post: List-Unsubscribe=One-Click'] : []),
+    ...(mailto ? [`List-Unsubscribe: <${mailto}>`] : []),
+    ...Object.entries(m.headers ?? {}).filter(([k]) => /^X-[A-Za-z0-9-]{1,60}$/.test(k)).map(([k, v]) => `${k}: ${oneLine(v)}`),
     'MIME-Version: 1.0',
   ];
   const b64 = (bytes: Uint8Array) => (Buffer.from(bytes).toString('base64').match(/.{1,76}/g) ?? []).join('\r\n');
   const text = b64(Buffer.from(m.body.replace(/\r?\n/g, '\r\n'), 'utf-8'));
+  const boundaryOf = () => `m2o-${randomBytes(12).toString('hex')}`;
+  /** 本文の部分（HTML があれば alternative、埋め込みの画像があれば related で包む）。見出しと中身の行を返す。 */
+  const bodyPart = (): string[] => {
+    if (!m.html) return ['Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', text];
+    const alt = boundaryOf();
+    const alternative = [`Content-Type: multipart/alternative; boundary="${alt}"`, '', `--${alt}`,
+      'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', text, `--${alt}`,
+      'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64(Buffer.from(m.html, 'utf-8')), `--${alt}--`];
+    if (!m.inline?.length) return alternative;
+    const rel = boundaryOf();
+    const out = [`Content-Type: multipart/related; boundary="${rel}"`, '', `--${rel}`, ...alternative];
+    for (const img of m.inline) {
+      const mime = /^image\/(png|jpeg|gif|webp)$/i.test(img.mime) ? img.mime : 'application/octet-stream';
+      const cid = oneLine(img.cid).replace(/[<>\s]/g, '');
+      out.push(`--${rel}`, `Content-Type: ${mime}`, 'Content-Transfer-Encoding: base64', `Content-ID: <${cid}>`, 'Content-Disposition: inline', '', b64(img.bytes));
+    }
+    out.push(`--${rel}--`);
+    return out;
+  };
   if (!m.attachments?.length) {
-    lines.push('Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', text);
+    lines.push(...bodyPart());
   } else {
-    const boundary = `m2o-${randomBytes(12).toString('hex')}`;
-    lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`, '', `--${boundary}`,
-      'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', text);
+    const boundary = boundaryOf();
+    lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`, '', `--${boundary}`, ...bodyPart());
     for (const a of m.attachments) {
       // 名前は RFC 2231 の形で送る（日本語の名前が化けないように）。種類は決まったものだけ
       const mime = /^[a-z]+\/[a-z0-9.+-]+$/i.test(a.mime) ? a.mime : 'application/octet-stream';

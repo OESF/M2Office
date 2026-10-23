@@ -16,6 +16,8 @@ src/types/run.ts      ジョブ・実行・ステップ・承認・成果物
 src/types/tenant.ts   テナント・利用者・要求ごとの文脈
 src/types/audit.ts    監査ログ
 src/types/cards.ts    名刺管理（連絡先・名刺・読み取った項目・範囲。仕様書 第27章）
+src/types/deliveries.ts 外部のアプリからの配信の依頼（依頼・結果・停止の形・上限 DELIVERY_MAX_RECIPIENTS・1 日の上限・照合の値と結果を持つ日数。仕様書 第13.4.4節）
+src/types/runtime.ts  動いている環境（Node.js のサポートの表 NODE_RELEASE_LINES とセキュリティの修正の下限 secure・nodeSupport・compareNodeVersions・環境の形。リリースのたびに公式の予定とセキュリティの発表と見比べる。仕様書 第8.6.7.1節）
 ```
 
 ## 主なもの

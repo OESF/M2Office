@@ -15,6 +15,7 @@ import {
   type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
+import { RuntimeCard } from './runtime-card.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
 const ROLE_LABEL: Record<OperatorRole, string> = { admin: '運営管理者', support: 'サポート', monitor: '監視' };
@@ -641,6 +642,8 @@ function Server() {
   return (
     <>
       <h2>稼働状況</h2>
+      {/* 動いている環境（第8.6.7.1節）。クラウドの形では運営の機械の情報なので、運営の画面だけに出す */}
+      <RuntimeCard load={opsApi.runtime} />
       {error && <p className="error">{error}</p>}
       {s && (
         <>

@@ -67,6 +67,10 @@ export interface InquiryServiceDeps {
    * その日（YYYY-MM-DD）を含む休業の期間（お知らせで出した休業。第35.7節）。休業中に届いた問い合わせに「〇日から順にお返事します」の下書きを用意する
    */
   closureOn?(tenantId: string, day: string): Promise<{ startDate: string; endDate: string } | null>;
+  /**
+   * 問い合わせに入れない窓口のアカウントのメールか（外部のアプリからの配信の停止の返信・送れなかった知らせ。第13.4.4節）。理由を返し、違えば `null`。
+   */
+  skipMail?(tenantId: string, m: MailItem, mailboxAddress: string): Promise<string | null>;
   logger?: Logger;
 }
 
@@ -630,6 +634,13 @@ export class InquiryService {
       // 窓口のアカウント自身が送ったもの（受信トレイに残った控え）は、送信済みのほうで扱う
       if (sendAs.includes(m.fromAddress)) continue;
       const to = this.mailTo(m, sendAs, box.address);
+      // 外部のアプリからの配信の停止の返信と送れなかった知らせは、配信のほうで読む（問い合わせにしない）
+      const skip = await this.deps.skipMail?.(tenantId, m, box.address).catch(() => null);
+      if (skip) {
+        await store.logMail(tenantId, { messageId: m.id, threadId: m.threadId, direction: 'in', from: m.from, subject: m.subject, to, receivedAt: m.date, status: 'skipped', inquiryId: null, reason: skip });
+        out.skipped += 1;
+        continue;
+      }
       const reading = await readMail(llm, m, today, box.address);
       const r = await this.takeMail(tenantId, m, reading, to, owner);
       if (r !== 'skipped' && to !== box.address && !sendAs.includes(to)) noSendAs.add(to);

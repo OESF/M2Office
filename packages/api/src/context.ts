@@ -18,7 +18,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
@@ -66,6 +66,10 @@ export interface AppDeps {
   appKnowledge: AppKnowledgeSearch;
   /** 不正の兆しの見張り（第16.8節）。ログインの締め出しと、秘書の見張りの受け口に使う（見回りはワーカー）。 */
   security: SecurityWatch;
+  /** 外部のアプリからの配信の依頼（第13.4.4節）。 */
+  deliveries: DeliveryService;
+  /** 動いている環境（第8.6.7.1節）。API とワーカーが置く知らせの置き場と、この API の起動の時刻。 */
+  runtime: { store: PostgresRuntimeBeatStore; startedAt: Date };
   /** 開発者向けのヘルプで見せる API の定義（`docs/api/<名前>.openapi.yaml`。名前 → 題と中身。第6.10.7.4節）。 */
   apiDocs: Map<string, { title: string; text: string }>;
   /** ヘルプを育てる（見つからなかった質問と、役に立ったか。仕様書 第6.10.10節） */
@@ -407,6 +411,16 @@ export function buildDeps(): AppDeps {
     // サイネージの機能で使ってよい画面の候補（第13.4.3節。サイネージは下で作る。呼ばれるのは作った後）
     signageScreens: async (tenantId) => (await signageService.deps.store.listScreens(tenantId)).map((s) => ({ id: s.id, name: s.name })),
   });
+  // 外部のアプリからの配信の依頼（第13.4.4節）。受けた依頼の承認の業務を始め、結果と停止を渡す（送るのと受信を読むのはワーカー）
+  const deliveries = new DeliveryService({
+    store: new PostgresDeliveryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, box,
+    apps: { get: (tenantId, appId) => apps.get(tenantId, appId) },
+    mailbox: (tenantId) => openMailbox({ repo, box, sourceFor: (t) => connector.sourceFor(t) }, tenantId),
+    startApproval: async (tenantId, deliveryId, requestedBy) => (await enqueueJob(repo, {
+      tenantId, requestedBy, def: DELIVERY_SEND, input: { deliveryId }, origin: 'api', actor: { type: 'system', id: 'deliveries' },
+    })).runId,
+    logger: log,
+  });
   const appLinks = new AppLinks({ store: apps.store, repo });
   const appKnowledge = new AppKnowledgeSearch({ repo, llmFor: (tenantId) => ai.llmFor(tenantId) });
   // 不正の兆しの見張り（第16.8節）。見回りはワーカーが行い、API はログインの締め出しと秘書の受け口に使う
@@ -481,6 +495,8 @@ export function buildDeps(): AppDeps {
       line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
       // 休業中に届いた問い合わせに「〇日から順にお返事します」の下書きを用意する（第35.7節）
       closureOn: (tenantId, day) => announcementStore.closureOn(tenantId, day),
+      // 外部のアプリからの配信の停止の返信と送れなかった知らせは、問い合わせにしない（第13.4.4節）
+      skipMail: (tenantId, m, address) => deliveries.mailKind(tenantId, m, address),
     }),
     access: inquiriesAccess(repo),
   };
@@ -686,6 +702,7 @@ export function buildDeps(): AppDeps {
   });
   const engine = new RunEngine({
     repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts, subsidies, members, printDesigns, reservations,
+    deliveries: { service: deliveries },
     closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
     hr: { calendar: laborCalendar, access: hrAccess(repo) },
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
@@ -840,6 +857,8 @@ export function buildDeps(): AppDeps {
   return {
     proxy: new ProxyAccessStore(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 2, name: 'proxy' })),
     opsSide: new OpsAppSide(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'ops' })),
+    deliveries,
+    runtime: { store: new PostgresRuntimeBeatStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), startedAt: new Date() },
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, apiDocs, apps, appLinks, appKnowledge, security, helpFeedback, knowledgeGaps, systemLogs, helpNotes, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     onsiteTenant: ai.deployment() === 'onsite' ? (process.env['M2O_ONSITE_TENANT']?.trim() || null) : null,

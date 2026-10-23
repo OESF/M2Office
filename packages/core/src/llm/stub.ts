@@ -373,6 +373,9 @@ function chooseTools(tools: string[], prompt: string): Call[] {
   if (has('schedule.confirm_prepare') && instruction.includes('schedule.confirm_prepare')) {
     return [{ name: 'schedule.confirm_prepare', args: { requestId: extractField(prompt, 'requestId') } }];
   }
+  if (has('deliveries.send') && instruction.includes('deliveries.send')) {
+    return [{ name: 'deliveries.send', args: { deliveryId: extractField(prompt, 'deliveryId') } }];
+  }
   if (has('schedule.invite') && instruction.includes('schedule.invite')) {
     return [{ name: 'schedule.invite', args: { requestId: extractField(prompt, 'requestId') } }];
   }

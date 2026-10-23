@@ -50,6 +50,7 @@ import type { AnnouncementService } from '../announcements/service.js';
 import type { ContractService } from '../contracts/service.js';
 import type { SubsidyService } from '../subsidies/service.js';
 import type { MemberService } from '../members/service.js';
+import type { DeliveryService } from '../deliveries/service.js';
 import type { PrintDesignService } from '../print-designs/service.js';
 import type { ReservationService } from '../reservations/service.js';
 import type { ColumnPlanner } from '../columns/planner.js';
@@ -211,6 +212,8 @@ export interface RunEngineDeps {
     access(tenantId: string, userId: string): Promise<SubsidySettings | null>;
   };
   /** 会員とポイント（内蔵の拡張。仕様書 第40章）。ツールに渡す。 */
+  /** 外部のアプリからの配信（第13.4.4節）。業務「外部のアプリからの配信」のツールが使う。 */
+  deliveries?: { service: DeliveryService };
   members?: {
     service: MemberService;
     access(tenantId: string, userId: string): Promise<MemberSettings | null>;
@@ -1141,6 +1144,7 @@ export class RunEngine {
         subsidies: { service: this.deps.subsidies.service, access: () => this.deps.subsidies!.access(run.tenantId, requestedBy) },
       } : {}),
       // 会員とポイント（第40.7節）
+      ...(this.deps.deliveries ? { deliveries: { service: this.deps.deliveries.service } } : {}),
       ...(this.deps.members ? {
         members: { service: this.deps.members.service, access: () => this.deps.members!.access(run.tenantId, requestedBy) },
       } : {}),
@@ -1418,7 +1422,7 @@ export function needsHuman(
 }
 
 /** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるもの・問い合わせの返事・サイネージの画面に流すものも人が見る（仕様書 第9.4.0節・第32.18.1節・第32.18.6節・第33.18節）。 */
-const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'columns.place', 'inquiries.reply_send', 'announcements.publish', 'web_review.request_send', 'columns.signage_publish']);
+const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'deliveries.send', 'columns.place', 'inquiries.reply_send', 'announcements.publish', 'web_review.request_send', 'columns.signage_publish']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = {

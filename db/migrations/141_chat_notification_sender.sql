@@ -3,7 +3,7 @@
 -- ① 会社の Chat アプリのサービスアカウントの鍵を、会社の接続の設定（暗号化した秘密の値）として預かる（kind に google_chat_app を足す）。
 -- ② 本人と Chat アプリの個別メッセージの場所（spaces/…）を覚えておく。名前だけで、メッセージの中身は持たない。
 alter table tenant_credentials drop constraint if exists tenant_credentials_kind_check;
-alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress', 'inquiry_mailbox', 'line', 'places', 'web_review', 'google_chat_app'));
+alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress', 'inquiry_mailbox', 'line', 'places', 'web_review', 'google_chat_app')) not valid;  -- 後で足した種類の行があっても止まらないよう、ここでは確かめない（最後の形は移行 155）
 
 create table if not exists chat_dm_spaces (
   tenant_id   text not null references tenants(id) on delete cascade,

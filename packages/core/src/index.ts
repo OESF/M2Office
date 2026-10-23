@@ -173,6 +173,7 @@ export * from './cards/index.js';
 export * from './inventory/index.js';
 export * from './apps/index.js';
 export * from './security/index.js';
+export * from './deliveries/index.js';
 export * from './columns/index.js';
 export * from './inquiries/index.js';
 export * from './competitors/index.js';
@@ -205,6 +206,8 @@ export { appRoot, appPath } from './app-root.js';
 export {
   runBackup, restoreTest, readBackupStatus, requestBackup, takeBackupRequest, backupsToKeep, backupName, diskSpace,
   machineStatus, writeWorkerBeat, machineDir, backupConfigFromEnv, machineConfigFromEnv,
+  availableMemoryOf, currentMachine, inferenceText, beatFromRow, PostgresRuntimeBeatStore, writeRuntimeBeat, runtimeEnvironment,
+  RUNTIME_BEAT_INTERVAL_MS, RUNTIME_BEAT_STALE_MS, type RuntimeBeatStore,
   type BackupConfig, type BackupRecord, type BackupStatus, type MachineConfig, type MachineStatus,
   readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus,
   readMaintenanceStatus, requestMaintenance, frontDir, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, type MaintenanceSession, type MaintenanceStatus,

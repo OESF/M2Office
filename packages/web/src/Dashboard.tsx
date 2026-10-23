@@ -14,6 +14,7 @@ import { EffectPanel } from './Effect.js';
 import { HelpTip, openHelp } from './help.js';
 import { Icon } from './nav.js';
 import { busyOf, groupAgents, type AgentGroupView, type AgentLoad } from './agent-groups.js';
+import { nodeSecurityText } from './runtime-card.js';
 
 /** 「いま」を取り直す間隔（ミリ秒）。 */
 const LIVE_INTERVAL_MS = 5000;
@@ -281,6 +282,18 @@ function Live({ board = false }: { board?: boolean }) {
         <Tile label="今日の費用" value={c.todayCostJpy} unit="円" />
       </div>
 
+      {/* Node.js のセキュリティの修正がある（ローカルの形。第8.6.7.1節）。眺める画面では出さない */}
+      {data.nodeSecurity && !board && (
+        <p className="error" role="status">{nodeSecurityText(data.nodeSecurity)}。管理者ページの「機械」で確かめられます</p>
+      )}
+      {/* Node.js のサポートの終わりが近い・終わった（ローカルの形。第8.6.7.1節）。眺める画面では出さない */}
+      {data.nodeWarn && !board && (
+        <p className={data.nodeWarn.expired ? 'error' : 'warn-msg'} role="status">
+          {data.nodeWarn.expired
+            ? `Node.js（${data.nodeWarn.version}）のサポートが終わっています。管理者ページの「機械」で確かめ、新しい LTS の版へ更新してください`
+            : `Node.js の更新が要ります（${data.nodeWarn.version} のサポートは ${data.nodeWarn.end ?? '近く'} まで）。管理者ページの「機械」で確かめられます`}
+        </p>
+      )}
       <Agents data={data} board={board} />
 
       <HealthList items={data.connections ?? []} />

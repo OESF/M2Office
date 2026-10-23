@@ -142,6 +142,7 @@ Claude Code の `/release` スキル（[.claude/skills/release/SKILL.md](../.cla
 | 7 | 影響するテナントへの事前告知が済んでいる（MAJOR の場合） | 第5.4節 |
 | 8 | **利用者に見える変更について、ヘルプの記事を更新した**（業務の追加・画面や文言の変更・挙動の変更） | 仕様書 第6.10.9節 |
 | 9 | **依存に「高」以上の既知の脆弱性が無い**（`npm run security:check`。確かめられなかったときは「未確認」とする）。静的解析（GitHub の CodeQL）に新しい指摘が無い | 仕様書 第16.11.3節 G-11 |
+| 10 | **Node.js のサポートの表が公式の予定と合っている**（`packages/shared/src/types/runtime.ts` の `NODE_RELEASE_LINES` を https://raw.githubusercontent.com/nodejs/Release/main/schedule.json と見比べ、違えば直す。確かめられなかったときは「未確認」とする）。動いている Node.js のサポートの終わりまで 6 か月を切っていれば、更新をリリースノートの「配備で行うこと」に書く。あわせて、**セキュリティの修正の下限（`secure`）を公式のセキュリティの発表（https://nodejs.org/en/blog/vulnerability）と見比べ**、新しい発表があれば直し、直した版を「配備で行うこと」に書く。**発表があったときは、ほかの変更を待たずに下限だけを直した PATCH のリリースを出す**（M2Medical と同じ値にする） | 仕様書 第8.6.7.1節 |
 
 ### 6.2 配備
 

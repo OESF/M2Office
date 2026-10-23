@@ -31,6 +31,7 @@ info:
     | 業務を依頼して結果を受け取る（`jobs.run`） | `POST /v1/jobs`・`GET /v1/runs/{id}` | 使える |
     | サイネージにメッセージを表示する（`signage.interrupt`） | `POST /v1/signage/interrupts` ほか | 使える（サイネージを入れた会社） |
     | サイネージの画面の状態を読む（`signage.status`） | `GET /v1/signage/screens` | 使える（サイネージを入れた会社） |
+    | 配信を頼む（`deliveries.send`） | `POST /v1/deliveries`・`GET /v1/deliveries/{requestId}/results`・`GET /v1/deliveries/stops` | 使える（メールだけ） |
 
     **共通の決まり**
     - 鍵が違う・アプリを止めた・会社が止まっている・呼んだ名前の会社と鍵の会社が合わないは、どれも同じ 404 です。許していない機能の道は 403 です。
@@ -38,7 +39,7 @@ info:
     - 送られてきた中身は、M2Office の中でデータとしてだけ扱い、文の中に書かれた指示には従いません。
     - 書き込みの機能は、通知ごとの番号（`eventId`）で二重に数えません。送り直すときは同じ番号で送ってください（社内規程の登録は、同じ文書の番号への PUT なので要りません）。
     - 本人として行う機能（ナレッジの検索・予約を入れる・業務の依頼）は、アカウントの結び付けで受け取った結び付きの ID（`bindingId`）を送ります。結び付きが無効なら 410（`binding_invalid`）です。
-    - M2Office からアプリへ知らせる口（Webhook）はありません。
+    - M2Office からアプリへ知らせる口（Webhook）はありません。「配信を頼む」の結果と配信の停止も、アプリが取りに来ます。
 
     使い方の例（販売管理・M2Medical）は、管理者ページのヘルプの「開発者」で解説しています。
   contact:
@@ -80,6 +81,8 @@ tags:
     description: 機能 jobs.run。結び付いた本人として業務を依頼し、結果を受け取る
   - name: サイネージ
     description: 機能 signage.interrupt・signage.status。受付・順番待ち・レジのシステムから店頭の画面に呼び出しを出し、画面の状態を読む
+  - name: 配信
+    description: 機能 deliveries.send。外部のアプリが作った案内のメールを、M2Office の承認の後に会社の窓口のアカウントから送る。結果と配信の停止はアプリが取りに来る（使い方の例 M2Medical の声掛け）
 paths:
   /v1/company/profile:
     get:
@@ -976,6 +979,121 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/deliveries:
+    post:
+      tags: [配信]
+      operationId: requestDelivery
+      summary: 配信を頼む（機能 deliveries.send）
+      description: |
+        外部のアプリが作った案内のメールを、M2Office が**承認の後に**会社の窓口のアカウント（会社の Gmail）から **1 人に 1 通ずつ**送ります（仕様書 第13.4.4節）。クラウドの形でもローカルの形でも使えます。
+        結果と配信の停止は、アプリが下の 2 つの道で取りに来ます（M2Office からアプリへは送りません）。
+
+        - **承認**: 社外への送信なので、M2Office の承認トレイで管理者か承認者が承認してから送ります（外部のアプリでの承認に加えて）。承認の画面には人数と見本の本文だけを出し、宛先の名前とアドレスは出しません。会社の Google Workspace のドメインのアドレス 1 人だけへの送信は、承認なしで送ります
+        - **差し込み**: `{{name}}`（宛先の名前）・`values` の名前（`{{clinic_name}}` など）・`{{unsubscribe_url}}`・`{{unsubscribe_address}}` を、送るときに差し込みます。差し込めない名前があれば受け付けません（422 `unknown-placeholder`）。HTML には文字に直して差し込みます
+        - **配信の停止**: `{{unsubscribe_url}}` には、宛先の ID を付けた返信の宛先 `mailto:<窓口>+stop-<recipientId>@<ドメイン>?subject=配信停止` が、`{{unsubscribe_address}}` には窓口のアドレスが入ります。見出しの `List-Unsubscribe` にも同じ mailto を入れます。返信が届いたら停止として渡します
+        - **中身は書き換えません**（外の画像の読み込み・開いたかの計測・リンクの置き換えはしません）。ロゴは `cid` で埋め込みます。見出しに `X-M2O-Recipient: <recipientId>` を付けます（送れなかった知らせを照らすため）
+        - **数**: 1 回の依頼は承認した上限（500 人まで）。窓口のアカウントから送るのは 1 日 1,000 通まで（ほかの送信と合わせて）で、超える分はあとで続けて送ります
+        - **LINE**: まだ受け付けません（422 `channel-unsupported`）
+        - **宛先**: 暗号化して持ち、その人に送り終えたら名前とアドレスを消します。照合の値（アドレスの SHA-256）は 3 日、結果と停止は 30 日で消します。秘書・推論・会社の接続には渡しません
+        - **同じ requestId** は 1 度だけ受けます（送り直しには前の答えを返します）。受け付けなかった依頼は、直して同じ requestId で送り直せます
+        - **受け付けないとき**は `{ accepted: false, reason, code }`（`reason` は画面に出せる文）を返します。受け付けたら `{ accepted: true, jobId, status }` です（`deliveryId` は `jobId` と同じ値）
+        - **テスト送信**（職員の業務用のアドレスへの 1 通）は `test: true` を付け、宛先を 1 人にします。結果は持ちません
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeliveryRequest' }
+            example:
+              requestId: rd-20261023-001
+              title: インフルリピート
+              channel: mail
+              sendAt: null
+              template:
+                subject: '{{clinic_name}} から予防接種のご案内'
+                html: '<!doctype html><html><body><img src="cid:logo" alt=""><p>{{name}} 様</p><p>…</p><p><a href="{{unsubscribe_url}}">配信の停止</a>（{{unsubscribe_address}}）</p></body></html>'
+                text: "{{name}} 様\n…\n配信の停止: {{unsubscribe_url}}"
+                line: null
+              values: { clinic_name: 見本クリニック }
+              logo: { contentType: image/png, base64: iVBORw0KGgo…, cid: logo }
+              recipients: [{ recipientId: 3f9a1c0b7e2d4a6b8c1d2e3f, name: 試験 花子, email: hanako@mail.example }]
+      responses:
+        '202':
+          description: 受け付けた（`awaiting_approval` は承認待ち、`scheduled` は社内のアドレスへの送信で承認なし）
+          content:
+            application/json:
+              example: { accepted: true, jobId: dl-7d1b4c3a, deliveryId: dl-7d1b4c3a, status: awaiting_approval }
+        '400':
+          description: 形が違う（`invalid`）
+          content:
+            application/json:
+              example: { accepted: false, reason: recipients の recipientId は、英数字と「-」「_」の 64 文字まで・重ならないものにしてください, code: invalid }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 鍵が違う・「配信を頼む」を承認していない }
+        '409':
+          description: 同じ requestId を受け付け済み、窓口のアカウントがつながっていない（`no-mailbox`）、承認の手続きを始められない（`ai-unavailable`）
+          content:
+            application/json:
+              example: { accepted: false, reason: 窓口のアカウントがつながっていないため送れません, code: no-mailbox }
+        '413': { description: 本文が 4 MB を超えた }
+        '422':
+          description: 人数の上限（`too-many`）・差し込めない名前（`unknown-placeholder`）・LINE（`channel-unsupported`）
+          content:
+            application/json:
+              example: { accepted: false, reason: LINE の配信はまだ受け付けていません（メールだけ）, code: channel-unsupported }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/deliveries/{requestId}/results:
+    get:
+      tags: [配信]
+      operationId: deliveryResults
+      summary: 配信の結果を取りに来る（機能 deliveries.send）
+      description: |
+        その依頼の宛先ごとの結果を、`after`（前の答えの `next`。最初は付けない）より後から 500 件まで渡します。結果が変わる（送れた後に送れなかった知らせが届く・停止を受ける）と、同じ宛先の新しい結果を後ろに足します。
+        `status` は `sent`・`failed`（`reason` は `invalid-address`・`bounced`・`quota`・`rejected`（M2Office で却下））・`stopped`（この依頼の宛先の ID で受けた停止。`channel: mail`）です。
+        `done` は、全員の送信が終わって 24 時間たち（あとから届く送れなかった知らせを入れるため。却下とテスト送信は待たない）、渡していない結果が残っていないとき `true` です。それ以降は取りに来なくてかまいません。
+        結果は送り終えてから 30 日で消します。テスト送信は結果を持ちません（すぐ `done: true`）。
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string } }
+        - { name: after, in: query, required: false, schema: { type: string }, description: 前の答えの next（中身に意味を持たせない文字としてそのまま渡す） }
+      responses:
+        '200':
+          description: 結果
+          content:
+            application/json:
+              example:
+                results:
+                  - { recipientId: 3f9a1c0b7e2d4a6b8c1d2e3f, status: sent, at: '2026-10-23T01:00:00.000Z' }
+                  - { recipientId: 7c2e, status: failed, reason: invalid-address, at: '2026-10-23T01:00:03.000Z' }
+                  - { recipientId: 9b1d, status: stopped, channel: mail, at: '2026-10-24T00:12:00.000Z' }
+                next: '1824'
+                done: false
+        '400': { description: after の形が違う }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: その requestId の配信が無い（ほかのアプリの配信も含む） }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/deliveries/stops:
+    get:
+      tags: [配信]
+      operationId: deliveryStops
+      summary: 配信の停止を取りに来る（機能 deliveries.send）
+      description: |
+        そのアプリの配信で受けた停止を、`after`（前の答えの `next`）より後から 500 件まで渡します。
+        `+stop-<recipientId>` の宛先への返信は `{ recipientId }`、`+` の無い窓口への「配信停止」の返信は、差出人のアドレスで宛先を照らせれば `{ recipientId }`、照らせなければ `{ email }`（差出人のアドレス）で渡します。
+        メールマガジンなど（`List-Unsubscribe` などの印があるもの）は停止とみなしません。停止は 30 日で消します。
+      parameters:
+        - { name: after, in: query, required: false, schema: { type: string }, description: 前の答えの next }
+      responses:
+        '200':
+          description: 停止
+          content:
+            application/json:
+              example:
+                stops:
+                  - { recipientId: 3f9a1c0b7e2d4a6b8c1d2e3f, channel: mail, at: '2026-10-24T00:12:00.000Z' }
+                  - { email: patient@mail.example, channel: mail, at: '2026-10-24T00:30:00.000Z' }
+                next: '77'
+        '400': { description: after の形が違う }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 components:
   securitySchemes:
     appKey:
@@ -1013,6 +1131,41 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
   schemas:
+    DeliveryRequest:
+      type: object
+      required: [requestId, title, channel, template, recipients]
+      properties:
+        requestId: { type: string, maxLength: 100, description: 依頼の番号（二重に受けない） }
+        title: { type: string, maxLength: 200 }
+        channel: { type: string, enum: [mail, line], description: いまは mail だけ }
+        sendAt: { type: [string, 'null'], format: date-time, description: 送る日時。null なら承認の後すぐ }
+        test: { type: boolean, description: テスト送信（宛先は 1 人。結果を持たない。社内のアドレスなら承認なしで送る） }
+        template:
+          type: object
+          required: [subject, html, text]
+          properties:
+            subject: { type: string, maxLength: 300 }
+            html: { type: string, description: メール向けに組み立て済みの HTML（500 KB まで）。M2Office は書き換えない }
+            text: { type: string, description: 文字だけの本文（200 KB まで） }
+            line: { type: [string, 'null'] }
+        values: { type: object, additionalProperties: { type: string, maxLength: 2000 }, description: '差し込む値（英数字の名前。name・unsubscribe_url・unsubscribe_address は入れられない）' }
+        logo:
+          type: [object, 'null']
+          properties:
+            contentType: { type: string, enum: [image/png, image/jpeg, image/gif] }
+            base64: { type: string, description: 300 KB まで }
+            cid: { type: string }
+        recipients:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [recipientId, name, email]
+            properties:
+              recipientId: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$', description: 依頼ごとに作り直した、元に戻せない番号（返信の宛先に入れる） }
+              name: { type: string, maxLength: 200 }
+              email: { type: string, maxLength: 320 }
     CompanyProfile:
       type: object
       required: [legalName, shortName, postalCode, address, phone, website, invoiceRegistrationNumber, fiscalYearStartMonth, businessDays, holidaysClosed]

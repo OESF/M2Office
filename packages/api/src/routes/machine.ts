@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   readMaintenanceStatus, requestMaintenance, frontDir, setHeartbeatOff, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, holdUpdates, machineDir,
-  appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup,
+  appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup, runtimeEnvironment, inferenceText, localLlmFromEnv,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -33,6 +33,18 @@ export function machineRoute(deps: AppDeps) {
     if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
     const version = (() => { try { return (JSON.parse(readFileSync(appPath('package.json'), 'utf8')) as { version?: string }).version ?? '0'; } catch { return '0'; } })();
     return c.json(await machineStatus(machineConfigFromEnv(process.env, version)));
+  });
+
+  /**
+   * 動いている環境（第8.6.7.1節）。M2Office の版・API とワーカーの Node.js（段階とサポートの終わり）・PostgreSQL・OS と CPU・
+   * メモリー・動いている形・推論・起動してからの時間。クラウドの形では 404（運営の画面の「稼働状況」に出す）。
+   *
+   * @remarks 外へは見に行かない。秘密の値・業務の中身・個人の情報は返さない。取れなかった値は `null`
+   */
+  app.get('/runtime', async (c) => {
+    if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
+    const [beats, postgres] = await Promise.all([deps.runtime.store.read().catch(() => []), deps.runtime.store.postgresVersion().catch(() => null)]);
+    return c.json(runtimeEnvironment(beats, postgres, { deployment: 'onsite', debug: !!deps.debug, inference: inferenceText(localLlmFromEnv(process.env), 'onsite') }));
   });
 
   /**

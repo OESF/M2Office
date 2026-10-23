@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { APP_JOB_RISKS, type AppFunctionId, type AppFunctionInfo, type AppSettingOptions, type AppSettings, type ExternalApp, type InventoryCatalogScope, type InventoryItemView, type RiskLevel } from '@m2office/shared';
+import { APP_JOB_RISKS, DELIVERY_MAX_RECIPIENTS, type AppFunctionId, type DeliveryView, type AppFunctionInfo, type AppSettingOptions, type AppSettings, type ExternalApp, type InventoryCatalogScope, type InventoryItemView, type RiskLevel } from '@m2office/shared';
 import { api, describeError, type InventorySalesItemView } from './api.js';
 import { copyText } from './clipboard.js';
 import { InventoryItemPicker, withRuleItems } from './InventoryItemPicker.js';
@@ -31,7 +31,7 @@ const RISK_LABEL: Record<RiskLevel, string> = { read: '読むだけ', draft: '�
 /** 機能ごとの設定のはじめの値。 */
 const EMPTY_EXTRA: Required<Omit<AppSettings, 'catalog'>> = {
   notices: { all: false, groupIds: [] }, reservations: { all: true, itemIds: [] }, knowledgeRules: { compartments: [] }, jobs: { agentIds: [], maxRisk: 'read' },
-  signage: { all: true, screenIds: [] },
+  signage: { all: true, screenIds: [] }, deliveries: { maxRecipients: DELIVERY_MAX_RECIPIENTS },
 };
 
 /** 選んだ機能の設定だけを残す（承認に送る形）。 */
@@ -44,6 +44,8 @@ function settingsFor(functions: AppFunctionId[], catalog: InventoryCatalogScope,
     ...(functions.includes('jobs.run') ? { jobs: extra.jobs } : {}),
     // サイネージの 2 つの機能は、使ってよい画面を一緒に決める（第13.4.3節）
     ...(functions.some((f) => f.startsWith('signage.')) ? { signage: extra.signage } : {}),
+    // 配信を頼む（第13.4.4節）: 1 回の上限と、結果を返してよい場所
+    ...(functions.includes('deliveries.send') ? { deliveries: extra.deliveries } : {}),
   };
 }
 
@@ -151,6 +153,31 @@ function KeyBanner({ value, onClose }: { value: string; onClose: () => void }) {
   );
 }
 
+/** 配信の状態の言い方。 */
+const DELIVERY_STATUS: Record<DeliveryView['status'], string> = { awaiting_approval: '承認待ち', scheduled: '送る時を待っています', sending: '送っています', done: '送り終えました', rejected: '却下されました' };
+
+/** そのアプリから届いた配信の依頼（宛先は出さず、人数と結果の数だけ。第13.4.4節）。 */
+function DeliveryList({ appId }: { appId: string }) {
+  const [items, setItems] = useState<DeliveryView[] | null>(null);
+  useEffect(() => { api.admin.appDeliveries(appId).then((r) => setItems(r.items)).catch(() => setItems([])); }, [appId]);
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="table-scroll"><table className="table small">
+      <thead><tr><th>受けた日時</th><th>題名</th><th>状態</th><th className="num">宛先</th><th className="num">送れた</th><th className="num">送れなかった</th><th className="num">停止</th></tr></thead>
+      <tbody>
+        {items.map((d) => (
+          <tr key={d.id}>
+            <td className="nowrap">{new Date(d.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+            <td>{d.title}</td>
+            <td>{DELIVERY_STATUS[d.status]}{d.test && <span className="badge">テスト</span>}</td>
+            <td className="num">{d.total}</td><td className="num">{d.sent}</td><td className="num">{d.failed}</td><td className="num">{d.stopped}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table></div>
+  );
+}
+
 /** アプリ 1 つの欄（名前・様子・機能・機能ごとの設定・承認・鍵・止める・削除）。 */
 function AppEditor({ app: initial, functions, items, options, onKey, onChanged }: {
   app: ExternalApp; functions: AppFunctionInfo[]; items: InventoryItemView[]; options: AppSettingOptions; onKey: (key: string) => void; onChanged: (select?: string | null) => void;
@@ -176,7 +203,8 @@ function AppEditor({ app: initial, functions, items, options, onKey, onChanged }
     || (chosen.includes('notices.post') && !extra.notices.all && extra.notices.groupIds.length === 0)
     || (chosen.includes('reservations.book') && !extra.reservations.all && extra.reservations.itemIds.length === 0)
     || (chosen.includes('jobs.run') && extra.jobs.agentIds.length === 0)
-    || (chosen.some((f) => f.startsWith('signage.')) && !extra.signage.all && extra.signage.screenIds.length === 0);
+    || (chosen.some((f) => f.startsWith('signage.')) && !extra.signage.all && extra.signage.screenIds.length === 0)
+    || (chosen.includes('deliveries.send') && !(extra.deliveries.maxRecipients >= 1 && extra.deliveries.maxRecipients <= DELIVERY_MAX_RECIPIENTS));
   const base = location.origin;
 
   const act = async (fn: () => Promise<ExternalApp>, failed: string) => {
@@ -258,6 +286,16 @@ function AppEditor({ app: initial, functions, items, options, onKey, onChanged }
       {chosen.some((f) => f.startsWith('signage.')) && (
         <PickList title="使ってよいサイネージの画面" allLabel="すべて" all={extra.signage.all} chosen={extra.signage.screenIds} choices={options.signageScreens}
           onChange={(all, ids) => setExtra({ ...extra, signage: { all, screenIds: ids } })} />
+      )}
+      {chosen.includes('deliveries.send') && (
+        <div className="app-setting">
+          <strong className="small">配信を頼む</strong>
+          <label className="small">1 回の宛先の上限
+            <input type="number" min={1} max={DELIVERY_MAX_RECIPIENTS} className="num" value={extra.deliveries.maxRecipients}
+              onChange={(e) => setExtra({ ...extra, deliveries: { maxRecipients: Number(e.target.value) } })} /> 人
+          </label>
+          <DeliveryList appId={app.id} />
+        </div>
       )}
       {chosen.includes('knowledge.rules') && (
         <PickList title="規程を書いてよい権限区画（区画なしはいつも書けます）" chosen={extra.knowledgeRules.compartments} choices={options.compartments.map((c) => ({ id: c, name: c }))}

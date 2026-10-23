@@ -4,7 +4,7 @@ alter table tenant_settings add column if not exists web_review jsonb;
 
 -- 2. 担当の Google アカウントの許可（アナリティクスと Search Console の読み取りだけ）を、会社の鍵の置き場に預ける
 alter table tenant_credentials drop constraint if exists tenant_credentials_kind_check;
-alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress', 'inquiry_mailbox', 'line', 'places', 'web_review'));
+alter table tenant_credentials add constraint tenant_credentials_kind_check check (kind in ('gemini', 'google_oauth', 'wordpress', 'inquiry_mailbox', 'line', 'places', 'web_review')) not valid;  -- 移行は毎回すべて流すため、後で足した種類の行があっても止まらないよう、ここでは確かめない（最後の形は移行 155）
 
 -- 3. 月の便り（月ごとに 1 つ）。数字はプログラムが API の値から計算したもの、文は推論が書いたもの
 create table if not exists web_review_reports (

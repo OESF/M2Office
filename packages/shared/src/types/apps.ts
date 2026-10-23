@@ -16,7 +16,7 @@ export type AppFunctionId =
   | 'company.profile' | 'inventory.catalog' | 'inventory.sales' | 'inventory.receipts'
   | 'accounts.link' | 'knowledge.search' | 'knowledge.rules'
   | 'inquiries.intake' | 'notices.post' | 'reservations.book' | 'members.points' | 'columns.read' | 'jobs.run'
-  | 'signage.interrupt' | 'signage.status';
+  | 'signage.interrupt' | 'signage.status' | 'deliveries.send';
 
 /** 機能を選べる条件になる内蔵の拡張（その拡張を入れた会社だけ選べる）。 */
 export type AppFunctionRequirement = 'inventory' | 'inquiries' | 'reservations' | 'members' | 'web-columns' | 'signage';
@@ -60,6 +60,11 @@ export const APP_FUNCTIONS: readonly AppFunctionInfo[] = [
     routes: ['POST /v1/signage/interrupts', 'POST /v1/signage/interrupts/{id}/clear'], requires: 'signage',
   },
   { id: 'signage.status', label: 'サイネージの画面の状態を読む', routes: ['GET /v1/signage/screens'], requires: 'signage' },
+  // 外部のアプリからの配信（第13.4.4節）。クラウドの形でもローカルの形でも。結果と停止はアプリが取りに来る
+  {
+    id: 'deliveries.send', label: '配信を頼む（メール）',
+    routes: ['POST /v1/deliveries', 'GET /v1/deliveries/{requestId}/results', 'GET /v1/deliveries/stops'],
+  },
 ];
 
 /** 機能「業務を依頼して結果を受け取る」で選べる危険度の上限（お金の確定は外から依頼させない）。 */
@@ -79,6 +84,8 @@ export interface AppSettings {
   jobs?: { agentIds: string[]; maxRisk: RiskLevel };
   /** サイネージの機能（呼び出しを出す・画面の状態を読む）で使ってよい画面（すべてか、決めた画面。第13.4.3節）。 */
   signage?: { all: boolean; screenIds: string[] };
+  /** 機能「配信を頼む」の設定（第13.4.4節）。1 回の依頼の宛先の上限（500 人まで）。 */
+  deliveries?: { maxRecipients: number };
 }
 
 /** 機能ごとの設定を選ぶための候補（管理者の画面）。 */

@@ -3,7 +3,7 @@ id: admin-developer
 title: 外部のアプリ（開発者向けの情報）（管理者）
 audience: admin
 category: admin
-related: [admin-developer-case-sales, admin-developer-case-medical, admin-connectors]
+related: [admin-developer-case-sales, admin-developer-case-medical, admin-developer-case-delivery, admin-connectors]
 group: 開発者
 order: 1
 api: m2office-apps
@@ -29,6 +29,7 @@ api: m2office-apps
 | 社内規程を登録・改定する | 書いてよい権限区画（区画なしはいつも書けます） |
 | 業務を依頼して結果を受け取る | 依頼してよい業務と、危険度の上限（お金の確定を行う業務は選べません） |
 | サイネージにメッセージを表示する・画面の状態を読む | 使ってよいサイネージの画面（2 つの機能で共通） |
+| 配信を頼む | 1 回の宛先の上限（500 人まで） |
 
 ナレッジの検索・予約を入れる・業務の依頼は、**つなぐシステムの利用者本人の権限**で行います。そのため「アカウントを結び付ける」も一緒に選ばれます。本人は M2Office の「お知らせ」に届く確認コードで結び付け、個人設定の「サービスとの接続」からいつでも削除できます。
 
@@ -49,6 +50,7 @@ api: m2office-apps
 | 業務を依頼して結果を受け取る | `POST /v1/jobs` | 社内のほかのシステムから、決めた業務を頼む |
 | サイネージにメッセージを表示する | `POST /v1/signage/interrupts` | 受付・順番待ち・レジのシステムから、番号や案内を店頭の画面に出す（サイネージを入れた会社） |
 | サイネージの画面の状態を読む | `GET /v1/signage/screens` | 受付のシステムで、画面が止まっていないかを受付の人に知らせる（サイネージを入れた会社） |
+| 配信を頼む | `POST /v1/deliveries`・`GET /v1/deliveries/{requestId}/results`・`GET /v1/deliveries/stops` | M2Medical の声掛け（案内のメールを、承認の後に窓口のアカウントから送る。結果と配信の停止はアプリが取りに来る） |
 
 新しいつなぐ依頼は、機能を足して受けます。足してほしい機能があれば、運営に伝えてください。
 

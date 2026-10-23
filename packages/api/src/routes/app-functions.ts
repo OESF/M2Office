@@ -176,7 +176,7 @@ export function appFunctionsRoute(deps: AppDeps) {
    */
   const once = async (
     c: Context<AppEnv>, appId: string, kind: string, eventId: string, hashOf: unknown,
-    run: () => Promise<{ status: 200 | 201 | 202 | 400 | 403 | 404 | 409 | 410 | 429; body: object; keep?: Record<string, unknown> }>,
+    run: () => Promise<{ status: 200 | 201 | 202 | 400 | 403 | 404 | 409 | 410 | 422 | 429; body: object; keep?: Record<string, unknown> }>,
   ) => {
     const { tenant } = c.get('ctx');
     const hash = createHash('sha256').update(JSON.stringify(hashOf)).digest('hex');
@@ -184,7 +184,7 @@ export function appFunctionsRoute(deps: AppDeps) {
     if (claim.kind === 'conflict') return c.json({ error: 'この eventId は別の中身で受け付け済みです' }, 409);
     if (claim.kind === 'busy') return c.json({ error: 'この eventId は処理の途中です。少し待って同じ中身で送り直してください' }, 409, { 'Retry-After': '10' });
     if (claim.kind === 'replay') {
-      const prev = claim.response as { status: 200 | 201 | 202 | 400 | 403 | 404 | 409 | 410; body: object };
+      const prev = claim.response as { status: 200 | 201 | 202 | 400 | 403 | 404 | 409 | 410 | 422; body: object };
       return c.json(prev.body, prev.status);
     }
     const out = await run();
@@ -192,6 +192,11 @@ export function appFunctionsRoute(deps: AppDeps) {
     if (out.status === 429) {
       await deps.apps.dropEvent(tenant.id, appId, kind, eventId);
       return c.json(out.body, 429, { 'Retry-After': '10' });
+    }
+    // 直せば通る断り（配信の依頼の上限・窓口のアカウントが無いなど）も答えを残さず、直して同じ番号で送り直せるようにする
+    if (out.keep?.['retryable'] === true) {
+      await deps.apps.dropEvent(tenant.id, appId, kind, eventId);
+      return c.json(out.body, out.status);
     }
     await deps.apps.finishEvent(tenant.id, appId, kind, eventId, { status: out.status, body: out.body, ...(out.keep ?? {}) });
     return c.json(out.body, out.status);
@@ -615,6 +620,56 @@ export function appFunctionsRoute(deps: AppDeps) {
     if (!(await deps.apps.store.hasRef(tenant.id, a.appId, 'signage_interrupt', id))) return c.json(NOT_FOUND, 404);
     await deps.signage.interrupts.clear(tenant.id, ExternalApps.actorOf(a.appId), id);
     return c.body(null, 204);
+  });
+
+  /**
+   * 配信を頼む（`deliveries.send`。第13.4.4節）。文の型・差し込む値・ロゴ・宛先を受け、M2Office の承認のあと
+   * 会社の窓口のアカウントから 1 人に 1 通ずつ送る。結果と停止はアプリが取りに来る（下の 2 つの道）。同じ `requestId` は 1 度だけ受ける。
+   *
+   * @remarks 危険度: 受けるだけ（送るのは M2Office の承認の後）。宛先はログ・監査ログ・答えに出さない。本文は 4 MB まで
+   */
+  app.post('/deliveries', async (c, next) => {
+    const a = appOf(c);
+    if (!a) return next();
+    const { tenant } = c.get('ctx');
+    const b = await jsonOf(c, 4 * 1024 * 1024);
+    if (b instanceof Response) return b;
+    const requestId = typeof b['requestId'] === 'string' && b['requestId'].trim() && b['requestId'].length <= 100 ? b['requestId'] : null;
+    if (!requestId) return c.json({ accepted: false, reason: 'requestId は 1〜100 字の文字にしてください', code: 'invalid', field: 'requestId' }, 400);
+    return once(c, a.appId, 'deliveries.send', requestId, b, async () => {
+      const r = await deps.deliveries.accept(tenant.id, a.appId, b);
+      // 受け付けないときは { accepted: false, reason } を返す（M2Medical の画面に出す）。直して同じ requestId で送り直せるよう、断りは覚えない
+      if (!r.ok) return { status: r.status, body: { accepted: false, reason: r.error, code: r.code }, keep: { retryable: true } };
+      return { status: 202, body: { accepted: true, jobId: r.deliveryId, deliveryId: r.deliveryId, status: r.status } };
+    });
+  });
+
+  /**
+   * 配信の停止を渡す（`deliveries.send`）。そのアプリの配信で受けた停止を、`after`（前の答えの `next`）より後から 500 件まで。
+   *
+   * @remarks 危険度: 読むだけ。宛先の ID が読めなかった停止だけ、差出人のアドレスを返す
+   */
+  app.get('/deliveries/stops', async (c, next) => {
+    const a = appOf(c);
+    if (!a) return next();
+    const { tenant } = c.get('ctx');
+    const r = await deps.deliveries.stops(tenant.id, a.appId, c.req.query('after') ?? null);
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+  });
+
+  /**
+   * 配信の結果を渡す（`deliveries.send`）。その依頼の宛先ごとの結果を、`after`（前の答えの `next`）より後から 500 件まで。
+   * `done` が `true` になったら、それ以降は取りに来なくてよい。
+   *
+   * @remarks 危険度: 読むだけ。宛先の ID・状態・時刻だけを返す（名前とアドレスは返さない）
+   */
+  app.get('/deliveries/:requestId/results', async (c, next) => {
+    const a = appOf(c);
+    if (!a) return next();
+    const { tenant } = c.get('ctx');
+    const r = await deps.deliveries.results(tenant.id, a.appId, c.req.param('requestId'), c.req.query('after') ?? null);
+    if ('error' in r) return c.json({ error: r.error }, r.status);
+    return c.json(r);
   });
 
   /** サイネージの画面の状態（`signage.status`）。承認した画面の、名前・接続中か・音が出せるか・待っている数だけ。 */

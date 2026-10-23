@@ -20,7 +20,7 @@ import {
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
-  SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom,
+  SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -165,6 +165,16 @@ const inventorySales = new InventorySales({
   apps: new ExternalApps({ store: new PostgresAppStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo }),
 });
 inventoryWatch = new InventoryWatch({ repo, service: inventory, bookings: inventoryBookings, sales: inventorySales, logger: log });
+// 外部のアプリからの配信の依頼（第13.4.4節）。承認された配信を窓口のアカウントから 1 人に 1 通ずつ送り、停止の返信と送れなかった知らせを読む
+const deliveryApps = new ExternalApps({
+  store: new PostgresAppStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo,
+});
+const deliveries = new DeliveryService({
+  store: new PostgresDeliveryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, box,
+  apps: { get: (tenantId, appId) => deliveryApps.get(tenantId, appId) },
+  mailbox: (tenantId) => openMailbox({ repo, box, sourceFor: (t) => connector.sourceFor(t) }, tenantId),
+  logger: log,
+});
 // 人事・給与の勤怠と有給（第30.7.1節）。毎朝、付与の日が来た分を作り、有給の取得義務を知らせる
 const hrStore = new PostgresHrStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const attendance = new AttendanceService({
@@ -201,6 +211,10 @@ const columns: ColumnService = new ColumnService({
 const announcementStore = new PostgresAnnouncementStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 // 不正の兆しの見張り（第16.8節）。監査ログとログイン中の端末を読み、管理者に知らせる
 const securityStore = new PostgresSecurityStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+// 動いている環境（第8.6.7.1節）の知らせの置き場と、ワーカーの起動の時刻
+const runtimeBeats = new PostgresRuntimeBeatStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+const WORKER_STARTED_AT = new Date();
+let lastRuntimeBeat = 0;
 const security = new SecurityWatch({
   repo, store: securityStore,
   closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
@@ -300,6 +314,8 @@ const inquiries = new InquiryService({
   line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
   // 休業中に届いた問い合わせに「〇日から順にお返事します」の下書きを用意する（第35.7節）
   closureOn: (tenantId, day) => announcementStore.closureOn(tenantId, day),
+  // 外部のアプリからの配信の停止の返信と送れなかった知らせは、問い合わせにしない（第13.4.4節）
+  skipMail: (tenantId, m, address) => deliveries.mailKind(tenantId, m, address),
 });
 const inquiryWatch = new InquiryWatch({ store: inquiryStore, repo, logger: log });
 // 競合の分析（内蔵の拡張。仕様書 第36章）。受け付けた探す・読む作業を 1 つずつ行う（相手のサイトは間を空けて 1 本ずつ読む）
@@ -387,6 +403,8 @@ const engine = new RunEngine({
   printDesigns: { service: printDesigns, access: printDesignsAccess(repo) },
   // 日程調整で会議と一緒に会議室を取る（第37.18節）
   reservations: { service: reservations, access: reservationsAccess(repo) },
+  // 外部のアプリからの配信（第13.4.4節）。承認の後の「送る」の段が使う
+  deliveries: { service: deliveries },
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
   llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),
@@ -551,6 +569,11 @@ let lastConversationCheck = 0;
 let lastProactiveCheck = 0;
 /** サイネージの見回りの間隔（つながらない画面の知らせ。第31.5.1節）。 */
 const SIGNAGE_INTERVAL_MS = Number(process.env['SIGNAGE_INTERVAL_MS'] ?? 60_000);
+// 外部のアプリからの配信（第13.4.4節）。送る・結果を返すのは 5 秒ごと、窓口のアカウントの停止の返信と送れなかった知らせを読むのは 5 分ごと
+const DELIVERY_INTERVAL_MS = Number(process.env['DELIVERY_INTERVAL_MS'] ?? 5_000);
+const DELIVERY_MAIL_INTERVAL_MS = Number(process.env['DELIVERY_MAIL_INTERVAL_MS'] ?? 5 * 60_000);
+let lastDeliveryCheck = 0;
+let lastDeliveryMailCheck = 0;
 let lastSignageCheck = 0;
 /** 問い合わせの見張りの間隔（期限の知らせ・手つかずの知らせ・原文の片付け。第33.7節）。 */
 const INQUIRY_INTERVAL_MS = Number(process.env['INQUIRY_INTERVAL_MS'] ?? 900_000);
@@ -738,6 +761,11 @@ while (running) {
 
   // ローカルの形の機械: ワーカーが動いていることを書き、毎晩 2 時（日本時間）か頼まれたときに控えを取り、毎月 1 回戻せるかを確かめる（第8.6.5節・第8.6.7節）
   await writeWorkerBeat(machineDir(process.env), appVersion()).catch(() => undefined);
+  // 動いている環境（第8.6.7.1節）。起動のときと 5 分ごとに、ワーカーの版・Node.js の版・機械の様子をデータベースに置く
+  if (Date.now() - lastRuntimeBeat >= RUNTIME_BEAT_INTERVAL_MS) {
+    lastRuntimeBeat = Date.now();
+    await writeRuntimeBeat(runtimeBeats, 'worker', appVersion(), WORKER_STARTED_AT).catch((err) => log.warn('動いている環境の知らせを置けませんでした', { err }));
+  }
   if (backupCfg && Date.now() - lastBackupCheck >= 60_000) {
     lastBackupCheck = Date.now();
     try {
@@ -1043,6 +1071,21 @@ while (running) {
   } catch (err) {
     log.error('名刺の読み取りで例外が発生しました', { err });
   }
+  // 外部のアプリからの配信（第13.4.4節）。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastDeliveryCheck >= DELIVERY_INTERVAL_MS) {
+    lastDeliveryCheck = Date.now();
+    const readMail = Date.now() - lastDeliveryMailCheck >= DELIVERY_MAIL_INTERVAL_MS;
+    if (readMail) lastDeliveryMailCheck = Date.now();
+    for (const tenantId of await repo.listTenantIds().catch(() => [] as string[])) {
+      try {
+        if (readMail) await deliveries.readMail(tenantId);
+        if ((await deliveries.tick(tenantId)) > 0) handled = true;
+      } catch (err) {
+        log.warn('配信の見回りで例外が発生しました', { tenantId, err: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  }
+
   // 承認されたまとめてのメールを 1 通送る（第27.9.1節）。1 つのまとめてのメールは数秒おきに送る
   try {
     if (await bulkMail.processNext(connector, async (tenantId) => appUrl((await repo.findTenantById(tenantId))?.subdomain ?? ''))) handled = true;

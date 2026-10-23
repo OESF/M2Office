@@ -40,7 +40,7 @@ test('入れ替え: 今の鍵の値は変えず、前の鍵の値は今の鍵で
   assert.equal(new SecretBox(NEW).decrypt(r.sealed), 'b', '暗号化し直した値は今の鍵だけで読める');
   assert.equal(decide(keys, new SecretBox('another').encrypt('c')).action, 'unreadable');
   assert.equal(decide(keys, 'not-sealed').action, 'unreadable');
-  assert.equal(SEALED_COLUMNS.length, 7);
+  assert.equal(SEALED_COLUMNS.length, 9);
 });
 
 test('入れ替えの対象の列は、移行で作った暗号化の列（*_enc）とそろっている', async () => {

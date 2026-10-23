@@ -18,6 +18,7 @@ import { SECRETARY_PLAN_REPORT } from './secretary-plan-report.js';
 import { SECRETARY_CALENDAR } from './secretary-calendar.js';
 import { MORNING_BRIEF } from './morning-brief.js';
 import { BASIC_AGENTS } from './basic.js';
+import { DELIVERY_SEND } from '../deliveries/agents.js';
 
 /**
  * 公式エージェントのカタログ。
@@ -29,6 +30,8 @@ import { BASIC_AGENTS } from './basic.js';
  */
 export const OFFICIAL_AGENTS: AgentDefinition[] = [
   AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, MORNING_BRIEF, ...BASIC_AGENTS, AG07_QUOTE, AG16_RECRUITING, SECRETARY_LOOKUP, SECRETARY_CALENDAR, SECRETARY_PLAN_REPORT, SCHEDULING_CONFIRM,
+  // 外部のアプリからの配信（第13.4.4節）。メニューには出さない
+  DELIVERY_SEND,
 ];
 
 /** 秘書の段取りの報告に使う業務の ID（仕様書 第10.14節）。 */

@@ -8,6 +8,8 @@
 import type { EvidencePackage, SystemLogDigest, SystemLogFilter, SystemLogLine } from '../log/store.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
+import type { RuntimeBeat } from '@m2office/shared';
+import { beatFromRow } from '../machine/runtime.js';
 import type { MachineReport, NewTenantInput, OperatorRole } from './rules.js';
 import type { IncidentImpact, ServiceIncident } from './incidents.js';
 
@@ -448,6 +450,15 @@ export class OpsStore {
   async tenantDetail(tenantId: string): Promise<TenantDetail | null> {
     const { rows } = await this.pool.query('select ops.tenant_detail($1) as d', [tenantId]);
     return (rows[0]?.d as TenantDetail | null) ?? null;
+  }
+
+  /** 動いている環境の知らせ（API とワーカー）と PostgreSQL の版（第8.6.7.1節。決めた関数 ops.runtime_beats() で読む）。 */
+  async runtimeBeats(): Promise<{ beats: RuntimeBeat[]; postgres: string | null }> {
+    const [{ rows }, pgv] = await Promise.all([
+      this.pool.query('select * from ops.runtime_beats()'),
+      this.pool.query<{ server_version: string }>('show server_version').then((r) => r.rows[0]?.server_version?.split(' ')[0] ?? null).catch(() => null),
+    ]);
+    return { beats: rows.map((r) => beatFromRow(r as Parameters<typeof beatFromRow>[0])), postgres: pgv };
   }
 
   /** サーバー全体の稼働状況。 */

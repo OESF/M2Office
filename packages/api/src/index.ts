@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage, appPath } from '@m2office/core';
+import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage, appPath, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS } from '@m2office/core';
 import { buildDeps, companyView } from './context.js';
 import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
 import { attachVoiceRelay } from './voice/relay.js';
@@ -324,6 +324,12 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
     deps.log.warn('開発用ログインが有効です（本番では起動を拒否します）');
   }
 });
+
+// 動いている環境（第8.6.7.1節）。起動のときと 5 分ごとに、この API の版・Node.js の版・機械の様子を置く（失敗しても止めない）
+const apiVersion = (() => { try { return (JSON.parse(readFileSync(appPath('package.json'), 'utf8')) as { version?: string }).version ?? null; } catch { return null; } })();
+const beat = () => void writeRuntimeBeat(deps.runtime.store, 'api', apiVersion, deps.runtime.startedAt).catch((err) => deps.log.warn('動いている環境の知らせを置けませんでした', { err }));
+beat();
+setInterval(beat, RUNTIME_BEAT_INTERVAL_MS).unref();
 
 // 音声の対話の中継（仕様書 第10.5.5節）。WebSocket は Hono の外側で受ける
 attachVoiceRelay(deps, server as unknown as HttpServer);
