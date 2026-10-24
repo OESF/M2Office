@@ -388,6 +388,11 @@ export function adminRoute(deps: AppDeps) {
     if (await deps.repo.findUserByEmail(tenant.id, email)) {
       return c.json({ error: 'すでに登録されています' }, 409);
     }
+    // 窓口のアカウント（問い合わせの窓口のメール）とその別名は、人の利用者にしない（第33.24節）
+    if ((await deps.inquiries.service.mailboxAddresses(tenant.id).catch(() => [] as string[])).includes(email)) {
+      await audit(deps, tenant.id, user.id, 'user.invite_refused', 'user', '', { reason: 'mailbox' });
+      return c.json({ error: '窓口のアカウントは M2Office の利用者にできません（問い合わせの窓口のメールとしてつないであるアドレスです）' }, 400);
+    }
     const created: User = {
       id: `u-${randomUUID()}`, tenantId: tenant.id, email,
       displayName: (body.displayName ?? '').trim() || email.split('@')[0]!,

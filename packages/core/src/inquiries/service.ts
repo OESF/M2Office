@@ -523,17 +523,23 @@ export class InquiryService {
   }
 
   /**
-   * 窓口のアカウントを預ける（管理者だけ。呼ぶ側が確かめる）。アドレスは会社の利用者と同じドメインに限る。
+   * 窓口のアカウントを預ける（管理者だけ。呼ぶ側が確かめる）。アドレスは会社の利用者と同じドメインに限り、利用者のアカウントは断る（第33.24節）。
    *
    * @param refreshToken Google の許可（見本の会社では `null`）
-   * @returns 預けられなければ理由
+   * @returns 預けられなければ理由と符号（`domain` 会社の外のアカウント・`user` M2Office の利用者のアカウント）
    */
-  async connectMailbox(who: InquiryViewer, p: { email: string; refreshToken: string | null }): Promise<string | null> {
+  async connectMailbox(who: InquiryViewer, p: { email: string; refreshToken: string | null }): Promise<{ code: 'invalid' | 'domain' | 'user'; error: string } | null> {
     const email = p.email.trim().toLowerCase();
-    if (!EMAIL.test(email)) return 'メールアドレスが読めません';
-    const domains = new Set((await this.deps.repo.listUsers(who.tenantId)).map((u) => u.email.split('@')[1]?.toLowerCase()).filter(Boolean));
+    if (!EMAIL.test(email)) return { code: 'invalid', error: 'メールアドレスが読めません' };
+    const users = await this.deps.repo.listUsers(who.tenantId);
+    const domains = new Set(users.map((u) => u.email.split('@')[1]?.toLowerCase()).filter(Boolean));
     // 会社の外のアカウント（個人の Gmail など）を窓口にしない（第33.6節「専用のアカウント」）
-    if (!domains.has(email.split('@')[1] ?? '')) return `会社のドメインのアカウントではありません（${email}）。会社の Google Workspace の窓口のアカウントでつないでください`;
+    if (!domains.has(email.split('@')[1] ?? '')) return { code: 'domain', error: `会社のドメインのアカウントではありません（${email}）。会社の Google Workspace の窓口のアカウントでつないでください` };
+    // 人のアカウントを窓口にしない（受信箱をすべて読むため、その人の個人のメールまで読むことになる。第33.24節）
+    if (users.some((u) => u.status !== 'disabled' && u.email.toLowerCase() === email)) {
+      await this.audit(who, 'inquiry.mailbox_refused', 'mailbox', { reason: 'user' });
+      return { code: 'user', error: '人のアカウントは窓口にできません。窓口専用のアカウントを作って、それでつないでください' };
+    }
     const now = new Date().toISOString();
     await this.deps.repo.saveTenantCredential({
       tenantId: who.tenantId, kind: MAILBOX_KIND, secretEnc: p.refreshToken && this.deps.mailbox ? this.deps.mailbox.box.encrypt(p.refreshToken) : null,
@@ -543,6 +549,46 @@ export class InquiryService {
     await this.deps.repo.saveTenantSettings(who.tenantId, 'inquiries', { ...settings.inquiries, mailbox: { email, connectedBy: who.userId, connectedAt: now } }, who.userId);
     await this.audit(who, 'inquiry.mailbox_connect', 'mailbox', { email });
     return null;
+  }
+
+  /**
+   * 窓口のアカウントのアドレス（本来のアドレスと、送信元の別名。小文字）。つないでいなければ空。
+   * 利用者の招待で、窓口のアカウントを招待させないために使う（第33.24節）。
+   *
+   * @remarks Gmail に届かなければ、本来のアドレスだけを返す
+   */
+  async mailboxAddresses(tenantId: string): Promise<string[]> {
+    const address = (await this.deps.repo.getTenantSettings(tenantId)).inquiries.mailbox?.email?.toLowerCase();
+    if (!address) return [];
+    const box = await this.openBox(tenantId).catch(() => null);
+    const sendAs = box ? await box.sendAs().catch(() => [] as string[]) : [];
+    return [...new Set([address, ...sendAs.map((a) => a.toLowerCase())])];
+  }
+
+  /**
+   * 窓口のアカウントが利用者と同じなら、管理者に 1 度だけ知らせる（同じアドレスでは 2 度知らせない。外すかは管理者が決める。第33.24節）。
+   */
+  private async mailboxUserNotice(tenantId: string, address: string, now: Date): Promise<void> {
+    const { repo } = this.deps;
+    const tenant = await repo.getTenantSettings(tenantId);
+    const email = address.toLowerCase();
+    if (tenant.inquiries.mailboxUserNotified === email) return;
+    const users = await repo.listUsers(tenantId);
+    if (!users.some((u) => u.status !== 'disabled' && u.email.toLowerCase() === email)) return;
+    const title = `窓口のアカウント ${email} が、M2Office の利用者のアカウントです`;
+    const body = [
+      `問い合わせの窓口として、利用者 ${email} のアカウントの受信箱を読んでいます。その人の個人のメールまで M2Office が読むことになります。`,
+      '',
+      '窓口専用のアカウントを作り、管理者ページの「接続」→「窓口のメール」でつなぎ直してください（作り方はヘルプ「接続の設定」）。',
+    ].join('\n');
+    let notified = 0;
+    for (const u of users) {
+      if (u.status !== 'active' || !u.roles.includes('admin')) continue;
+      await repo.createNotification({ id: randomUUID(), tenantId, userId: u.id, kind: 'inquiry', title, body: body.slice(0, 400), runId: null, readAt: null, createdAt: now.toISOString() });
+      notified += 1;
+    }
+    await repo.saveTenantSettings(tenantId, 'inquiries', { ...tenant.inquiries, mailboxUserNotified: email }, MAILBOX_ACTOR);
+    await this.auditSystem(tenantId, 'inquiry.mailbox_user_notice', 'mailbox', { notified });
   }
 
   /**
@@ -621,6 +667,7 @@ export class InquiryService {
     const [inbox, sent] = await Promise.all([box.list('inbox', since, 100), box.list('sent', since, 100)]);
     const seen = await store.seenMail(tenantId, [...inbox, ...sent]);
     const sendAs = await box.sendAs().catch(() => [box.address]);
+    await this.mailboxUserNotice(tenantId, box.address, now).catch((err: unknown) => this.log.warn('窓口のアカウントの知らせを出せませんでした', { tenantId, error: String(err) }));
     const llm = await this.deps.llmFor(tenantId).catch(() => null);
     const today = { date: dateIn('Asia/Tokyo', now) };
     const owner = settings.mailbox.connectedBy;

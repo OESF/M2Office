@@ -629,7 +629,7 @@ export function oauthCallbackRoute(deps: AppDeps) {
         const err = await deps.inquiries.service.connectMailbox({ tenantId: pending.tenantId, userId: pending.userId }, { email: info.email, refreshToken: tokens.refreshToken });
         if (err) {
           await revokeGoogleToken(tokens.refreshToken).catch(() => false);
-          return back('domain');
+          return back(err.code === 'user' ? 'user' : 'domain');
         }
         return back('connected');
       } catch (err) {

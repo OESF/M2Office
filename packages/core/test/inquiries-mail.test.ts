@@ -50,7 +50,7 @@ const member = { tenantId: 't1', userId: 'u1' };
 
 test('窓口のアカウント: 会社のドメインのアカウントだけをつなぎ、外すとすぐに読まなくなる', async () => {
   const { service, settings, creds, audits } = setup();
-  assert.match((await service.connectMailbox(admin, { email: 'someone@gmail.example', refreshToken: null }))!, /会社のドメインのアカウントではありません/);
+  assert.match((await service.connectMailbox(admin, { email: 'someone@gmail.example', refreshToken: null }))!.error, /会社のドメインのアカウントではありません/);
   assert.equal(await service.connectMailbox(admin, { email: 'info@alpha.example.jp', refreshToken: null }), null);
   assert.equal(settings().inquiries.mailbox?.email, 'info@alpha.example.jp');
   assert.equal(settings().inquiries.mailbox?.connectedBy, 'boss');
@@ -59,6 +59,31 @@ test('窓口のアカウント: 会社のドメインのアカウントだけを
   assert.equal(settings().inquiries.mailbox, null);
   assert.equal((await service.ingest('t1')).created, 0, '外すと読まない');
   assert.ok(audits.some((a) => a.action === 'inquiry.mailbox_connect') && audits.some((a) => a.action === 'inquiry.mailbox_disconnect'));
+});
+
+test('窓口のアカウント: 利用者のアカウントは窓口にしない。すでにつないであれば管理者に 1 度だけ知らせる（第33.24節）', async () => {
+  const { service, settings, notes, audits, repo, creds } = setup();
+  const refused = await service.connectMailbox(admin, { email: 'U1@alpha.example.jp', refreshToken: null });
+  assert.equal(refused?.code, 'user');
+  assert.match(refused!.error, /人のアカウントは窓口にできません/);
+  assert.equal(settings().inquiries.mailbox, null, 'つながない');
+  assert.ok(audits.some((a) => a.action === 'inquiry.mailbox_refused' && !JSON.stringify(a.detail).includes('u1@')), 'アドレスは残さず理由だけ');
+  // 前の版でつないだ窓口が利用者と同じなら、読むときに 1 度だけ知らせる（外さない）
+  await repo.saveTenantSettings('t1', 'inquiries', { ...settings().inquiries, mailbox: { email: 'u1@alpha.example.jp', connectedBy: 'boss', connectedAt: '2026-10-01T00:00:00Z' } }, 'boss');
+  creds.set('inquiry_mailbox', { tenantId: 't1', kind: 'inquiry_mailbox', secretEnc: null, meta: { email: 'u1@alpha.example.jp', mock: true }, updatedBy: 'boss', updatedAt: '2026-10-01T00:00:00Z' } as never);
+  await service.ingest('t1');
+  await service.ingest('t1');
+  const told = notes.filter((n) => /利用者のアカウントです/.test(n.title));
+  assert.equal(told.length, 1, '管理者（boss）に 1 度だけ');
+  assert.equal(told[0]!.userId, 'boss');
+  assert.equal(settings().inquiries.mailbox?.email, 'u1@alpha.example.jp', '自動では外さない');
+});
+
+test('窓口のアカウントのアドレス: 本来のアドレスと送信元の別名（招待で断るため）', async () => {
+  const { service } = setup();
+  assert.deepEqual(await service.mailboxAddresses('t1'), [], 'つないでいなければ空');
+  await service.connectMailbox(admin, { email: 'info@alpha.example.jp', refreshToken: null });
+  assert.deepEqual(await service.mailboxAddresses('t1'), ['info@alpha.example.jp', 'sales@alpha.example.jp']);
 });
 
 test('決まった言葉で読む: メールマガジン・営業の売り込みは問い合わせにせず、フォームの通知はお客様の名前とメールを本文から取る', () => {

@@ -84,8 +84,11 @@ export interface AppSettings {
   jobs?: { agentIds: string[]; maxRisk: RiskLevel };
   /** サイネージの機能（呼び出しを出す・画面の状態を読む）で使ってよい画面（すべてか、決めた画面。第13.4.3節）。 */
   signage?: { all: boolean; screenIds: string[] };
-  /** 機能「配信を頼む」の設定（第13.4.4節）。1 回の依頼の宛先の上限（500 人まで）。 */
-  deliveries?: { maxRecipients: number };
+  /**
+   * 機能「配信を頼む」の設定（第13.4.4節）。1 回の依頼の宛先の上限（500 人まで）と差出人。
+   * 差出人は窓口のアカウントの送信元（本来のアドレスと確認の済んだ別名）から選ぶ。無ければ本来のアドレス（第33.24節）。
+   */
+  deliveries?: { maxRecipients: number; from?: string };
 }
 
 /** 機能ごとの設定を選ぶための候補（管理者の画面）。 */
@@ -96,6 +99,8 @@ export interface AppSettingOptions {
   agents: { id: string; name: string; risk: RiskLevel }[];
   /** サイネージの画面（サイネージの機能で選ぶ）。 */
   signageScreens: { id: string; name: string }[];
+  /** 窓口のアカウントの送信元（配信を頼む機能の差出人で選ぶ。小文字。つないでいなければ空。第33.24節）。 */
+  mailboxSendAs?: string[];
 }
 
 /** 本人に見せる、結び付いているアプリ（個人設定の「サービスとの接続」）。 */

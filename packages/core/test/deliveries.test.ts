@@ -31,12 +31,14 @@ function app(over: Partial<AppRecord> = {}): AppRecord {
 
 function setup(o: { mailbox?: Mailbox | null; app?: AppRecord } = {}) {
   const audits: AuditEvent[] = [];
+  const notes: { userId: string; title: string; body: string }[] = [];
   const runs = new Map<string, Run>();
   const repo = {
     findTenantById: async () => ({ id: 't1', workspaceDomain: 'clinic.example.jp' }),
     listUsers: async () => users,
     getRun: async (_t: string, id: string) => runs.get(id) ?? null,
     appendAudit: async (e: AuditEvent) => { audits.push(e); },
+    createNotification: async (n: { userId: string; title: string; body: string }) => { notes.push(n); },
   } as unknown as Repository;
   const store = new MemoryDeliveryStore();
   const started: string[] = [];
@@ -47,7 +49,7 @@ function setup(o: { mailbox?: Mailbox | null; app?: AppRecord } = {}) {
     mailbox: async () => mailbox,
     startApproval: async (_t, id) => { started.push(id); const runId = `run-${id}`; runs.set(runId, { id: runId, status: 'awaiting_approval' } as Run); return runId; },
   });
-  return { svc, store, audits, runs, started };
+  return { svc, store, audits, runs, started, notes };
 }
 
 const request = (over: Record<string, unknown> = {}) => ({
@@ -246,6 +248,36 @@ test('照合の値は 3 日、結果は送り終えてから 30 日で消す', a
   assert.equal((await s.store.get('t1', r.deliveryId))!.purged, true);
   const gone = (await s.svc.results('t1', 'app1', 'rd-1', null, new Date(t + 31 * 86_400_000))) as DeliveryResultsPage;
   assert.deepEqual(gone, { results: [], next: null, done: true });
+});
+
+test('差出人を送信元の別名から選べ、停止の宛先もその差出人に付ける。外れたら送らずに止めて知らせる（第33.24節）', async () => {
+  const salesApp = app({ settings: { deliveries: { maxRecipients: 500, from: 'sales@clinic.example.jp' } } });
+  const s = setup({ app: salesApp });
+  const r = await s.svc.accept('t1', 'app1', request(), NOW);
+  assert.ok(r.ok);
+  const p = await s.svc.preview('t1', r.deliveryId);
+  assert.ok('shown' in p && /差出人: sales@clinic\.example\.jp/.test(p.shown));
+  const t = await sendAll(s, r.deliveryId);
+  const sent = MockMailbox.sent(MAILBOX) as (MailItem & { html?: string; listUnsubscribe?: string })[];
+  assert.ok(sent.length === 2 && sent.every((m) => m.from === 'sales@clinic.example.jp'), '選んだ差出人から送る');
+  const taro = sent.find((m) => m.to[0] === 'taro@mail.example')!;
+  assert.equal(taro.listUnsubscribe, 'mailto:sales+stop-r2@clinic.example.jp?subject=%E9%85%8D%E4%BF%A1%E5%81%9C%E6%AD%A2');
+  assert.ok((taro.html ?? '').includes('（sales@clinic.example.jp）'));
+  const later = new Date(t + 60_000);
+  MockMailbox.deliver(MAILBOX, { id: 'stop-s', from: 'x@mail.example', fromAddress: 'x@mail.example', to: ['sales+stop-r2@clinic.example.jp'], subject: 'Re', body: '', date: later.toISOString() });
+  assert.equal(await s.svc.readMail('t1', later), 1, '別名に付いた +stop も読む');
+  assert.equal(stopRecipientOf(['sales+stop-r2@clinic.example.jp'], [MAILBOX, 'sales@clinic.example.jp']), 'r2');
+
+  const gone = setup({ app: app({ settings: { deliveries: { maxRecipients: 500, from: 'gone@clinic.example.jp' } } }) });
+  const g = await gone.svc.accept('t1', 'app1', request({ requestId: 'rd-gone' }), NOW);
+  assert.ok(g.ok);
+  assert.ok('problem' in (await gone.svc.preview('t1', g.deliveryId)), '承認の画面でも知らせる');
+  await gone.svc.approved('t1', 'u-admin', g.deliveryId);
+  await gone.svc.tick('t1', NOW);
+  await gone.svc.tick('t1', new Date(NOW.getTime() + 5000));
+  assert.equal(MockMailbox.sent(MAILBOX).length, 2, '黙って本来のアドレスから送らない（前のテストの 2 通だけ）');
+  assert.equal((await gone.store.get('t1', g.deliveryId))!.status, 'sending', '止めて待つ');
+  assert.equal(gone.notes.filter((n) => /配信を止めています/.test(n.title)).length, 1, '管理者に 1 度だけ知らせる');
 });
 
 test('窓口のアカウントの 1 日の上限（1,000 通）に達していれば送らない', async () => {

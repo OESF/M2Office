@@ -194,6 +194,8 @@ export interface InquirySettings {
   line: InquiryLine | null;
   /** 返事を送る設定が無いと管理者に知らせた宛先（小文字。送信元に足されたら外す。第33.23節）。前の版の設定には無い */
   aliasNotified?: string[];
+  /** 窓口のアカウントが利用者と同じだと管理者に知らせたアドレス（小文字。同じアドレスでは 2 度知らせない。第33.24節）。前の版の設定には無い */
+  mailboxUserNotified?: string;
 }
 
 /** 既定の設定。既定は切り（第33.2節）。 */

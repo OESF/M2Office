@@ -357,7 +357,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/competitors/reports/list` ／ `POST /v1/competitors/reports` | レポート（新しい順）／ いまある事実から、その場のレポートを作る |
 | `GET /v1/inquiries/faq` | よくある質問の話題（`days`。既定 90 日。2 件以上・5 つまで。誰が聞いたかは返さない。仕様書 第33.19節） |
 | `PUT` ／ `DELETE /v1/admin/extensions/inquiries/line` | 管理者: LINE 公式アカウントをつなぐ（`secret`・`token`。鍵を確かめて預け、受け口の URL `webhookUrl` を 1 度だけ返す。見本の会社では鍵を確かめない。ローカルの形では 409）／ 外す（受け口も止める） |
-| `POST /v1/admin/extensions/inquiries/mailbox/connect` ／ `DELETE /v1/admin/extensions/inquiries/mailbox` | 管理者: 窓口のアカウントをつなぐ（Google の認可の URL。アカウントを選ばせる。見本の会社ではすぐつながる）／ 外す（Google の許可も取り消す）。戻りは `/v1/oauth/google/callback` |
+| `POST /v1/admin/extensions/inquiries/mailbox/connect` ／ `DELETE /v1/admin/extensions/inquiries/mailbox` | 管理者: 窓口のアカウントをつなぐ（Google の認可の URL。アカウントを選ばせる。見本の会社ではすぐつながる。M2Office の利用者のアカウントは断る（`?mailbox=user`）。仕様書 第33.24節）／ 外す（Google の許可も取り消す）。戻りは `/v1/oauth/google/callback` |
 | `GET /v1/public/inventory/:key` ／ `:key.json` | **認証なし**。在庫の公開のページ（他のサイトの iframe に入れてよい。`frame-ancestors *`・スクリプトなし）とデータ（`Access-Control-Allow-Origin: *`）。作り直して置いた中身だけを返す。知らない鍵・止めた公開・公開を切った会社はどれも 404 |
 | `GET /v1/company/profile` | **外部のアプリの鍵**（`Authorization: Bearer m2oa_…`）。機能 `company.profile`。会社の基本情報（会社名・略称・郵便番号・所在地・電話・Web・登録番号・会計年度の開始月・営業する曜日）。経理の設定とロゴは返さない（第13.4.1節） |
 | `GET /v1/inventory/catalog` | 外部のアプリの鍵。機能 `inventory.catalog`。承認した範囲の商品の一覧（`updatedSince`・`categories`・`ids`・`codes`・`barcodes`・`limit`・`cursor`）。外れた品目は `active: false`。在庫管理を切った会社は 404（第29.20.1節） |
@@ -481,7 +481,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/settings/invoice/seal` | 管理者: 印影（社印。PNG・JPEG・2 MB まで）を登録する。ファイルの記録を作らず置き場にだけ置く。`DELETE` で削除、`GET` で管理者の画面の見本（仕様書 第15.2.3節） |
 | `POST /v1/admin/settings/invoice/quote-sample` | 管理者: 会社の見積書の見本（PDF・画像）から、見積書の型と文言を読み取って設定に入れる（第15.2.3節） |
 | `PUT /v1/admin/settings/:section` | 管理者: 設定の 1 区分を保存（`company`・`writingStyle`・`automation`・`agents`・`effect`・`slides`・`privacy`。`knowledge`（言い換えの登録）は 400 で断る（第 0.115.0 版から秘書が考える。第11.7.7.0節）。`privacy` は Google から取得したデータを残す日数） |
-| `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ） |
+| `POST /v1/admin/users` | 管理者: 利用者の招待（Workspace のドメインのみ。窓口のアカウントとその別名は断る。仕様書 第33.24節） |
 | `POST /v1/admin/users/:id/forget-mail-signatures` | 管理者: Google のデータの削除を求められたとき、その人のメールの署名から名刺を新しくした値を前の値に戻し、変更の記録を消す（`count`。仕様書 第27.6.1節、Q-152） |
 | `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409）。止めたときは、止めた業務の数（`stoppedRuns`）と、30 日後に削除される自分だけの名刺の数（`personalCards`。仕様書 第27.7節、Q-94）を返す。止めた日時を持ち、戻すと空にする |
 | `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧（種類 `category`: `rule`・`minutes`・`learned`、状態 `status`: `active`・`retired`・`archived`、施行日と施行日が先の版。廃止・しまったものを含む）と、最後に整理した日と数（`consolidated`。仕様書 第11.11節） |

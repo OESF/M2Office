@@ -30,7 +30,7 @@ function approvalOf(body: unknown): { functions: AppFunctionId[]; settings: AppS
   const g = obj(s['signage']);
   if (g) settings.signage = { all: g['all'] === true, screenIds: strs(g['screenIds']) };
   const d = obj(s['deliveries']);
-  if (d) settings.deliveries = { maxRecipients: Number(d['maxRecipients']) };
+  if (d) settings.deliveries = { maxRecipients: Number(d['maxRecipients']), ...(typeof d['from'] === 'string' && d['from'].trim() ? { from: d['from'] } : {}) };
   return { functions, settings };
 }
 

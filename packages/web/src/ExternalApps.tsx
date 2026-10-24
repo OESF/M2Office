@@ -292,7 +292,14 @@ function AppEditor({ app: initial, functions, items, options, onKey, onChanged }
           <strong className="small">配信を頼む</strong>
           <label className="small">1 回の宛先の上限
             <input type="number" min={1} max={DELIVERY_MAX_RECIPIENTS} className="num" value={extra.deliveries.maxRecipients}
-              onChange={(e) => setExtra({ ...extra, deliveries: { maxRecipients: Number(e.target.value) } })} /> 人
+              onChange={(e) => setExtra({ ...extra, deliveries: { ...extra.deliveries, maxRecipients: Number(e.target.value) } })} /> 人
+          </label>
+          <label className="small">差出人
+            <select value={extra.deliveries.from ?? ''}
+              onChange={(e) => setExtra({ ...extra, deliveries: { maxRecipients: extra.deliveries.maxRecipients, ...(e.target.value ? { from: e.target.value } : {}) } })}>
+              <option value="">窓口のアカウントのアドレス</option>
+              {(options.mailboxSendAs ?? []).map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
           </label>
           <DeliveryList appId={app.id} />
         </div>

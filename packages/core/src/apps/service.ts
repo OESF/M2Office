@@ -97,6 +97,8 @@ export interface ExternalAppsDeps {
   agents?: (tenantId: string) => Promise<{ id: string; name: string; risk: RiskLevel }[]>;
   /** サイネージの画面（サイネージの機能で使ってよい画面を選ぶため。第13.4.3節）。 */
   signageScreens?: (tenantId: string) => Promise<{ id: string; name: string }[]>;
+  /** 窓口のアカウントの送信元（配信を頼む機能の差出人を選ぶため。第33.24節）。 */
+  mailboxSendAs?: (tenantId: string) => Promise<string[]>;
 }
 
 /**
@@ -132,14 +134,15 @@ export class ExternalApps {
 
   /** 機能ごとの設定を選ぶための候補（宛先のグループ・予約できるもの・権限区画・業務）。 */
   async settingOptions(tenantId: string): Promise<AppSettingOptions> {
-    const [groups, compartments, items, agents, screens] = await Promise.all([
+    const [groups, compartments, items, agents, screens, sendAs] = await Promise.all([
       this.deps.repo.listGroups(tenantId), this.deps.repo.listCompartments(tenantId),
       this.deps.reservableItems ? this.deps.reservableItems(tenantId) : Promise.resolve([]), this.deps.agents ? this.deps.agents(tenantId) : Promise.resolve([]),
       this.deps.signageScreens ? this.deps.signageScreens(tenantId) : Promise.resolve([]),
+      this.deps.mailboxSendAs ? this.deps.mailboxSendAs(tenantId).catch(() => [] as string[]) : Promise.resolve([] as string[]),
     ]);
     return {
       groups: groups.map((g) => ({ id: g.id, name: g.name })), reservableItems: items, compartments: compartments.map((c) => c.name),
-      agents: agents.filter((a) => APP_JOB_RISKS.includes(a.risk)), signageScreens: screens,
+      agents: agents.filter((a) => APP_JOB_RISKS.includes(a.risk)), signageScreens: screens, mailboxSendAs: sendAs.map((a) => a.toLowerCase()),
     };
   }
 
@@ -232,7 +235,7 @@ export class ExternalApps {
       ...(settings.reservations ? { reservationAll: settings.reservations.all, reservationItems: settings.reservations.itemIds.length } : {}),
       ...(settings.knowledgeRules ? { ruleCompartments: settings.knowledgeRules.compartments } : {}),
       ...(settings.jobs ? { jobAgents: settings.jobs.agentIds, jobMaxRisk: settings.jobs.maxRisk } : {}),
-      ...(settings.deliveries ? { deliveryMax: settings.deliveries.maxRecipients } : {}), ...(settings.catalog ? { catalogItems: settings.catalog.itemIds.length, showCount: settings.catalog.showCount, price: settings.catalog.price, employeePrice: settings.catalog.employeePrice } : {}),
+      ...(settings.deliveries ? { deliveryMax: settings.deliveries.maxRecipients, deliveryFrom: settings.deliveries.from ?? null } : {}), ...(settings.catalog ? { catalogItems: settings.catalog.itemIds.length, showCount: settings.catalog.showCount, price: settings.catalog.price, employeePrice: settings.catalog.employeePrice } : {}),
     });
     return (await this.view(tenantId, id))!;
   }
@@ -327,8 +330,8 @@ export class ExternalApps {
   private async functionSettings(tenantId: string, functions: AppFunctionId[], input: AppSettings): Promise<Omit<AppSettings, 'catalog'> | { error: string }> {
     const out: Omit<AppSettings, 'catalog'> = {};
     // 候補は、設定の要る機能を選んだときだけ読む
-    const needsOptions = functions.some((f) => f === 'notices.post' || f === 'reservations.book' || f === 'knowledge.rules' || f === 'jobs.run' || f.startsWith('signage.'));
-    const options = needsOptions ? await this.settingOptions(tenantId) : { groups: [], reservableItems: [], compartments: [], agents: [], signageScreens: [] };
+    const needsOptions = functions.some((f) => f === 'notices.post' || f === 'reservations.book' || f === 'knowledge.rules' || f === 'jobs.run' || f.startsWith('signage.') || f === 'deliveries.send');
+    const options: AppSettingOptions = needsOptions ? await this.settingOptions(tenantId) : { groups: [], reservableItems: [], compartments: [], agents: [], signageScreens: [] };
     if (functions.includes('notices.post')) {
       const n = input.notices ?? { all: false, groupIds: [] };
       const known = new Set(options.groups.map((g) => g.id));
@@ -368,11 +371,14 @@ export class ExternalApps {
       if (screenIds.some((x) => !known.has(x))) return { error: 'サイネージの画面が見つかりません' };
       out.signage = { all: !!g.all, screenIds: g.all ? [] : screenIds };
     }
-    // 配信を頼む（第13.4.4節）: 1 回の上限
+    // 配信を頼む（第13.4.4節）: 1 回の上限と差出人（窓口のアカウントの送信元から選ぶ。空なら本来のアドレス。第33.24節）
     if (functions.includes('deliveries.send')) {
-      const max = Math.floor(Number((input.deliveries ?? { maxRecipients: DELIVERY_MAX_RECIPIENTS }).maxRecipients));
+      const d = input.deliveries ?? { maxRecipients: DELIVERY_MAX_RECIPIENTS };
+      const max = Math.floor(Number(d.maxRecipients));
       if (!(max >= 1 && max <= DELIVERY_MAX_RECIPIENTS)) return { error: `「配信を頼む」の 1 回の上限は 1〜${DELIVERY_MAX_RECIPIENTS} 人にしてください` };
-      out.deliveries = { maxRecipients: max };
+      const from = (d.from ?? '').trim().toLowerCase();
+      if (from && !(options.mailboxSendAs ?? []).includes(from)) return { error: '「配信を頼む」の差出人は、窓口のアカウントの送信元（Gmail で確認の済んだアドレス）から選んでください' };
+      out.deliveries = { maxRecipients: max, ...(from ? { from } : {}) };
     }
     return out;
   }

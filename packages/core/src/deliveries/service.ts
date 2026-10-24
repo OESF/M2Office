@@ -9,6 +9,7 @@
  *   **秘書・推論・会社の接続（MCP）には渡さない**。承認の画面にも宛先の一覧は出さない（人数と見本だけ）。監査ログとシステムログにも出さない
  * - 差し込み（`{{name}}`・`values`・`{{unsubscribe_url}}`・`{{unsubscribe_address}}`）はプログラムで行う。中身は書き換えない
  * - 配信の停止は、宛先の ID を付けた窓口のアカウントへの返信（`窓口+stop-<ID>@…`）で受ける（院外の患者が開けるページを持たないため）
+ * - 差出人は、アプリの設定で選んだ窓口のアカウントの送信元（無ければ本来のアドレス）。送信元から外れたら送らずに止めて知らせる（第33.24節）
  * - 1 回 500 人・窓口のアカウントから 1 日 1,000 通まで。その日の残りを超える分は、あとで続けて送る
  */
 
@@ -94,14 +95,16 @@ export function unsubscribeAddress(mailboxAddress: string, recipientId?: string)
   return `mailto:${tagged}?subject=${encodeURIComponent('配信停止')}`;
 }
 
-/** 返信の宛先から、配信の停止の宛先の ID を読む（窓口のアカウントの `+stop-<ID>` だけ）。 */
-export function stopRecipientOf(to: string[], mailboxAddress: string): string | null {
-  const at = mailboxAddress.lastIndexOf('@');
-  const local = mailboxAddress.slice(0, at).toLowerCase();
-  const domain = mailboxAddress.slice(at + 1).toLowerCase();
+/**
+ * 返信の宛先から、配信の停止の宛先の ID を読む（窓口のアカウントのアドレスか送信元の別名に付いた `+stop-<ID>` だけ）。
+ *
+ * @param mailboxAddresses 窓口のアカウントの本来のアドレスと送信元の別名（差出人に選べるもの）
+ */
+export function stopRecipientOf(to: string[], mailboxAddresses: string | string[]): string | null {
+  const own = new Set((Array.isArray(mailboxAddresses) ? mailboxAddresses : [mailboxAddresses]).map((a) => a.toLowerCase()));
   for (const addr of to) {
     const m = /^(.+)\+stop-([A-Za-z0-9_-]{1,64})@(.+)$/i.exec(addr.trim());
-    if (m && m[1]!.toLowerCase() === local && m[3]!.toLowerCase() === domain) return m[2]!;
+    if (m && own.has(`${m[1]!.toLowerCase()}@${m[3]!.toLowerCase()}`)) return m[2]!;
   }
   return null;
 }
@@ -141,6 +144,22 @@ export class DeliveryService {
   private readonly quota = new Map<string, { left: number; at: number; pausedUntil: number }>();
   /** 配信ごとの、最後に送った時刻（1 通ごとに間を空ける）。 */
   private readonly lastSent = new Map<string, number>();
+  /** 差出人が送信元から外れたと管理者に知らせた配信（同じ配信で 2 度知らせない）。 */
+  private readonly fromMissingNotified = new Set<string>();
+  /** 問い合わせの取り込みが 1 通ごとに聞くため、会社ごとの窓口のアドレスを 5 分覚える。 */
+  private readonly ownCache = new Map<string, { at: number; own: string[] }>();
+
+  /** アプリの設定で選んだ差出人（無ければ窓口のアカウントの本来のアドレス。第33.24節）。 */
+  private async fromOf(tenantId: string, appId: string, mailbox: Mailbox): Promise<string> {
+    const app = await this.deps.apps.get(tenantId, appId);
+    return (app?.settings.deliveries?.from ?? '').trim().toLowerCase() || mailbox.address;
+  }
+
+  /** 窓口のアカウントの本来のアドレスと送信元の別名（小文字）。読めなければ本来のアドレスだけ。 */
+  private async ownAddresses(mailbox: Mailbox): Promise<string[]> {
+    const sendAs = await mailbox.sendAs().catch(() => [] as string[]);
+    return [...new Set([mailbox.address.toLowerCase(), ...sendAs.map((a) => a.toLowerCase())])];
+  }
 
   constructor(private readonly deps: DeliveryDeps) {}
 
@@ -274,10 +293,12 @@ export class DeliveryService {
     const mailbox = await this.deps.mailbox(tenantId).catch(() => null);
     if (!mailbox) return { problem: '窓口のアカウントがつながっていないため送れません' };
     const counts = await this.deps.store.counts(tenantId, id);
-    const vars = { ...d.values, name: '（宛先の名前）', unsubscribe_url: unsubscribeAddress(mailbox.address, 'xxxx'), unsubscribe_address: mailbox.address };
+    const from = await this.fromOf(tenantId, d.appId, mailbox);
+    if (!(await this.ownAddresses(mailbox)).includes(from)) return { problem: `差出人 ${from} が窓口のアカウントの送信元にありません。Gmail の「他のメールアドレスを追加」で足してください` };
+    const vars = { ...d.values, name: '（宛先の名前）', unsubscribe_url: unsubscribeAddress(from, 'xxxx'), unsubscribe_address: from };
     const shown = [
       `外部のアプリ「${app?.name ?? d.appId}」からの配信の依頼: ${d.title}`,
-      `道: メール　差出人: ${mailbox.address}`,
+      `道: メール　差出人: ${from}`,
       `宛先: ${counts.pending} 人${counts.failed ? `（ほかにアドレスの形が違う ${counts.failed} 人は送りません）` : ''}`,
       `送る日時: ${d.sendAt ? new Date(d.sendAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '承認の後すぐ'}`,
       '',
@@ -358,6 +379,13 @@ export class DeliveryService {
   private async sendSome(tenantId: string, d: DeliveryRecord, now: Date, max: number): Promise<number> {
     const mailbox = await this.deps.mailbox(tenantId).catch(() => null);
     if (!mailbox) return 0;
+    // 選んだ差出人が送信元から外れていたら、送らずに止める（Gmail は確認の済んでいない From を本来のアドレスに替えて送ってしまう。第33.24節）
+    const from = await this.fromOf(tenantId, d.appId, mailbox);
+    if (!(await this.ownAddresses(mailbox)).includes(from)) {
+      await this.fromMissing(tenantId, d, from, now);
+      return 0;
+    }
+    this.fromMissingNotified.delete(d.id);
     let sent = 0;
     const hashUntil = new Date(now.getTime() + DELIVERY_HASH_KEEP_DAYS * DAY).toISOString();
     while (sent < max) {
@@ -371,11 +399,11 @@ export class DeliveryService {
         continue;
       }
       const contact = JSON.parse(this.deps.box.decrypt(r.contactEnc)) as { name: string; email: string };
-      const unsubscribe = unsubscribeAddress(mailbox.address, r.recipientId);
-      const vars = { ...d.values, name: contact.name, unsubscribe_url: unsubscribe, unsubscribe_address: mailbox.address };
+      const unsubscribe = unsubscribeAddress(from, r.recipientId);
+      const vars = { ...d.values, name: contact.name, unsubscribe_url: unsubscribe, unsubscribe_address: from };
       try {
         await mailbox.send({
-          from: mailbox.address, to: contact.email, subject: renderTemplate(d.subject, vars, false).replace(/[\r\n]+/g, ' '),
+          from, to: contact.email, subject: renderTemplate(d.subject, vars, false).replace(/[\r\n]+/g, ' '),
           body: renderTemplate(d.text, vars, false), html: d.html ? renderTemplate(d.html, vars, true) : null,
           ...(d.logo ? { inline: [{ cid: d.logo.cid, mime: d.logo.contentType, bytes: Buffer.from(d.logo.base64, 'base64') }] } : {}),
           // 送れなかった知らせに元の見出しが付いて返ってきたとき、宛先の ID で照らす
@@ -467,7 +495,14 @@ export class DeliveryService {
    * 窓口のアカウントのメールが、配信の停止の返信か送れなかった知らせか（問い合わせの記録に入れないため）。理由を返し、違えば `null`。
    */
   async mailKind(tenantId: string, m: MailItem, mailboxAddress: string, now: Date = new Date()): Promise<string | null> {
-    if (stopRecipientOf(m.to, mailboxAddress)) return '配信の停止の返信';
+    const cached = this.ownCache.get(tenantId);
+    let own = cached && now.getTime() - cached.at < 5 * MIN ? cached.own : null;
+    if (!own) {
+      const mailbox = await this.deps.mailbox(tenantId).catch(() => null);
+      own = mailbox ? await this.ownAddresses(mailbox) : [mailboxAddress.toLowerCase()];
+      this.ownCache.set(tenantId, { at: now.getTime(), own });
+    }
+    if (stopRecipientOf(m.to, own)) return '配信の停止の返信';
     if (isBounce(m.fromAddress, m.subject) && bouncedRecipientOf(m.body)) return '配信の送れなかった知らせ';
     // メールマガジンなど（配信の停止の案内を含む）は、停止の返信とみなさない
     if (!m.bulk && isStopReply(m.subject, m.body)) {
@@ -495,15 +530,15 @@ export class DeliveryService {
     const cursor = await this.deps.store.mailCursor(tenantId);
     const since = new Date(Math.max(Date.parse(cursor ?? active[0]!.createdAt) - 10 * MIN, now.getTime() - DELIVERY_KEEP_DAYS * DAY));
     const ids = await mailbox.list('inbox', since, 100).catch(() => [] as string[]);
-    const self = mailbox.address.toLowerCase();
+    const own = await this.ownAddresses(mailbox);
     let found = 0;
     for (const mid of ids) {
       const m = await mailbox.get(mid).catch(() => null);
-      if (!m || m.fromAddress === self) continue;
+      if (!m || own.includes(m.fromAddress.toLowerCase())) continue;
       const at = m.date;
       if (isBounce(m.fromAddress, m.subject)) {
         const rid = bouncedRecipientOf(m.body);
-        const targets = rid ? await this.deps.store.findRecipient(tenantId, rid) : await this.byAddressesIn(tenantId, m.body, self, now);
+        const targets = rid ? await this.deps.store.findRecipient(tenantId, rid) : await this.byAddressesIn(tenantId, m.body, own, now);
         for (const r of targets) {
           if (r.status !== 'sent') continue;
           await this.deps.store.setResult(tenantId, r.deliveryId, r.recipientId, { status: 'failed', reason: 'bounced', at });
@@ -511,7 +546,7 @@ export class DeliveryService {
         }
         continue;
       }
-      const rid = stopRecipientOf(m.to, mailbox.address);
+      const rid = stopRecipientOf(m.to, own);
       if (rid) {
         for (const r of await this.deps.store.findRecipient(tenantId, rid)) found += await this.stop(tenantId, r, m.id, at);
         continue;
@@ -535,10 +570,10 @@ export class DeliveryService {
   }
 
   /** 送れなかった知らせの本文に出てくるアドレスのうち、照合の値に当たる宛先。 */
-  private async byAddressesIn(tenantId: string, body: string, self: string, now: Date) {
+  private async byAddressesIn(tenantId: string, body: string, own: string[], now: Date) {
     const out: Awaited<ReturnType<DeliveryStore['findByHash']>> = [];
     for (const addr of new Set((body.match(/[^\s<>()"',;:]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []).map((x) => x.toLowerCase()))) {
-      if (addr === self) continue;
+      if (own.includes(addr)) continue;
       out.push(...await this.deps.store.findByHash(tenantId, emailHash(addr), now.toISOString()));
     }
     return out;
@@ -553,6 +588,22 @@ export class DeliveryService {
       await this.deps.store.setResult(tenantId, r.deliveryId, r.recipientId, { status: 'stopped', stopChannel: 'mail', at });
     }
     return added ? 1 : 0;
+  }
+
+  /** 差出人が送信元から外れて止めたことを、管理者に 1 度だけ知らせる（送信元に戻されたら続ける）。 */
+  private async fromMissing(tenantId: string, d: DeliveryRecord, from: string, now: Date): Promise<void> {
+    if (this.fromMissingNotified.has(d.id)) return;
+    this.fromMissingNotified.add(d.id);
+    for (const u of await this.deps.repo.listUsers(tenantId)) {
+      if (u.status !== 'active' || !u.roles.includes('admin')) continue;
+      await this.deps.repo.createNotification({
+        id: randomUUID(), tenantId, userId: u.id, kind: 'failure', title: `配信を止めています: ${d.title}`,
+        body: `差出人 ${from} が、窓口のアカウントの送信元にありません。送らずに止めています。窓口のアカウントの Gmail の「設定 → アカウント →「他のメールアドレスを追加」」で ${from} を足すと、続けて送ります。`.slice(0, 400),
+        runId: null, readAt: null, createdAt: now.toISOString(),
+      });
+    }
+    await this.audit(tenantId, 'system', 'delivery.from_missing', d.id, { appId: d.appId, requestId: d.requestId });
+    this.deps.logger?.warn('配信の差出人が窓口のアカウントの送信元に無いため止めています', { tenantId, deliveryId: d.id });
   }
 
   // ---- 管理者に見せる ----

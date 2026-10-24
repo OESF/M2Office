@@ -139,7 +139,8 @@ function MailboxCard({ settings, onChanged }: { settings: InquirySettings; onCha
   });
   const RESULT_TEXT: Record<string, string> = {
     connected: '窓口のアカウントを接続しました', cancelled: '接続をキャンセルしました', scopes: 'メールを読む・送るの許可が足りません。もう一度接続して、すべて許可してください',
-    domain: '会社のドメインのアカウントではありません。会社の Google Workspace の窓口のアカウントを選んでください', client: '会社の Google 接続の設定に誤りがあります', failed: '接続できませんでした',
+    domain: '会社のドメインのアカウントではありません。会社の Google Workspace の窓口のアカウントを選んでください',
+    user: 'M2Office の利用者のアカウントは窓口にできません。窓口専用のアカウントを作って、それを選んでください', client: '会社の Google 接続の設定に誤りがあります', failed: '接続できませんでした',
   };
   const connect = () => {
     setWorking(true);

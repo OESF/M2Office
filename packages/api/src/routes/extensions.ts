@@ -418,7 +418,7 @@ export function extensionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     if (deps.connector.sourceFor(tenant.id) === 'mock') {
       const err = await deps.inquiries.service.connectMailbox({ tenantId: tenant.id, userId: user.id }, { email: `info@${user.email.split('@')[1] ?? 'example.jp'}`, refreshToken: null });
-      return err ? c.json({ error: err }, 400) : c.json({ connected: true });
+      return err ? c.json({ error: err.error, code: err.code }, 400) : c.json({ connected: true });
     }
     const client = await googleClient(deps, tenant.id);
     if (!client) return c.json({ error: '会社の Google 接続の設定がありません。「接続」の「Google Workspace」で登録してください' }, 409);

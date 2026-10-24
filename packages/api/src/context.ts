@@ -410,6 +410,8 @@ export function buildDeps(): AppDeps {
     },
     // サイネージの機能で使ってよい画面の候補（第13.4.3節。サイネージは下で作る。呼ばれるのは作った後）
     signageScreens: async (tenantId) => (await signageService.deps.store.listScreens(tenantId)).map((s) => ({ id: s.id, name: s.name })),
+    // 配信を頼む機能の差出人の候補（窓口のアカウントの送信元。第33.24節）
+    mailboxSendAs: async (tenantId) => { const mb = await openMailbox({ repo, box, sourceFor: (t) => connector.sourceFor(t) }, tenantId); return mb ? mb.sendAs() : []; },
   });
   // 外部のアプリからの配信の依頼（第13.4.4節）。受けた依頼の承認の業務を始め、結果と停止を渡す（送るのと受信を読むのはワーカー）
   const deliveries = new DeliveryService({
