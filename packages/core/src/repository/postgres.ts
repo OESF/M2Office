@@ -1097,6 +1097,7 @@ export class PostgresRepository implements Repository {
       slides: {
         templates: [...(r?.slides?.templates ?? [])],
         defaultDesign: r?.slides?.defaultDesign ?? null, defaultDocTemplate: r?.slides?.defaultDocTemplate ?? null,
+        defaultSheetTemplate: r?.slides?.defaultSheetTemplate ?? null,
       },
       knowledge: {
         standardSynonyms: r?.knowledge?.standardSynonyms ?? d.knowledge.standardSynonyms,

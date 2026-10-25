@@ -17,6 +17,7 @@ import { DELIVERY_TOOLS } from '../deliveries/tools.js';
 import { RECRUIT_TOOLS } from './recruit.js';
 import { RESEARCH_TOOLS } from './research.js';
 import { DOC_DRAFT_TOOLS } from './doc-drafts.js';
+import { SHEET_DRAFT_TOOLS } from './sheet-drafts.js';
 import { GOOGLE_TOOLS } from './google.js';
 import { PROFILE_TOOLS } from './profile.js';
 import { CARD_TOOLS } from '../cards/tools.js';
@@ -201,6 +202,8 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...RESEARCH_TOOLS,
   // 業務「文書の作成」（第9.5.5.2節「文書の作成の扱い」）
   ...DOC_DRAFT_TOOLS,
+  // 業務「表の作成」（第9.5.5.2節「表の作成の扱いとテンプレート」）
+  ...SHEET_DRAFT_TOOLS,
   ...GOOGLE_TOOLS,
   ...PROFILE_TOOLS,
   // 名刺管理（内蔵の拡張。第27.9節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く

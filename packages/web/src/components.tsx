@@ -272,6 +272,8 @@ function Field({
   if (field.format === 'slide-design') return <SlideDesignField label={field.title ?? name} value={value} onChange={onChange} />;
   // 文書のテンプレート（第9.5.5.2節「文書のテンプレート」）。見本の並びから選ぶ
   if (field.format === 'doc-template') return <DocTemplateField label={field.title ?? name} value={value} onChange={onChange} />;
+  // 表のテンプレート（第9.5.5.2節「表の作成の扱いとテンプレート」）
+  if (field.format === 'sheet-template') return <DocTemplateField label={field.title ?? name} value={value} onChange={onChange} kind="sheet" />;
   if (field.enum?.length) {
     return (
       <div className="field">

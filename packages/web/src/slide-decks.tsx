@@ -15,11 +15,14 @@ import { api, describeError } from './api.js';
 export const SLIDES_AGENT_ID = 'slides';
 /** 業務「文書の作成」の ID。 */
 export const DOCUMENT_AGENT_ID = 'document-draft';
+/** 業務「表の作成」の ID。 */
+export const SHEET_AGENT_ID = 'sheet-builder';
 
 /** 種類ごとの、作り直す業務・開くボタン・一覧の見出し。 */
 const KIND: Record<SlideDeckKind, { agent: string; open: string; list: string }> = {
   slides: { agent: SLIDES_AGENT_ID, open: 'Google スライドで開く', list: '作ったスライド' },
   doc: { agent: DOCUMENT_AGENT_ID, open: 'Google ドキュメントで開く', list: '作った文書' },
+  sheet: { agent: SHEET_AGENT_ID, open: 'Google スプレッドシートで開く', list: '作った表' },
 };
 
 const SHARINGS: SlideDeckSharing[] = ['private', 'company'];

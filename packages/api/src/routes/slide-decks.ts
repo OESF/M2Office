@@ -27,7 +27,10 @@ export function slideDecksRoute(deps: AppDeps) {
   app.use('/:id', async (c, next) => (ID.test(c.req.param('id')) ? next() : c.json({ error: '見つかりません' }, 404)));
 
   /** 本人が作ったもの（mine）と、会社で共有されたもの（shared）。新しい順。`kind` は `slides`（既定）か `doc`。 */
-  app.get('/', async (c) => c.json(await service.list(who(c), c.req.query('kind') === 'doc' ? 'doc' : 'slides')));
+  app.get('/', async (c) => {
+    const kind = c.req.query('kind');
+    return c.json(await service.list(who(c), kind === 'doc' || kind === 'sheet' ? kind : 'slides'));
+  });
 
   /** 1 件（本人のものか会社で共有されたもの）。 */
   app.get('/:id', async (c) => {
@@ -66,7 +69,7 @@ export function slideDecksRoute(deps: AppDeps) {
    */
   app.get('/:id/export', async (c) => {
     const format = c.req.query('format');
-    if (format !== 'pptx' && format !== 'docx' && format !== 'pdf') return c.json({ error: '取り出す形は pptx・docx・pdf です' }, 400);
+    if (format !== 'pptx' && format !== 'docx' && format !== 'xlsx' && format !== 'pdf') return c.json({ error: '取り出す形は pptx・docx・xlsx・pdf です' }, 400);
     const r = await service.exportAs(who(c), c.req.param('id'), format);
     if ('error' in r) return c.json(r, r.error.includes('見つかりません') || r.error.includes('見つかりませんでした') ? 404 : 400);
     if ('fallback' in r) return c.json(r, 409);

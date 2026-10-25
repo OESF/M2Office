@@ -46,6 +46,12 @@ export function agentsRoute(deps: AppDeps) {
     return c.json({ defaultChoice: slides.defaultDocTemplate || '標準' });
   });
 
+  /** 表のテンプレートの会社の既定（第9.5.5.2節「表の作成の扱いとテンプレート」）。`theme:<ID>` か「標準」。 */
+  app.get('/sheet-templates', async (c) => {
+    const { slides } = await deps.repo.getTenantSettings(c.get('ctx').tenant.id);
+    return c.json({ defaultChoice: slides.defaultSheetTemplate || '標準' });
+  });
+
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
     const { agents: setting } = await deps.repo.getTenantSettings(tenant.id);

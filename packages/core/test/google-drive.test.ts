@@ -66,6 +66,27 @@ async function fakeDrive(pdf: Uint8Array) {
       return json(200, { spreadsheetId: 'NEWSHEET', spreadsheetUrl: 'https://docs.example/NEWSHEET', sheets: [{ properties: { title: 'シート1' } }] });
     }
     if (s.path.startsWith('/sheets/spreadsheets/NEWSHEET/values/') && s.method === 'PUT') return json(200, { updatedRows: 3 });
+    // 表の見た目・テンプレート・書き直し（第9.5.5.2節「表の作成の扱いとテンプレート」）
+    if (s.path === '/sheets/spreadsheets/NEWSHEET:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
+    if (s.path === '/drive/files/SHEETTPL/copy' && s.method === 'POST') return json(200, { id: 'SHEETCOPY', name: JSON.parse(raw).name, mimeType: `${G}spreadsheet`, modifiedTime: '2026-10-25T03:00:00.000Z' });
+    if (s.path === '/sheets/spreadsheets/SHEETCOPY' && s.method === 'GET') {
+      if (s.query.get('includeGridData') === 'true') {
+        const cell = (v: string, bg?: object, fg?: object) => ({ formattedValue: v, effectiveFormat: { ...(bg ? { backgroundColor: bg } : {}), textFormat: { bold: !!bg, ...(fg ? { foregroundColor: fg } : {}), fontFamily: 'Lexend' } } });
+        return json(200, { sheets: [{ data: [{ rowData: [
+          { values: [cell('家計簿')] },
+          { values: [cell('日付', { red: 0.2, green: 0.4, blue: 0.8 }, { red: 1, green: 1, blue: 1 }), cell('金額', { red: 0.2, green: 0.4, blue: 0.8 })] },
+          { values: [cell('10/1'), cell('500')] },
+        ] }] }] });
+      }
+      return json(200, { sheets: [{ properties: { sheetId: 11, title: '家計簿' }, bandedRanges: [] }, { properties: { sheetId: 12, title: '集計' } }] });
+    }
+    if (s.path === '/sheets/spreadsheets/SHEETCOPY:batchUpdate' && s.method === 'POST') {
+      return json(200, { replies: raw.includes('addSheet') ? [{ addSheet: { properties: { sheetId: 99, title: '表' } } }] : [] });
+    }
+    if (s.path.startsWith('/sheets/spreadsheets/SHEETCOPY/values/') && s.method === 'PUT') return json(200, {});
+    if (s.path === '/sheets/spreadsheets/SHEET1:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
+    if (s.path.startsWith('/sheets/spreadsheets/SHEET1/values/') && s.method === 'PUT') return json(200, {});
+    if (s.path === '/drive/files/SHEET1' && s.method === 'PATCH') return json(200, meta('SHEET1'));
     if (s.path === '/drive/files/NEWSHEET' && s.query.get('fields') === 'parents') return json(200, { parents: ['ROOT'] });
     if (s.path === '/drive/files/NEWSHEET' && s.method === 'PATCH') return json(200, { id: 'NEWSHEET' });
     if (s.path === '/sheets/spreadsheets/SHEET1' && s.method === 'GET') return json(200, { sheets: [{ properties: { title: "顧客'一覧" } }] });
@@ -588,6 +609,35 @@ test('ドキュメント: テンプレートを複製し、本文を空にして
       c.docs.createFromTemplate(P, { templateId: 'GONETPL', templateName: '消えたテンプレート', title: 'x', body: 'y' }),
       (err: unknown) => err instanceof SlideThemeUnavailableError && /消えたテンプレート/.test(err.message),
     );
+  });
+});
+
+test('スプレッドシート: 作る表に見た目を付け、テンプレートからは見た目だけを写して見本のシートを消す。書き直しと Excel・PDF の書き出し', async () => {
+  await withDrive(async (c, seen) => {
+    await c.sheets.create(P, { title: '見積', columns: ['会社', '金額'], rows: [['A', '1']], folderId: null });
+    const std = JSON.parse(seen.find((x) => x.path === '/sheets/spreadsheets/NEWSHEET:batchUpdate')!.body).requests as Record<string, any>[];
+    assert.deepEqual(std.map((r) => Object.keys(r)[0]), ['repeatCell', 'addBanding', 'updateSheetProperties', 'autoResizeDimensions'], '見出し・1 行おきの塗り・固定・列の幅');
+    assert.equal(std[0]!['repeatCell'].cell.userEnteredFormat.backgroundColorStyle.themeColor, 'ACCENT1', '標準はテーマの色');
+
+    const made = await c.sheets.createFromTemplate(P, { templateId: 'SHEETTPL', templateName: '家計簿', title: '経費', columns: ['日付', '金額'], rows: [['10/2', '800']] });
+    assert.equal(made.id, 'SHEETCOPY');
+    const batches = seen.filter((x) => x.path === '/sheets/spreadsheets/SHEETCOPY:batchUpdate').map((x) => JSON.parse(x.body).requests as Record<string, any>[]);
+    assert.deepEqual(batches[0], [{ addSheet: { properties: { title: '表', index: 0 } } }]);
+    assert.deepEqual(batches[1]!.filter((r) => r['deleteSheet']).map((r) => r['deleteSheet'].sheetId), [11, 12], '見本のシートを消す');
+    const header = batches[1]!.find((r) => r['repeatCell'])!['repeatCell'];
+    assert.equal(header.range.sheetId, 99);
+    assert.deepEqual(header.cell.userEnteredFormat.backgroundColor, { red: 0.2, green: 0.4, blue: 0.8 }, 'テンプレートの見出しの塗りを写す');
+    assert.equal(header.cell.userEnteredFormat.textFormat.fontFamily, 'Lexend');
+    assert.ok(seen.some((x) => x.path.startsWith('/sheets/spreadsheets/SHEETCOPY/values/') && decodeURIComponent(x.path).includes("'表'!A1")));
+
+    const again = await c.sheets.rewrite(P, { spreadsheetId: 'SHEET1', title: '顧客（直した）', columns: ['会社'], rows: [['見本商事']] });
+    assert.equal(again?.id, 'SHEET1');
+    const rw = seen.filter((x) => x.path === '/sheets/spreadsheets/SHEET1:batchUpdate').map((x) => JSON.parse(x.body).requests as Record<string, any>[]);
+    assert.ok(rw[0]!.some((r) => r['updateCells']?.fields === 'userEnteredValue,userEnteredFormat'), '値と書式を消してから書き直す');
+    assert.equal(await c.sheets.rewrite(P, { spreadsheetId: 'DOC1', title: 'x', columns: ['a'], rows: [] }), null, '表でないものは書き換えない');
+
+    assert.ok(await c.sheets.export(P, 'SHEET1', 'xlsx') instanceof Uint8Array);
+    assert.equal(seen.filter((x) => x.path === '/drive/files/SHEET1/export').at(-1)!.query.get('mimeType'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   });
 });
 

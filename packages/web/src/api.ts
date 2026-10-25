@@ -2836,6 +2836,8 @@ export const api = {
   slideThemePicker: (kind: SlideDeckKind = 'slides') => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>(`/slide-themes/picker?kind=${kind}`),
   /** 文書のテンプレートの会社の既定（`theme:<ID>` か「標準」。第9.5.5.2節「文書のテンプレート」）。 */
   docTemplateDefault: () => call<{ defaultChoice: string }>('/agents/doc-templates'),
+  /** 表のテンプレートの会社の既定（第9.5.5.2節「表の作成の扱いとテンプレート」）。 */
+  sheetTemplateDefault: () => call<{ defaultChoice: string }>('/agents/sheet-templates'),
   /** テーマの見本の縮小の絵（`URL.createObjectURL`）。無ければ `null`。 */
   slideThemeThumbnail: async (id: string): Promise<string | null> => {
     const res = await fetch(`/v1/slide-themes/${encodeURIComponent(id)}/thumbnail`, { credentials: 'same-origin', headers: devTenant ? { 'x-tenant': devTenant } : {} }).catch(() => null);

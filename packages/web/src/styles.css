@@ -2736,3 +2736,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .slide-design-thumb.doc-standard span { display: block; height: 3px; border-radius: 2px; background: var(--line); }
 .slide-design-thumb.doc-standard span:first-child { width: 55%; height: 5px; background: var(--muted); }
 .slide-design-thumb.doc-standard span:last-child { width: 70%; }
+/* 表のテンプレートの「標準」の見本（見出しの行と罫線） */
+.slide-design-thumb.sheet-standard { display: grid; grid-template-rows: repeat(4, 1fr); gap: 2px; padding: 8px; background: var(--panel); box-sizing: border-box; }
+.slide-design-thumb.sheet-standard span { display: block; border-radius: 1px; background: var(--line); }
+.slide-design-thumb.sheet-standard span:first-child { background: var(--accent); }

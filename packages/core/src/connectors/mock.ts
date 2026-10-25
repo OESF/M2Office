@@ -430,6 +430,24 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       f.values = [...(f.values ?? []), ...s.rows];
       return { appended: s.rows.length };
     },
+    // 見本の接続口では書き出せない
+    export: async () => null,
+    // テンプレート（見本のドライブの表）。複製の代わりに、M2Office が作った表として足す
+    inspectTemplate: async (p: ConnectorPrincipal, id: string) => {
+      const f = this.visibleFiles(p).find((x) => x.file.id === id && x.file.kind === 'spreadsheet');
+      return f ? { name: f.file.name.replace(/\.[a-z0-9]+$/i, ''), thumbnail: null } : null;
+    },
+    createFromTemplate: async (p: ConnectorPrincipal, s: { templateId: string; templateName: string; title: string; columns: string[]; rows: string[][] }) => {
+      if (!this.visibleFiles(p).some((x) => x.file.id === s.templateId)) throw new SlideThemeUnavailableError(`テンプレート「${s.templateName}」のファイルが見つかりませんでした`);
+      return this.addFile(p, s.title, 'spreadsheet', { values: [s.columns, ...s.rows] });
+    },
+    rewrite: async (p: ConnectorPrincipal, s: { spreadsheetId: string; title: string; columns: string[]; rows: string[][] }) => {
+      const f = this.driveFiles.get(s.spreadsheetId);
+      if (!f || f.owner !== key(p) || f.file.kind !== 'spreadsheet') return null;
+      f.values = [s.columns, ...s.rows];
+      f.file = { ...f.file, name: s.title, modifiedAt: this.now().toISOString() };
+      return f.file;
+    },
   };
 
   private addFile(

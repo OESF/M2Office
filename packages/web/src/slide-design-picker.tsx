@@ -53,8 +53,11 @@ function DesignPreview({ d }: { d: SlideDesign }) {
 
 /** Google スライドのテンプレート ギャラリー（テーマにするファイルを作る場所）。 */
 const GALLERY_URL = 'https://docs.google.com/presentation/u/0/?tgif=d';
-/** Google ドキュメントのテンプレート ギャラリー（第9.5.5.2節「文書のテンプレート」）。 */
-const DOC_GALLERY_URL = 'https://docs.google.com/document/u/0/?tgif=d';
+/** Google ドキュメント・スプレッドシートのテンプレート ギャラリー（第9.5.5.2節「文書のテンプレート」「表の作成の扱いとテンプレート」）。 */
+const TEMPLATE_GALLERY: Record<'doc' | 'sheet', { url: string; label: string }> = {
+  doc: { url: 'https://docs.google.com/document/u/0/?tgif=d', label: 'Google ドキュメントのテンプレート' },
+  sheet: { url: 'https://docs.google.com/spreadsheets/u/0/?tgif=d', label: 'Google スプレッドシートのテンプレート' },
+};
 /** 文書のテンプレートを使わない（今の作り方）値。 */
 export const DOC_STANDARD = '標準';
 
@@ -248,13 +251,16 @@ export function SlideDesignField({ label, value, onChange }: { label: string; va
 }
 
 /**
- * 文書のテンプレートの見本の並び（第9.5.5.2節「文書のテンプレート」）。「標準」、マイテンプレート・会社のテンプレート、「＋ Google ドキュメントのテンプレート」。
+ * 文書・表のテンプレートの見本の並び（第9.5.5.2節「文書のテンプレート」「表の作成の扱いとテンプレート」）。
+ * 「標準」、マイテンプレート・会社のテンプレート、「＋ Google ドキュメント（スプレッドシート）のテンプレート」。
  *
  * @param value 選んでいるもの（「標準」か `theme:<ID>`）
+ * @param kind 文書（既定）か表
  */
-export function DocTemplatePicker({ value, onChange, templates }: {
-  value: string; onChange: (v: string) => void; templates: ReturnType<typeof useSlideThemes>;
+export function DocTemplatePicker({ value, onChange, templates, kind = 'doc' }: {
+  value: string; onChange: (v: string) => void; templates: ReturnType<typeof useSlideThemes>; kind?: 'doc' | 'sheet';
 }) {
+  const gallery = TEMPLATE_GALLERY[kind];
   const choose = async (v: string) => {
     onChange(v);
     const t = templates.themes.find((x) => `${SLIDE_THEME_PREFIX}${x.id}` === v);
@@ -266,7 +272,7 @@ export function DocTemplatePicker({ value, onChange, templates }: {
       <div className="slide-design-grid" role="radiogroup">
         <button type="button" role="radio" aria-checked={value === DOC_STANDARD}
           className={`slide-design-card is-template${value === DOC_STANDARD ? ' is-selected' : ''}`} onClick={() => onChange(DOC_STANDARD)}>
-          <span className="slide-design-thumb doc-standard" aria-hidden="true"><span /><span /><span /><span /></span>
+          <span className={`slide-design-thumb ${kind === 'sheet' ? 'sheet-standard' : 'doc-standard'}`} aria-hidden="true"><span /><span /><span /><span /></span>
           <span className="slide-design-name">{DOC_STANDARD}</span>
         </button>
         {templates.themes.map((t) => {
@@ -287,9 +293,9 @@ export function DocTemplatePicker({ value, onChange, templates }: {
         <div className="slide-design-card is-add">
           <button type="button" className="slide-design-pick" disabled={templates.busy} onClick={() => void templates.add().then(added)}>
             <span className="slide-design-plus" aria-hidden="true">＋</span>
-            <span className="slide-design-name">{templates.busy ? '開いています…' : 'Google ドキュメントのテンプレート'}</span>
+            <span className="slide-design-name">{templates.busy ? '開いています…' : gallery.label}</span>
           </button>
-          <a className="small" href={DOC_GALLERY_URL} target="_blank" rel="noreferrer">ギャラリー</a>
+          <a className="small" href={gallery.url} target="_blank" rel="noreferrer">ギャラリー</a>
         </div>
       </div>
       {templates.mockItems && (
@@ -307,13 +313,14 @@ export function DocTemplatePicker({ value, onChange, templates }: {
 }
 
 /**
- * 業務の入力の欄（形 `doc-template`）。会社の既定を読み、初めは会社の既定を選んだ状態にする。
+ * 業務の入力の欄（形 `doc-template`・`sheet-template`）。会社の既定を読み、初めは会社の既定を選んだ状態にする。
  */
-export function DocTemplateField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  const templates = useSlideThemes(false, 'doc');
+export function DocTemplateField({ label, value, onChange, kind = 'doc' }: { label: string; value: string; onChange: (v: string) => void; kind?: 'doc' | 'sheet' }) {
+  const templates = useSlideThemes(false, kind);
   useEffect(() => {
     let alive = true;
-    api.docTemplateDefault().then((r) => { if (alive && !value) onChange(r.defaultChoice); }).catch(() => { if (alive && !value) onChange(DOC_STANDARD); });
+    (kind === 'sheet' ? api.sheetTemplateDefault() : api.docTemplateDefault())
+      .then((r) => { if (alive && !value) onChange(r.defaultChoice); }).catch(() => { if (alive && !value) onChange(DOC_STANDARD); });
     return () => { alive = false; };
     // 読むのは開いたときの 1 回だけ
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -321,7 +328,7 @@ export function DocTemplateField({ label, value, onChange }: { label: string; va
   return (
     <div className="field">
       <label>{label}</label>
-      <DocTemplatePicker value={value || DOC_STANDARD} onChange={onChange} templates={templates} />
+      <DocTemplatePicker value={value || DOC_STANDARD} onChange={onChange} templates={templates} kind={kind} />
     </div>
   );
 }

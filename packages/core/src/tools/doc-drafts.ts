@@ -20,17 +20,20 @@ const who = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId 
 const BODY_MAX = 60_000;
 
 /** テンプレートを使わない（今の作り方）ことを表す名前。 */
-const STANDARD = '標準';
+export const STANDARD = '標準';
 
 /**
- * 使うテンプレートを決める（第9.5.5.2節「文書のテンプレート」）。指定（名前か `theme:<ID>`。「標準」なら使わない）があればそれ。
+ * 使うテンプレートを決める（第9.5.5.2節「文書のテンプレート」「表の作成の扱いとテンプレート」）。指定（名前か `theme:<ID>`。「標準」なら使わない）があればそれ。
  * 無ければ、直すときは前と同じ、新しく作るときは会社の既定、それも無ければ使わない。
  *
+ * @param kind 文書（`doc`）か表（`sheet`）
  * @returns テンプレート（使わないなら `null`）と、指定が見つからなかったときの注意
  */
-async function chooseTemplate(ctx: ToolContext, wanted: string, prev: SlideDeck | null): Promise<{ template: { id: string; presentationId: string; name: string } | null; warning: string | null }> {
+export async function chooseTemplate(
+  ctx: ToolContext, wanted: string, prev: SlideDeck | null, kind: 'doc' | 'sheet' = 'doc',
+): Promise<{ template: { id: string; presentationId: string; name: string } | null; warning: string | null }> {
   const find = async (key: string) => {
-    const t = key && ctx.slideThemes ? await ctx.slideThemes.find(who(ctx), key, 'doc') : null;
+    const t = key && ctx.slideThemes ? await ctx.slideThemes.find(who(ctx), key, kind) : null;
     return t ? { id: t.id, presentationId: t.presentationId, name: t.name } : null;
   };
   if (wanted === STANDARD) return { template: null, warning: null };
@@ -41,7 +44,8 @@ async function chooseTemplate(ctx: ToolContext, wanted: string, prev: SlideDeck 
   const warning = wanted ? `テンプレート「${wanted}」が見つからないため、${prev ? '前と同じ' : '会社の既定'}で作りました` : null;
   if (prev) return { template: prev.theme ? await find(`${SLIDE_THEME_PREFIX}${prev.theme}`) : null, warning };
   const { slides } = await ctx.repo.getTenantSettings(ctx.tenantId);
-  return { template: slides.defaultDocTemplate ? await find(slides.defaultDocTemplate) : null, warning };
+  const fallback = kind === 'sheet' ? slides.defaultSheetTemplate : slides.defaultDocTemplate;
+  return { template: fallback ? await find(fallback) : null, warning };
 }
 
 /**

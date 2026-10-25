@@ -372,6 +372,29 @@ export interface SheetsConnector {
   read(p: ConnectorPrincipal, s: { spreadsheetId: string; maxRows: number }): Promise<{ file: DriveFile; values: string[][] } | null>;
   /** 末尾に行を足す。見つからなければ `null`。 */
   append(p: ConnectorPrincipal, s: { spreadsheetId: string; rows: string[][] }): Promise<{ appended: number } | null>;
+  /**
+   * Excel か PDF の形で受け取る（Drive の書き出し。M2Office が作った表だけ。第9.5.5.2節「表の作成の扱いとテンプレート」）。
+   *
+   * @returns 中身。見つからなければ `null`、Google の書き出しの上限（10 MB）を超えれば `'too-large'`
+   */
+  export(p: ConnectorPrincipal, spreadsheetId: string, format: 'xlsx' | 'pdf'): Promise<Uint8Array | 'too-large' | null>;
+  /**
+   * テンプレートにするスプレッドシートを確かめる（本人が選んだもの）。名前と見本の縮小の絵を返す。
+   *
+   * @returns 開けない・スプレッドシートでない・見本の接続口で見つからないときは `null`
+   */
+  inspectTemplate(p: ConnectorPrincipal, spreadsheetId: string): Promise<{ name: string; thumbnail: { bytes: Uint8Array; mimeType: string } | null } | null>;
+  /**
+   * テンプレートを本人のドライブに複製し、表を新しいシートに書いて、テンプレートの見本のシートを消す。
+   * 見た目（テーマの字体と配色、見出しの行と本文の行の書式）はテンプレートから写す（ADR-0111）。開けなければ `SlideThemeUnavailableError`
+   */
+  createFromTemplate(p: ConnectorPrincipal, s: { templateId: string; templateName: string; title: string; columns: string[]; rows: string[][] }): Promise<DriveFile>;
+  /**
+   * 作った表を書き直す（作り直し。見た目は今の表から読んで付け直す）。M2Office が作った表だけ。
+   *
+   * @returns 書き直したもの。見つからなければ `null`
+   */
+  rewrite(p: ConnectorPrincipal, s: { spreadsheetId: string; title: string; columns: string[]; rows: string[][] }): Promise<DriveFile | null>;
 }
 
 export interface ChatConnector {

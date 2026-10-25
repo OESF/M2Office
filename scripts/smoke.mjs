@@ -8475,5 +8475,41 @@ console.log('\n■ 125. 文書のテンプレートと会社の既定（テー�
   }
 }
 
+console.log('\n■ 126. 作った表と表のテンプレート（文書・スライドと分けて並べる・Excel を断る形・既定を読み戻す。第9.5.5.2節「表の作成の扱いとテンプレート」）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const key = `smoke-sheet-${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select slides from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    const { rows: users } = await owner.query(`select id from users where tenant_id = 't-alpha' and email = 'admin@alpha.example.jp'`);
+    await owner.query(`insert into slide_decks (id, kind, tenant_id, user_id, presentation_id, title, sharing, table_data, built_at) values ($1, 'sheet', 't-alpha', $2, $3, $4, 'company', '{"columns":["a"],"rows":[]}', now())`,
+      [key, users[0]?.id, `mock-${key}`, `${key} 表`]);
+    await owner.query(`insert into slide_themes (id, kind, tenant_id, user_id, presentation_id, name) values ($1, 'sheet', 't-alpha', null, 'SHEETGALLERY01', $2)`, [`${key}-tpl`, `${key} 予算`]);
+    const { body: sheets } = await call('a', '/v1/slide-decks?kind=sheet', {}, 'member');
+    const { body: docs } = await call('a', '/v1/slide-decks?kind=doc', {}, 'member');
+    const { body: tpls } = await call('a', '/v1/slide-themes?kind=sheet', {}, 'member');
+    const { body: docTpls } = await call('a', '/v1/slide-themes?kind=doc', {}, 'member');
+    const mockExport = await call('a', `/v1/slide-decks/${key}/export?format=xlsx`);
+    const put = await call('a', '/v1/admin/settings/slides', { method: 'PUT', body: JSON.stringify({ templates: [], defaultSheetTemplate: `theme:${key}-tpl` }) });
+    const { body: def } = await call('a', '/v1/agents/sheet-templates', {}, 'member');
+    const titles = (b) => [...(b?.mine ?? []), ...(b?.shared ?? [])].map((d) => d.title).filter((t) => t.startsWith(key));
+    const names = (b) => (b?.items ?? []).map((t) => t.name).filter((n) => n.startsWith(key));
+    const good = titles(sheets).length === 1 && titles(docs).length === 0 && names(tpls).length === 1 && names(docTpls).length === 0
+      && mockExport.status === 400 && put.status === 200 && def.defaultChoice === `theme:${key}-tpl`;
+    good
+      ? ok('表と表のテンプレートは文書と分けて並び、見本の表は取り出せず、表の会社の既定を読み戻せる')
+      : ng('作った表の扱いが違う', JSON.stringify({ sheets: titles(sheets), docs: titles(docs), tpls: names(tpls), docTpls: names(docTpls), mockExport: mockExport.status, put: put.status, def: def.defaultChoice }));
+  } catch (err) {
+    ng('作った表の確認が途中で止まった', String(err));
+  } finally {
+    await owner.query(`update tenant_settings set slides = $1 where tenant_id = 't-alpha'`, [saved[0]?.slides ?? null]).catch(() => undefined);
+    await owner.query('delete from slide_decks where id = $1', [key]).catch(() => undefined);
+    await owner.query('delete from slide_themes where id = $1', [`${key}-tpl`]).catch(() => undefined);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

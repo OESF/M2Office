@@ -248,7 +248,12 @@ export function CompanySettings({ page }: { page: string }) {
       </div>
       )}
       {page === 'invoice' && <InvoiceStyleSettings initial={data.invoice} onSaved={() => void reload()} />}
-      {page === 'slides' && <SlideTemplateSettings initial={data.slides.templates} initialDesign={data.slides.defaultDesign ?? null} initialDocTemplate={data.slides.defaultDocTemplate ?? null} onSaved={() => void reload()} />}
+      {page === 'slides' && (
+        <SlideTemplateSettings
+          initial={data.slides.templates} initialDesign={data.slides.defaultDesign ?? null}
+          initialDocTemplate={data.slides.defaultDocTemplate ?? null} initialSheetTemplate={data.slides.defaultSheetTemplate ?? null} onSaved={() => void reload()}
+        />
+      )}
     </>
   );
 }
@@ -438,8 +443,8 @@ type TemplateDraft = { id: string; name: string; url: string; description: strin
  *
  * @remarks 中身（レイアウト・差し込み口）の読み取りは Google 連携の後。いまは登録と既定の選択だけを行う。
  */
-function SlideTemplateSettings({ initial, initialDesign, initialDocTemplate, onSaved }: {
-  initial: SlideTemplate[]; initialDesign: string | null; initialDocTemplate: string | null; onSaved: () => void;
+function SlideTemplateSettings({ initial, initialDesign, initialDocTemplate, initialSheetTemplate, onSaved }: {
+  initial: SlideTemplate[]; initialDesign: string | null; initialDocTemplate: string | null; initialSheetTemplate: string | null; onSaved: () => void;
 }) {
   const toDraft = (t: SlideTemplate): TemplateDraft => ({
     id: t.id, name: t.name, url: t.presentationId, description: t.description, isDefault: t.isDefault,
@@ -454,6 +459,10 @@ function SlideTemplateSettings({ initial, initialDesign, initialDocTemplate, onS
   const docTemplates = useSlideThemes(true, 'doc');
   const [docTemplate, setDocTemplate] = useState<string>(initialDocTemplate ?? DOC_STANDARD);
   useEffect(() => { setDocTemplate(initialDocTemplate ?? DOC_STANDARD); }, [initialDocTemplate]);
+  // 表の会社の既定（第9.5.5.2節「表の作成の扱いとテンプレート」）
+  const sheetTemplates = useSlideThemes(true, 'sheet');
+  const [sheetTemplate, setSheetTemplate] = useState<string>(initialSheetTemplate ?? DOC_STANDARD);
+  useEffect(() => { setSheetTemplate(initialSheetTemplate ?? DOC_STANDARD); }, [initialSheetTemplate]);
   useEffect(() => { setItems(initial.map(toDraft)); }, [initial]);
   useEffect(() => { setDesign(initialDesign); }, [initialDesign]);
   const choice = design ?? items.find((t) => t.isDefault && t.name)?.name ?? SLIDE_DESIGNS[0]!.id;
@@ -474,6 +483,10 @@ function SlideTemplateSettings({ initial, initialDesign, initialDocTemplate, onS
       <div className="field">
         <label>文書の会社の既定</label>
         <DocTemplatePicker value={docTemplate} onChange={setDocTemplate} templates={docTemplates} />
+      </div>
+      <div className="field">
+        <label>表の会社の既定</label>
+        <DocTemplatePicker value={sheetTemplate} onChange={setSheetTemplate} templates={sheetTemplates} kind="sheet" />
       </div>
       <h3>会社のテンプレート</h3>
       <p className="muted small">ファイルは社内で共有してください</p>
@@ -518,6 +531,7 @@ function SlideTemplateSettings({ initial, initialDesign, initialDocTemplate, onS
             templates: items.map((t) => ({ id: t.id, name: t.name, presentationId: t.url, description: t.description, isDefault: t.isDefault })),
             defaultDesign: design ?? '',
             defaultDocTemplate: docTemplate === DOC_STANDARD ? '' : docTemplate,
+            defaultSheetTemplate: sheetTemplate === DOC_STANDARD ? '' : sheetTemplate,
           });
           onSaved();
         }} />

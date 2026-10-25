@@ -20,7 +20,7 @@ interface PickerBuilder {
 interface PickerNamespace {
   DocsView: new (viewId: string) => DocsView;
   PickerBuilder: new () => PickerBuilder;
-  ViewId: { DOCS_IMAGES: string; DOCS: string; PRESENTATIONS?: string; DOCUMENTS?: string };
+  ViewId: { DOCS_IMAGES: string; DOCS: string; PRESENTATIONS?: string; DOCUMENTS?: string; SPREADSHEETS?: string };
   DocsViewMode?: { LIST: string; GRID: string };
   Action: { PICKED: string; CANCEL: string };
 }
@@ -120,20 +120,22 @@ export async function pickDrivePresentation(p: { apiKey: string; appId: string; 
  * @param kind スライド（`slides`）か文書（`doc`）
  * @returns 選んだファイルの ID と名前。やめたら `null`
  */
-export async function pickDriveTemplate(p: { apiKey: string; appId: string; accessToken: string; fileId?: string }, kind: 'slides' | 'doc'): Promise<{ id: string; name: string } | null> {
+export async function pickDriveTemplate(p: { apiKey: string; appId: string; accessToken: string; fileId?: string }, kind: 'slides' | 'doc' | 'sheet'): Promise<{ id: string; name: string } | null> {
   await loadPicker();
   const picker = (window as unknown as { google: { picker: PickerNamespace } }).google.picker;
-  const doc = kind === 'doc';
+  const t = {
+    slides: { view: picker.ViewId.PRESENTATIONS, mime: 'application/vnd.google-apps.presentation', label: 'Google スライド', what: 'テーマ' },
+    doc: { view: picker.ViewId.DOCUMENTS, mime: 'application/vnd.google-apps.document', label: 'Google ドキュメント', what: 'テンプレート' },
+    sheet: { view: picker.ViewId.SPREADSHEETS, mime: 'application/vnd.google-apps.spreadsheet', label: 'Google スプレッドシート', what: 'テンプレート' },
+  }[kind];
   return new Promise((resolve) => {
-    // フォルダをたどらせず、Google スライド（文書なら Google ドキュメント）だけを新しい順に名前と日付で並べる（何を選ぶのか迷わないように）
-    const viewId = (doc ? picker.ViewId.DOCUMENTS : picker.ViewId.PRESENTATIONS) ?? picker.ViewId.DOCS;
-    let view = new picker.DocsView(viewId).setMimeTypes(doc ? 'application/vnd.google-apps.document' : 'application/vnd.google-apps.presentation').setIncludeFolders(false);
+    // フォルダをたどらせず、その種類のファイルだけを新しい順に名前と日付で並べる（何を選ぶのか迷わないように）
+    let view = new picker.DocsView(t.view ?? picker.ViewId.DOCS).setMimeTypes(t.mime).setIncludeFolders(false);
     if (picker.DocsViewMode && view.setMode) view = view.setMode(picker.DocsViewMode.LIST);
-    if (view.setLabel) view = view.setLabel(doc ? 'Google ドキュメント' : 'Google スライド');
+    if (view.setLabel) view = view.setLabel(t.label);
     if (p.fileId && view.setFileIds) view = view.setFileIds(p.fileId);
     let builder = new picker.PickerBuilder();
-    const what = doc ? 'テンプレート' : 'テーマ';
-    if (builder.setTitle) builder = builder.setTitle(p.fileId ? `会社の${what}を使えるようにする（このまま「選択」）` : doc ? 'テンプレートにする Google ドキュメントを選択' : 'テーマにする Google スライドを選択');
+    if (builder.setTitle) builder = builder.setTitle(p.fileId ? `会社の${t.what}を使えるようにする（このまま「選択」）` : `${t.what}にする ${t.label} を選択`);
     builder
       .addView(view)
       .setOAuthToken(p.accessToken)

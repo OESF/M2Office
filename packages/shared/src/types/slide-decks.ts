@@ -4,14 +4,14 @@
  * API と画面が同じ形を使う。構成（作り直すための中身）は一覧に載せない。
  */
 
-/** 作ったものの種類（スライド・文書。仕様書 第9.5.5.2節「文書の作成の扱い」）。 */
-export type SlideDeckKind = 'slides' | 'doc';
+/** 作ったものの種類（スライド・文書・表。仕様書 第9.5.5.2節「文書の作成の扱い」「表の作成の扱いとテンプレート」）。 */
+export type SlideDeckKind = 'slides' | 'doc' | 'sheet';
 
-/** 取り出せる形（PowerPoint・Word・PDF）。 */
-export type SlideDeckFormat = 'pptx' | 'docx' | 'pdf';
+/** 取り出せる形（PowerPoint・Word・Excel・PDF）。 */
+export type SlideDeckFormat = 'pptx' | 'docx' | 'xlsx' | 'pdf';
 
 /** 取り出せる形の画面の言葉。 */
-export const SLIDE_DECK_FORMAT_LABEL: Record<SlideDeckFormat, string> = { pptx: 'PowerPoint', docx: 'Word', pdf: 'PDF' };
+export const SLIDE_DECK_FORMAT_LABEL: Record<SlideDeckFormat, string> = { pptx: 'PowerPoint', docx: 'Word', xlsx: 'Excel', pdf: 'PDF' };
 
 /** 共有の範囲。自分だけ・会社で共有（会社の Google Workspace のドメインの人が見られる）。 */
 export type SlideDeckSharing = 'private' | 'company';

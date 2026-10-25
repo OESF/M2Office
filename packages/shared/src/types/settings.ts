@@ -131,6 +131,10 @@ export interface SlidesSettings {
    * 文書の会社の既定のテンプレート（`theme:<ID>`。会社のテンプレート。第9.5.5.2節「文書のテンプレート」）。無ければ「標準」。
    */
   defaultDocTemplate?: string | null;
+  /**
+   * 表の会社の既定のテンプレート（`theme:<ID>`。会社のテンプレート。第9.5.5.2節「表の作成の扱いとテンプレート」）。無ければ「標準」。
+   */
+  defaultSheetTemplate?: string | null;
 }
 
 /**

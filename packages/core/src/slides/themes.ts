@@ -171,10 +171,10 @@ export class SlideThemeService {
    * @returns 加えたもの、またはできない理由
    */
   async add(viewer: SlideThemeViewer, input: { fileId: unknown; company?: unknown; kind?: unknown }): Promise<SlideThemeSummary | { error: string }> {
-    const kind: SlideDeckKind = input.kind === 'doc' ? 'doc' : 'slides';
-    const what = kind === 'doc' ? 'テンプレート' : 'テーマ';
+    const kind: SlideDeckKind = input.kind === 'doc' || input.kind === 'sheet' ? input.kind : 'slides';
+    const what = kind === 'slides' ? 'テーマ' : 'テンプレート';
     const fileId = typeof input.fileId === 'string' ? input.fileId.trim() : '';
-    if (!/^[A-Za-z0-9_-]{10,200}$/.test(fileId)) return { error: kind === 'doc' ? 'ドキュメントを選んでください' : 'プレゼンテーションを選んでください' };
+    if (!/^[A-Za-z0-9_-]{10,200}$/.test(fileId)) return { error: kind === 'doc' ? 'ドキュメントを選んでください' : kind === 'sheet' ? 'スプレッドシートを選んでください' : 'プレゼンテーションを選んでください' };
     const company = input.company === true;
     if (company && !viewer.admin) return { error: `会社の${what}を登録できるのは管理者だけです` };
     const existing = (await this.deps.store.list(viewer.tenantId, viewer.userId, kind)).filter((t) => (company ? t.userId === null : t.userId === viewer.userId));
@@ -183,8 +183,10 @@ export class SlideThemeService {
     if (same) return this.summary(same, viewer);
     const got = kind === 'doc'
       ? await this.deps.connector.docs.inspectTemplate(viewer, fileId)
-      : await this.deps.connector.slides.inspectTheme(viewer, fileId);
-    if (!got) return { error: kind === 'doc' ? '選んだファイルを Google ドキュメントとして開けませんでした' : '選んだファイルを Google スライドとして開けませんでした' };
+      : kind === 'sheet'
+        ? await this.deps.connector.sheets.inspectTemplate(viewer, fileId)
+        : await this.deps.connector.slides.inspectTheme(viewer, fileId);
+    if (!got) return { error: `選んだファイルを Google ${kind === 'doc' ? 'ドキュメント' : kind === 'sheet' ? 'スプレッドシート' : 'スライド'}として開けませんでした` };
     const t: SlideTheme = {
       id: randomUUID(), kind, tenantId: viewer.tenantId, userId: company ? null : viewer.userId, presentationId: fileId, name: got.name.slice(0, 60),
       thumbnail: got.thumbnail?.bytes ?? null, thumbnailMime: got.thumbnail?.mimeType ?? null, createdAt: new Date().toISOString(),
@@ -197,7 +199,7 @@ export class SlideThemeService {
   async remove(viewer: SlideThemeViewer, id: string): Promise<string | null> {
     const t = await this.deps.store.get(viewer.tenantId, id);
     if (!t || (t.userId !== null && t.userId !== viewer.userId)) return 'テーマが見つかりません';
-    if (t.userId === null && !viewer.admin) return `会社の${t.kind === 'doc' ? 'テンプレート' : 'テーマ'}を削除できるのは管理者だけです`;
+    if (t.userId === null && !viewer.admin) return `会社の${t.kind === 'slides' ? 'テーマ' : 'テンプレート'}を削除できるのは管理者だけです`;
     await this.deps.store.remove(viewer.tenantId, id);
     return null;
   }

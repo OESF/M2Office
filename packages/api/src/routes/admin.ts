@@ -807,7 +807,16 @@ function validateSection(
       // 文書の会社の既定（第9.5.5.2節「文書のテンプレート」）。会社のテンプレート（`theme:<ID>`）か、無し（標準）
       const docWanted = typeof o['defaultDocTemplate'] === 'string' ? o['defaultDocTemplate'] : '';
       if (docWanted && docWanted !== '標準' && !/^theme:[A-Za-z0-9_-]{1,80}$/.test(docWanted)) return { error: '文書の会社の既定が見つかりません' };
-      return { section: 'slides', value: { templates, defaultDesign: design?.id ?? theme, defaultDocTemplate: docWanted && docWanted !== '標準' ? docWanted : null } };
+      // 表の会社の既定（第9.5.5.2節「表の作成の扱いとテンプレート」）
+      const sheetWanted = typeof o['defaultSheetTemplate'] === 'string' ? o['defaultSheetTemplate'] : '';
+      if (sheetWanted && sheetWanted !== '標準' && !/^theme:[A-Za-z0-9_-]{1,80}$/.test(sheetWanted)) return { error: '表の会社の既定が見つかりません' };
+      return {
+        section: 'slides',
+        value: {
+          templates, defaultDesign: design?.id ?? theme, defaultDocTemplate: docWanted && docWanted !== '標準' ? docWanted : null,
+          defaultSheetTemplate: sheetWanted && sheetWanted !== '標準' ? sheetWanted : null,
+        },
+      };
     }
     case 'privacy': {
       // Google から取得したデータを残す日数（仕様書 第14.3.2節）。短くはできるが、7 日より長くはできない

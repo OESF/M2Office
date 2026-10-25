@@ -34,8 +34,10 @@ export interface SlideDeck {
   request: string;
   /** スライドの構成（文書では `null`）。 */
   plan: SlidePlan | null;
-  /** 文書の本文（Markdown。スライドでは `null`）。 */
+  /** 文書の本文（Markdown。スライドと表では `null`）。 */
   body: string | null;
+  /** 表の列と行（作り直すため。表のほかは `null`）。 */
+  table?: { columns: string[]; rows: string[][] } | null;
   /** AI が作った画像の頼み（場所の名前 → 頼み）。作り直すときに、同じ頼みの画像を使い回す。 */
   imagePrompts: Record<string, string>;
   runId: string | null;
@@ -66,12 +68,13 @@ export const HAND_EDIT_GRACE_MS = 30_000;
 export const EXPORT_MIME: Record<SlideDeckFormat, string> = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pdf: 'application/pdf',
 };
 
 type Row = Omit<SlideDeck, 'imagePrompts'> & { imagePrompts: Record<string, string> | null };
 const COLUMNS = `id, kind, tenant_id as "tenantId", user_id as "userId", presentation_id as "presentationId", title, design, template, theme_id as "theme", sharing,
-  request, plan, body, image_prompts as "imagePrompts", run_id as "runId", built_at as "builtAt", created_at as "createdAt", updated_at as "updatedAt"`;
+  request, plan, body, table_data as "table", image_prompts as "imagePrompts", run_id as "runId", built_at as "builtAt", created_at as "createdAt", updated_at as "updatedAt"`;
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
 const fromRow = (r: Row): SlideDeck => ({
   ...r, imagePrompts: r.imagePrompts ?? {}, builtAt: iso(r.builtAt), createdAt: iso(r.createdAt), updatedAt: iso(r.updatedAt),
@@ -103,14 +106,14 @@ export class PostgresSlideDeckStore implements SlideDeckStore {
 
   async save(d: SlideDeck): Promise<void> {
     await this.q(d.tenantId,
-      `insert into slide_decks (id, tenant_id, user_id, presentation_id, title, design, template, sharing, request, plan, image_prompts, run_id, built_at, created_at, updated_at, theme_id, kind, body)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      `insert into slide_decks (id, tenant_id, user_id, presentation_id, title, design, template, sharing, request, plan, image_prompts, run_id, built_at, created_at, updated_at, theme_id, kind, body, table_data)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        on conflict (id) do update set presentation_id = excluded.presentation_id, title = excluded.title, design = excluded.design,
-         template = excluded.template, theme_id = excluded.theme_id, sharing = excluded.sharing, request = excluded.request, plan = excluded.plan, body = excluded.body,
+         template = excluded.template, theme_id = excluded.theme_id, sharing = excluded.sharing, request = excluded.request, plan = excluded.plan, body = excluded.body, table_data = excluded.table_data,
          image_prompts = excluded.image_prompts, run_id = excluded.run_id, built_at = excluded.built_at, updated_at = excluded.updated_at
        where slide_decks.tenant_id = excluded.tenant_id`,
       [d.id, d.tenantId, d.userId, d.presentationId, d.title, d.design, d.template, d.sharing, d.request,
-        d.plan ? JSON.stringify(d.plan) : null, JSON.stringify(d.imagePrompts), d.runId, d.builtAt, d.createdAt, d.updatedAt, d.theme, d.kind, d.body]);
+        d.plan ? JSON.stringify(d.plan) : null, JSON.stringify(d.imagePrompts), d.runId, d.builtAt, d.createdAt, d.updatedAt, d.theme, d.kind, d.body, d.table ? JSON.stringify(d.table) : null]);
   }
 
   async get(tenantId: string, id: string): Promise<SlideDeck | null> {
@@ -183,7 +186,7 @@ export function slideDeckLinks(presentationId: string): { url: string | null; pp
 }
 
 /** 種類ごとの取り出せる形。 */
-const FORMATS: Record<SlideDeckKind, SlideDeckFormat[]> = { slides: ['pptx'], doc: ['docx', 'pdf'] };
+const FORMATS: Record<SlideDeckKind, SlideDeckFormat[]> = { slides: ['pptx'], doc: ['docx', 'pdf'], sheet: ['xlsx', 'pdf'] };
 
 /**
  * 作ったものの開く道と、Google の書き出しの道（M2Office が受け取れないときに開く）。見本の接続口で作ったものは無い。
@@ -192,6 +195,12 @@ export function draftLinks(kind: SlideDeckKind, fileId: string): { url: string |
   if (fileId.startsWith('mock-')) return { url: null, exports: {} };
   const id = encodeURIComponent(fileId);
   if (kind === 'slides') return { url: `https://docs.google.com/presentation/d/${id}/edit`, exports: { pptx: `https://docs.google.com/presentation/d/${id}/export/pptx` } };
+  if (kind === 'sheet') {
+    return {
+      url: `https://docs.google.com/spreadsheets/d/${id}/edit`,
+      exports: { xlsx: `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`, pdf: `https://docs.google.com/spreadsheets/d/${id}/export?format=pdf` },
+    };
+  }
   return {
     url: `https://docs.google.com/document/d/${id}/edit`,
     exports: { docx: `https://docs.google.com/document/d/${id}/export?format=docx`, pdf: `https://docs.google.com/document/d/${id}/export?format=pdf` },
@@ -318,10 +327,12 @@ export class SlideDeckService {
     if (d.userId !== viewer.userId) return { fallback, reason: 'ほかの人が作ったものは Google から取り出します' };
     const got = d.kind === 'slides'
       ? await this.deps.connector.slides.exportPptx(viewer, d.presentationId)
-      : await this.deps.connector.docs.export(viewer, d.presentationId, format as 'docx' | 'pdf');
+      : d.kind === 'sheet'
+        ? await this.deps.connector.sheets.export(viewer, d.presentationId, format as 'xlsx' | 'pdf')
+        : await this.deps.connector.docs.export(viewer, d.presentationId, format as 'docx' | 'pdf');
     if (got === null) return { error: 'ファイルがドライブに見つかりませんでした（ドライブで削除されたかもしれません）' };
     if (got === 'too-large') return { fallback, reason: '大きいため、Google から取り出します' };
-    const name = d.title.replace(/[\\/:*?"<>|\n\r]/g, ' ').trim().slice(0, 80) || (d.kind === 'slides' ? 'スライド' : '文書');
+    const name = d.title.replace(/[\\/:*?"<>|\n\r]/g, ' ').trim().slice(0, 80) || (d.kind === 'slides' ? 'スライド' : d.kind === 'sheet' ? '表' : '文書');
     return { bytes: got, filename: `${name}.${format}`, mimeType: EXPORT_MIME[format] };
   }
 
