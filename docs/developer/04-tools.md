@@ -223,7 +223,7 @@
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
 | `skill.read` | `path`（必須）: ファイルの相対パス |
-| `slides.template` | `template`: テンプレートの名前（任意） |
+| `slides.template` | `design`: デザインの名前（組み込みのデザインか会社のテンプレート。任意） |
 | `subsidies.brief` | なし |
 | `subsidies.find` | `query`: 制度の名前の言葉 |
 | `subsidies.search` | `interest`: 頼みにあった関心 |
@@ -244,7 +244,7 @@
 | `quote.create` | `to`: 宛先（会社名・担当者。例: 株式会社○○ 山田様）、`items`（必須）: 品目。{ name, quantity, unit, unitPrice, taxRate, group, discount } の配列。group は区分の見出し（任意）、discount は値引きの額（任意。依頼に書かれたものだけ）、`validDays`: 有効期限（発行から何日。既定は会社の見積書の設定）、`paymentTerms`: お支払い条件（任意。無ければ会社の既定）、`terms`: 納期などの条件（任意）、`notes`: 備考（任意） |
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
-| `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`template`: 会社が登録したテンプレートの名前（任意） |
+| `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`design`: デザインの名前（組み込みのデザインか会社のテンプレート。任意） |
 | `announcements.draft` | `request`（必須）: 依頼者の頼み（そのまま） |
 | `announcements.recipients` | `request`（必須）: 宛先の頼み |
 | `announcements.revise` | `instruction`: 書き方の頼み、`publishAt`: 予約の日時（ISO 8601） |

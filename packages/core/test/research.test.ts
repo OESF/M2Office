@@ -27,31 +27,70 @@ test('サンプルの構成（表紙を含む 8 ページ）は検証を通る',
   if ('error' in r) return;
   assert.equal(r.plan.slides.length + 1, 8);
   assert.deepEqual(r.warnings, []);
-  assert.match(planOutline(r.plan), /## 5\. グラフの例（見本）（CHART）/);
+  assert.match(planOutline(r.plan), /## 3\. 見本では A が最も多い（BAR）/);
+  assert.match(planOutline(r.plan), /（発表者のメモ）/);
 });
 
 test('構成の誤りは作らずに理由を返す', () => {
   const bad = (p: unknown) => { const r = normalizeSlidePlan(p); return 'error' in r ? r.error : ''; };
   assert.match(bad({ slides: [{ layout: 'BULLET', title: 'x' }] }), /表紙の題名/);
-  assert.match(bad({ title: 't', slides: [{ layout: 'TABLE', title: 'x' }] }), /layout/);
+  assert.match(bad({ title: 't', slides: [{ layout: 'TEXT', title: 'x' }] }), /layout/);
   assert.match(bad({ title: 't', slides: Array.from({ length: 13 }, () => ({ layout: 'BULLET', title: 'x' })) }), /12 枚まで/);
   assert.match(bad({ title: 't', slides: [{ layout: 'CHART', title: 'g', chartType: 'LINE', chartCategories: ['a', 'b'], chartSeries: [{ name: 's', values: [1] }] }] }), /値の数/);
 });
 
 test('上限を超えた文字は切り詰め、そのことを注意として残す（黙って捨てない）', () => {
   const r = normalizeSlidePlan({
-    title: 't', slides: [{ layout: 'BULLET', title: 'あ'.repeat(30), body: ['1', '2', '3', '4', '5', '6', '7', '8'].join('\n') }],
+    title: 't', slides: [{ layout: 'BULLET', title: 'あ'.repeat(40), body: ['1', '2', '3', '4', '5', '6', '7', '8'].join('\n') }],
   });
   if ('error' in r) assert.fail(r.error);
-  assert.equal(r.plan.slides[0]!.title.length, 20);
-  assert.equal(r.plan.slides[0]!.body!.split('\n').length, 6);
-  assert.ok(r.warnings.some((w) => w.includes('題名')) && r.warnings.some((w) => w.includes('6 行')));
+  assert.equal(r.plan.slides[0]!.title.length, 30, '見出しは言い切りの 1 文で 30 文字まで');
+  assert.equal(r.plan.slides[0]!.body!.split('\n').length, 3, '箇条書きは 3 行まで');
+  assert.ok(r.warnings.some((w) => w.includes('題名')) && r.warnings.some((w) => w.includes('3 行')));
 });
 
 test('箇条書きの行頭の印は外す（組み立てで付く印と二重にしない）。数の - は残す', () => {
-  const r = normalizeSlidePlan({ title: 't', slides: [{ layout: 'BULLET', title: 'b', body: '・MoE の主流化\n- 量子化\n• 小型化\n-3% の低下' }] });
+  const r = normalizeSlidePlan({ title: 't', slides: [{ layout: 'BULLET', title: 'b', body: '・MoE の主流化\n• 量子化\n-3% の低下' }] });
   if ('error' in r) assert.fail(r.error);
-  assert.equal(r.plan.slides[0]!.body, 'MoE の主流化\n量子化\n小型化\n-3% の低下');
+  assert.equal(r.plan.slides[0]!.body, 'MoE の主流化\n量子化\n-3% の低下');
+});
+
+test('発表の決まり: 箇条書きは 2 枚まで・同じレイアウトを続けない・文字だけのページは半分まで。合わなければ直し方を返す', () => {
+  const bad = (slides: unknown[]) => { const r = normalizeSlidePlan({ title: 't', slides }); return 'error' in r ? r.error : ''; };
+  const b = (t: string) => ({ layout: 'BULLET', title: t, body: 'a' });
+  const kpi = { layout: 'KPI', title: 'k', stats: [{ value: '1', label: 'x' }] };
+  const table = { layout: 'TABLE', title: 't', chartCategories: ['a'], chartSeries: [{ name: 's', values: [1] }] };
+  assert.match(bad([b('1'), kpi, b('2'), kpi, b('3')]), /BULLET.*2 枚まで/);
+  assert.match(bad([kpi, kpi]), /同じレイアウト/);
+  assert.match(bad([b('1'), table, kpi, b('2'), table]), /文字だけのページ.*多すぎます/);
+  assert.equal(bad([b('1'), kpi, b('2'), { layout: 'STATEMENT', title: '', message: 'まとめ' }]), '');
+  // 会社のテンプレートの見本で書いた構成には当てない
+  const r = normalizeSlidePlan({ title: 't', slides: [{ layout: '箇条書き', values: { 本文: 'a' } }, { layout: '箇条書き', values: { 本文: 'b' } }] });
+  assert.ok(!('error' in r));
+});
+
+test('図のレイアウト: 項目の数・数の値・アイコンを確かめる。前の版の CHART は棒グラフ・割合・表に読み替える', () => {
+  const one = (s: Record<string, unknown>) => normalizeSlidePlan({ title: 't', slides: [s] });
+  const err = (s: Record<string, unknown>) => { const r = one(s); return 'error' in r ? r.error : ''; };
+  assert.match(err({ layout: 'STEPS', title: 's', items: [{ title: 'a' }, { title: 'b' }] }), /3 つ以上/);
+  assert.match(err({ layout: 'BAR', title: 'b', items: [{ label: 'a', value: 'x' }, { label: 'b', value: 2 }] }), /value/);
+  assert.match(err({ layout: 'PROGRESS', title: 'p', items: [{ label: 'a', value: 120 }] }), /0〜100/);
+  assert.match(err({ layout: 'BIG_NUMBER', title: 'n' }), /stats/);
+  const cards = one({ layout: 'CARDS', title: 'c', items: [{ icon: '🎯', title: 'a', text: 'x' }, { icon: '長すぎるアイコンの文字', title: 'b' }, { title: 'c' }, { title: 'd' }, { title: 'e' }] });
+  if ('error' in cards) assert.fail(cards.error);
+  assert.equal(cards.plan.slides[0]!.items!.length, 4, 'カードは 4 つまで');
+  assert.equal(cards.plan.slides[0]!.items![0]!.icon, '🎯');
+  assert.equal(cards.plan.slides[0]!.items![1]!.icon, undefined, 'アイコンは絵文字 1 つだけ');
+  const pie = one({ layout: 'CHART', title: 'p', chartType: 'PIE', chartCategories: ['a', 'b'], chartSeries: [{ name: 's', values: [70, 30] }] });
+  const col = one({ layout: 'CHART', title: 'c', chartType: 'COLUMN', chartCategories: ['a', 'b'], chartSeries: [{ name: 's', values: [1, 2] }] });
+  const two = one({ layout: 'CHART', title: 't', chartType: 'LINE', chartCategories: ['a', 'b'], chartSeries: [{ name: 's', values: [1, 2] }, { name: 'u', values: [3, 4] }] });
+  if ('error' in pie || 'error' in col || 'error' in two) assert.fail('前の版の CHART を受け付ける');
+  assert.equal(pie.plan.slides[0]!.layout, 'SHARE');
+  assert.deepEqual([col.plan.slides[0]!.layout, col.plan.slides[0]!.orientation], ['BAR', 'vertical']);
+  assert.equal(two.plan.slides[0]!.layout, 'TABLE');
+  const statement = one({ layout: 'STATEMENT', title: '', message: '伝えたい一文', notes: '話すこと' });
+  if ('error' in statement) assert.fail(statement.error);
+  assert.equal(statement.plan.slides[0]!.notes, '話すこと');
 });
 
 test('本文を配列で渡されても 1 行ずつの箇条書きとして読む（比較の本文も）', () => {
@@ -65,6 +104,7 @@ test('本文を配列で渡されても 1 行ずつの箇条書きとして読�
 });
 
 let settingsTemplates: { id: string; name: string; presentationId: string; description: string; isDefault: boolean }[] = [];
+let settingsDesign: string | null = null;
 
 function ctx(): ToolContext & { artifacts: { title: string; body: string; kind: string }[]; connector: MockWorkspaceConnector } {
   const artifacts: { title: string; body: string; kind: string }[] = [];
@@ -72,7 +112,7 @@ function ctx(): ToolContext & { artifacts: { title: string; body: string; kind: 
     tenantId: 't', userId: 'u', runId: 'r', compartment: null, artifacts,
     repo: {
       createArtifact: async (a: { title: string; body: string; kind: string }) => { artifacts.push(a); },
-      getTenantSettings: async () => ({ slides: { templates: settingsTemplates }, company: { legalName: '株式会社見本', shortName: '' } }),
+      getTenantSettings: async () => ({ slides: { templates: settingsTemplates, defaultDesign: settingsDesign }, company: { legalName: '株式会社見本', shortName: '見本' } }),
     } as never,
     connector: new MockWorkspaceConnector(), files: {} as never, research: new MockResearchProvider(),
   };
@@ -106,6 +146,38 @@ test('slides.create: 会社が登録したテンプレートを使う。名前�
     assert.match(c.artifacts[0]!.body, /テンプレート: 提案書/);
   } finally {
     settingsTemplates = [];
+  }
+});
+
+test('組み込みのデザイン: 名前か ID で選び、指定が無ければ会社の既定（デザイン → テンプレートの既定 → ビジネス）。会社名を下の隅に渡す', async () => {
+  const tool = registry.get('slides.create')!;
+  const designOf = (c: ReturnType<typeof ctx>) => c.connector.outbox.map((o) => {
+    const b = o.body as { template: { name: string } | null; design?: { id: string } | null; footer?: string };
+    return b.template ? `t:${b.template.name}` : `d:${b.design?.id}:${b.footer}`;
+  });
+  const c = ctx();
+  await tool.invoke({ ...SAMPLE_PLAN, design: 'ナチュラル' }, c);
+  await tool.invoke({ ...SAMPLE_PLAN, design: 'dark' }, c);
+  const out = await tool.invoke(SAMPLE_PLAN, c) as { design: string; template: string | null };
+  assert.deepEqual(designOf(c), ['d:natural:見本', 'd:dark:見本', 'd:business:見本'], '指定が無く登録も無ければビジネス');
+  assert.equal(out.design, 'ビジネス');
+  assert.equal(out.template, null);
+  assert.match(c.artifacts[0]!.body, /デザイン: ナチュラル/);
+  settingsTemplates = [{ id: 'a', name: '社内向け', presentationId: 'p-inner-0000000000000000', description: '', isDefault: true }];
+  try {
+    const c2 = ctx();
+    await tool.invoke(SAMPLE_PLAN, c2);
+    settingsDesign = 'pop';
+    await tool.invoke(SAMPLE_PLAN, c2);
+    await tool.invoke({ ...SAMPLE_PLAN, design: '社内向け' }, c2);
+    await tool.invoke({ ...SAMPLE_PLAN, template: '社内向け' }, c2);
+    assert.deepEqual(designOf(c2), ['t:社内向け', 'd:pop:見本', 't:社内向け', 't:社内向け'], '会社の既定のデザインはテンプレートの既定より先。名前を指せばテンプレート');
+    const tpl = await registry.get('slides.template')!.invoke({}, ctx()) as Record<string, unknown>;
+    assert.equal(tpl['design'], 'ポップ');
+    assert.ok((tpl['choices'] as string[]).includes('クリーン') && (tpl['choices'] as string[]).includes('社内向け'), '選べる名前を推論に渡す');
+  } finally {
+    settingsTemplates = [];
+    settingsDesign = null;
   }
 });
 

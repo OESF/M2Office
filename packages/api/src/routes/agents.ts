@@ -5,6 +5,7 @@
  */
 
 import { Hono } from 'hono';
+import { findSlideDesign } from '@m2office/shared';
 import { isSchedulable } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -19,6 +20,23 @@ import type { AppEnv } from '../middleware/tenant.js';
  */
 export function agentsRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
+
+  /**
+   * スライドの作成で選べる見た目（第9.4.2節「組み込みのデザイン」）。組み込みのデザインは画面が持つため、
+   * 会社が登録したテンプレートの名前と説明と、会社の既定（組み込みのデザインの ID か、テンプレートの名前）だけを返す。
+   *
+   * @remarks テンプレートのファイルの ID は返さない（利用者の画面には要らない）
+   */
+  app.get('/slide-designs', async (c) => {
+    const { tenant } = c.get('ctx');
+    const slides = (await deps.repo.getTenantSettings(tenant.id)).slides;
+    const design = slides.defaultDesign ? findSlideDesign(slides.defaultDesign) : null;
+    const template = slides.templates.find((t) => t.isDefault);
+    return c.json({
+      templates: slides.templates.map((t) => ({ name: t.name, description: t.description })),
+      defaultChoice: design?.id ?? template?.name ?? 'business',
+    });
+  });
 
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');

@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { maskClientId,
   agentDisplayName,
-  isValidInvoiceNumber, parsePresentationId, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
+  isValidInvoiceNumber, parsePresentationId, findSlideDesign, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE, DEFAULT_QUOTE_STYLE
 } from '@m2office/shared';
 import { semanticSearchEnabled,
@@ -798,7 +798,10 @@ function validateSection(
       // 既定はちょうど 1 つ。指定が無ければ先頭、複数なら最初のものだけを既定にする
       const first = templates.findIndex((x) => x.isDefault);
       templates.forEach((x, i) => { x.isDefault = i === (first === -1 ? 0 : first); });
-      return { section: 'slides', value: { templates } };
+      // 会社の既定にした組み込みのデザイン（第9.4.2節「組み込みのデザイン」）。決めていればテンプレートの既定より先に使う
+      const design = typeof o['defaultDesign'] === 'string' && o['defaultDesign'] ? findSlideDesign(o['defaultDesign']) : null;
+      if (typeof o['defaultDesign'] === 'string' && o['defaultDesign'] && !design) return { error: '組み込みのデザインが見つかりません' };
+      return { section: 'slides', value: { templates, defaultDesign: design?.id ?? null } };
     }
     case 'privacy': {
       // Google から取得したデータを残す日数（仕様書 第14.3.2節）。短くはできるが、7 日より長くはできない

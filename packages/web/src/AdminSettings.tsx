@@ -11,10 +11,12 @@ import { Fragment, useEffect, useState } from 'react';
 import type {
   AutomationPolicy, CompanyInfo, Role, SlideTemplate, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
+import { SLIDE_DESIGNS } from '@m2office/shared';
 import { api, describeError, type ConsolidationView, type KnowledgeItemView, type KnowledgeSectionView, type KnowledgeVersionView } from './api.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
+import { SlideDesignPicker } from './slide-design-picker.js';
 
 type Catalog = {
   id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;
@@ -246,7 +248,7 @@ export function CompanySettings({ page }: { page: string }) {
       </div>
       )}
       {page === 'invoice' && <InvoiceStyleSettings initial={data.invoice} onSaved={() => void reload()} />}
-      {page === 'slides' && <SlideTemplateSettings initial={data.slides.templates} onSaved={() => void reload()} />}
+      {page === 'slides' && <SlideTemplateSettings initial={data.slides.templates} initialDesign={data.slides.defaultDesign ?? null} onSaved={() => void reload()} />}
     </>
   );
 }
@@ -436,18 +438,32 @@ type TemplateDraft = { id: string; name: string; url: string; description: strin
  *
  * @remarks 中身（レイアウト・差し込み口）の読み取りは Google 連携の後。いまは登録と既定の選択だけを行う。
  */
-function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[]; onSaved: () => void }) {
+function SlideTemplateSettings({ initial, initialDesign, onSaved }: { initial: SlideTemplate[]; initialDesign: string | null; onSaved: () => void }) {
   const toDraft = (t: SlideTemplate): TemplateDraft => ({
     id: t.id, name: t.name, url: t.presentationId, description: t.description, isDefault: t.isDefault,
   });
   const [items, setItems] = useState<TemplateDraft[]>(initial.map(toDraft));
+  // 会社の既定にした組み込みのデザイン（第9.4.2節「組み込みのデザイン」）。決めていればテンプレートの既定より先に使う
+  const [design, setDesign] = useState<string | null>(initialDesign);
   const saver = useSaver();
   useEffect(() => { setItems(initial.map(toDraft)); }, [initial]);
+  useEffect(() => { setDesign(initialDesign); }, [initialDesign]);
+  const choice = design ?? items.find((t) => t.isDefault && t.name)?.name ?? SLIDE_DESIGNS[0]!.id;
+  const choose = (v: string) => {
+    if (SLIDE_DESIGNS.some((d) => d.id === v)) { setDesign(v); return; }
+    setDesign(null);
+    setItems(items.map((x) => ({ ...x, isDefault: x.name === v })));
+  };
   const set = (i: number, patch: Partial<TemplateDraft>) => setItems(items.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const idOf = (url: string) => /\/presentation\/d\/([A-Za-z0-9_-]{20,})/.exec(url)?.[1] ?? (/^[A-Za-z0-9_-]{20,}$/.test(url.trim()) ? url.trim() : null);
 
   return (
     <div className="card">
+      <div className="field">
+        <label>会社の既定</label>
+        <SlideDesignPicker value={choice} templates={items.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), description: t.description }))} onChange={choose} />
+      </div>
+      <h3>会社のテンプレート</h3>
       <p className="muted small">ファイルは社内で共有してください</p>
       {items.map((t, i) => {
         const id = idOf(t.url);
@@ -474,8 +490,8 @@ function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[];
               </div>
             </div>
             <label className="check">
-              <input type="radio" name="default-template" checked={t.isDefault}
-                onChange={() => setItems(items.map((x, j) => ({ ...x, isDefault: j === i })))} /> 既定にする
+              <input type="radio" name="default-template" checked={!design && t.isDefault}
+                onChange={() => { setDesign(null); setItems(items.map((x, j) => ({ ...x, isDefault: j === i }))); }} /> 既定にする
             </label>
           </div>
         );
@@ -488,6 +504,7 @@ function SlideTemplateSettings({ initial, onSaved }: { initial: SlideTemplate[];
         <SaveButton run={async () => {
           await api.admin.saveSettings('slides', {
             templates: items.map((t) => ({ id: t.id, name: t.name, presentationId: t.url, description: t.description, isDefault: t.isDefault })),
+            defaultDesign: design ?? '',
           });
           onSaved();
         }} />

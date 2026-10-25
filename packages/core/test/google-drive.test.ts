@@ -20,6 +20,7 @@ import { markdownToDocHtml } from '../src/connectors/google/doc-html.js';
 import { DRIVE_READ_MAX_BYTES, kindOf, quoteDriveQuery } from '../src/connectors/google/drive.js';
 import { sheetRange, toCell } from '../src/connectors/google/sheets.js';
 import { SOURCES_MAX, TABLE_ROWS_MAX, slideRequests } from '../src/connectors/google/slides.js';
+import { findSlideDesign } from '@m2office/shared';
 import { describeTemplate } from '../src/slides/template.js';
 import { SlidePlanError } from '../src/slides/plan.js';
 
@@ -342,11 +343,12 @@ test('スライド: 標準の見た目で組み立てる。表紙・各レイア
     assert.deepEqual(slides, ['m2cover', 'm2slide1', 'm2slide2', 'm2slide3', 'm2slide4', 'm2slide5', 'm2src']);
     assert.deepEqual(reqs.at(-1), { deleteObject: { objectId: 'p' } }, '最初から入っていた 1 枚は最後に消す');
     const texts = reqs.filter((r) => r['insertText']).map((r) => r['insertText'].text);
-    for (const t of ['ローカル LLM の動向', '2026 年 9 月', '製品が増えた\n価格が下がった', '手元で動かせる時代になった', '手元\n社外に出さない', '12\n製品の数', '12,000', '手元で動く様子', '出典']) {
+    for (const t of ['ローカル LLM の動向', '2026 年 9 月', '製品が増えた\n価格が下がった', '手元で動かせる時代になった', '手元\n社外に出さない', '12', '製品の数', '12,000', '手元で動く様子', '出典']) {
       assert.ok(texts.includes(t), `「${t}」を置く`);
     }
     assert.equal(reqs.filter((r) => r['createTable']).length, 1, 'グラフは表で示す');
-    assert.equal(reqs.filter((r) => r['createParagraphBullets']).length, 1);
+    assert.equal(reqs.filter((r) => r['createParagraphBullets']).length, 3, '箇条書きと、対比の 2 つのパネルの本文（見出しの行には付けない）');
+    assert.ok(reqs.some((r) => r['createParagraphBullets']?.textRange?.type === 'FROM_START_INDEX'));
     const links = reqs.filter((r) => r['updateTextStyle']?.style?.link).map((r) => r['updateTextStyle'].style.link.url);
     assert.deepEqual(links, ['https://example.com/a'], 'http・https だけをリンクにする');
     assert.ok(!seen.some((s) => s.path.includes('/permissions')), '共有しない');
@@ -377,6 +379,26 @@ test('スライド: 表と出典は上限で切り、そのことを注意に残
   assert.ok(r.requests.some((x) => x['deleteObject']?.objectId === 'm2cover_s'));
   const r2 = slideRequests({ title: 't', slides: [{ layout: 'BULLET', title: 'b', body: 'x' }] }, { width: 9144000, height: 5143500 }, null);
   assert.equal(r2.pages, 2, '出典が無ければ出典のページを足さない');
+});
+
+test('組み込みのデザイン: 背景・題名の色と字体・表紙の飾り・題名の下の線・下の隅の会社名を当てる（第9.4.2節）', () => {
+  const plan = { title: '表紙', subtitle: '副題', slides: [{ layout: 'BULLET' as const, title: '説明', body: 'a' }] };
+  const page = { width: 9144000, height: 5143500 };
+  const dark = slideRequests(plan, page, null, { design: findSlideDesign('dark')!, footer: '見本' });
+  const bg = dark.requests.filter((x) => x['updatePageProperties']).map((x) => x['updatePageProperties'].pageProperties.pageBackgroundFill.solidFill.color.rgbColor);
+  assert.deepEqual(bg, [findSlideDesign('dark')!.cover.background, findSlideDesign('dark')!.background], '表紙と本文の背景');
+  const titleStyle = dark.requests.find((x) => x['updateTextStyle']?.objectId === 'm2slide1_t')!['updateTextStyle'];
+  assert.equal(titleStyle.style.fontFamily, 'Noto Sans JP');
+  assert.deepEqual(titleStyle.style.foregroundColor.opaqueColor.rgbColor, findSlideDesign('dark')!.accent);
+  assert.ok(dark.requests.some((x) => x['createShape']?.objectId === 'm2slide1_rl'), 'ダークは題名の下に線');
+  assert.ok(dark.requests.some((x) => x['createShape']?.objectId === 'm2cover_line'), 'ダークの表紙は線');
+  assert.ok(dark.requests.some((x) => x['insertText']?.objectId === 'm2slide1_f' && x['insertText'].text === '見本'), '下の隅の会社名');
+  const natural = slideRequests(plan, page, null, { design: findSlideDesign('ナチュラル')! });
+  assert.ok(natural.requests.some((x) => x['createShape']?.objectId === 'm2cover_c1') && !natural.requests.some((x) => x['createShape']?.objectId === 'm2slide1_rl'), 'ナチュラルは角の飾りで、線は引かない');
+  assert.ok(!natural.requests.some((x) => x['insertText']?.objectId === 'm2slide1_f'), '会社名が無ければ出さない');
+  const plain = slideRequests(plan, page, null);
+  assert.ok(plain.requests.some((x) => x['createShape']?.objectId === 'm2cover_band'), '指定が無ければビジネス（帯）');
+  assert.equal(plain.pages, natural.pages, 'デザインはページの数を変えない');
 });
 
 test('テンプレート: 見本のスライドと差し込み口を読む。名前・入る量・図の置き場所（囲む枠）・マスターの変数', () => {

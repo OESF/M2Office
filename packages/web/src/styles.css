@@ -2685,3 +2685,17 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .back-bottom { margin: calc(24px * var(--space-scale)) 0 calc(8px * var(--space-scale)); }
 /* 横に並ぶ行の中（状態の印などと並べるとき）は、下の余白を取らない */
 .row > .back-btn.back-top, .cards-toolbar > .back-btn.back-top { margin-bottom: 0; }
+
+/* スライドのデザインの見本の絵のカード（仕様書 第9.4.2節「組み込みのデザイン」） */
+.slide-design-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.slide-design-card {
+  display: flex; flex-direction: column; gap: 6px; padding: 8px; text-align: left; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); font: inherit;
+}
+.slide-design-card:hover { border-color: var(--accent); }
+.slide-design-card.is-selected { border: 2px solid var(--accent); padding: 7px; background: var(--accent-soft); }
+.slide-design-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.slide-design-preview { width: 100%; height: auto; display: block; }
+.slide-design-name { font-weight: 600; font-size: .85rem; }
+.slide-design-template { display: flex; flex-direction: column; gap: 4px; min-height: 48px; justify-content: center; }
+.slide-design-badge { font-size: .72rem; color: var(--accent); font-weight: 600; }

@@ -2794,6 +2794,8 @@ export const api = {
       call(`${mcpPath(id)}/tools/${encodeURIComponent(tool)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
   },
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
+  /** スライドの作成で選べる会社のテンプレートと、会社の既定（第9.4.2節「組み込みのデザイン」）。組み込みのデザインは画面が持つ。 */
+  slideDesigns: () => call<{ templates: { name: string; description: string }[]; defaultChoice: string }>('/agents/slide-designs'),
   /** 個人設定「サービスとの接続」（仕様書 第6.5.9節）。 */
   myConnections: () => call<{ items: MyConnectionView[] }>('/me/connections'),
   /** 結び付いている外部のアプリ（個人設定の「サービスとの接続」。仕様書 第11.12節）。 */

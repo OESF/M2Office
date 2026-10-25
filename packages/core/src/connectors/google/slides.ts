@@ -4,7 +4,11 @@
  * テンプレートのファイルを使わず、Slides API で空のプレゼンテーションを作ってから、
  * レイアウトごとに決めた位置へ図形と文字を置く。M2Office が作ったファイルしか触らないため、権限は `drive.file` だけで足りる。
  * LLM は内容と構成だけを決め、位置や色はここで決める（ADR-0006）。共有はしない。
+ * 色・字体・表紙の飾りは、組み込みのデザイン（`SLIDE_DESIGNS`。第9.4.2節「組み込みのデザイン」）で切り替える。
  */
+
+import { DEFAULT_SLIDE_DESIGN_ID, findSlideDesign, type SlideDesign, type SlideRgb } from '@m2office/shared';
+import { drawInfographic, onColor, type ShapeKind, type SlideDraw, type TextStyle } from './slide-infographics.js';
 
 import { SlidePlanError, isStandardLayout, type SlidePlan, type SlideSpec } from '../../slides/plan.js';
 import { TEMPLATE_FIELDS, describeTemplate, type SlidesPresentation, type TemplateManifest } from '../../slides/template.js';
@@ -27,15 +31,10 @@ export const TABLE_ROWS_MAX = 8;
 /** 出典のページに載せる件数の上限。 */
 export const SOURCES_MAX = 10;
 
-/** 色（0〜1 の RGB）。落ち着いた紺を基調にする。 */
-const COLOR = {
-  accent: { red: 0.1, green: 0.3, blue: 0.55 },
-  accentLight: { red: 0.91, green: 0.94, blue: 0.98 },
-  text: { red: 0.2, green: 0.2, blue: 0.2 },
-  muted: { red: 0.4, green: 0.4, blue: 0.4 },
-};
+type Rgb = SlideRgb;
 
-type Rgb = (typeof COLOR)[keyof typeof COLOR];
+/** 既定のデザイン（ビジネス）。 */
+const DEFAULT_DESIGN = findSlideDesign(DEFAULT_SLIDE_DESIGN_ID)!;
 type Request = Record<string, unknown>;
 /** 置く場所（インチ。既定の大きさでの値）。 */
 type Box = { x: number; y: number; w: number; h: number };
@@ -46,25 +45,32 @@ type Box = { x: number; y: number; w: number; h: number };
  * @param plan 検証済みの構成（`normalizeSlidePlan` を通したもの）
  * @param page 作ったプレゼンテーションの大きさ（EMU）
  * @param initialSlide 作ったときに入っている 1 枚目。最後に消す
- * @returns 要求の並び、ページ数、注意（切り詰めたことなど。黙って捨てない）
+ * @param o.design 組み込みのデザイン（無ければ既定の「ビジネス」）
+ * @param o.footer 表紙と各ページの下の隅に出す会社名（無ければ出さない）
+ * @returns 要求の並び、ページ数、注意（切り詰めたことなど。黙って捨てない）、ページごとの発表者のメモ（ページの ID → 文）
  */
 export function slideRequests(
   plan: SlidePlan, page: { width: number; height: number }, initialSlide: string | null,
-): { requests: Request[]; pages: number; warnings: string[] } {
+  o: { design?: SlideDesign; footer?: string } = {},
+): { requests: Request[]; pages: number; warnings: string[]; notes: Record<string, string> } {
   const sx = page.width / BASE.width;
   const sy = page.height / BASE.height;
   const requests: Request[] = [];
   const warnings: string[] = [];
+  const d = o.design ?? DEFAULT_DESIGN;
+  const COLOR = { accent: d.accent, accentLight: d.accentLight, text: d.text, muted: d.muted };
+  const footer = (o.footer ?? '').trim().slice(0, 40);
 
   const at = (pageObjectId: string, b: Box) => ({
     pageObjectId,
     size: { width: { magnitude: Math.round(b.w * EMU_PER_INCH * sx), unit: 'EMU' }, height: { magnitude: Math.round(b.h * EMU_PER_INCH * sy), unit: 'EMU' } },
     transform: { scaleX: 1, scaleY: 1, translateX: Math.round(b.x * EMU_PER_INCH * sx), translateY: Math.round(b.y * EMU_PER_INCH * sy), unit: 'EMU' },
   });
-  const style = (objectId: string, s: { size?: number; bold?: boolean; color?: Rgb }, range: Request = { type: 'ALL' }) => {
+  const style = (objectId: string, s: { size?: number; bold?: boolean; color?: Rgb; font?: string }, range: Request = { type: 'ALL' }) => {
     const st: Record<string, unknown> = {};
     const fields: string[] = [];
     if (s.size) { st['fontSize'] = { magnitude: s.size, unit: 'PT' }; fields.push('fontSize'); }
+    if (s.font) { st['fontFamily'] = s.font; fields.push('fontFamily'); }
     if (s.bold !== undefined) { st['bold'] = s.bold; fields.push('bold'); }
     if (s.color) { st['foregroundColor'] = { opaqueColor: { rgbColor: s.color } }; fields.push('foregroundColor'); }
     requests.push({ updateTextStyle: { objectId, style: st, textRange: range, fields: fields.join(',') } });
@@ -89,17 +95,66 @@ export function slideRequests(
     }
     if (!value) return;
     text(id, value);
-    style(id, { size: o.size, bold: o.bold ?? false, color: o.color ?? COLOR.text });
+    style(id, { size: o.size, bold: o.bold ?? false, color: o.color ?? COLOR.text, font: d.font.body });
     if (o.center) requests.push({ updateParagraphStyle: { objectId: id, style: { alignment: 'CENTER' }, textRange: { type: 'ALL' }, fields: 'alignment' } });
     if (o.bullets) requests.push({ createParagraphBullets: { objectId: id, textRange: { type: 'ALL' }, bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE' } });
   };
-  /** 見出しの 1 行目を太く大きく、残りを本文にした枠。 */
-  const headed = (id: string, slide: string, b: Box, head: string, body: string, fill: Rgb) => {
-    const value = [head, body].filter(Boolean).join('\n');
-    box(id, slide, b, value, { size: 14, fill });
-    if (head) style(id, { size: 18, bold: true, color: COLOR.accent }, { type: 'FIXED_RANGE', startIndex: 0, endIndex: head.length });
+  /** ページの背景を塗る。 */
+  const background = (slide: string, color: Rgb) => {
+    requests.push({
+      updatePageProperties: {
+        objectId: slide, pageProperties: { pageBackgroundFill: { solidFill: { color: { rgbColor: color } } } }, fields: 'pageBackgroundFill.solidFill.color',
+      },
+    });
   };
-  /** 題名だけの型のスライドを足し、題名を入れる。 */
+  /** 飾りの図形（枠の線なし）。 */
+  const shape = (id: string, slide: string, b: Box, kind: 'RECTANGLE' | 'ELLIPSE', fill: Rgb) => {
+    requests.push({ createShape: { objectId: id, shapeType: kind, elementProperties: at(slide, b) } });
+    requests.push({
+      updateShapeProperties: {
+        objectId: id, shapeProperties: { shapeBackgroundFill: { solidFill: { color: { rgbColor: fill } } }, outline: { propertyState: 'NOT_RENDERED' } },
+        fields: 'shapeBackgroundFill.solidFill.color,outline.propertyState',
+      },
+    });
+  };
+  /** 図のレイアウトを描く道具（第9.4.2節「プレゼンテーションの表現」）。 */
+  const g: SlideDraw = {
+    design: d,
+    shape: (id: string, slide: string, b: Box, kind: ShapeKind, fill: Rgb | null, value?: string, st?: TextStyle) => {
+      requests.push({ createShape: { objectId: id, shapeType: kind, elementProperties: at(slide, b) } });
+      const props: Record<string, unknown> = {};
+      const fields: string[] = [];
+      if (fill) { props['shapeBackgroundFill'] = { solidFill: { color: { rgbColor: fill } } }; fields.push('shapeBackgroundFill.solidFill.color'); }
+      if (kind !== 'TEXT_BOX') { props['outline'] = { propertyState: 'NOT_RENDERED' }; fields.push('outline.propertyState'); }
+      if (st?.valign) { props['contentAlignment'] = st.valign; fields.push('contentAlignment'); }
+      if (fields.length) requests.push({ updateShapeProperties: { objectId: id, shapeProperties: props, fields: fields.join(',') } });
+      if (!value || !st) return;
+      text(id, value);
+      style(id, { size: st.size, bold: st.bold ?? false, color: st.color ?? COLOR.text, font: st.heading ? d.font.heading : d.font.body });
+      if (st.align && st.align !== 'START') requests.push({ updateParagraphStyle: { objectId: id, style: { alignment: st.align }, textRange: { type: 'ALL' }, fields: 'alignment' } });
+    },
+    restyle: (id: string, start: number, end: number, st: TextStyle) => {
+      if (end <= start) return;
+      style(id, { size: st.size, bold: st.bold ?? false, ...(st.color ? { color: st.color } : {}), ...(st.heading ? { font: d.font.heading } : {}) }, { type: 'FIXED_RANGE', startIndex: start, endIndex: end });
+    },
+    bullets: (id: string, from = 0) => {
+      requests.push({ createParagraphBullets: { objectId: id, textRange: from > 0 ? { type: 'FROM_START_INDEX', startIndex: from } : { type: 'ALL' }, bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE' } });
+    },
+  };
+  /** 題名の無いページ（大きな一文・区切り）を足す。 */
+  const blank = (id: string, color: Rgb) => {
+    requests.push({ createSlide: { objectId: id, slideLayoutReference: { predefinedLayout: 'BLANK' } } });
+    background(id, color);
+  };
+  /** 発表者のメモ（ページの ID → 文）。組み立ての後に、メモの枠の ID を読んで入れる。 */
+  const notes: Record<string, string> = {};
+  /** 下の隅の会社名。 */
+  const footerText = (slide: string, color: Rgb) => {
+    if (!footer) return;
+    box(`${slide}_f`, slide, { x: 5.5, y: 5.28, w: 4, h: 0.3 }, footer, { size: 9, color });
+    requests.push({ updateParagraphStyle: { objectId: `${slide}_f`, style: { alignment: 'END' }, textRange: { type: 'ALL' }, fields: 'alignment' } });
+  };
+  /** 題名だけの型のスライドを足し、題名を入れる。背景・題名の色と字体・題名の下の線・下の隅の会社名をデザインに合わせる。 */
   const titled = (id: string, title: string) => {
     requests.push({
       createSlide: {
@@ -107,7 +162,12 @@ export function slideRequests(
         placeholderIdMappings: [{ layoutPlaceholder: { type: 'TITLE', index: 0 }, objectId: `${id}_t` }],
       },
     });
+    background(id, d.background);
     text(`${id}_t`, title);
+    // 見出しは言い切りの 1 文（30 文字まで）。1 行に収まる大きさにする
+    if (title) style(`${id}_t`, { size: 20, bold: true, color: COLOR.accent, font: d.font.heading });
+    if (d.rule) shape(`${id}_rl`, id, { x: 0.5, y: 1.18, w: 9, h: 0.03 }, 'RECTANGLE', COLOR.accent);
+    footerText(id, COLOR.muted);
   };
 
   // 表紙
@@ -120,44 +180,66 @@ export function slideRequests(
       ],
     },
   });
+  background('m2cover', d.cover.background);
+  // 表紙の飾り（帯・線・角・全面）。全面は背景の色だけで表す
+  if (d.cover.style === 'band') shape('m2cover_band', 'm2cover', { x: 0, y: 0, w: 0.35, h: 5.625 }, 'RECTANGLE', COLOR.accent);
+  // 線は題名の上に短く置く（題名の下は副題の枠と重なるため）
+  if (d.cover.style === 'line') shape('m2cover_line', 'm2cover', { x: 4.5, y: 1.0, w: 1, h: 0.06 }, 'RECTANGLE', COLOR.accent);
+  if (d.cover.style === 'corner') {
+    shape('m2cover_c1', 'm2cover', { x: 8.2, y: -1, w: 2.6, h: 2.6 }, 'ELLIPSE', COLOR.accentLight);
+    shape('m2cover_c2', 'm2cover', { x: -1, y: 4, w: 2.6, h: 2.6 }, 'ELLIPSE', COLOR.accent);
+  }
   text('m2cover_t', plan.title);
-  if (plan.subtitle) text('m2cover_s', plan.subtitle);
-  else requests.push({ deleteObject: { objectId: 'm2cover_s' } });
+  if (plan.title) style('m2cover_t', { bold: true, color: d.cover.title, font: d.font.heading });
+  if (plan.subtitle) {
+    text('m2cover_s', plan.subtitle);
+    style('m2cover_s', { color: d.cover.subtitle, font: d.font.body });
+  } else requests.push({ deleteObject: { objectId: 'm2cover_s' } });
+  footerText('m2cover', d.cover.subtitle);
 
   // 本文のスライド。中身は題名の下から、伝えたいこと（takeaway）の帯の上まで
-  const content: Box = { x: 0.5, y: 1.35, w: 9, h: 3.25 };
+  const content: Box = { x: 0.5, y: 1.45, w: 9, h: 3.7 };
   plan.slides.forEach((s: SlideSpec, i) => {
     // Slides API はオブジェクトの ID に 5 文字以上を求める（短いと 400。AI Radio での知見）
     const id = `m2slide${i + 1}`;
+    if (s.notes) notes[id] = s.notes;
+    if (s.layout === 'STATEMENT') {
+      // 大きな一文だけを中央に
+      blank(id, d.background);
+      g.shape(`${id}_bar`, id, { x: 4.6, y: 1.35, w: 0.8, h: 0.06 }, 'RECTANGLE', COLOR.accent);
+      g.shape(`${id}_m`, id, { x: 0.9, y: 1.6, w: 8.2, h: 1.9 }, 'TEXT_BOX', null, s.message ?? s.title, { size: 32, bold: true, heading: true, color: COLOR.accent, align: 'CENTER', valign: 'MIDDLE' });
+      if (s.sub) g.shape(`${id}_s`, id, { x: 1.2, y: 3.6, w: 7.6, h: 0.6 }, 'TEXT_BOX', null, s.sub, { size: 16, color: COLOR.muted, align: 'CENTER' });
+      footerText(id, COLOR.muted);
+      return;
+    }
+    if (s.layout === 'SECTION') {
+      // 区切り。強調の色で塗り、番号と章の名前を大きく
+      blank(id, COLOR.accent);
+      const fg = onColor(COLOR.accent);
+      if (s.number) g.shape(`${id}_n`, id, { x: 0.8, y: 1.3, w: 3, h: 1.2 }, 'TEXT_BOX', null, s.number, { size: 60, bold: true, heading: true, color: fg, valign: 'BOTTOM' });
+      g.shape(`${id}_t`, id, { x: 0.8, y: 2.55, w: 8.4, h: 1.2 }, 'TEXT_BOX', null, s.title, { size: 36, bold: true, heading: true, color: fg, valign: 'TOP' });
+      if (s.sub) g.shape(`${id}_s`, id, { x: 0.8, y: 3.75, w: 8.4, h: 0.6 }, 'TEXT_BOX', null, s.sub, { size: 16, color: fg });
+      return;
+    }
     titled(id, s.title);
-    const area = s.takeaway ? content : { ...content, h: 3.9 };
-    if (s.layout === 'BULLET') {
-      box(`${id}_b`, id, area, s.body ?? '', { size: 16, bullets: true });
-    } else if (s.layout === 'COMPARISON') {
-      const w = (area.w - 0.3) / 2;
-      headed(`${id}_l`, id, { ...area, w }, s.compareLeftTitle ?? '', s.compareLeftBody ?? '', COLOR.accentLight);
-      headed(`${id}_r`, id, { ...area, x: area.x + w + 0.3, w }, s.compareRightTitle ?? '', s.compareRightBody ?? '', COLOR.accentLight);
-    } else if (s.layout === 'KPI') {
-      const stats = s.stats ?? [];
-      const w = stats.length > 0 ? (area.w - 0.3 * (stats.length - 1)) / stats.length : area.w;
-      stats.forEach((st, k) => {
-        const kid = `${id}_k${k + 1}`;
-        box(kid, id, { x: area.x + k * (w + 0.3), y: area.y + 0.4, w, h: Math.min(2.2, area.h - 0.4) }, `${st.value}\n${st.label}`, { size: 14, fill: COLOR.accentLight, center: true, color: COLOR.muted });
-        style(kid, { size: 32, bold: true, color: COLOR.accent }, { type: 'FIXED_RANGE', startIndex: 0, endIndex: st.value.length });
-      });
-    } else if (s.layout === 'CHART') {
+    const area = s.takeaway ? { ...content, h: 3.15 } : content;
+    if (drawInfographic(g, s, id, area)) {
+      // 図のレイアウト（第9.4.2節「プレゼンテーションの表現」）
+    } else if (s.layout === 'BULLET') {
+      box(`${id}_b`, id, area, s.body ?? '', { size: 20, bullets: true });
+    } else if (s.layout === 'TABLE' || s.layout === 'CHART') {
       const cats = s.chartCategories ?? [];
       const rows = Math.min(cats.length, TABLE_ROWS_MAX);
-      requests.push(...tableRequests(`${id}_tbl`, at(id, { ...area, h: Math.min(area.h, 0.4 * (rows + 1)) }), s, `${i + 1} 枚目`, warnings));
+      requests.push(...tableRequests(`${id}_tbl`, at(id, { ...area, h: Math.min(area.h, 0.4 * (rows + 1)) }), s, `${i + 1} 枚目`, warnings, d));
     } else if (s.layout === 'IMAGE') {
       // 画像の生成は後の段階（第9.4.2節）。説明だけを出す
-      box(`${id}_c`, id, area, s.caption ?? s.body ?? '', { size: 18, center: true, color: COLOR.muted });
+      box(`${id}_c`, id, area, s.caption ?? s.body ?? '', { size: 20, center: true, color: COLOR.muted });
     } else {
       // 会社のテンプレートの見本の名前で構成されたが、テンプレートを使えなかった。値を箇条書きにして失わない
       box(`${id}_b`, id, area, Object.values(s.values ?? {}).filter(Boolean).join('\n'), { size: 16, bullets: true });
     }
     if (s.takeaway) {
-      box(`${id}_w`, id, { x: 0.5, y: 4.75, w: 9, h: 0.55 }, s.takeaway, { size: 14, bold: true, color: COLOR.accent, fill: COLOR.accentLight });
+      box(`${id}_w`, id, { x: 0.5, y: 4.7, w: 9, h: 0.5 }, s.takeaway, { size: 14, bold: true, color: COLOR.accent, fill: COLOR.accentLight });
     }
   });
 
@@ -182,7 +264,7 @@ export function slideRequests(
     pages += 1;
   }
   if (initialSlide) requests.push({ deleteObject: { objectId: initialSlide } });
-  return { requests, pages, warnings };
+  return { requests, pages, warnings, notes };
 }
 
 /**
@@ -192,8 +274,9 @@ export function slideRequests(
  * @param where 注意に書く場所（例: 3 枚目）
  */
 function tableRequests(
-  tid: string, elementProperties: Record<string, unknown>, s: SlideSpec, where: string, warnings: string[],
+  tid: string, elementProperties: Record<string, unknown>, s: SlideSpec, where: string, warnings: string[], design: SlideDesign = DEFAULT_DESIGN,
 ): Request[] {
+  const COLOR = { accent: design.accent, accentLight: design.accentLight, text: design.text };
   const cats = s.chartCategories ?? [];
   const series = s.chartSeries ?? [];
   if (cats.length === 0 || series.length === 0) return [];
@@ -206,8 +289,8 @@ function tableRequests(
     out.push({
       updateTextStyle: {
         objectId: tid, cellLocation: { rowIndex: r, columnIndex: c }, textRange: { type: 'ALL' },
-        style: { fontSize: { magnitude: 12, unit: 'PT' }, bold: head, foregroundColor: { opaqueColor: { rgbColor: head ? COLOR.accent : COLOR.text } } },
-        fields: 'fontSize,bold,foregroundColor',
+        style: { fontSize: { magnitude: 12, unit: 'PT' }, bold: head, fontFamily: design.font.body, foregroundColor: { opaqueColor: { rgbColor: head ? COLOR.accent : COLOR.text } } },
+        fields: 'fontSize,bold,fontFamily,foregroundColor',
       },
     });
   };
@@ -340,20 +423,35 @@ export function googleSlides(ctx: Ctx): SlidesConnector {
     }
   };
 
-  /** 標準の見た目で作る（第9.4.2節「標準の見た目」）。 */
-  const standard = async (p: ConnectorPrincipal, input: { title: string; plan: SlidePlan }) => {
+  /** 標準の見た目で作る（第9.4.2節「標準の見た目」）。組み込みのデザインがあれば、その色・字体・飾りで。 */
+  const standard = async (p: ConnectorPrincipal, input: { title: string; plan: SlidePlan; design?: SlideDesign | null; footer?: string }) => {
     const made = await slides(p, '/presentations', { method: 'POST', body: { title: input.title } });
     const id = String(made?.['presentationId'] ?? '');
     if (!id) throw new Error('スライドを作れませんでした');
     const size = made?.['pageSize'] as { width?: { magnitude?: number }; height?: { magnitude?: number } } | undefined;
     const page = { width: size?.width?.magnitude || BASE.width, height: size?.height?.magnitude || BASE.height };
     const first = (made?.['slides'] as { objectId?: string }[] | undefined)?.[0]?.objectId ?? null;
-    const { requests, pages, warnings } = slideRequests(input.plan, page, first);
+    const { requests, pages, warnings, notes } = slideRequests(input.plan, page, first, { ...(input.design ? { design: input.design } : {}), ...(input.footer ? { footer: input.footer } : {}) });
     try {
       await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests } });
     } catch (err) {
       await discard(p, id);
       throw new Error(`スライドを組み立てられませんでした: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // 発表者のメモ（話す内容）。メモの枠の ID は作った後にしか分からないため、読み直してから入れる。入れられなくてもスライドは残す
+    if (Object.keys(notes).length > 0) {
+      try {
+        const read = await slides(p, `/presentations/${encodeURIComponent(id)}?fields=${encodeURIComponent('slides(objectId,slideProperties(notesPage(notesProperties(speakerNotesObjectId))))')}`);
+        const list = (read?.['slides'] as { objectId?: string; slideProperties?: { notesPage?: { notesProperties?: { speakerNotesObjectId?: string } } } }[] | undefined) ?? [];
+        const inserts = list.flatMap((sl) => {
+          const notesId = sl.slideProperties?.notesPage?.notesProperties?.speakerNotesObjectId;
+          const text = sl.objectId ? notes[sl.objectId] : undefined;
+          return notesId && text ? [{ insertText: { objectId: notesId, text, insertionIndex: 0 } }] : [];
+        });
+        if (inserts.length) await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests: inserts } });
+      } catch (err) {
+        warnings.push(`発表者のメモを入れられませんでした（${err instanceof Error ? err.message : String(err)}）`);
+      }
     }
     return { presentationId: id, ...links(id), templateApplied: false, pages, warnings };
   };
@@ -365,7 +463,7 @@ export function googleSlides(ctx: Ctx): SlidesConnector {
     },
 
     createPresentation: async (p, input) => {
-      if (!input.template) return standard(p, input);
+      if (!input.template) return { ...(await standard(p, input)), ...(input.design ? { design: input.design.name } : {}) };
       const t = input.template;
       const got = await read(p, t.presentationId, t.name);
       const fallback = async (reason: string) => {

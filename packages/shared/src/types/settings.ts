@@ -122,6 +122,11 @@ export interface SlideTemplate {
 
 export interface SlidesSettings {
   templates: SlideTemplate[];
+  /**
+   * 会社の既定にした組み込みのデザインの ID（第9.4.2節「組み込みのデザイン」）。決めていれば、登録したテンプレートの既定より先に使う。
+   * 前の版の設定には無い（無ければ、テンプレートの既定、それも無ければ組み込みの「ビジネス」）
+   */
+  defaultDesign?: string | null;
 }
 
 /**

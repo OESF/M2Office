@@ -26,77 +26,112 @@
               "subtitle": "見本の構成（自動テストの見本です。実際には調べていません）",
               "slides": [
                 {
-                  "layout": "BULLET",
-                  "title": "この資料について",
-                  "body": "これは自動テストの見本の構成です\n実際の調査結果は入っていません\n本番では、調べた内容で作られます",
-                  "takeaway": "本物の資料は、調査の結果から作られます"
+                  "layout": "STATEMENT",
+                  "title": "",
+                  "message": "調べた結果を、伝わる形にまとめます",
+                  "sub": "見本のスライドです",
+                  "notes": "この資料は、スライドの作成の見本です。調べた結果を、図で見せる形にまとめています。"
                 },
                 {
-                  "layout": "BULLET",
-                  "title": "調べる観点（見本）",
-                  "body": "主な製品と発売時期\n動かすのに必要な機器\n性能の比べ方\n価格と使い方の違い",
-                  "takeaway": "観点は調査の結果に合わせて変わります"
+                  "layout": "BIG_NUMBER",
+                  "title": "見本の数字は 1 つを大きく見せる",
+                  "stats": [
+                    {
+                      "value": "82.6",
+                      "unit": "%",
+                      "label": "見本の利用率"
+                    }
+                  ],
+                  "sub": "前の年は 64.0%",
+                  "notes": "大事な数字は 1 つだけを大きく見せます。比べる値を下に添えると、変化が伝わります。"
+                },
+                {
+                  "layout": "BAR",
+                  "title": "見本では A が最も多い",
+                  "items": [
+                    {
+                      "label": "A",
+                      "value": 120
+                    },
+                    {
+                      "label": "B",
+                      "value": 80
+                    },
+                    {
+                      "label": "C",
+                      "value": 45
+                    }
+                  ],
+                  "highlight": "A",
+                  "unit": "件",
+                  "notes": "棒グラフでは、伝えたい 1 本だけを強調の色にします。"
+                },
+                {
+                  "layout": "STEPS",
+                  "title": "見本の進め方は 3 つの段",
+                  "items": [
+                    {
+                      "title": "調べる",
+                      "text": "テーマを Web で調べる"
+                    },
+                    {
+                      "title": "組み立てる",
+                      "text": "図で見せる構成にする"
+                    },
+                    {
+                      "title": "見直す",
+                      "text": "出典と数字を確かめる"
+                    }
+                  ],
+                  "notes": "流れは矢印の形で左から右に並べます。"
                 },
                 {
                   "layout": "COMPARISON",
-                  "title": "比べ方の例（見本）",
-                  "compareLeftTitle": "手元で動かす",
-                  "compareLeftBody": "データを社外に出さずに使える、という観点で比べます",
-                  "compareRightTitle": "クラウドで使う",
-                  "compareRightBody": "性能と手軽さ、という観点で比べます",
-                  "takeaway": "対比のレイアウトの見本です"
+                  "title": "見本では前と後で手間が減る",
+                  "mode": "before-after",
+                  "compareLeftTitle": "これまで",
+                  "compareLeftBody": "手で資料を探す\n文章を貼り付ける",
+                  "compareRightTitle": "これから",
+                  "compareRightBody": "秘書が調べる\n図で見せる",
+                  "notes": "前と後を並べると、変わる点が一目で分かります。"
                 },
                 {
-                  "layout": "KPI",
-                  "title": "数値の見せ方（見本）",
-                  "stats": [
+                  "layout": "CARDS",
+                  "title": "見本の資料は 3 つの点で伝わる",
+                  "items": [
                     {
-                      "value": "（数値）",
-                      "label": "主な製品の数"
+                      "icon": "🎯",
+                      "title": "1 枚 1 つ",
+                      "text": "伝えることを絞る"
                     },
                     {
-                      "value": "（数値）",
-                      "label": "必要なメモリ"
+                      "icon": "📊",
+                      "title": "図で見せる",
+                      "text": "数字はグラフにする"
                     },
                     {
-                      "value": "（数値）",
-                      "label": "価格の幅"
+                      "icon": "🗣️",
+                      "title": "話は台本へ",
+                      "text": "説明は発表者のメモに"
                     }
                   ],
-                  "takeaway": "強調する数値は、調査結果にあるものだけを使います"
+                  "notes": "カードは 3〜4 つにすると、覚えてもらいやすくなります。"
                 },
                 {
-                  "layout": "CHART",
-                  "title": "グラフの例（見本）",
-                  "chartType": "COLUMN",
-                  "chartCategories": [
-                    "項目 1",
-                    "項目 2",
-                    "項目 3"
-                  ],
-                  "chartSeries": [
+                  "layout": "CHECKLIST",
+                  "title": "見本のまとめは 3 つ",
+                  "items": [
                     {
-                      "name": "見本の値（実際のデータではありません）",
-                      "values": [
-                        1,
-                        2,
-                        3
-                      ]
+                      "title": "出典を確かめる"
+                    },
+                    {
+                      "title": "数字を推測で作らない"
+                    },
+                    {
+                      "title": "文字を減らす"
                     }
                   ],
-                  "takeaway": "グラフのレイアウトの見本です"
-                },
-                {
-                  "layout": "BULLET",
-                  "title": "まとめ方の例（見本）",
-                  "body": "分かったこと\n分からなかったこと（不明と書く）\n次に調べること",
-                  "takeaway": "分からない点は推測で埋めません"
-                },
-                {
-                  "layout": "BULLET",
-                  "title": "出典について",
-                  "body": "調べた結果の出典を最後に載せます\n見本のため、出典はありません",
-                  "takeaway": "出典は Google 検索の結果から付きます"
+                  "notes": "最後に、持ち帰ってほしいことをチェックの形で示します。"
                 }
               ],
               "sources": []

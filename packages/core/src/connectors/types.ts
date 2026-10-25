@@ -9,6 +9,7 @@
  * @see 仕様書 第24.2節 第 6 項
  */
 
+import type { SlideDesign } from '@m2office/shared';
 import type { SlidePlan } from '../slides/plan.js';
 import type { TemplateManifest } from '../slides/template.js';
 
@@ -418,10 +419,16 @@ export interface SlidesConnector {
       template: { presentationId: string; name: string } | null;
       /** マスターの変数の既定の値（`会社名` など）。構成の `deck` が優先する。 */
       deckDefaults?: Record<string, string>;
+      /** 組み込みのデザイン（第9.4.2節「組み込みのデザイン」）。会社のテンプレートを使わないときの色・字体・飾り。無ければ既定。 */
+      design?: SlideDesign | null;
+      /** 標準の見た目で、表紙と各ページの下の隅に出す会社名。 */
+      footer?: string;
     },
   ): Promise<{
     presentationId: string; url: string | null; pptxUrl: string | null;
     templateApplied?: boolean; pages?: number; warnings?: string[];
+    /** 標準の見た目で作ったときの、使ったデザインの名前。 */
+    design?: string;
   }>;
 }
 

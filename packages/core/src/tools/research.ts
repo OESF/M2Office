@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { DEFAULT_SLIDE_DESIGN_ID, SLIDE_DESIGNS, findSlideDesign, type SlideDesign } from '@m2office/shared';
 import type { Tool } from './registry.js';
 import { SlidePlanError, normalizeSlidePlan, planOutline } from '../slides/plan.js';
 
@@ -43,19 +44,37 @@ export const webResearch: Tool = {
 };
 
 /**
- * 使うテンプレートを決める。名前の指定があればそれ、無ければ既定。登録が無ければ `null`（標準）。
+ * 使う見た目を決める（第9.4.2節「組み込みのデザイン」）。
+ * 指定（組み込みのデザインの ID か名前、または会社のテンプレートの名前）があればそれ。
+ * 無ければ会社の既定（組み込みのデザイン → 会社のテンプレートの既定 → 組み込みの「ビジネス」の順）。
  *
- * @returns 選んだテンプレートと、名前が見つからなかったときの注意
+ * @returns 会社のテンプレート（使うなら）か組み込みのデザインのどちらか一方と、指定が見つからなかったときの注意
  */
-async function chooseTemplate(ctx: Parameters<Tool['invoke']>[1], wanted: string) {
-  const { templates } = (await ctx.repo.getTenantSettings(ctx.tenantId)).slides;
-  const named = wanted ? templates.find((t) => t.name === wanted) : undefined;
-  const chosen = named ?? templates.find((t) => t.isDefault) ?? null;
-  return {
-    template: chosen ? { presentationId: chosen.presentationId, name: chosen.name } : null,
-    warning: wanted && !named ? `テンプレート「${wanted}」が登録されていないため、既定のテンプレートを使いました` : null,
-  };
+async function chooseLook(ctx: Parameters<Tool['invoke']>[1], wanted: string): Promise<{
+  template: { presentationId: string; name: string } | null; design: SlideDesign | null; warning: string | null;
+}> {
+  const slides = (await ctx.repo.getTenantSettings(ctx.tenantId)).slides;
+  const builtIn = wanted ? findSlideDesign(wanted) : null;
+  if (builtIn) return { template: null, design: builtIn, warning: null };
+  const named = wanted ? slides.templates.find((t) => t.name === wanted) : undefined;
+  if (named) return { template: { presentationId: named.presentationId, name: named.name }, design: null, warning: null };
+  const warning = wanted ? `デザイン「${wanted}」が見つからないため、会社の既定で作りました` : null;
+  const defaultDesign = slides.defaultDesign ? findSlideDesign(slides.defaultDesign) : null;
+  if (defaultDesign) return { template: null, design: defaultDesign, warning };
+  const def = slides.templates.find((t) => t.isDefault);
+  if (def) return { template: { presentationId: def.presentationId, name: def.name }, design: null, warning };
+  return { template: null, design: findSlideDesign(DEFAULT_SLIDE_DESIGN_ID), warning };
 }
+
+/** 選べる見た目の名前（推論が依頼の言葉から選ぶため）。 */
+async function lookChoices(ctx: Parameters<Tool['invoke']>[1]): Promise<string[]> {
+  const { templates } = (await ctx.repo.getTenantSettings(ctx.tenantId)).slides;
+  return [...SLIDE_DESIGNS.map((d) => d.name), ...templates.map((t) => t.name)];
+}
+
+/** ツールの引数から、見た目の指定（`design`。前の版の `template` も読む）を取り出す。 */
+const wantedLook = (args: Record<string, unknown>) =>
+  (typeof args['design'] === 'string' && args['design'].trim()) || (typeof args['template'] === 'string' ? args['template'].trim() : '');
 
 /**
  * 会社のテンプレートを使えない理由。本人がドライブ全体の許可（`drive`）をまだ与えていなければ、接続し直すよう書く。
@@ -89,12 +108,14 @@ export const slidesTemplate: Tool = {
   helpText: '会社が登録したスライドのテンプレートの、使えるレイアウトを確かめます。どこにも書き込みません',
   description: '会社が登録したスライドのテンプレートの、使えるレイアウト（見本のスライド）の名前と差し込み口（入る行数と 1 行の字数の目安）、'
     + 'マスターの変数を返す。slides.create の前に呼ぶ。テンプレートがあれば、slides[] の layout に見本の名前、values に差し込み口ごとの値、'
-    + 'deck にマスターの変数の値を書き、表紙も見本の 1 枚として構成に入れる。引数: template（テンプレートの名前。任意。無ければ既定）',
-  args: { properties: { template: { type: 'string', description: 'テンプレートの名前（任意）' } } },
+    + 'deck にマスターの変数の値を書き、表紙も見本の 1 枚として構成に入れる。引数: design（組み込みのデザインの名前か、会社のテンプレートの名前。任意。無ければ会社の既定）。'
+    + '組み込みのデザイン（ビジネス・ナチュラル・ポップ・モノトーン・クリーン・ダーク）なら、標準のレイアウトで構成する',
+  args: { properties: { design: { type: 'string', description: 'デザインの名前（組み込みのデザインか会社のテンプレート。任意）' } } },
   google: { scope: 'drive', level: 'restricted' },
   async invoke(args, ctx) {
-    const { template, warning } = await chooseTemplate(ctx, typeof args['template'] === 'string' ? args['template'].trim() : '');
-    if (!template) return { template: null, message: `会社のテンプレートは登録されていません。${USE_STANDARD}` };
+    const { template, design, warning } = await chooseLook(ctx, wantedLook(args));
+    const choices = await lookChoices(ctx);
+    if (!template) return { template: null, design: design?.name ?? null, choices, ...(warning ? { warnings: [warning] } : {}), message: `組み込みのデザイン「${design?.name ?? 'ビジネス'}」で作ります。${USE_STANDARD}` };
     const blocked = await missingDriveGrant(ctx, template.name);
     if (blocked) return { template: template.name, message: `${blocked}。${USE_STANDARD}` };
     const got = await ctx.connector.slides.readTemplate({ tenantId: ctx.tenantId, userId: ctx.userId }, template);
@@ -102,7 +123,7 @@ export const slidesTemplate: Tool = {
     if ('unavailable' in got) return { template: template.name, message: `${got.unavailable}。${USE_STANDARD}` };
     if (got.layouts.length === 0) return { template: template.name, message: `テンプレートに見本のスライドがありません。${USE_STANDARD}` };
     return {
-      template: template.name,
+      template: template.name, choices,
       layouts: got.layouts.map((l) => ({
         name: l.name,
         slots: l.slots.map((x) => ({ key: x.key, lines: x.lines, charsPerLine: x.charsPerLine })),
@@ -130,14 +151,17 @@ export const slidesCreate: Tool = {
   risk: 'draft',
   activityLabel: 'スライドを作成しています',
   helpText: '調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません',
-  description: 'スライドの構成（title・subtitle・slides[]・sources[]）から Google スライドを作る。'
-    + 'slides[] の各要素は layout（BULLET・COMPARISON・KPI・CHART・IMAGE）と title（20 文字まで）、'
-    + 'BULLET は body（改行区切りで 6 行まで）、COMPARISON は compareLeftTitle・compareLeftBody・compareRightTitle・compareRightBody、'
-    + 'KPI は stats（value と label、3 件まで）、CHART は chartType・chartCategories・chartSeries（name と values、2 系列まで）、'
-    + 'IMAGE は imagePrompt と caption。takeaway は伝えたいこと 1 文。本文のスライドは 12 枚まで。'
+  description: 'スライドの構成（title・subtitle・slides[]・sources[]）から、発表で使う Google スライドを作る。'
+    + 'slides[] の各要素は layout と title（言い切りの 1 文。30 文字まで）と notes（発表者のメモ。話す内容）。図のレイアウトで見せる: '
+    + 'STATEMENT（message・sub）・SECTION（number・title）・BIG_NUMBER（stats 1 件に value・unit・label、sub）・KPI（stats 2〜4 に value・unit・label・icon）・'
+    + 'BAR（items に label・value、highlight、unit、orientation）・SHARE（items に label・value、shareStyle は band か grid）・PROGRESS（items に label・value 0〜100）・'
+    + 'STEPS（items に title・text）・TIMELINE（items に date・title・text）・CARDS（items に icon・title・text）・'
+    + 'COMPARISON（compareLeftTitle・compareLeftBody・compareRightTitle・compareRightBody、mode は vs か before-after）・MATRIX（xAxis・yAxis・items 4 つ）・'
+    + 'PYRAMID（items に title・text）・CHECKLIST（items に title・text）・TABLE（chartCategories・chartSeries）・BULLET（body。3 行まで）。'
+    + '本文の半分以上を図にし、同じ layout を続けず、BULLET は 2 枚まで（合わなければ作らずに直し方を返す）。本文のスライドは 12 枚まで。'
     + '会社のテンプレートがあるときは slides.template で見本を確かめ、layout に見本の名前、values に差し込み口ごとの値、deck にマスターの変数の値を書く。'
-    + 'template に会社が登録したテンプレートの名前を渡せばそれを、無ければ既定のテンプレートを使う',
-  args: { properties: { title: { type: 'string', description: '表紙の題名' }, subtitle: { type: 'string', description: '副題（任意）' }, slides: { type: 'array', description: '本文のスライドの配列（layout・title ほか。12 枚まで）' }, sources: { type: 'array', description: '出典（title・url）の配列' }, template: { type: 'string', description: '会社が登録したテンプレートの名前（任意）' } }, required: ['title', 'slides'] },
+    + 'design に組み込みのデザインの名前（ビジネス・ナチュラル・ポップ・モノトーン・クリーン・ダーク）か会社のテンプレートの名前を渡せばそれを、無ければ会社の既定を使う',
+  args: { properties: { title: { type: 'string', description: '表紙の題名' }, subtitle: { type: 'string', description: '副題（任意）' }, slides: { type: 'array', description: '本文のスライドの配列（layout・title ほか。12 枚まで）' }, sources: { type: 'array', description: '出典（title・url）の配列' }, design: { type: 'string', description: 'デザインの名前（組み込みのデザインか会社のテンプレート。任意）' } }, required: ['title', 'slides'] },
   google: { scope: 'drive.file', level: 'non-sensitive' },
   // 会社のテンプレートを本人のドライブへ複製するため（仕様書 第9.4.2節、Q-88）
   googleAlso: [{ scope: 'drive', level: 'restricted' }],
@@ -145,8 +169,8 @@ export const slidesCreate: Tool = {
     const checked = normalizeSlidePlan(args);
     if ('error' in checked) return { error: `スライドを作れませんでした: ${checked.error}` };
     const { plan, warnings } = checked;
-    // 会社が登録したテンプレート（第9.4.2節）。名前の指定が無い・見つからなければ既定、登録が無ければ標準
-    const chosen = await chooseTemplate(ctx, typeof args['template'] === 'string' ? args['template'].trim() : '');
+    // 見た目（第9.4.2節）: 組み込みのデザインか会社のテンプレート。指定が無い・見つからなければ会社の既定
+    const chosen = await chooseLook(ctx, wantedLook(args));
     if (chosen.warning) warnings.push(chosen.warning);
     const blocked = chosen.template ? await missingDriveGrant(ctx, chosen.template.name) : null;
     if (blocked) warnings.push(blocked);
@@ -157,7 +181,8 @@ export const slidesCreate: Tool = {
     let created;
     try {
       created = await ctx.connector.slides.createPresentation(
-        { tenantId: ctx.tenantId, userId: ctx.userId }, { title: plan.title, plan, template, deckDefaults },
+        { tenantId: ctx.tenantId, userId: ctx.userId },
+        { title: plan.title, plan, template, deckDefaults, design: chosen.design, footer: company.shortName || company.legalName || '' },
       );
     } catch (err) {
       // 見本に無い名前などは推論が直せる。段を失敗にせず、理由を返す
@@ -167,6 +192,8 @@ export const slidesCreate: Tool = {
     const mock = ctx.connector.sourceFor(ctx.tenantId) === 'mock';
     // 接続口が会社のテンプレートを使えなかったときは、標準の見た目で作ったと書く（第9.4.2節）
     const used = created.templateApplied === false ? null : template;
+    // 標準の見た目で作ったときのデザインの名前（会社のテンプレートを開けずに標準にしたときは既定のデザイン）
+    const designName = used ? null : (chosen.design ?? findSlideDesign(DEFAULT_SLIDE_DESIGN_ID))!.name;
     warnings.push(...(created.warnings ?? []));
     const links = created.url
       ? [`開く: ${created.url}`, ...(created.pptxUrl ? [`PowerPoint 形式: ${created.pptxUrl}`] : [])]
@@ -174,12 +201,12 @@ export const slidesCreate: Tool = {
     const id = randomUUID();
     await ctx.repo.createArtifact({
       id, runId: ctx.runId, tenantId: ctx.tenantId, kind: 'slides', title: plan.title,
-      body: [...links, `テンプレート: ${used ? used.name : '標準のテンプレート'}`, '', planOutline(plan), ...(warnings.length ? ['', '---', ...warnings.map((w) => `注意: ${w}`)] : [])].join('\n'),
+      body: [...links, used ? `テンプレート: ${used.name}` : `デザイン: ${designName}`, '', planOutline(plan), ...(warnings.length ? ['', '---', ...warnings.map((w) => `注意: ${w}`)] : [])].join('\n'),
       createdAt: new Date().toISOString(),
     });
     return {
       artifactId: id, presentationId: created.presentationId, url: created.url, pptxUrl: created.pptxUrl,
-      slideCount: created.pages ?? plan.slides.length + 1, template: used?.name ?? '標準', warnings, ...(mock ? { source: 'mock' } : {}),
+      slideCount: created.pages ?? plan.slides.length + 1, template: used?.name ?? null, design: designName, warnings, ...(mock ? { source: 'mock' } : {}),
     };
   },
 };

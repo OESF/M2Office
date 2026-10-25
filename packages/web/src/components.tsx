@@ -13,6 +13,7 @@ import { Markdown, openHelp } from './help.js';
 import { Icon } from './nav.js';
 import { keyLabel, useHotkey } from './keys.js';
 import { RecorderDialog } from './Recorder.js';
+import { SlideDesignField } from './slide-design-picker.js';
 
 /**
  * 通常の停止の間と、停止の予告の間に、画面の上部に出す案内（仕様書 第23.8.6節）。どちらでもなければ何も出さない。
@@ -238,6 +239,8 @@ function Field({
   const hint = field.examples?.[0] ? `例: ${field.examples[0]}` : undefined;
   if (field.format === 'date') return <DateField name={name} label={label} optional={!required} value={value} onChange={onChange} />;
   if (field.format === 'file') return <FileField name={name} label={label} value={value} onChange={onChange} />;
+  // スライドのデザイン（第9.4.2節「組み込みのデザイン」）。見本の絵のカードから選ぶ
+  if (field.format === 'slide-design') return <SlideDesignField label={field.title ?? name} value={value} onChange={onChange} />;
   if (field.enum?.length) {
     return (
       <div className="field">
