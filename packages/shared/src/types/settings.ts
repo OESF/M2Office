@@ -127,6 +127,10 @@ export interface SlidesSettings {
    * 前の版の設定には無い（無ければ、テンプレートの既定、それも無ければ組み込みの「ビジネス」）
    */
   defaultDesign?: string | null;
+  /**
+   * 文書の会社の既定のテンプレート（`theme:<ID>`。会社のテンプレート。第9.5.5.2節「文書のテンプレート」）。無ければ「標準」。
+   */
+  defaultDocTemplate?: string | null;
 }
 
 /**

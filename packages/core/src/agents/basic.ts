@@ -169,6 +169,8 @@ export const DOCUMENT_DRAFT: AgentDefinition = {
     type: 'object',
     required: ['request'],
     properties: {
+      // テンプレート（第9.5.5.2節「文書のテンプレート」）。画面では見本の並びから選ぶ（標準・マイテンプレート・会社のテンプレート）
+      template: { type: 'string', title: 'テンプレート', format: 'doc-template' },
       request: { type: 'string', title: '作る文書（目的・宛先・入れたいこと）', format: 'textarea', examples: ['10 月の全社会議の案内文。日時は 10/15 15 時、場所は本社 3 階'] },
       // 共有の範囲（第9.5.5.2節「文書の作成の扱い」）。既定は自分だけ
       sharing: { type: 'string', title: '共有', format: 'switch', enum: ['自分だけ', '会社で共有'], default: '自分だけ' },
@@ -191,7 +193,8 @@ export const DOCUMENT_DRAFT: AgentDefinition = {
         '',
         '新しく作るとき:',
         '1. 依頼の文書を書く。会社の決まりや過去の文書が要るときは knowledge.search で探し、差出人の名前・役職が要るときは profile.read で確かめる。',
-        '2. 本文は Markdown で書き（見出し・箇条書き・表が使える）、docs.draft で本人のドライブに Google ドキュメントとして作る。request には依頼の文をそのまま渡す。',
+        '2. 本文は Markdown で書き（# は文書の題名に 1 回だけ、## は見出し、### は小見出し。箇条書き・表が使える）、docs.draft で本人のドライブに Google ドキュメントとして作る。request には依頼の文をそのまま渡す。',
+        '   入力に template があれば docs.draft の template にそのまま渡す。無ければ、依頼の文にテンプレートの名前（「提案書のテンプレートで」）があればそれを渡し、無ければ渡さない（会社の既定になる）。',
         '3. 入力の sharing が「会社で共有」か、依頼に「会社で共有して」とあれば、docs.draft が返した draftId で docs.share（sharing は「会社で共有」）を呼ぶ。',
         '',
         '直すとき:',
@@ -199,7 +202,7 @@ export const DOCUMENT_DRAFT: AgentDefinition = {
         '2. docs.get で前の本文と頼みを読む（deckId を draftId に渡す）。',
         '3. 新しい事実が要る頼みのときだけ knowledge.search を呼ぶ。',
         '4. 前の本文を、頼みの分だけ直す（頼まれていない段落・数字・言い回しは変えない）。',
-        '5. docs.draft に draftId と、直した本文と、request に直す頼みの文を渡す。',
+        '5. docs.draft に draftId と、直した本文と、request に直す頼みの文を渡す。入力の template か、依頼にテンプレートの名前があるときだけ template を渡す（無ければ前と同じテンプレートになる）。',
         '',
         '依頼に無い日時・金額・人の名前は作らない。分からないところは「（要確認: 〇〇）」と書いておく。',
         '最後に、文書の題名（直したときは何を直したか）と、要確認の箇所を答えに書く。URL は書かない（画面にボタンが出る）。共有できなかったときは理由を添える。',
@@ -214,6 +217,7 @@ export const DOCUMENT_DRAFT: AgentDefinition = {
     examples: [{ title: '全社会議の案内文', input: { request: '10 月の全社会議の案内文。日時は 10/15 15 時、場所は本社 3 階' } }],
     notes: [
       'あなたのドライブに作ります。「共有」で「会社で共有」を選ぶと、会社の Google Workspace の人が見られるようにします（編集はできません）。社外には共有しません',
+      '「テンプレート」の「＋ Google ドキュメントのテンプレート」から、Google ドキュメントのテンプレート ギャラリーで作ったファイルを選ぶと、その見た目（字体・色・ヘッダー・フッター）で作れます。テンプレートの本文の見本の文は消えます（本文の中の飾りの画像も一緒に消えます）',
       '分からないところは「（要確認）」と書いておきます',
       '作った文書は、この画面の下の一覧から開く・Word や PDF で取り出す・直してほしいことを書いて作り直す・共有を切り替える・削除ができます',
       '作り直すと同じファイルが新しくなります（前の形は Google ドキュメントの版の履歴に残ります）。Google ドキュメントで手を入れた後なら、上書きせずに新しいファイルに作ります',

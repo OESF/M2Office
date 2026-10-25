@@ -13,7 +13,7 @@ import { Markdown, openHelp } from './help.js';
 import { Icon } from './nav.js';
 import { keyLabel, useHotkey } from './keys.js';
 import { RecorderDialog } from './Recorder.js';
-import { SlideDesignField } from './slide-design-picker.js';
+import { DocTemplateField, SlideDesignField } from './slide-design-picker.js';
 import { SlideDeckActions } from './slide-decks.js';
 
 /**
@@ -270,6 +270,8 @@ function Field({
   if (field.format === 'file') return <FileField name={name} label={label} value={value} onChange={onChange} />;
   // スライドのデザイン（第9.4.2節「組み込みのデザイン」）。見本の絵のカードから選ぶ
   if (field.format === 'slide-design') return <SlideDesignField label={field.title ?? name} value={value} onChange={onChange} />;
+  // 文書のテンプレート（第9.5.5.2節「文書のテンプレート」）。見本の並びから選ぶ
+  if (field.format === 'doc-template') return <DocTemplateField label={field.title ?? name} value={value} onChange={onChange} />;
   if (field.enum?.length) {
     return (
       <div className="field">

@@ -8444,5 +8444,36 @@ console.log('\n■ 124. 作った文書（スライドと分けて並べる・�
   }
 }
 
+console.log('\n■ 125. 文書のテンプレートと会社の既定（テーマと分けて並べる・既定を読み戻す。第9.5.5.2節「文書のテンプレート」）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const key = `smoke-doctpl-${Date.now().toString(36)}`;
+  const { rows: saved } = await owner.query(`select slides from tenant_settings where tenant_id = 't-alpha'`);
+  try {
+    await owner.query(`insert into slide_themes (id, kind, tenant_id, user_id, presentation_id, name) values ($1, 'doc', 't-alpha', null, 'DOCGALLERY0001', $2)`, [key, `${key} 提案書`]);
+    const { body: docs } = await call('a', '/v1/slide-themes?kind=doc', {}, 'member');
+    const { body: themes } = await call('a', '/v1/slide-themes', {}, 'member');
+    const names = (b) => (b?.items ?? []).map((t) => t.name).filter((n) => n.startsWith(key));
+    // 会社の既定（デザインと文書のテンプレート）を保存して、読み戻せる
+    const put = await call('a', '/v1/admin/settings/slides', { method: 'PUT', body: JSON.stringify({ templates: [], defaultDesign: 'natural', defaultDocTemplate: `theme:${key}` }) });
+    const badDoc = await call('a', '/v1/admin/settings/slides', { method: 'PUT', body: JSON.stringify({ templates: [], defaultDocTemplate: 'どこか' }) });
+    const { body: design } = await call('a', '/v1/agents/slide-designs', {}, 'member');
+    const { body: doc } = await call('a', '/v1/agents/doc-templates', {}, 'member');
+    const good = names(docs).length === 1 && names(themes).length === 0 && put.status === 200 && badDoc.status === 400
+      && design.defaultChoice === 'natural' && doc.defaultChoice === `theme:${key}`;
+    good
+      ? ok('文書のテンプレートはスライドのテーマと分けて並び、会社の既定のデザインと文書のテンプレートを読み戻せる')
+      : ng('文書のテンプレートの扱いが違う', JSON.stringify({ docs: names(docs), themes: names(themes), put: put.status, badDoc: badDoc.status, design: design.defaultChoice, doc: doc.defaultChoice }));
+  } catch (err) {
+    ng('文書のテンプレートの確認が途中で止まった', String(err));
+  } finally {
+    await owner.query(`update tenant_settings set slides = $1 where tenant_id = 't-alpha'`, [saved[0]?.slides ?? null]).catch(() => undefined);
+    await owner.query('delete from slide_themes where id = $1', [key]).catch(() => undefined);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

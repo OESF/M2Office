@@ -96,6 +96,8 @@ async function fakeDrive(pdf: Uint8Array) {
     const file = /^\/drive\/files\/([^/]+)$/.exec(s.path);
     // 作り直す前のスライドの状態（第9.4.2節「作ったスライドの扱い」）
     if (s.path === '/drive/files/OLDDECK' && s.method === 'GET') return json(200, { modifiedTime: '2026-10-25T03:00:00.000Z', trashed: false });
+    // 文書のテンプレートの確かめ（第9.5.5.2節「文書のテンプレート」）
+    if (s.path === '/drive/files/DOCTPL' && s.method === 'GET') return json(200, { name: '提案書', mimeType: `${G}document`, trashed: false, thumbnailLink: 'https://evil.example/thumb' });
     if (file && s.method === 'GET') {
       const id = file[1]!;
       if (!FILES[id]) return json(404, { error: { code: 404 } });
@@ -110,6 +112,19 @@ async function fakeDrive(pdf: Uint8Array) {
       return json(200, { id: 'NEWDOC', name: '作った文書', mimeType: `${G}document`, modifiedTime: '2026-09-25T03:00:00.000Z', webViewLink: 'https://docs.example/NEWDOC' });
     }
     if (s.path === '/docs/documents/DOC1:batchUpdate' && s.method === 'POST') return json(200, { documentId: 'DOC1' });
+    // 文書のテンプレート（第9.5.5.2節「文書のテンプレート」）。DOCTPL は複製できる。GONETPL は消された
+    if (s.path === '/drive/files/DOCTPL/copy' && s.method === 'POST') return json(200, { id: 'DOCCOPY', name: JSON.parse(raw).name, mimeType: `${G}document`, modifiedTime: '2026-10-25T03:00:00.000Z' });
+    if (s.path === '/drive/files/GONETPL/copy' && s.method === 'POST') return json(404, { error: { code: 404 } });
+    if (s.path === '/docs/documents/DOCCOPY' && s.method === 'GET') {
+      const fields = s.query.get('fields') ?? '';
+      if (!fields.includes('paragraph')) return json(200, { body: { content: [{ startIndex: 0, endIndex: 1 }, { startIndex: 1, endIndex: 80 }] } });
+      docReads += 1;
+      // 1 回目: 表の印の段落、2 回目: 入れた表
+      return docReads % 2 === 1
+        ? json(200, { body: { content: [{ startIndex: 20, endIndex: 31, paragraph: { elements: [{ textRun: { content: '\u2063M2TABLE0\u2063\n' } }] } }] } })
+        : json(200, { body: { content: [{ startIndex: 21, endIndex: 40, table: { tableRows: [{ tableCells: [{ content: [{ startIndex: 24 }] }] }] } }] } });
+    }
+    if (s.path === '/docs/documents/DOCCOPY:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
     // 文書の作り直し（本文の入れ替え。第9.5.5.2節「文書の作成の扱い」）
     if (s.path === '/upload/files/DOC1' && s.method === 'PATCH') return json(200, meta('DOC1'));
     // スライド。題名が「失敗」なら組み立てで断る
@@ -193,6 +208,9 @@ async function fakeDrive(pdf: Uint8Array) {
 
 /** 見本の Google が、ドライブの共有のリンク（`uc?`）の画像を読めないふりをする。 */
 let rejectDriveUc = false;
+
+/** 見本の Google が、テンプレートで作った文書の中身を読まれた回数。 */
+let docReads = 0;
 
 async function withDrive(fn: (c: GoogleWorkspaceConnector, seen: Seen[]) => Promise<void>) {
   const pdf = await renderPdf({ title: '請求書', to: '株式会社アルファ 御中', from: ['見本'], fields: [], rows: [{ name: '利用料', quantity: 1, unitPrice: 3000 }], notes: [] });
@@ -548,6 +566,28 @@ test('ドキュメント: 作り直しは同じファイルに本文を取り込
     assert.equal(seen.filter((x) => x.path === '/drive/files/DOC1/export').at(-1)!.query.get('mimeType'), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     await c.docs.export(P, 'DOC1', 'pdf');
     assert.equal(seen.filter((x) => x.path === '/drive/files/DOC1/export').at(-1)!.query.get('mimeType'), 'application/pdf');
+  });
+});
+
+test('ドキュメント: テンプレートを複製し、本文を空にして名前の付いたスタイルで書き入れ、表の印を表に置き換える。開けなければテンプレートの誤り', async () => {
+  docReads = 0;
+  await withDrive(async (c, seen) => {
+    const got = await c.docs.inspectTemplate(P, 'DOCTPL');
+    assert.deepEqual(got, { name: '提案書', thumbnail: null }, 'Google の縮小の絵の道でなければ読まない');
+    const made = await c.docs.createFromTemplate(P, { templateId: 'DOCTPL', templateName: '提案書', title: '新しい提案', body: '# 新しい提案\n本文\n\n| 項目 | 値 |\n|---|---|\n| A | 1 |' });
+    assert.equal(made.id, 'DOCCOPY');
+    const batches = seen.filter((x) => x.path === '/docs/documents/DOCCOPY:batchUpdate').map((x) => JSON.parse(x.body).requests as Record<string, any>[]);
+    assert.deepEqual(batches[0]![0], { deleteContentRange: { range: { startIndex: 1, endIndex: 79 } } }, '見本の文を消す');
+    assert.ok(batches[0]!.some((r) => r['updateParagraphStyle']?.paragraphStyle?.namedStyleType === 'TITLE'));
+    assert.deepEqual(batches[1]!.map((r) => Object.keys(r)[0]), ['deleteContentRange', 'insertTable'], '印を消して表を入れる');
+    assert.equal(batches[1]![1]!['insertTable'].rows, 2);
+    assert.equal(batches[2]!.find((r) => r['insertText'])!['insertText'].location.index, 24, '入れた表のます目に書く');
+  });
+  await withDrive(async (c) => {
+    await assert.rejects(
+      c.docs.createFromTemplate(P, { templateId: 'GONETPL', templateName: '消えたテンプレート', title: 'x', body: 'y' }),
+      (err: unknown) => err instanceof SlideThemeUnavailableError && /消えたテンプレート/.test(err.message),
+    );
   });
 });
 

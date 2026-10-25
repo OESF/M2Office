@@ -2825,15 +2825,17 @@ export const api = {
     return null;
   },
   /** Google スライドのテーマ（本人のものと会社のもの。仕様書 第9.4.2節「Google スライドのテーマを使う」）。 */
-  slideThemes: () => call<{ items: SlideThemeSummary[] }>('/slide-themes'),
+  slideThemes: (kind: SlideDeckKind = 'slides') => call<{ items: SlideThemeSummary[] }>(`/slide-themes?kind=${kind}`),
   /** 本人が選んだプレゼンテーションをテーマにする（`company` は管理者だけ）。 */
-  addSlideTheme: (fileId: string, company = false) =>
-    call<SlideThemeSummary>('/slide-themes', { method: 'POST', body: JSON.stringify({ fileId, company }) }),
+  addSlideTheme: (fileId: string, company = false, kind: SlideDeckKind = 'slides') =>
+    call<SlideThemeSummary>('/slide-themes', { method: 'POST', body: JSON.stringify({ fileId, company, kind }) }),
   deleteSlideTheme: (id: string) => call<{ ok: true }>(`/slide-themes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** 本人がテーマのファイルを開けるか（会社のテーマを初めて使うときは、選ぶ画面で選んでもらう）。 */
   slideThemeAccess: (id: string) => call<{ ok: true } | { ok: false; fileId: string }>(`/slide-themes/${encodeURIComponent(id)}/access`),
   /** テーマを選ぶ画面の材料。 */
-  slideThemePicker: () => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>('/slide-themes/picker'),
+  slideThemePicker: (kind: SlideDeckKind = 'slides') => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>(`/slide-themes/picker?kind=${kind}`),
+  /** 文書のテンプレートの会社の既定（`theme:<ID>` か「標準」。第9.5.5.2節「文書のテンプレート」）。 */
+  docTemplateDefault: () => call<{ defaultChoice: string }>('/agents/doc-templates'),
   /** テーマの見本の縮小の絵（`URL.createObjectURL`）。無ければ `null`。 */
   slideThemeThumbnail: async (id: string): Promise<string | null> => {
     const res = await fetch(`/v1/slide-themes/${encodeURIComponent(id)}/thumbnail`, { credentials: 'same-origin', headers: devTenant ? { 'x-tenant': devTenant } : {} }).catch(() => null);

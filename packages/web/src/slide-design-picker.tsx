@@ -8,9 +8,9 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { SLIDE_DESIGNS, SLIDE_THEME_PREFIX, slideRgbCss, type SlideDesign, type SlideThemeSummary } from '@m2office/shared';
+import { SLIDE_DESIGNS, SLIDE_THEME_PREFIX, slideRgbCss, type SlideDeckKind, type SlideDesign, type SlideThemeSummary } from '@m2office/shared';
 import { api, describeError } from './api.js';
-import { pickDrivePresentation } from './google-picker.js';
+import { pickDriveTemplate } from './google-picker.js';
 
 /** 会社が登録したテンプレート（選ぶための名前と説明だけ）。 */
 export interface SlideTemplateChoice {
@@ -53,6 +53,10 @@ function DesignPreview({ d }: { d: SlideDesign }) {
 
 /** Google スライドのテンプレート ギャラリー（テーマにするファイルを作る場所）。 */
 const GALLERY_URL = 'https://docs.google.com/presentation/u/0/?tgif=d';
+/** Google ドキュメントのテンプレート ギャラリー（第9.5.5.2節「文書のテンプレート」）。 */
+const DOC_GALLERY_URL = 'https://docs.google.com/document/u/0/?tgif=d';
+/** 文書のテンプレートを使わない（今の作り方）値。 */
+export const DOC_STANDARD = '標準';
 
 /** テーマの見本の縮小の絵（読み込めなければ名前だけ）。 */
 function ThemeThumb({ theme }: { theme: SlideThemeSummary }) {
@@ -70,25 +74,27 @@ function ThemeThumb({ theme }: { theme: SlideThemeSummary }) {
 }
 
 /**
- * Google スライドのテーマの一覧と、加える・削除する・使えるようにする手続き（第9.4.2節「Google スライドのテーマを使う」）。
+ * Google スライドのテーマ（文書ならテンプレート）の一覧と、加える・削除する・使えるようにする手続き
+ * （第9.4.2節「Google スライドのテーマを使う」・第9.5.5.2節「文書のテンプレート」）。
  *
- * @param company 会社のテーマを扱うか（管理者ページ）。`false` なら本人のテーマと会社のテーマ
+ * @param company 会社のものを扱うか（管理者ページ）。`false` なら本人のものと会社のもの
+ * @param kind スライドのテーマ（既定）か文書のテンプレート
  */
-export function useSlideThemes(company: boolean) {
+export function useSlideThemes(company: boolean, kind: SlideDeckKind = 'slides') {
   const [themes, setThemes] = useState<SlideThemeSummary[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 見本の接続口の会社では、見本のドライブのファイルから選ぶ
   const [mockItems, setMockItems] = useState<{ id: string; name: string }[] | null>(null);
   const reload = useCallback(async () => {
-    const r = await api.slideThemes().catch(() => ({ items: [] as SlideThemeSummary[] }));
+    const r = await api.slideThemes(kind).catch(() => ({ items: [] as SlideThemeSummary[] }));
     setThemes(company ? r.items.filter((t) => t.company) : r.items);
-  }, [company]);
+  }, [company, kind]);
   useEffect(() => { void reload(); }, [reload]);
 
   /** 選んだファイルをテーマにする。 */
   const register = async (fileId: string): Promise<string | null> => {
-    const t = await api.addSlideTheme(fileId, company);
+    const t = await api.addSlideTheme(fileId, company, kind);
     await reload();
     return `${SLIDE_THEME_PREFIX}${t.id}`;
   };
@@ -97,12 +103,12 @@ export function useSlideThemes(company: boolean) {
     setBusy(true);
     setError(null);
     try {
-      const p = await api.slideThemePicker();
+      const p = await api.slideThemePicker(kind);
       if (p.kind === 'mock') { setMockItems(p.items); return null; }
-      const picked = await pickDrivePresentation(p);
+      const picked = await pickDriveTemplate(p, kind);
       return picked ? await register(picked.id) : null;
     } catch (err) {
-      setError(describeError(err, 'テーマを加えられませんでした'));
+      setError(describeError(err, kind === 'doc' ? 'テンプレートを加えられませんでした' : 'テーマを加えられませんでした'));
       return null;
     } finally {
       setBusy(false);
@@ -119,7 +125,7 @@ export function useSlideThemes(company: boolean) {
     }
   };
   const remove = async (id: string) => {
-    if (!window.confirm('このテーマを見本から削除します（Google スライドのファイルはそのまま残ります）。')) return;
+    if (!window.confirm(kind === 'doc' ? 'このテンプレートを見本から削除します（Google ドキュメントのファイルはそのまま残ります）。' : 'このテーマを見本から削除します（Google スライドのファイルはそのまま残ります）。')) return;
     try {
       await api.deleteSlideTheme(id);
       await reload();
@@ -132,8 +138,8 @@ export function useSlideThemes(company: boolean) {
     try {
       const a = await api.slideThemeAccess(id);
       if (a.ok) return;
-      const p = await api.slideThemePicker();
-      if (p.kind === 'google') await pickDrivePresentation({ ...p, fileId: a.fileId });
+      const p = await api.slideThemePicker(kind);
+      if (p.kind === 'google') await pickDriveTemplate({ ...p, fileId: a.fileId }, kind);
     } catch {
       // 使えなければ、作るときに標準のデザインにして理由を出す
     }
@@ -237,6 +243,85 @@ export function SlideDesignField({ label, value, onChange }: { label: string; va
     <div className="field">
       <label>{label}</label>
       <SlideDesignPicker value={value} templates={templates} onChange={onChange} themes={themes} />
+    </div>
+  );
+}
+
+/**
+ * 文書のテンプレートの見本の並び（第9.5.5.2節「文書のテンプレート」）。「標準」、マイテンプレート・会社のテンプレート、「＋ Google ドキュメントのテンプレート」。
+ *
+ * @param value 選んでいるもの（「標準」か `theme:<ID>`）
+ */
+export function DocTemplatePicker({ value, onChange, templates }: {
+  value: string; onChange: (v: string) => void; templates: ReturnType<typeof useSlideThemes>;
+}) {
+  const choose = async (v: string) => {
+    onChange(v);
+    const t = templates.themes.find((x) => `${SLIDE_THEME_PREFIX}${x.id}` === v);
+    if (t?.company) await templates.ensureAccess(t.id);
+  };
+  const added = async (v: string | null) => { if (v) onChange(v); };
+  return (
+    <>
+      <div className="slide-design-grid" role="radiogroup">
+        <button type="button" role="radio" aria-checked={value === DOC_STANDARD}
+          className={`slide-design-card is-template${value === DOC_STANDARD ? ' is-selected' : ''}`} onClick={() => onChange(DOC_STANDARD)}>
+          <span className="slide-design-thumb doc-standard" aria-hidden="true"><span /><span /><span /><span /></span>
+          <span className="slide-design-name">{DOC_STANDARD}</span>
+        </button>
+        {templates.themes.map((t) => {
+          const v = `${SLIDE_THEME_PREFIX}${t.id}`;
+          return (
+            <div key={v} className={`slide-design-card is-theme${value === v ? ' is-selected' : ''}`}>
+              <button type="button" role="radio" aria-checked={value === v} className="slide-design-pick" title={t.name} onClick={() => void choose(v)}>
+                <ThemeThumb theme={t} />
+                <span className="slide-design-name">{t.name}</span>
+                <span className="slide-design-badge">{t.company ? '会社のテンプレート' : 'マイテンプレート'}</span>
+              </button>
+              {t.removable && (
+                <button type="button" className="slide-design-remove" aria-label={`${t.name}を削除`} onClick={() => void templates.remove(t.id)}>×</button>
+              )}
+            </div>
+          );
+        })}
+        <div className="slide-design-card is-add">
+          <button type="button" className="slide-design-pick" disabled={templates.busy} onClick={() => void templates.add().then(added)}>
+            <span className="slide-design-plus" aria-hidden="true">＋</span>
+            <span className="slide-design-name">{templates.busy ? '開いています…' : 'Google ドキュメントのテンプレート'}</span>
+          </button>
+          <a className="small" href={DOC_GALLERY_URL} target="_blank" rel="noreferrer">ギャラリー</a>
+        </div>
+      </div>
+      {templates.mockItems && (
+        <div className="slide-theme-mock card">
+          {templates.mockItems.length === 0 && <p className="muted small">見本のドライブにファイルがありません</p>}
+          {templates.mockItems.map((f) => (
+            <button key={f.id} type="button" className="btn ghost small" onClick={() => void templates.pickMock(f.id).then(added)}>{f.name}</button>
+          ))}
+          <button type="button" className="btn ghost small" onClick={templates.closeMock}>閉じる</button>
+        </div>
+      )}
+      {templates.error && <p className="error small">{templates.error}</p>}
+    </>
+  );
+}
+
+/**
+ * 業務の入力の欄（形 `doc-template`）。会社の既定を読み、初めは会社の既定を選んだ状態にする。
+ */
+export function DocTemplateField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const templates = useSlideThemes(false, 'doc');
+  useEffect(() => {
+    let alive = true;
+    api.docTemplateDefault().then((r) => { if (alive && !value) onChange(r.defaultChoice); }).catch(() => { if (alive && !value) onChange(DOC_STANDARD); });
+    return () => { alive = false; };
+    // 読むのは開いたときの 1 回だけ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <DocTemplatePicker value={value || DOC_STANDARD} onChange={onChange} templates={templates} />
     </div>
   );
 }

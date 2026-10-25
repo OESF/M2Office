@@ -1093,7 +1093,11 @@ export class PostgresRepository implements Repository {
       effect: { minutesPerRun: { ...(r?.effect?.minutesPerRun ?? {}) } },
       onboarding: { ...d.onboarding, ...(r?.onboarding ?? {}) },
       access: { scopes: { ...(r?.access?.scopes ?? {}) } },
-      slides: { templates: [...(r?.slides?.templates ?? [])] },
+      // 会社の既定（デザイン・文書のテンプレート）も読み戻す（第 0.445.0 版まで既定のデザインを読み落としていた）
+      slides: {
+        templates: [...(r?.slides?.templates ?? [])],
+        defaultDesign: r?.slides?.defaultDesign ?? null, defaultDocTemplate: r?.slides?.defaultDocTemplate ?? null,
+      },
       knowledge: {
         standardSynonyms: r?.knowledge?.standardSynonyms ?? d.knowledge.standardSynonyms,
         synonyms: [...(r?.knowledge?.synonyms ?? [])],

@@ -2731,3 +2731,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .slide-design-card.is-add { align-items: center; justify-content: center; border-style: dashed; }
 .slide-design-plus { font-size: 22px; color: var(--accent); text-align: center; }
 .slide-theme-mock { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* 文書のテンプレートの「標準」の見本（線だけの紙） */
+.slide-design-thumb.doc-standard { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; background: var(--panel); box-sizing: border-box; }
+.slide-design-thumb.doc-standard span { display: block; height: 3px; border-radius: 2px; background: var(--line); }
+.slide-design-thumb.doc-standard span:first-child { width: 55%; height: 5px; background: var(--muted); }
+.slide-design-thumb.doc-standard span:last-child { width: 70%; }

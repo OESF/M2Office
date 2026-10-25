@@ -16,7 +16,7 @@ import { api, describeError, type ConsolidationView, type KnowledgeItemView, typ
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
-import { SlideDesignPicker, useSlideThemes } from './slide-design-picker.js';
+import { SlideDesignPicker, useSlideThemes, DocTemplatePicker, DOC_STANDARD } from './slide-design-picker.js';
 
 type Catalog = {
   id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;
@@ -248,7 +248,7 @@ export function CompanySettings({ page }: { page: string }) {
       </div>
       )}
       {page === 'invoice' && <InvoiceStyleSettings initial={data.invoice} onSaved={() => void reload()} />}
-      {page === 'slides' && <SlideTemplateSettings initial={data.slides.templates} initialDesign={data.slides.defaultDesign ?? null} onSaved={() => void reload()} />}
+      {page === 'slides' && <SlideTemplateSettings initial={data.slides.templates} initialDesign={data.slides.defaultDesign ?? null} initialDocTemplate={data.slides.defaultDocTemplate ?? null} onSaved={() => void reload()} />}
     </>
   );
 }
@@ -258,7 +258,7 @@ const TITLES: Record<string, string> = {
   basic: '基本情報',
   writing: '自社の書き方',
   invoice: '帳票の体裁',
-  slides: 'スライドの見本',
+  slides: 'スライドと文書の見本',
   dashboard: 'ダッシュボードの見せ方',
 };
 
@@ -438,7 +438,9 @@ type TemplateDraft = { id: string; name: string; url: string; description: strin
  *
  * @remarks 中身（レイアウト・差し込み口）の読み取りは Google 連携の後。いまは登録と既定の選択だけを行う。
  */
-function SlideTemplateSettings({ initial, initialDesign, onSaved }: { initial: SlideTemplate[]; initialDesign: string | null; onSaved: () => void }) {
+function SlideTemplateSettings({ initial, initialDesign, initialDocTemplate, onSaved }: {
+  initial: SlideTemplate[]; initialDesign: string | null; initialDocTemplate: string | null; onSaved: () => void;
+}) {
   const toDraft = (t: SlideTemplate): TemplateDraft => ({
     id: t.id, name: t.name, url: t.presentationId, description: t.description, isDefault: t.isDefault,
   });
@@ -448,6 +450,10 @@ function SlideTemplateSettings({ initial, initialDesign, onSaved }: { initial: S
   const saver = useSaver();
   // 会社のテーマ（Google スライドのテーマ。第9.4.2節「Google スライドのテーマを使う」）。ここで加えたものは会社の人がみな選べる
   const themes = useSlideThemes(true);
+  // 文書の会社の既定（第9.5.5.2節「文書のテンプレート」）。会社のテンプレートか「標準」
+  const docTemplates = useSlideThemes(true, 'doc');
+  const [docTemplate, setDocTemplate] = useState<string>(initialDocTemplate ?? DOC_STANDARD);
+  useEffect(() => { setDocTemplate(initialDocTemplate ?? DOC_STANDARD); }, [initialDocTemplate]);
   useEffect(() => { setItems(initial.map(toDraft)); }, [initial]);
   useEffect(() => { setDesign(initialDesign); }, [initialDesign]);
   const choice = design ?? items.find((t) => t.isDefault && t.name)?.name ?? SLIDE_DESIGNS[0]!.id;
@@ -464,6 +470,10 @@ function SlideTemplateSettings({ initial, initialDesign, onSaved }: { initial: S
       <div className="field">
         <label>会社の既定</label>
         <SlideDesignPicker value={choice} templates={items.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), description: t.description }))} onChange={choose} themes={themes} />
+      </div>
+      <div className="field">
+        <label>文書の会社の既定</label>
+        <DocTemplatePicker value={docTemplate} onChange={setDocTemplate} templates={docTemplates} />
       </div>
       <h3>会社のテンプレート</h3>
       <p className="muted small">ファイルは社内で共有してください</p>
@@ -507,6 +517,7 @@ function SlideTemplateSettings({ initial, initialDesign, onSaved }: { initial: S
           await api.admin.saveSettings('slides', {
             templates: items.map((t) => ({ id: t.id, name: t.name, presentationId: t.url, description: t.description, isDefault: t.isDefault })),
             defaultDesign: design ?? '',
+            defaultDocTemplate: docTemplate === DOC_STANDARD ? '' : docTemplate,
           });
           onSaved();
         }} />

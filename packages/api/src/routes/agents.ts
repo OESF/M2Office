@@ -40,6 +40,12 @@ export function agentsRoute(deps: AppDeps) {
     });
   });
 
+  /** 文書のテンプレートの会社の既定（第9.5.5.2節「文書のテンプレート」）。`theme:<ID>` か「標準」。 */
+  app.get('/doc-templates', async (c) => {
+    const { slides } = await deps.repo.getTenantSettings(c.get('ctx').tenant.id);
+    return c.json({ defaultChoice: slides.defaultDocTemplate || '標準' });
+  });
+
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
     const { agents: setting } = await deps.repo.getTenantSettings(tenant.id);

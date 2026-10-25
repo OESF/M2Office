@@ -51,7 +51,7 @@ const TABS: {
       { id: 'basic', label: '基本情報' },
       { id: 'writing', label: '自社の書き方' },
       { id: 'invoice', label: '帳票の体裁' },
-      { id: 'slides', label: 'スライドの見本' },
+      { id: 'slides', label: 'スライドと文書の見本' },
       { id: 'dashboard', label: 'ダッシュボードの見せ方' },
     ],
   },

@@ -45,6 +45,8 @@ export interface SlideDeckSummary {
 /** Google スライドのテーマ 1 件（デザインの見本の並びに出す。第9.4.2節「Google スライドのテーマを使う」）。 */
 export interface SlideThemeSummary {
   id: string;
+  /** スライドのテーマか、文書のテンプレートか。 */
+  kind: SlideDeckKind;
   name: string;
   /** 会社のテーマ（管理者が登録）か。 */
   company: boolean;

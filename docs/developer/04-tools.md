@@ -246,7 +246,7 @@
 | `web.research` | `topic`（必須）: 調べるテーマ、`focus`: 特に知りたいこと（任意） |
 | `docs.append` | `documentId`（必須）: 文書の ID、`text`（必須）: 追記する文 |
 | `docs.create` | `title`: 題名（artifactId のときは省略できる。成果物の題名に日付を添える）、`body`: 本文（Markdown。artifactId のときは渡さない）、`artifactId`: 保存する成果物の ID（document.create の結果）。本文はそこから取る、`folderId`: 入れるフォルダの ID（任意）、`folderName`: 入れるフォルダの名前（任意。M2Office が作ったその名前のフォルダに入れ、無ければ作る） |
-| `docs.draft` | `title`（必須）: 題名、`body`（必須）: 本文（Markdown）、`draftId`: 直す、前に作った文書の ID（直すときだけ）、`request`: 依頼の文（直す頼みも。覚えておき、次に直すときに読む） |
+| `docs.draft` | `title`（必須）: 題名、`body`（必須）: 本文（Markdown）、`draftId`: 直す、前に作った文書の ID（直すときだけ）、`template`: テンプレートの名前か theme:<ID>（任意。「標準」なら使わない）、`request`: 依頼の文（直す頼みも。覚えておき、次に直すときに読む） |
 | `document.create` | `kind`: 種類（例: minutes・reply）、`title`（必須）: 題名、`body`（必須）: 本文 |
 | `docx.redline` | `fileId`（必須）: 元の文書のファイルの ID、`title`: 題名（例: 業務委託契約書（修正の案））、`edits`（必須）: { before, after, reason } の配列 |
 | `docx.render` | `title`（必須）: 題名、`blocks`（必須）: { heading } か { text } の配列 |

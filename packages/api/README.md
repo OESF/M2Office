@@ -129,7 +129,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/slide-decks`・`GET /v1/slide-decks/:id` | 作ったスライドの一覧（本人のもの `mine` と会社で共有されたもの `shared`）と 1 件。構成は出さない（仕様書 第9.4.2節「作ったスライドの扱い」） |
 | `GET /v1/slide-decks/:id/export?format=` | 取り出す（スライドは `pptx`、文書は `docx`・`pdf`）。M2Office が Google の書き出しで受け取って返す。読めないもの・大きすぎるものは 409 と `fallback`（仕様書 第9.5.5.2節「文書の作成の扱い」）。一覧は `GET /v1/slide-decks?kind=doc` で文書 |
 | `GET /v1/slide-decks/:id/pptx` | PowerPoint の形で受け取る（M2Office が Google の書き出しで受け取って返す）。本人の権限で読めないもの・10 MB を超えるものは 409 と Google の書き出しの道（`fallback`） |
-| `GET/POST /v1/slide-themes`・`DELETE /v1/slide-themes/:id` | Google スライドのテーマ（本人が選んだプレゼンテーション）の一覧・追加（`fileId`。`company: true` は管理者だけ）・削除（仕様書 第9.4.2節「Google スライドのテーマを使う」） |
+| `GET /v1/agents/doc-templates` | 文書のテンプレートの会社の既定（`theme:<ID>` か「標準」。仕様書 第9.5.5.2節「文書のテンプレート」） |
+| `GET/POST /v1/slide-themes`・`DELETE /v1/slide-themes/:id` | Google スライドのテーマと文書のテンプレート（本人が選んだファイル。`kind=doc` で文書）の一覧・追加（`fileId`・`kind`。`company: true` は管理者だけ）・削除（仕様書 第9.4.2節「Google スライドのテーマを使う」・第9.5.5.2節「文書のテンプレート」） |
 | `GET /v1/slide-themes/:id/thumbnail`・`/access`・`GET /v1/slide-themes/picker` | テーマの見本の縮小の絵、本人がファイルを開けるか（会社のテーマを初めて使うとき）、Google のファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン） |
 | `POST /v1/slide-decks/:id/share`・`DELETE /v1/slide-decks/:id` | 共有の範囲の切り替え（`sharing`: `private`・`company`。会社の Workspace のドメインへの閲覧だけ）と削除（ファイルはドライブのごみ箱へ）。作った人だけ。作り直しは業務「スライドの作成」の実行（`deckId`） |
 | `GET /v1/public/slide-images/:token` | ログイン不要: スライドの画像の使い捨ての道。Google スライドが画像を貼るときに 1 度だけ読む。鍵（32 バイトの乱数）が違う・5 分を過ぎた・貼り終えたものは 404（仕様書 第9.4.2節「段 2」） |

@@ -20,7 +20,7 @@ interface PickerBuilder {
 interface PickerNamespace {
   DocsView: new (viewId: string) => DocsView;
   PickerBuilder: new () => PickerBuilder;
-  ViewId: { DOCS_IMAGES: string; DOCS: string; PRESENTATIONS?: string };
+  ViewId: { DOCS_IMAGES: string; DOCS: string; PRESENTATIONS?: string; DOCUMENTS?: string };
   DocsViewMode?: { LIST: string; GRID: string };
   Action: { PICKED: string; CANCEL: string };
 }
@@ -111,16 +111,29 @@ export async function pickDriveFile(p: { apiKey: string; appId: string; accessTo
  * @returns 選んだファイルの ID と名前。やめたら `null`
  */
 export async function pickDrivePresentation(p: { apiKey: string; appId: string; accessToken: string; fileId?: string }): Promise<{ id: string; name: string } | null> {
+  return pickDriveTemplate(p, 'slides');
+}
+
+/**
+ * Google スライドのテーマか、文書のテンプレートにするファイルを 1 つ選ぶ（仕様書 第9.4.2節・第9.5.5.2節「文書のテンプレート」）。
+ *
+ * @param kind スライド（`slides`）か文書（`doc`）
+ * @returns 選んだファイルの ID と名前。やめたら `null`
+ */
+export async function pickDriveTemplate(p: { apiKey: string; appId: string; accessToken: string; fileId?: string }, kind: 'slides' | 'doc'): Promise<{ id: string; name: string } | null> {
   await loadPicker();
   const picker = (window as unknown as { google: { picker: PickerNamespace } }).google.picker;
+  const doc = kind === 'doc';
   return new Promise((resolve) => {
-    // フォルダをたどらせず、Google スライドだけを新しい順に名前と日付で並べる（何を選ぶのか迷わないように）
-    let view = new picker.DocsView(picker.ViewId.PRESENTATIONS ?? picker.ViewId.DOCS).setMimeTypes('application/vnd.google-apps.presentation').setIncludeFolders(false);
+    // フォルダをたどらせず、Google スライド（文書なら Google ドキュメント）だけを新しい順に名前と日付で並べる（何を選ぶのか迷わないように）
+    const viewId = (doc ? picker.ViewId.DOCUMENTS : picker.ViewId.PRESENTATIONS) ?? picker.ViewId.DOCS;
+    let view = new picker.DocsView(viewId).setMimeTypes(doc ? 'application/vnd.google-apps.document' : 'application/vnd.google-apps.presentation').setIncludeFolders(false);
     if (picker.DocsViewMode && view.setMode) view = view.setMode(picker.DocsViewMode.LIST);
-    if (view.setLabel) view = view.setLabel('Google スライド');
+    if (view.setLabel) view = view.setLabel(doc ? 'Google ドキュメント' : 'Google スライド');
     if (p.fileId && view.setFileIds) view = view.setFileIds(p.fileId);
     let builder = new picker.PickerBuilder();
-    if (builder.setTitle) builder = builder.setTitle(p.fileId ? '会社のテーマを使えるようにする（このまま「選択」）' : 'テーマにする Google スライドを選択');
+    const what = doc ? 'テンプレート' : 'テーマ';
+    if (builder.setTitle) builder = builder.setTitle(p.fileId ? `会社の${what}を使えるようにする（このまま「選択」）` : doc ? 'テンプレートにする Google ドキュメントを選択' : 'テーマにする Google スライドを選択');
     builder
       .addView(view)
       .setOAuthToken(p.accessToken)

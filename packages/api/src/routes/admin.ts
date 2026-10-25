@@ -804,7 +804,10 @@ function validateSection(
       // 会社のテーマ（`theme:<ID>`）も既定にできる（第9.4.2節「Google スライドのテーマを使う」）。会社のテーマでなければ、使うときに会社の既定から外れる
       const theme = !design && /^theme:[A-Za-z0-9_-]{1,80}$/.test(wanted) ? wanted : null;
       if (wanted && !design && !theme) return { error: '組み込みのデザインか会社のテーマが見つかりません' };
-      return { section: 'slides', value: { templates, defaultDesign: design?.id ?? theme } };
+      // 文書の会社の既定（第9.5.5.2節「文書のテンプレート」）。会社のテンプレート（`theme:<ID>`）か、無し（標準）
+      const docWanted = typeof o['defaultDocTemplate'] === 'string' ? o['defaultDocTemplate'] : '';
+      if (docWanted && docWanted !== '標準' && !/^theme:[A-Za-z0-9_-]{1,80}$/.test(docWanted)) return { error: '文書の会社の既定が見つかりません' };
+      return { section: 'slides', value: { templates, defaultDesign: design?.id ?? theme, defaultDocTemplate: docWanted && docWanted !== '標準' ? docWanted : null } };
     }
     case 'privacy': {
       // Google から取得したデータを残す日数（仕様書 第14.3.2節）。短くはできるが、7 日より長くはできない

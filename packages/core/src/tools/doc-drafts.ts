@@ -3,12 +3,14 @@
  *
  * 作ったスライドと同じ置き場（種類 `doc`）を使う。作り直しは同じファイルの本文を入れ替え（URL と共有はそのまま）、
  * 人が Google ドキュメントで手を入れた後なら上書きせずに新しいファイルに作る。会社で共有は会社の Workspace のドメインへの閲覧だけ。
+ * テンプレート（Google ドキュメントのテンプレート ギャラリーから作ったもの）を選べば、その見た目で作る（第9.5.5.2節「文書のテンプレート」、Q-267）。
  */
 
 import { randomUUID } from 'node:crypto';
-import { SLIDE_DECK_SHARING_LABEL, type SlideDeckSummary } from '@m2office/shared';
+import { SLIDE_DECK_SHARING_LABEL, SLIDE_THEME_PREFIX, type SlideDeckSummary } from '@m2office/shared';
 import type { Tool, ToolContext } from './registry.js';
-import { HAND_EDIT_GRACE_MS, draftLinks } from '../slides/decks.js';
+import { HAND_EDIT_GRACE_MS, draftLinks, type SlideDeck } from '../slides/decks.js';
+import { SlideThemeUnavailableError } from '../slides/theme.js';
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 const S = (description: string) => ({ type: 'string' as const, description });
@@ -16,6 +18,31 @@ const who = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId 
 
 /** 本文の上限（文字）。 */
 const BODY_MAX = 60_000;
+
+/** テンプレートを使わない（今の作り方）ことを表す名前。 */
+const STANDARD = '標準';
+
+/**
+ * 使うテンプレートを決める（第9.5.5.2節「文書のテンプレート」）。指定（名前か `theme:<ID>`。「標準」なら使わない）があればそれ。
+ * 無ければ、直すときは前と同じ、新しく作るときは会社の既定、それも無ければ使わない。
+ *
+ * @returns テンプレート（使わないなら `null`）と、指定が見つからなかったときの注意
+ */
+async function chooseTemplate(ctx: ToolContext, wanted: string, prev: SlideDeck | null): Promise<{ template: { id: string; presentationId: string; name: string } | null; warning: string | null }> {
+  const find = async (key: string) => {
+    const t = key && ctx.slideThemes ? await ctx.slideThemes.find(who(ctx), key, 'doc') : null;
+    return t ? { id: t.id, presentationId: t.presentationId, name: t.name } : null;
+  };
+  if (wanted === STANDARD) return { template: null, warning: null };
+  if (wanted) {
+    const t = await find(wanted);
+    if (t) return { template: t, warning: null };
+  }
+  const warning = wanted ? `テンプレート「${wanted}」が見つからないため、${prev ? '前と同じ' : '会社の既定'}で作りました` : null;
+  if (prev) return { template: prev.theme ? await find(`${SLIDE_THEME_PREFIX}${prev.theme}`) : null, warning };
+  const { slides } = await ctx.repo.getTenantSettings(ctx.tenantId);
+  return { template: slides.defaultDocTemplate ? await find(slides.defaultDocTemplate) : null, warning };
+}
 
 /**
  * 文書を作る。前に作った文書を直すときは、同じファイルの本文を入れ替える。
@@ -29,13 +56,15 @@ export const docsDraft: Tool = {
   risk: 'draft',
   activityLabel: '文書を作成しています',
   helpText: 'あなたのドライブに Google ドキュメントを作ります。前に作った文書を直すこともできます。共有はしません',
-  description: '本人のドライブに Google ドキュメントを作る（共有しない）。body は Markdown（見出し・箇条書き・表）。'
-    + '前に作った文書を直すときは draftId（docs.get で読んだもの）と、頼みの分だけ直した本文を渡す（同じファイルの本文が入れ替わる）。request には依頼の文を渡す',
+  description: '本人のドライブに Google ドキュメントを作る（共有しない）。body は Markdown（# 題名・## 見出し・箇条書き・表）。'
+    + '前に作った文書を直すときは draftId（docs.get で読んだもの）と、頼みの分だけ直した本文を渡す（同じファイルの本文が入れ替わる）。request には依頼の文を渡す。'
+    + 'template にテンプレートの名前か theme:<ID>（無ければ会社の既定。「標準」なら使わない）を渡すと、そのテンプレートの見た目（字体・色・ヘッダー・フッター）で作る',
   args: {
     properties: {
       title: S('題名'),
       body: S('本文（Markdown）'),
       draftId: S('直す、前に作った文書の ID（直すときだけ）'),
+      template: S('テンプレートの名前か theme:<ID>（任意。「標準」なら使わない）'),
       request: S('依頼の文（直す頼みも。覚えておき、次に直すときに読む）'),
     },
     required: ['title', 'body'],
@@ -52,9 +81,14 @@ export const docsDraft: Tool = {
     const draftId = str(args['draftId']);
     const prev = draftId && ctx.slideDecks ? await ctx.slideDecks.store.get(ctx.tenantId, draftId) : null;
     if (draftId && (!prev || prev.userId !== ctx.userId || prev.kind !== 'doc')) return { error: '直す文書が見つかりません（作った人だけが直せます。docs.list で探してください）' };
-    // 作り直す先。人が手を入れた後なら上書きしない（手で直したものを消さない）
+    // テンプレート（第9.5.5.2節「文書のテンプレート」）
+    const chosen = await chooseTemplate(ctx, str(args['template']), prev);
+    if (chosen.warning) warnings.push(chosen.warning);
+    let template = chosen.template;
+    // 作り直す先。人が手を入れた後なら上書きしない（手で直したものを消さない）。テンプレートを変えたら新しいファイル（見た目がファイルに入っているため）
     let replaced = null;
     let asNew = false;
+    let replaceOld = false;
     if (prev) {
       const mock = prev.presentationId.startsWith('mock-');
       const state = await ctx.connector.slides.fileState(p, prev.presentationId).catch(() => null);
@@ -63,19 +97,44 @@ export const docsDraft: Tool = {
       } else if (state && Date.parse(state.modifiedTime) > Date.parse(prev.builtAt) + HAND_EDIT_GRACE_MS) {
         asNew = true;
         warnings.push('前のファイルに手で直した跡があったので、上書きせずに新しいファイルに作りました');
+      } else if ((prev.theme ?? null) !== (template?.id ?? null)) {
+        replaceOld = true;
       } else {
-        replaced = await ctx.connector.docs.replace(p, { documentId: prev.presentationId, title, body: text });
+        replaced = template
+          ? await ctx.connector.docs.rewrite(p, { documentId: prev.presentationId, title, body: text })
+          : await ctx.connector.docs.replace(p, { documentId: prev.presentationId, title, body: text });
         if (!replaced && !mock) warnings.push('前のファイルを書き換えられなかったため、新しいファイルに作りました');
       }
     }
-    const file = replaced ?? await ctx.connector.docs.create(p, { title, body: text, folderId: null });
+    let file = replaced;
+    if (!file && template) {
+      try {
+        file = await ctx.connector.docs.createFromTemplate(p, { templateId: template.presentationId, templateName: template.name, title, body: text });
+      } catch (err) {
+        // テンプレートを開けなければ「標準」で作り、理由を残す
+        if (!(err instanceof SlideThemeUnavailableError)) throw err;
+        warnings.push(`${err.message}。標準の見た目で作りました`);
+        template = null;
+      }
+    }
+    file ??= await ctx.connector.docs.create(p, { title, body: text, folderId: null });
+    // テンプレートを変えて新しいファイルにしたら、共有の範囲を引き継ぎ、前のファイルをごみ箱へ
+    if (prev && replaceOld && prev.presentationId !== file.id) {
+      if (prev.sharing === 'company' && ctx.slideDecks) {
+        const domain = await ctx.slideDecks.companyDomain(p);
+        if ('domain' in domain) await ctx.connector.slides.share(p, file.id, domain.domain).catch(() => false);
+        else warnings.push(domain.reason);
+      }
+      await ctx.connector.slides.trash(p, prev.presentationId).catch(() => false);
+      warnings.push('テンプレートを変えたため新しいファイルにし、前のファイルはドライブのごみ箱に移しました');
+    }
     const now = new Date().toISOString();
     const builtAt = (await ctx.connector.slides.fileState(p, file.id).catch(() => null))?.modifiedTime || now;
     const keep = prev && !asNew;
     const request = str(args['request']).slice(0, 2000);
     const draft = ctx.slideDecks ? {
       id: keep ? prev.id : randomUUID(), kind: 'doc' as const, tenantId: ctx.tenantId, userId: ctx.userId, presentationId: file.id,
-      title, design: null, template: null, theme: null, sharing: keep ? prev.sharing : 'private' as const,
+      title, design: template?.name ?? null, template: null, theme: template?.id ?? null, sharing: keep ? prev.sharing : 'private' as const,
       request: [keep ? prev.request : '', request].filter(Boolean).join('\n直す頼み: ').slice(-4000),
       plan: null, body: text, imagePrompts: {}, runId: ctx.runId, builtAt, createdAt: keep ? prev.createdAt : now, updatedAt: now,
     } : null;
@@ -91,7 +150,7 @@ export const docsDraft: Tool = {
     const source = ctx.connector.sourceFor(ctx.tenantId);
     return {
       artifactId, draftId: draft?.id ?? null, documentId: file.id, url: draftLinks('doc', file.id).url, title,
-      sharing: draft ? SLIDE_DECK_SHARING_LABEL[draft.sharing] : null, rebuilt: !!replaced, warnings, ...(source === 'mock' ? { source } : {}),
+      template: template?.name ?? STANDARD, sharing: draft ? SLIDE_DECK_SHARING_LABEL[draft.sharing] : null, rebuilt: !!replaced, warnings, ...(source === 'mock' ? { source } : {}),
     };
   },
 };

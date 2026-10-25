@@ -6,6 +6,7 @@
  * @see ADR-0003 外部接続の手前に接続口を設ける
  */
 
+import { SlideThemeUnavailableError } from '../slides/theme.js';
 import { randomUUID } from 'node:crypto';
 import type { SlidePlan } from '../slides/plan.js';
 import { renderSvgPng } from '../columns/cover.js';
@@ -398,6 +399,22 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     // 見本の接続口では書き出せない
     export: async () => null,
+    // テンプレート（見本のドライブのドキュメント）。複製の代わりに、M2Office が作った文書として足す
+    inspectTemplate: async (p: ConnectorPrincipal, id: string) => {
+      const f = this.visibleFiles(p).find((x) => x.file.id === id && x.file.kind === 'document');
+      return f ? { name: f.file.name.replace(/\.[a-z0-9]+$/i, ''), thumbnail: null } : null;
+    },
+    createFromTemplate: async (p: ConnectorPrincipal, d: { templateId: string; templateName: string; title: string; body: string }) => {
+      if (!this.visibleFiles(p).some((x) => x.file.id === d.templateId)) throw new SlideThemeUnavailableError(`テンプレート「${d.templateName}」のファイルが見つかりませんでした`);
+      return this.addFile(p, d.title, 'document', { text: d.body });
+    },
+    rewrite: async (p: ConnectorPrincipal, d: { documentId: string; title: string; body: string }) => {
+      const f = this.driveFiles.get(d.documentId);
+      if (!f || f.owner !== key(p) || f.file.kind !== 'document') return null;
+      f.text = d.body;
+      f.file = { ...f.file, name: d.title, modifiedAt: this.now().toISOString() };
+      return f.file;
+    },
   };
 
   sheets = {

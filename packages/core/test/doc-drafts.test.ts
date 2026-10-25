@@ -6,14 +6,18 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILTIN_TOOLS, InMemorySlideDeckStore, MockWorkspaceConnector, SlideDeckService, ToolRegistry, type ToolContext } from '../src/index.js';
+import {
+  BUILTIN_TOOLS, InMemorySlideDeckStore, InMemorySlideThemeStore, MockWorkspaceConnector, SlideDeckService, SlideThemeService, SlideThemeUnavailableError, ToolRegistry, type ToolContext,
+} from '../src/index.js';
 
 const registry = new ToolRegistry();
 for (const t of BUILTIN_TOOLS) registry.register(t);
 
 /** 記録する見本のドキュメントの接続口。 */
 function setup() {
-  const calls = { created: [] as string[], replaced: [] as string[] };
+  const calls = { created: [] as string[], replaced: [] as string[], fromTemplate: [] as string[], rewritten: [] as string[] };
+  const settings: { defaultDocTemplate: string | null } = { defaultDocTemplate: null };
+  const trashed: string[] = [];
   const state = new Map<string, { modifiedTime: string; trashed: boolean }>();
   let n = 0;
   const connector = new MockWorkspaceConnector();
@@ -28,21 +32,31 @@ function setup() {
       return file(d.documentId, d.title);
     },
     export: async (_p: unknown, id: string, format: string) => (id === 'DOC2' ? 'too-large' as const : new TextEncoder().encode(format)),
+    inspectTemplate: async (_p: unknown, id: string) => (id.startsWith('TPL') ? { name: id === 'TPLPROPOSAL1' ? '提案書' : 'レター', thumbnail: null } : null),
+    createFromTemplate: async (_p: unknown, d: { templateId: string; templateName: string; title: string }) => {
+      if (d.templateId === 'TPLGONE00001') throw new SlideThemeUnavailableError(`テンプレート「${d.templateName}」のファイルが見つかりませんでした`);
+      const id = `DOC${++n}`; calls.fromTemplate.push(`${d.templateId}>${id}`); state.set(id, { modifiedTime: new Date().toISOString(), trashed: false }); return file(id, d.title);
+    },
+    rewrite: async (_p: unknown, d: { documentId: string; title: string }) => {
+      calls.rewritten.push(d.documentId); state.set(d.documentId, { modifiedTime: new Date().toISOString(), trashed: false }); return file(d.documentId, d.title);
+    },
   };
   const slides = connector.slides as unknown as Record<string, unknown>;
   slides['fileState'] = async (_p: unknown, id: string) => state.get(id) ?? null;
   slides['share'] = async () => true;
-  slides['trash'] = async () => true;
+  slides['trash'] = async (_p: unknown, id: string) => { trashed.push(id); return true; };
   (connector as unknown as { sourceFor: () => string }).sourceFor = () => 'google';
   const artifacts: { kind: string; body: string; slideDeckId?: string | null }[] = [];
   const repo = {
     createArtifact: async (a: { kind: string; body: string; slideDeckId?: string | null }) => { artifacts.push(a); },
     findTenantById: async () => ({ id: 't', workspaceDomain: 'example.co.jp' }),
     findUserById: async (_t: string, id: string) => ({ id, email: `${id}@example.co.jp`, displayName: id }),
+    getTenantSettings: async () => ({ slides: { templates: [], defaultDesign: null, defaultDocTemplate: settings.defaultDocTemplate } }),
   };
   const decks = new SlideDeckService({ store: new InMemorySlideDeckStore(), repo: repo as never, connector });
-  const ctx = (userId = 'u'): ToolContext => ({ tenantId: 't', userId, runId: 'r', compartment: null, repo: repo as never, connector, files: {} as never, slideDecks: decks });
-  return { calls, state, decks, ctx, artifacts };
+  const themes = new SlideThemeService({ store: new InMemorySlideThemeStore(), connector });
+  const ctx = (userId = 'u'): ToolContext => ({ tenantId: 't', userId, runId: 'r', compartment: null, repo: repo as never, connector, files: {} as never, slideDecks: decks, slideThemes: themes });
+  return { calls, state, decks, themes, ctx, artifacts, settings, trashed };
 }
 const draft = (c: ToolContext, args: Record<string, unknown>) => registry.get('docs.draft')!.invoke(args, c) as Promise<Record<string, any>>;
 
@@ -108,4 +122,46 @@ test('文書の取り出し: Word と PDF は M2Office が受け取る。大き�
   assert.ok('fallback' in big && big.fallback.endsWith('/DOC2/export?format=docx'));
   await s.decks.share({ tenantId: 't', userId: 'u' }, a['draftId'], 'company');
   assert.ok('fallback' in await s.decks.exportAs({ tenantId: 't', userId: 'v' }, a['draftId'], 'pdf'));
+});
+
+test('テンプレート: 選んだテンプレートから作り、直すときは同じテンプレートで書き直す。テンプレートを変えたら新しいファイルにして前のものはごみ箱へ', async () => {
+  const s = setup();
+  const u = { tenantId: 't', userId: 'u' };
+  const t1 = await s.themes.add(u, { fileId: 'TPLPROPOSAL1', kind: 'doc' });
+  const t2 = await s.themes.add(u, { fileId: 'TPLLETTER002', kind: 'doc' });
+  assert.ok(!('error' in t1) && !('error' in t2) && t1.kind === 'doc');
+  assert.deepEqual((await s.themes.list(u)).length, 0, 'スライドのテーマとは分けて並べる');
+  const made = await draft(s.ctx(), { title: '提案', body: '# 提案\n本文', template: '提案書' });
+  assert.deepEqual(s.calls.fromTemplate, ['TPLPROPOSAL1>DOC1']);
+  assert.equal(made['template'], '提案書');
+  const d = (await s.decks.store.get('t', made['draftId']))!;
+  assert.equal(d.theme, t1.id);
+  assert.equal(d.design, '提案書');
+  // 直す（テンプレートの指定なし）→ 前と同じテンプレートで同じファイルを書き直す
+  await draft(s.ctx(), { title: '提案', body: '直した本文', draftId: made['draftId'] });
+  assert.deepEqual(s.calls.rewritten, ['DOC1']);
+  // テンプレートを変える → 新しいファイル、前のファイルはごみ箱
+  const changed = await draft(s.ctx(), { title: '提案', body: '本文', draftId: made['draftId'], template: `theme:${t2.id}` });
+  assert.equal(changed['draftId'], made['draftId'], '同じ文書として覚える');
+  assert.deepEqual(s.calls.fromTemplate, ['TPLPROPOSAL1>DOC1', 'TPLLETTER002>DOC2']);
+  assert.deepEqual(s.trashed, ['DOC1']);
+  // 「標準」に戻す → 今の作り方で新しいファイル
+  await draft(s.ctx(), { title: '提案', body: '本文', draftId: made['draftId'], template: '標準' });
+  assert.deepEqual(s.calls.created, ['DOC3']);
+});
+
+test('テンプレート: 選ばなければ会社の既定。開けなければ標準で作って理由を残す', async () => {
+  const s = setup();
+  const co = await s.themes.add({ tenantId: 't', userId: 'boss', admin: true }, { fileId: 'TPLPROPOSAL1', kind: 'doc', company: true });
+  assert.ok(!('error' in co));
+  s.settings.defaultDocTemplate = `theme:${co.id}`;
+  await draft(s.ctx(), { title: 'a', body: 'b' });
+  assert.deepEqual(s.calls.fromTemplate, ['TPLPROPOSAL1>DOC1'], '会社の既定のテンプレート');
+  const gone = await s.themes.add({ tenantId: 't', userId: 'u' }, { fileId: 'TPLGONE00001', kind: 'doc' });
+  assert.ok(!('error' in gone));
+  const out = await draft(s.ctx(), { title: 'a', body: 'b', template: `theme:${gone.id}` });
+  assert.equal(out['template'], '標準');
+  assert.ok((out['warnings'] as string[]).some((w) => w.includes('見つかりませんでした') && w.includes('標準の見た目')));
+  const missing = await draft(s.ctx(), { title: 'a', body: 'b', template: '無いテンプレート' });
+  assert.ok((missing['warnings'] as string[]).some((w) => w.includes('無いテンプレート')));
 });

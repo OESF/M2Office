@@ -344,6 +344,23 @@ export interface DocsConnector {
    * @returns 中身。見つからなければ `null`、Google の書き出しの上限（10 MB）を超えれば `'too-large'`
    */
   export(p: ConnectorPrincipal, documentId: string, format: 'docx' | 'pdf'): Promise<Uint8Array | 'too-large' | null>;
+  /**
+   * テンプレートにするドキュメントを確かめる（本人が選んだもの）。名前と見本の縮小の絵（1 ページ目）を返す（第9.5.5.2節「文書のテンプレート」）。
+   *
+   * @returns 開けない・ドキュメントでない・見本の接続口で見つからないときは `null`
+   */
+  inspectTemplate(p: ConnectorPrincipal, documentId: string): Promise<{ name: string; thumbnail: { bytes: Uint8Array; mimeType: string } | null } | null>;
+  /**
+   * テンプレートを本人のドライブに複製し、本文の見本の文を消して、名前の付いたスタイルで本文を書き入れる（ADR-0110）。
+   * ヘッダー・フッター・余白・スタイルはテンプレートのまま。開けなければ `SlideThemeUnavailableError`
+   */
+  createFromTemplate(p: ConnectorPrincipal, d: { templateId: string; templateName: string; title: string; body: string }): Promise<DriveFile>;
+  /**
+   * テンプレートで作った文書の本文を消して書き直す（作り直し。ヘッダー・フッターはそのまま）。M2Office が作った文書だけ。
+   *
+   * @returns 書き直したもの。見つからなければ `null`
+   */
+  rewrite(p: ConnectorPrincipal, d: { documentId: string; title: string; body: string }): Promise<DriveFile | null>;
 }
 
 /** Google スプレッドシート。 */

@@ -26,14 +26,15 @@ export function slideThemesRoute(deps: AppDeps) {
   };
   app.use('/:id/*', async (c, next) => (ID.test(c.req.param('id')) ? next() : c.json({ error: 'テーマが見つかりません' }, 404)));
 
-  /** 本人のテーマと会社のテーマ。 */
-  app.get('/', async (c) => c.json({ items: await service.list(who(c)) }));
+  /** 本人のものと会社のもの。`kind` はスライドのテーマ（既定）か文書のテンプレート（`doc`）。 */
+  app.get('/', async (c) => c.json({ items: await service.list(who(c), c.req.query('kind') === 'doc' ? 'doc' : 'slides') }));
 
   /** 選ぶ画面の材料（`drive.file` だけに絞ったトークン。見本の会社は見本のドライブのプレゼンテーションの一覧）。 */
   app.get('/picker', async (c) => {
     if (deps.connector.sourceFor(c.get('ctx').tenant.id) === 'mock') {
       const files = await deps.connector.drive.search(who(c), { query: '', limit: 100 });
-      return c.json({ kind: 'mock', items: files.filter((f) => f.kind === 'presentation').map((f) => ({ id: f.id, name: f.name })) });
+      const kind = c.req.query('kind') === 'doc' ? 'document' : 'presentation';
+      return c.json({ kind: 'mock', items: files.filter((f) => f.kind === kind).map((f) => ({ id: f.id, name: f.name })) });
     }
     const r = await drive.picker(who(c));
     return 'error' in r ? c.json(r, 400) : c.json(r, 200, { 'cache-control': 'no-store' });
@@ -42,7 +43,7 @@ export function slideThemesRoute(deps: AppDeps) {
   /** 本人が選んだプレゼンテーションをテーマにする（`fileId`。`company: true` は管理者だけ）。 */
   app.post('/', async (c) => {
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
-    const r = await service.add(who(c), { fileId: b['fileId'], company: b['company'] });
+    const r = await service.add(who(c), { fileId: b['fileId'], company: b['company'], kind: b['kind'] });
     return 'error' in r ? c.json(r, r.error.includes('管理者') ? 403 : 400) : c.json(r, 201);
   });
 

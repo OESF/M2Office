@@ -9,6 +9,8 @@ import type { ConnectorPrincipal, DocsConnector, DriveConnector, DriveFile } fro
 import { extractPdfText } from '../../files/pdf.js';
 import { callGoogle, downloadGoogle, type GoogleApiEndpoints, type GoogleTokenSource } from './http.js';
 import { markdownToDocHtml } from './doc-html.js';
+import { clearBodyRequests, docBodyRequests, fillTableRequests, findMark, type DocContent } from './doc-requests.js';
+import { SlideThemeUnavailableError } from '../../slides/theme.js';
 
 /** 読む中身の大きさの上限（バイト）。これを超えるものは読まない。 */
 export const DRIVE_READ_MAX_BYTES = 5 * 1024 * 1024;
@@ -204,6 +206,43 @@ export function googleDrive(ctx: Ctx): DriveConnector {
  * @param ctx トークンと呼び先を返す
  */
 export function googleDocs(ctx: Ctx): DocsConnector {
+  const docsApi = (p: ConnectorPrincipal, path: string, init?: Parameters<typeof callGoogle>[4]) =>
+    callGoogle(ctx().tokens, p, 'ドキュメント', `${ctx().endpoints.docs}${path}`, init);
+  const driveApi = (p: ConnectorPrincipal, path: string, init?: Parameters<typeof callGoogle>[4]) =>
+    callGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.drive}${path}`, init);
+  const content = async (p: ConnectorPrincipal, id: string, fields: string): Promise<DocContent[] | null> => {
+    const d = await docsApi(p, `/documents/${encodeURIComponent(id)}?fields=${encodeURIComponent(`body(content(${fields}))`)}`);
+    return d ? ((d['body']?.['content'] as DocContent[] | undefined) ?? []) : null;
+  };
+  const batch = (p: ConnectorPrincipal, id: string, requests: Record<string, unknown>[]) =>
+    requests.length ? docsApi(p, `/documents/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests } }) : Promise.resolve({});
+  /**
+   * 本文を空にして、名前の付いたスタイルで書き入れる（第9.5.5.2節「文書のテンプレート」、ADR-0110）。表は印の段落を後から表に置き換える。
+   *
+   * @returns 書けたか（文書が見つからなければ `false`）
+   */
+  const writeBody = async (p: ConnectorPrincipal, id: string, markdown: string): Promise<boolean> => {
+    const now = await content(p, id, 'startIndex,endIndex');
+    if (!now) return false;
+    const { requests, tables } = docBodyRequests(markdown);
+    await batch(p, id, [...clearBodyRequests(now), ...requests]);
+    const MARKED = 'startIndex,endIndex,paragraph(elements(textRun(content))),table(tableRows(tableCells(content(startIndex))))';
+    // 後ろの表から置き換える（前の表の位置が動かないように）
+    for (const t of [...tables].reverse()) {
+      const before = await content(p, id, MARKED);
+      const m = before ? findMark(before, t.mark) : null;
+      if (!m) continue;
+      const columns = Math.max(1, ...t.rows.map((r) => r.length));
+      await batch(p, id, [
+        { deleteContentRange: { range: { startIndex: m.start, endIndex: m.end } } },
+        { insertTable: { rows: t.rows.length, columns, location: { index: m.start } } },
+      ]);
+      const after = await content(p, id, MARKED);
+      const table = (after ?? []).filter((c) => c.table && (c.startIndex ?? 0) >= m.start).sort((a, b) => (a.startIndex ?? 0) - (b.startIndex ?? 0))[0];
+      if (table) await batch(p, id, fillTableRequests(table, t.rows));
+    }
+    return true;
+  };
   return {
     create: async (p, d) => {
       // 本文を HTML にして取り込ませ、見出しや箇条書きをドキュメントの書式にする
@@ -250,6 +289,48 @@ export function googleDocs(ctx: Ctx): DocsConnector {
         method: 'PATCH', raw: { contentType: `multipart/related; boundary=${boundary}`, data: body },
       })) as DriveMeta | null;
       return res ? toFile(res) : null;
+    },
+
+    inspectTemplate: async (p, id) => {
+      const f = (await driveApi(p, `/files/${encodeURIComponent(id)}?fields=${encodeURIComponent('name,mimeType,trashed,thumbnailLink')}`).catch(() => null)) as (DriveMeta & { thumbnailLink?: string }) | null;
+      if (!f || f.trashed || f.mimeType !== MIME.document) return null;
+      // 見本の縮小の絵。Google の縮小の絵の道（本人のトークンで読む）だけを読む
+      let thumbnail: { bytes: Uint8Array; mimeType: string } | null = null;
+      const link = f.thumbnailLink ?? '';
+      if (/^https:\/\/(docs\.google\.com|[a-z0-9-]+\.googleusercontent\.com)\//.test(link)) {
+        const got = await downloadGoogle(ctx().tokens, p, 'ドライブ', link, 2 * 1024 * 1024).catch(() => null);
+        if (got && 'bytes' in got) thumbnail = { bytes: got.bytes, mimeType: 'image/png' };
+      }
+      return { name: (f.name ?? '').trim() || 'テンプレート', thumbnail };
+    },
+
+    createFromTemplate: async (p, d) => {
+      let copied: Record<string, unknown> | null;
+      try {
+        copied = await driveApi(p, `/files/${encodeURIComponent(d.templateId)}/copy?fields=${FIELDS}`, { method: 'POST', body: { name: d.title } });
+      } catch (err) {
+        throw new SlideThemeUnavailableError(`テンプレート「${d.templateName}」のファイルを開けませんでした（${err instanceof Error ? err.message : String(err)}）`);
+      }
+      const made = copied as DriveMeta | null;
+      if (!made?.id) throw new SlideThemeUnavailableError(`テンプレート「${d.templateName}」のファイルが見つかりませんでした（消されたか、共有が外れたかもしれません。選び直してください）`);
+      try {
+        await writeBody(p, made.id, d.body);
+      } catch (err) {
+        // 書きかけを残さない（ごみ箱に移すだけ）
+        await driveApi(p, `/files/${encodeURIComponent(made.id)}`, { method: 'PATCH', body: { trashed: true } }).catch(() => null);
+        throw new Error(`テンプレートに本文を書き入れられませんでした: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return toFile(made);
+    },
+
+    rewrite: async (p, d) => {
+      if (!d.documentId.trim()) return null;
+      const id = encodeURIComponent(d.documentId);
+      const f = (await driveApi(p, `/files/${id}?fields=${FIELDS}`)) as DriveMeta | null;
+      if (!f || f.trashed || f.mimeType !== MIME.document) return null;
+      if (!(await writeBody(p, d.documentId, d.body))) return null;
+      const renamed = (await driveApi(p, `/files/${id}?fields=${FIELDS}`, { method: 'PATCH', body: { name: d.title } }).catch(() => null)) as DriveMeta | null;
+      return toFile(renamed ?? f);
     },
 
     export: async (p, documentId, format) => {
