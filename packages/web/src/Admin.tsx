@@ -59,10 +59,11 @@ const TABS: {
     id: 'connectors', label: '接続', icon: 'connectors', description: 'Gemini・Google Workspace・WordPress・LINE・窓口のメール・コネクタ（MCP）・外部のアプリ', group: '設定',
     pages: [
       { id: 'gemini', label: 'Gemini' },
+      // Google の小分けは並べて、頭に「Google」を付ける（仕様書 第6.6.2節「画面の構成」）
       { id: 'google', label: 'Google Workspace' },
-      { id: 'retention', label: 'データを残す日数' },
-      { id: 'permissions', label: '求める許可' },
-      { id: 'people', label: '従業員の接続状況' },
+      { id: 'people', label: 'Google の従業員の接続' },
+      { id: 'permissions', label: 'Google に求める許可' },
+      { id: 'retention', label: 'Google のデータを残す日数' },
       // いくつかの機能が使う会社の外のサービス（仕様書 第6.6.2.1節。第 0.361.0 版で拡張機能の設定から移した）
       { id: 'wordpress', label: 'WordPress' },
       { id: 'line', label: 'LINE 公式アカウント' },

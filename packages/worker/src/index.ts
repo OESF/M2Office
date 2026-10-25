@@ -15,12 +15,12 @@ import {
   fillApprovalCompartments, discardStaleRecordings, discardStaleLiveRecordings, PostgresSystemLogStore, SystemLogSink, attachLogSink, EvidenceBuilder, SYSTEM_LOG_KEEP_DAYS,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
-  SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, isPublicImageBase, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS,
+  SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, isPublicImageBase, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, WORKER_BEAT_INTERVAL_MS, keepAliveOnTransientErrors,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,8 @@ assertDatabaseConfigured();
 const log = createLoggerFromEnv('worker');
 // データベースの接続が切れたときの警告の書き先。置き場を作る前に置く
 installPoolLogger(log.child({ component: 'db' }));
+// データベースが一時的に止まっても、ワーカーごと終わらないようにする（2026-10-25 にデータベースが立て直しに入った後、ワーカーだけが止まったままになった）
+keepAliveOnTransientErrors(log.child({ component: 'process' }));
 
 const repo = new PostgresRepository(
   process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office',
@@ -48,6 +50,8 @@ const healthSink = new BufferedHealthSink(new PostgresHealthStore(
 ));
 installHealthSink(healthSink);
 setInterval(() => { void healthSink.flush(); }, 30_000).unref();
+// 有効になっていない Google の API（仕様書 第6.6.2節「足りない API を知らせる」）。業務が断られたら覚え、管理者に知らせる
+installApiGapSink(new PostgresApiGapStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { repo }));
 // Google の側で許可が外されたときの後始末（仕様書 第6.5.2.1節 経路 2・3）。後始末の役は下で組み立ててから結び付ける
 let onGrantLost: ((tenantId: string, userId: string, refreshTokenEnc: string) => Promise<unknown>) | null = null;
 const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock', {
@@ -224,7 +228,11 @@ const securityStore = new PostgresSecurityStore(process.env['DATABASE_URL'] ?? '
 // 動いている環境（第8.6.7.1節）の知らせの置き場と、ワーカーの起動の時刻
 const runtimeBeats = new PostgresRuntimeBeatStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const WORKER_STARTED_AT = new Date();
-let lastRuntimeBeat = 0;
+// 起動のときと 1 分ごとに、ワーカーの版・Node.js の版・機械の様子を置く。業務の処理とは別の時計で置くので、長い業務の間も途切れない。
+// 知らせが 3 分途絶えたら、画面は「ワーカーが止まっています」と出す（第8.6.7.1節「ワーカーが止まったら」）
+const workerBeat = () => void writeRuntimeBeat(runtimeBeats, 'worker', appVersion(), WORKER_STARTED_AT).catch((err) => log.warn('動いている環境の知らせを置けませんでした', { err }));
+workerBeat();
+setInterval(workerBeat, WORKER_BEAT_INTERVAL_MS).unref();
 const security = new SecurityWatch({
   repo, store: securityStore,
   closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
@@ -777,11 +785,6 @@ while (running) {
 
   // ローカルの形の機械: ワーカーが動いていることを書き、毎晩 2 時（日本時間）か頼まれたときに控えを取り、毎月 1 回戻せるかを確かめる（第8.6.5節・第8.6.7節）
   await writeWorkerBeat(machineDir(process.env), appVersion()).catch(() => undefined);
-  // 動いている環境（第8.6.7.1節）。起動のときと 5 分ごとに、ワーカーの版・Node.js の版・機械の様子をデータベースに置く
-  if (Date.now() - lastRuntimeBeat >= RUNTIME_BEAT_INTERVAL_MS) {
-    lastRuntimeBeat = Date.now();
-    await writeRuntimeBeat(runtimeBeats, 'worker', appVersion(), WORKER_STARTED_AT).catch((err) => log.warn('動いている環境の知らせを置けませんでした', { err }));
-  }
   if (backupCfg && Date.now() - lastBackupCheck >= 60_000) {
     lastBackupCheck = Date.now();
     try {

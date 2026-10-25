@@ -11,9 +11,11 @@
  */
 
 import { copyText } from './clipboard.js';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, describeError, type ConnectionHealth, type ConnectionSettings, type GoogleClientVerdict, type GoogleLoginAuditStatus } from './api.js';
+import { GOOGLE_APIS, googleEnableApiUrl } from '@m2office/shared';
 import { HealthList } from './health.js';
+import { adminPath } from './route.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
 import { isServiceConnectionPage, ServiceConnection } from './ServiceConnections.js';
@@ -329,7 +331,6 @@ function PickerKey({ registered, onSaved }: { registered: boolean; onSaved: () =
   };
   return (
     <div className="field">
-      <label>Picker の API キー（ドライブからファイルを選ぶ）</label>
       <div className="row">
         <input value={key} autoComplete="off" onChange={(e) => setKey(e.target.value)} placeholder={registered ? '●●●●●●●●（登録済み）' : 'AIza…'} />
         <button className="btn ghost small" disabled={!key.trim()} onClick={() => void save(key.trim())}>保存</button>
@@ -371,7 +372,6 @@ function ChatAppKey({ data, onSaved }: { data: { registered: boolean; clientEmai
   };
   return (
     <div className="field">
-      <label>Chat アプリの鍵（通知を Chat で届ける）</label>
       {data?.registered && <p className="small muted">登録済み: {data.clientEmail}</p>}
       <textarea rows={3} value={key} autoComplete="off" spellCheck={false} onChange={(e) => setKey(e.target.value)}
         placeholder={data?.registered ? '登録し直すときだけ、新しい鍵の JSON を貼る' : 'サービスアカウントの鍵の JSON を貼る'} />
@@ -393,8 +393,7 @@ function ChatAppKey({ data, onSaved }: { data: { registered: boolean; clientEmai
  * @remarks 読み取りだけの許可を、本人の Google の接続とは別に預ける。戻ってきたら結果（`?loginaudit=`）を出す。
  * Google Workspace の会社のドメインでログインしていない会社では出さない
  */
-function GoogleLoginAudit() {
-  const [status, setStatus] = useState<GoogleLoginAuditStatus | null>(null);
+function GoogleLoginAudit({ status, reload }: { status: GoogleLoginAuditStatus | null; reload: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result] = useState(() => {
@@ -406,8 +405,7 @@ function GoogleLoginAudit() {
     connected: '接続しました', cancelled: '接続をキャンセルしました', scopes: 'ログインの記録を見る許可が足りません。Google の管理者のアカウントで、許可してください',
     domain: '会社の Google Workspace のドメインのアカウントではありません', client: '会社の Google 接続の設定に誤りがあります', failed: '接続できませんでした',
   };
-  const load = () => void api.admin.googleLoginAudit().then(setStatus).catch(() => setStatus(null));
-  useEffect(load, []);
+  const load = reload;
   const connect = () => {
     setBusy(true); setError(null);
     api.admin.connectGoogleLoginAudit().then((r) => { if (r.url) location.href = r.url; else load(); })
@@ -421,7 +419,6 @@ function GoogleLoginAudit() {
   if (!status || status.state === 'na') return null;
   return (
     <div className="field">
-      <label>Google のログインの記録（不正の兆しの見張り）</label>
       <div className="row wrap">
         {status.state === 'connected'
           ? <>
@@ -441,6 +438,26 @@ function GoogleLoginAudit() {
   );
 }
 
+/** 状態の札（設定済み・未設定・注意）。 */
+function StateBadge({ state, text }: { state: 'ok' | 'off' | 'warn'; text: string }) {
+  return <span className={state === 'ok' ? 'badge ok' : state === 'warn' ? 'badge warn' : 'badge muted-badge'}>{text}</span>;
+}
+
+/** 「接続」の小分けへ移る（管理者ページは URL の変化で画面を切り替える）。 */
+function goPage(page: string) {
+  const href = adminPath('connectors', page);
+  history.pushState(null, '', href);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+/** 追加の機能（Google Workspace の画面の「追加の機能」。第6.6.2節「画面の構成」）。 */
+type Extra = 'picker' | 'chat' | 'audit';
+
+/**
+ * Google Workspace の画面（仕様書 第6.6.2節「Google Workspace」の「画面の構成」）。
+ * 上から、状態の一覧・基本の設定（OAuth クライアント）・追加の機能（Picker の API キー・Chat アプリの鍵・ログインの記録）。
+ * 小分けの「求める許可」「従業員の接続」は同じ部品で出す。
+ */
 function GoogleCard({ data, page, onSaved }: {
   data: ConnectionSettings['google']; page: string; onSaved: () => void;
 }) {
@@ -449,6 +466,11 @@ function GoogleCard({ data, page, onSaved }: {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [audit, setAudit] = useState<GoogleLoginAuditStatus | null>(null);
+  // ログインの記録の接続から戻ってきたとき（`?loginaudit=`）は、その結果が見えるように開いておく
+  const [open, setOpen] = useState<Set<Extra>>(() => new Set(new URLSearchParams(location.search).get('loginaudit') ? ['audit'] : []));
+  const loadAudit = () => void api.admin.googleLoginAudit().then(setAudit).catch(() => setAudit(null));
+  useEffect(() => { if (page === 'google') loadAudit(); }, [page]);
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true); setMsg(null);
     try { await fn(); setMsg({ ok: true, text: done }); setSecret(''); onSaved(); }
@@ -457,12 +479,69 @@ function GoogleCard({ data, page, onSaved }: {
   };
   const registered = !!data.clientId && data.secretRegistered;
   const connectedCount = data.users.filter((u) => u.connected).length;
+  // ログインの記録は、見本データの会社ならクライアントの登録が無くてもつなげる
+  const auditUsable = (registered || data.workspaceSource === 'mock') && !!audit && audit.state !== 'na';
+  const toggle = (k: Extra, on?: boolean) => setOpen((cur) => {
+    const next = new Set(cur);
+    if (on ?? !next.has(k)) next.add(k); else next.delete(k);
+    return next;
+  });
+  /** 状態の一覧から、その設定へ移る（追加の機能は開く）。 */
+  const jump = (id: string, extra?: Extra) => {
+    if (extra) toggle(extra, true);
+    setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  };
+  const auditState = (): { state: 'ok' | 'off' | 'warn'; text: string } =>
+    audit?.state === 'connected' ? (audit.read === 'error' ? { state: 'warn', text: '読めていません' } : { state: 'ok', text: '接続中' }) : { state: 'off', text: '未接続' };
+  /** 追加の機能の 1 つ（名前・使う機能・状態。押すと開く）。 */
+  const extra = (k: Extra, id: string, name: string, uses: string, st: { state: 'ok' | 'off' | 'warn'; text: string }, body: ReactNode) => (
+    <details key={k} id={id} className="google-extra" open={open.has(k)} onToggle={(e) => toggle(k, (e.currentTarget as HTMLDetailsElement).open)}>
+      <summary>
+        <span className="google-extra-name">{name}</span>
+        <StateBadge state={registered || k === 'audit' ? st.state : 'off'} text={registered || k === 'audit' ? st.text : '基本の設定が先'} />
+        <span className="muted small google-extra-uses">{uses}</span>
+      </summary>
+      {registered || (k === 'audit' && auditUsable) ? body : null}
+    </details>
+  );
 
   return (
     <>
       {page === 'google' && (
+      <>
+      {/* 状態の一覧。何が設定済みで、何が足りないかを一目で（第6.6.2節「画面の構成」） */}
       <div className="card">
+        <h3>状態</h3>
+        <ul className="google-status">
+          <li><button type="button" className="link" onClick={() => jump('google-client')}>OAuth クライアント</button><StateBadge state={registered ? 'ok' : 'off'} text={registered ? '設定済み' : '未設定'} /></li>
+          <li><button type="button" className="link" onClick={() => jump('google-picker', 'picker')}>Picker の API キー</button><StateBadge state={data.pickerKeyRegistered ? 'ok' : 'off'} text={data.pickerKeyRegistered ? '設定済み' : '未設定'} /></li>
+          <li><button type="button" className="link" onClick={() => jump('google-chat', 'chat')}>Chat アプリの鍵</button><StateBadge state={data.chatApp?.registered ? 'ok' : 'off'} text={data.chatApp?.registered ? '設定済み' : '未設定'} /></li>
+          {audit && audit.state !== 'na' && (
+            <li><button type="button" className="link" onClick={() => jump('google-audit', 'audit')}>ログインの記録</button><StateBadge {...auditState()} /></li>
+          )}
+          <li><button type="button" className="link" onClick={() => goPage('people')}>従業員の接続</button><span className="small">{connectedCount} / {data.users.length} 人</span></li>
+          {/* 業務が断られて分かった、有効になっていない API（第6.6.2節「足りない API を知らせる」） */}
+          {(data.apiGaps ?? []).map((g) => (
+            <li key={g.service} className="google-gap">
+              <span>{g.label}</span>
+              <span className="row">
+                <StateBadge state="warn" text="有効になっていません" />
+                <a className="btn small" href={googleEnableApiUrl([g.service], data.projectNumber ?? null)} target="_blank" rel="noreferrer">有効にする</a>
+                <button type="button" className="btn ghost small" onClick={() => void api.admin.clearGoogleApiGap(g.service).then(onSaved)}>有効にした</button>
+              </span>
+            </li>
+          ))}
+        </ul>
+        {data.workspaceSource === 'mock' && <p className="warn-msg small">この会社の業務は見本データで動きます</p>}
+      </div>
+
+      <div className="card" id="google-client">
+        <h3>基本の設定</h3>
         {/* 手順の説明は「？」とヘルプの記事に任せ、ここには Google Cloud の各画面へのリンクとリダイレクト URI だけを置く */}
+        {/* M2Office が使う API を並べた「まとめて有効にする」画面を開く（第6.6.2節「必要な API をまとめて有効にする」） */}
+        <p>
+          <a className="btn ghost" href={googleEnableApiUrl(GOOGLE_APIS.map((a) => a.service), data.projectNumber ?? null)} target="_blank" rel="noreferrer">必要な API をまとめて有効にする</a>
+        </p>
         <div className="row small">
           <a className="link" href="https://console.cloud.google.com/apis/library" target="_blank" rel="noreferrer">API ライブラリ</a>
           <a className="link" href="https://console.cloud.google.com/auth/branding" target="_blank" rel="noreferrer">同意画面（内部）</a>
@@ -516,14 +595,22 @@ function GoogleCard({ data, page, onSaved }: {
           )}
         </div>
         {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
-        {registered && <PickerKey registered={!!data.pickerKeyRegistered} onSaved={onSaved} />}
-        {registered && <ChatAppKey data={data.chatApp ?? null} onSaved={onSaved} />}
-        {/* 見本データで動く会社は、クライアントの登録が無くても見本の口でつなげる */}
-        {(registered || data.workspaceSource === 'mock') && <GoogleLoginAudit />}
-        {data.workspaceSource === 'mock' && (
-          <p className="warn-msg small">この会社の業務は見本データで動きます</p>
-        )}
       </div>
+
+      {/* 追加の機能。名前・使う機能・状態を 1 行に出し、押すと開いて設定する */}
+      <div className="card">
+        <h3>追加の機能</h3>
+        {extra('picker', 'google-picker', 'ファイルを選ぶ画面（Picker の API キー）',
+          'スライドのテーマ・文書と表のテンプレート・秘書にドライブのファイルを渡す・販促物の「ドライブから」',
+          data.pickerKeyRegistered ? { state: 'ok', text: '設定済み' } : { state: 'off', text: '未設定' },
+          <PickerKey registered={!!data.pickerKeyRegistered} onSaved={onSaved} />)}
+        {extra('chat', 'google-chat', 'Chat への通知（Chat アプリの鍵）', '通知の控えを Google Chat で届ける',
+          data.chatApp?.registered ? { state: 'ok', text: '設定済み' } : { state: 'off', text: '未設定' },
+          <ChatAppKey data={data.chatApp ?? null} onSaved={onSaved} />)}
+        {audit && audit.state !== 'na' && extra('audit', 'google-audit', 'ログインの見張り（ログインの記録）', 'Google アカウントの不正の兆しを見張る',
+          auditState(), <GoogleLoginAudit status={audit} reload={loadAudit} />)}
+      </div>
+      </>
       )}
 
       {page === 'permissions' && <RequiredScopes scopes={data.requiredScopes} />}
@@ -554,9 +641,9 @@ function GoogleCard({ data, page, onSaved }: {
 const TITLES: Record<string, string> = {
   gemini: 'Gemini',
   google: 'Google Workspace',
-  retention: 'データを残す日数',
-  permissions: '求める許可',
-  people: '従業員の接続状況',
+  retention: 'Google のデータを残す日数',
+  permissions: 'Google に求める許可',
+  people: 'Google の従業員の接続',
   wordpress: 'WordPress',
   line: 'LINE 公式アカウント',
   mailbox: '窓口のメール',
@@ -570,7 +657,7 @@ const TITLES: Record<string, string> = {
  */
 const CONNECTION_HELP: Record<string, PageHelp> = {
   gemini: { article: 'admin-connectors', text: '業務の推論・秘書・Web の調査・音声に使う Gemini の鍵とモデルです。鍵は登録後に表示しません。' },
-  google: { article: 'admin-connectors', text: '従業員が Google Workspace につなぐための OAuth クライアントです。シークレットは登録後に表示しません。' },
+  google: { article: 'admin-google-setup', text: '従業員が Google Workspace につなぐための設定です。はじめての設定の手順は、ヘルプの「Google Workspace のつなぎ方」にあります。' },
   retention: { article: 'admin-connectors', text: '業務が Google から読んだメールや文書の中身と、そこから作った文を、業務が終わってから何日残すかです。過ぎると中身を消し、使ったツールの名前と件数だけを残します。' },
   permissions: { article: 'admin-connectors', text: '従業員が接続するときに Google に求める許可と、その権限の段階です。' },
   people: { article: 'admin-connectors', text: '従業員ごとの、Google との接続の状況です。' },

@@ -772,6 +772,8 @@ export interface DashboardLive {
   nodeWarn?: { expired: boolean; end: string | null; version: string } | null;
   /** セキュリティの修正がある部分（ローカルの形だけ。第8.6.7.1節）。 */
   nodeSecurity?: NodeSecurityNotice | null;
+  /** ワーカー（業務を動かす裏の仕組み）が止まっている（第8.6.7.1節「ワーカーが止まったら」）。 */
+  workerDown?: boolean;
 }
 
 /** 不正の兆しの見張りの様子（仕様書 第16.8節）。数と時刻だけ。 */
@@ -1050,6 +1052,10 @@ export interface ConnectionSettings {
   };
   google: {
     clientId: string; secretRegistered: boolean; pickerKeyRegistered?: boolean; updatedAt: string | null; redirectUri: string;
+    /** 有効になっていない Google の API（第6.6.2節「足りない API を知らせる」）。 */
+    apiGaps?: { service: string; label: string; firstSeenAt: string; lastSeenAt: string }[];
+    /** Google Cloud のプロジェクトの番号（クライアント ID の頭）。 */
+    projectNumber?: string | null;
     /** 通知の控えを送る会社の Chat アプリの鍵（第6.5.5.2.1節）。 */
     chatApp?: { registered: boolean; clientEmail: string; updatedAt: string | null };
     requiredScopes: { scope: string; level: string; label: string }[];
@@ -1120,6 +1126,8 @@ export interface RunDetail {
   /** 業務の段の並び（動いている間の進み具合に使う。仕様書 第6.2.2.2節）。 */
   /** 段の並び。`activityLabel` は動いている間に出す言葉（無ければ `label`）。 */
   plan?: { stepId: string; label: string; kind: 'agent' | 'approval'; activityLabel?: string }[];
+  /** 待ち行列に入ったままで、ワーカーが止まっている（第8.6.7.1節「ワーカーが止まったら」）。 */
+  worker?: 'down';
 }
 
 /** 自分が判断した承認 1 件（仕様書 第6.2.5節）。 */
@@ -2491,6 +2499,8 @@ export const api = {
      */
     /** ドライブの写真を選ぶ画面（Google Picker）の API キー。空なら消す（仕様書 第41.19.2節）。 */
     saveGooglePickerKey: (apiKey: string) => call<{ ok: true }>('/admin/connections/google/picker', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+    /** 「有効にした」（足りない API の行を消す。第6.6.2節）。 */
+    clearGoogleApiGap: (service: string) => call<{ ok: true }>(`/admin/connections/google/api-gaps/${encodeURIComponent(service)}`, { method: 'DELETE' }),
     /** 通知の控えを送る会社の Chat アプリの鍵（サービスアカウントの JSON）を登録する・消す（第6.5.5.2.1節）。 */
     saveChatAppKey: (key: string) => call<{ ok: true; clientEmail: string }>('/admin/connections/google/chat-app', { method: 'PUT', body: JSON.stringify({ key }) }),
     deleteChatAppKey: () => call<{ ok: true }>('/admin/connections/google/chat-app', { method: 'DELETE' }),

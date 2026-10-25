@@ -246,6 +246,7 @@ decideApproval(...)  →  承認を記録し、待ち行列へ戻す
 | `../slides/theme.ts`・`../slides/themes.ts` | Google スライドのテーマ（本人が選んだプレゼンテーション）のマスターとレイアウトを読み、組み立てに使う形にする。マイテーマと会社のテーマを覚える（移行 160）。仕様書 第9.4.2節「Google スライドのテーマを使う」 |
 | `google/doc-requests.ts` | 文書の本文（Markdown）を、Docs API で名前の付いたスタイル（題名・見出し・本文・箇条書き・表）を指定して書き入れる命令に直す（テンプレートの見た目を生かす。仕様書 第9.5.5.2節「文書のテンプレート」、ADR-0110） |
 | `google/sheet-look.ts`・`../tools/sheet-drafts.ts` | 表の見た目（テンプレートの見出しの行と本文の行の書式を読む・標準の見た目）と、業務「表の作成」のツール（`sheets.draft`・`sheets.list`・`sheets.get`・`sheets.share`）。仕様書 第9.5.5.2節「表の作成の扱いとテンプレート」、ADR-0111 |
+| `../google/api-gaps.ts` | 有効になっていない Google の API を会社ごとに覚え、管理者に知らせる（移行 164。Google の呼び出しが断られたら記録し、成功したら消す）。仕様書 第6.6.2節「足りない API を知らせる」 |
 | `../tools/doc-drafts.ts` | 業務「文書の作成」のツール（`docs.draft`・`docs.list`・`docs.get`・`docs.share`）。作った文書を覚え、同じファイルの本文を入れ替えて作り直す。仕様書 第9.5.5.2節「文書の作成の扱い」 |
 | `../slides/decks.ts` | 作ったスライドを作った人ごとに覚え（移行 159）、一覧・共有の切り替え（会社の Workspace のドメインへの閲覧だけ）・削除（ドライブのごみ箱へ）を行う。ツール `slides.list`・`slides.get`・`slides.share` と、`slides.create` の作り直し（`deckId`）が使う。仕様書 第9.4.2節「作ったスライドの扱い」 |
 | `../slides/pie.ts`・`../slides/image-host.ts` | 円グラフ（ドーナツ型）を数値から PNG に描く。スライドの画像を Google に渡す使い捨ての置き場（クラウドの形。鍵のハッシュだけ・5 分・貼ったら消す。移行 158）。仕様書 第9.4.2節「段 2」 |

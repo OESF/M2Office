@@ -8511,5 +8511,34 @@ console.log('\n■ 126. 作った表と表のテンプレート（文書・ス�
   }
 }
 
+console.log('\n■ 127. 有効になっていない Google の API（会社ごと・管理者だけ・「有効にした」で消す。第6.6.2節「足りない API を知らせる」）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  try {
+    await owner.query(`insert into google_api_gaps (tenant_id, service) values ('t-alpha', 'meet.googleapis.com') on conflict do nothing`);
+    const { body: admin } = await call('a', '/v1/admin/connections');
+    const { body: beta } = await call('b', '/v1/admin/connections');
+    const member = await call('a', '/v1/admin/connections/google/api-gaps/meet.googleapis.com', { method: 'DELETE' }, 'member');
+    const bad = await call('a', '/v1/admin/connections/google/api-gaps/evil.example.com', { method: 'DELETE' });
+    const cleared = await call('a', '/v1/admin/connections/google/api-gaps/meet.googleapis.com', { method: 'DELETE' });
+    const { rows: left } = await owner.query(`select 1 from google_api_gaps where tenant_id = 't-alpha' and service = 'meet.googleapis.com'`);
+    const { rows: rls } = await owner.query(`select relrowsecurity from pg_class where relname = 'google_api_gaps'`);
+    const gaps = admin?.google?.apiGaps ?? [];
+    const good = gaps.some((g) => g.service === 'meet.googleapis.com' && g.label === 'Google Meet REST API')
+      && !(beta?.google?.apiGaps ?? []).some((g) => g.service === 'meet.googleapis.com') && 'projectNumber' in (admin?.google ?? {})
+      && member.status === 403 && bad.status === 400 && cleared.status === 200 && left.length === 0 && rls[0]?.relrowsecurity === true;
+    good
+      ? ok('足りない API は会社ごとに出て、管理者だけが「有効にした」で消せる。ほかの名前は断る')
+      : ng('足りない API の扱いが違う', JSON.stringify({ gaps, beta: beta?.google?.apiGaps, member: member.status, bad: bad.status, cleared: cleared.status, left: left.length, rls: rls[0] }));
+  } catch (err) {
+    ng('足りない API の確認が途中で止まった', String(err));
+  } finally {
+    await owner.query(`delete from google_api_gaps where tenant_id = 't-alpha' and service = 'meet.googleapis.com'`).catch(() => undefined);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

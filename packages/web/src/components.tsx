@@ -582,10 +582,13 @@ export function RunView({
         <div className="card running">
           <p className="doing">
             {/* 承認待ちは人の番であり、こちらは動いていない。回さない */}
-            {run.status !== 'awaiting_approval' && <span className="spin" aria-hidden="true" />}
+            {run.status !== 'awaiting_approval' && detail.worker !== 'down' && <span className="spin" aria-hidden="true" />}
             {run.status === 'awaiting_approval'
               ? '承認をお待ちしています'
-              : `${activity ?? detail.plan?.find((p) => p.stepId === doing?.stepId)?.activityLabel ?? doing?.label ?? '準備しています'}…`}
+              : detail.worker === 'down'
+                // 業務を動かす裏の仕組みが止まっている。「準備しています」のまま待たせない（第8.6.7.1節「ワーカーが止まったら」）
+                ? '業務を動かす仕組み（ワーカー）が止まっているため、始められません。管理者に伝えてください（動き出せば、この依頼から進みます）'
+                : `${activity ?? detail.plan?.find((p) => p.stepId === doing?.stepId)?.activityLabel ?? doing?.label ?? '準備しています'}…`}
             {/* 経過した時間（第6.2.2.2節）。承認待ちは人の番なので数えない */}
             {run.status !== 'awaiting_approval' && since && <Elapsed since={String(since)} />}
           </p>

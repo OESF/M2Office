@@ -65,7 +65,9 @@ export function runsRoute(deps: AppDeps) {
     const plan = (def?.steps ?? []).map((st) => ({
       stepId: st.id, label: stepLabel(st), kind: st.type, ...(st.type === 'agent' && st.activityLabel ? { activityLabel: st.activityLabel } : {}),
     }));
-    return c.json({ run, job, steps: labelled, artifacts, decisions, plan });
+    // 待ち行列に入ったままで、ワーカーが止まっていれば知らせる（「準備しています」のまま待たせない。第8.6.7.1節「ワーカーが止まったら」）
+    const worker = run.status === 'queued' && await deps.workerDown() ? 'down' as const : undefined;
+    return c.json({ run, job, steps: labelled, artifacts, decisions, plan, ...(worker ? { worker } : {}) });
   });
 
   /**

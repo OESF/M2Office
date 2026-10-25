@@ -14,7 +14,7 @@ import {
   HelpFeedback, PostgresHelpFeedbackStore, PostgresHelpNoteStore, noteText, type HelpNoteStore,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
-  createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, createPool, OpsAppSide, ProxyAccessStore, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
+  createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, keepAliveOnTransientErrors, workerDown, PostgresApiGapStore, installApiGapSink, createPool, OpsAppSide, ProxyAccessStore, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
@@ -74,8 +74,15 @@ export interface AppDeps {
   slideDecks: SlideDeckService;
   /** Google スライドのテーマ（仕様書 第9.4.2節「Google スライドのテーマを使う」）。 */
   slideThemes: SlideThemeService;
+  /** 有効になっていない Google の API（仕様書 第6.6.2節「足りない API を知らせる」）。管理者ページの「状態」が読む。 */
+  apiGaps: PostgresApiGapStore;
   /** 動いている環境（第8.6.7.1節）。API とワーカーが置く知らせの置き場と、この API の起動の時刻。 */
   runtime: { store: PostgresRuntimeBeatStore; startedAt: Date };
+  /**
+   * ワーカーが止まっているか（知らせが 3 分途絶えた。第8.6.7.1節「ワーカーが止まったら」）。30 秒だけ覚えておく。
+   * 読めなければ `false`（推測で止まっているとは言わない）
+   */
+  workerDown(): Promise<boolean>;
   /** 開発者向けのヘルプで見せる API の定義（`docs/api/<名前>.openapi.yaml`。名前 → 題と中身。第6.10.7.4節）。 */
   apiDocs: Map<string, { title: string; text: string }>;
   /** ヘルプを育てる（見つからなかった質問と、役に立ったか。仕様書 第6.10.10節） */
@@ -290,6 +297,8 @@ export function buildDeps(): AppDeps {
   const log = createLoggerFromEnv('api');
   // データベースの接続が切れたときの警告の書き先。置き場を作る前に置く
   installPoolLogger(log.child({ component: 'db' }));
+  // データベースが一時的に止まっても、API ごと終わらないようにする（第8.6.7.1節「止まらないように」）
+  keepAliveOnTransientErrors(log.child({ component: 'process' }));
   // システムログをデータベースにも書く（仕様書 第16.10.1節）
   const systemLogs = new PostgresSystemLogStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
   attachLogSink(new SystemLogSink(systemLogs.query).start().accept);
@@ -303,6 +312,12 @@ export function buildDeps(): AppDeps {
   const healthSink = new BufferedHealthSink(health);
   installHealthSink(healthSink);
   setInterval(() => { void healthSink.flush(); }, 30_000).unref();
+  // 動いている環境の知らせの置き場と、ワーカーが止まっているかの答え（30 秒覚える。第8.6.7.1節）
+  const runtimeStore = new PostgresRuntimeBeatStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+  let workerCheck = { at: 0, down: false };
+  // 有効になっていない Google の API（仕様書 第6.6.2節「足りない API を知らせる」）。断られたら覚え、管理者に知らせる
+  const apiGaps = new PostgresApiGapStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { repo, logger: log });
+  installApiGapSink(apiGaps);
   // Google の側で許可が外されたときの後始末（仕様書 第6.5.2.1節 経路 2・3）。後始末の役は下で組み立ててから結び付ける
   let onGrantLost: ((tenantId: string, userId: string, refreshTokenEnc: string) => Promise<unknown>) | null = null;
   const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock', {
@@ -876,8 +891,14 @@ export function buildDeps(): AppDeps {
     proxy: new ProxyAccessStore(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 2, name: 'proxy' })),
     opsSide: new OpsAppSide(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'ops' })),
     deliveries,
-    slideImages, slideDecks, slideThemes,
-    runtime: { store: new PostgresRuntimeBeatStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), startedAt: new Date() },
+    slideImages, slideDecks, slideThemes, apiGaps,
+    runtime: { store: runtimeStore, startedAt: new Date() },
+    workerDown: async () => {
+      if (Date.now() - workerCheck.at < 30_000) return workerCheck.down;
+      const down = await runtimeStore.read().then((beats) => workerDown(beats)).catch(() => false);
+      workerCheck = { at: Date.now(), down };
+      return down;
+    },
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, apiDocs, apps, appLinks, appKnowledge, security, helpFeedback, knowledgeGaps, systemLogs, helpNotes, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     onsiteTenant: ai.deployment() === 'onsite' ? (process.env['M2O_ONSITE_TENANT']?.trim() || null) : null,

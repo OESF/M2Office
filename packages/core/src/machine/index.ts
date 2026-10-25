@@ -20,7 +20,7 @@ export {
 export { machineStatus, writeWorkerBeat, type MachineConfig, type MachineStatus } from './status.js';
 export {
   availableMemoryOf, currentMachine, inferenceText, beatFromRow, PostgresRuntimeBeatStore, writeRuntimeBeat, runtimeEnvironment,
-  RUNTIME_BEAT_INTERVAL_MS, RUNTIME_BEAT_STALE_MS, type RuntimeBeatStore,
+  RUNTIME_BEAT_INTERVAL_MS, RUNTIME_BEAT_STALE_MS, WORKER_BEAT_INTERVAL_MS, WORKER_DOWN_MS, workerDown, type RuntimeBeatStore,
 } from './runtime.js';
 export {
   machineAdminFromEnv, hashMachinePassword, verifyMachinePassword, base32Encode, base32Decode, totpCode, verifyTotp, totpUri,

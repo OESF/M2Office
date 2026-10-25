@@ -35,6 +35,7 @@ export * from './types/effect.js';
 export * from './types/runtime.js';
 export * from './types/slide-designs.js';
 export * from './types/slide-decks.js';
+export * from './types/google-apis.js';
 export * from './types/deliveries.js';
 export * from './text/internal-ids.js';
 export * from './text/paths.js';

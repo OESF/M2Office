@@ -448,6 +448,8 @@ export function dashboardRoute(deps: AppDeps) {
       security: await deps.security.status(tenantId).catch(() => null),
       // Node.js の更新が要るか・セキュリティの修正があるか（ローカルの形だけ。第8.6.7.1節）
       ...(await nodeNotices()),
+      // ワーカーが止まっている（知らせが 3 分途絶えた。第8.6.7.1節「ワーカーが止まったら」）
+      workerDown: await deps.workerDown(),
       events: events.map((e) => eventView(e, nameOf, runAgent, agentName)).filter((e) => e !== null),
     };
   }

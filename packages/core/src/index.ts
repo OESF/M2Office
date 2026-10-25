@@ -35,7 +35,7 @@ export type {
   CredentialKind, TenantCredential, GoogleConnection, UserPhoto, AuditQuery, DecidedApproval, ConnectionSecret, UserConnection, Memory, MemoryKind, UserProfile, MemoryEmbedItem, CaseNote, LiveRecording, QuoteItem, QuoteRecord, ScheduleRequest, ScheduleCandidate,
 } from './repository/types.js';
 export { PostgresRepository } from './repository/postgres.js';
-export { createPool, watchPool, installPoolLogger, describePoolError, assertDatabaseConfigured, type PoolOptions } from './repository/pool.js';
+export { createPool, watchPool, installPoolLogger, describePoolError, assertDatabaseConfigured, isTransientDbError, keepAliveOnTransientErrors, type PoolOptions } from './repository/pool.js';
 export { canViewRun, decidableBy, withCompartments, type RunViewer } from './engine/run-access.js';
 export { fillApprovalCompartments } from './engine/approval-compartments.js';
 export * from './conversations/rotation.js';
@@ -104,6 +104,7 @@ export {
   type SlidePlan, type SlideSpec, type SlideLayout, type ChartType,
 } from './slides/plan.js';
 export { PostgresSlideImageHost, isPublicImageBase, SLIDE_IMAGE_TTL_MS } from './slides/image-host.js';
+export { PostgresApiGapStore, installApiGapSink, noteApiDisabled, noteApiOk, type ApiGap, type ApiGapSink } from './google/api-gaps.js';
 export { PostgresSlideThemeStore, InMemorySlideThemeStore, SlideThemeService, SLIDE_THEMES_MAX, type SlideTheme, type SlideThemeStore, type SlideThemeViewer } from './slides/themes.js';
 export { readTheme, SlideThemeUnavailableError, THEME_FIELDS, type ThemeLook, type ThemeLayout } from './slides/theme.js';
 export { PostgresSlideDeckStore, InMemorySlideDeckStore, SlideDeckService, SLIDE_DECK_LIST_MAX, slideDeckLinks, draftLinks, EXPORT_MIME, HAND_EDIT_GRACE_MS, type SlideDeck, type SlideDeckStore, type SlideDeckViewer } from './slides/decks.js';
@@ -212,7 +213,7 @@ export {
   runBackup, restoreTest, readBackupStatus, requestBackup, takeBackupRequest, backupsToKeep, backupName, diskSpace,
   machineStatus, writeWorkerBeat, machineDir, backupConfigFromEnv, machineConfigFromEnv,
   availableMemoryOf, currentMachine, inferenceText, beatFromRow, PostgresRuntimeBeatStore, writeRuntimeBeat, runtimeEnvironment,
-  RUNTIME_BEAT_INTERVAL_MS, RUNTIME_BEAT_STALE_MS, type RuntimeBeatStore,
+  RUNTIME_BEAT_INTERVAL_MS, RUNTIME_BEAT_STALE_MS, WORKER_BEAT_INTERVAL_MS, WORKER_DOWN_MS, workerDown, type RuntimeBeatStore,
   type BackupConfig, type BackupRecord, type BackupStatus, type MachineConfig, type MachineStatus,
   readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus,
   readMaintenanceStatus, requestMaintenance, frontDir, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, type MaintenanceSession, type MaintenanceStatus,

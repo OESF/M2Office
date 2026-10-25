@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { NODE_RELEASE_LINES, compareNodeVersions, nodeSupport, type RuntimeBeat } from '@m2office/shared';
-import { availableMemoryOf, inferenceText, runtimeEnvironment } from '../src/index.js';
+import { availableMemoryOf, inferenceText, runtimeEnvironment, workerDown, WORKER_BEAT_INTERVAL_MS, WORKER_DOWN_MS, isTransientDbError } from '../src/index.js';
 
 test('段階: Current → LTS → 保守の段階 → サポートの終わり', () => {
   assert.equal(nodeSupport('v26.12.1', '2026-10-22').stage, 'current');
@@ -103,4 +103,25 @@ test('推論の説明に、秘密の値や口の URL を入れない', () => {
   const t = inferenceText({ baseUrl: 'http://127.0.0.1:11434/v1', models: { fast: 'gemma3', standard: 'gemma3', advanced: 'gemma3:27b' } as never, apiKey: 'secret-key' }, 'onsite');
   assert.match(t, /ローカル AI（gemma3・gemma3:27b）/);
   assert.ok(!t.includes('secret-key') && !t.includes('127.0.0.1'));
+});
+
+test('ワーカーが止まっているか: 知らせが無いか 3 分より古ければ止まっている（第8.6.7.1節「ワーカーが止まったら」）', () => {
+  const now = new Date('2026-10-25T14:00:00.000Z');
+  const beat = (role: 'api' | 'worker', at: string) => ({
+    role, version: '0.20.0', node: 'v24.22.1', startedAt: '2026-10-25T13:00:00.000Z', at,
+    machine: { os: null, arch: null, cpu: null, cores: null, memTotal: null, memFree: null },
+  });
+  assert.equal(workerDown([beat('api', '2026-10-25T13:59:50.000Z')], now), true, 'ワーカーの知らせが無い');
+  assert.equal(workerDown([beat('worker', '2026-10-25T13:58:00.000Z')], now), false, '2 分前なら動いている');
+  assert.equal(workerDown([beat('worker', '2026-10-25T13:56:30.000Z')], now), true, '3 分より古ければ止まっている');
+  assert.ok(WORKER_BEAT_INTERVAL_MS * 2 < WORKER_DOWN_MS, '知らせ 1 回の遅れでは止まったと言わない');
+});
+
+test('一時的なデータベースの例外: 切断・立て直しの途中は続け、ほかの例外は続けない（第8.6.7.1節「止まらないように」）', () => {
+  assert.equal(isTransientDbError(new Error('Connection terminated unexpectedly')), true);
+  assert.equal(isTransientDbError(Object.assign(new Error('the database system is in recovery mode'), { code: '57P03' })), true);
+  assert.equal(isTransientDbError(Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' })), true);
+  assert.equal(isTransientDbError(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' })), true);
+  assert.equal(isTransientDbError(new TypeError('Cannot read properties of undefined')), false);
+  assert.equal(isTransientDbError(Object.assign(new Error('duplicate key value'), { code: '23505' })), false);
 });

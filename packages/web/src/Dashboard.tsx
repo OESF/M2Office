@@ -282,6 +282,10 @@ function Live({ board = false }: { board?: boolean }) {
         <Tile label="今日の費用" value={c.todayCostJpy} unit="円" />
       </div>
 
+      {/* ワーカーが止まっている（第8.6.7.1節「ワーカーが止まったら」）。依頼が始まらないので、いちばん先に出す */}
+      {data.workerDown && !board && (
+        <p className="error" role="status">業務を動かす仕組み（ワーカー）が 3 分以上止まっています。新しい依頼が始まりません。サーバーのワーカーを起動し直してください</p>
+      )}
       {/* Node.js のセキュリティの修正がある（ローカルの形。第8.6.7.1節）。眺める画面では出さない */}
       {data.nodeSecurity && !board && (
         <p className="error" role="status">{nodeSecurityText(data.nodeSecurity)}。管理者ページの「機械」で確かめられます</p>

@@ -22,6 +22,23 @@ export const RUNTIME_BEAT_INTERVAL_MS = 5 * 60_000;
 /** 知らせがこれより古ければ、止まっているかもしれないとする（知らせは 5 分ごと）。 */
 export const RUNTIME_BEAT_STALE_MS = 12 * 60_000;
 
+/**
+ * ワーカーが動いていることの知らせの間隔（仕様書 第8.6.7.1節「ワーカーが止まったら」）。業務の処理とは別の時計で置くので、
+ * 長い業務を動かしている間も途切れない。
+ */
+export const WORKER_BEAT_INTERVAL_MS = 60_000;
+
+/** ワーカーの知らせがこれより古ければ、止まっているとする（知らせは 1 分ごと）。 */
+export const WORKER_DOWN_MS = 3 * 60_000;
+
+/**
+ * ワーカーが止まっているか。ワーカーの知らせが無い（一度も動いていない）か、{@link WORKER_DOWN_MS} より古ければ止まっている。
+ */
+export function workerDown(beats: readonly RuntimeBeat[], now: Date = new Date()): boolean {
+  const w = beats.find((b) => b.role === 'worker');
+  return !w || now.getTime() - Date.parse(w.at) > WORKER_DOWN_MS;
+}
+
 /** 日本の今日（YYYY-MM-DD）。 */
 const todayJst = (now: Date) => new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
 

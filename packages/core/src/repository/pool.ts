@@ -89,6 +89,38 @@ export function watchPool(pool: pg.Pool, name: string, logger?: Logger): void {
 }
 
 /**
+ * データベースが一時的に止まった・つなぎ直しの途中に起きる例外か（仕様書 第8.6.7.1節「止まらないように」）。
+ * こうした例外が受け止められずに残っても、API とワーカーは終わらずに動き続ける（次の問い合わせでつなぎ直す）。
+ */
+export function isTransientDbError(err: unknown): boolean {
+  const code = err && typeof err === 'object' ? String((err as { code?: unknown }).code ?? '') : '';
+  if (['57P01', '57P02', '57P03', '08000', '08003', '08006', '08001', '08004', 'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT'].includes(code)) return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /Connection terminated|database system is (in recovery mode|starting up|shutting down)|server closed the connection|Client has encountered a connection error/i.test(msg);
+}
+
+/**
+ * 想定外の例外で、プロセスごと終わらないようにする（API とワーカーの起動のときに 1 度だけ呼ぶ。第8.6.7.1節）。
+ *
+ * - 受け止められなかった約束の失敗（`unhandledRejection`）は、記録して動き続ける
+ * - 投げられたまま受け止められなかった例外（`uncaughtException`）は、データベースが一時的に止まったものなら記録して動き続け、
+ *   それ以外は記録してから終わる（壊れた状態で動き続けない）
+ */
+export function keepAliveOnTransientErrors(logger: Logger): void {
+  process.on('unhandledRejection', (reason) => {
+    logger.error('受け止められなかった例外がありました（処理は続けます）', { ...describePoolError(reason) });
+  });
+  process.on('uncaughtException', (err) => {
+    if (isTransientDbError(err)) {
+      logger.error('データベースが一時的に止まりました（処理は続けます）', { ...describePoolError(err) });
+      return;
+    }
+    logger.error('想定外の例外で止まります', { err });
+    process.exit(1);
+  });
+}
+
+/**
  * 接続の失敗を、ログに残してよい形にする。
  *
  * @remarks 理由の文に接続文字列（`postgres://…`）が混ざっていても伏せる。呼び出し履歴は残さない（調査に要らないため）

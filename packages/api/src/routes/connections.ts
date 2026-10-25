@@ -19,7 +19,7 @@ import {
   GOOGLE_LOGIN_KIND, GOOGLE_LOGIN_SCOPES, googleLoginConnection,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
-import { agentDisplayName, WEB_REVIEW_SCOPES } from '@m2office/shared';
+import { agentDisplayName, WEB_REVIEW_SCOPES, googleApiLabel, googleProjectNumber } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { isOperational, requireRole, type AppEnv } from '../middleware/tenant.js';
 import { registerConnectionCallback } from './connection-auth.js';
@@ -155,6 +155,9 @@ export function connectionsRoute(deps: AppDeps) {
         secretRegistered: !!google?.secretEnc,
         // ドライブの写真を選ぶ画面の API キーを登録したか（第41.19.2節）
         pickerKeyRegistered: typeof google?.meta['pickerApiKey'] === 'string',
+        // 有効になっていない Google の API と、Google Cloud のプロジェクトの番号（有効にする画面を開くため。第6.6.2節）
+        apiGaps: (await deps.apiGaps.list(tenant.id).catch(() => [])).map((g) => ({ ...g, label: googleApiLabel(g.service) })),
+        projectNumber: googleProjectNumber(typeof google?.meta['clientId'] === 'string' ? google.meta['clientId'] : ''),
         // 通知の控えを送る会社の Chat アプリの鍵（第6.5.5.2.1節）。秘密の値は返さず、サービスアカウントの名前だけ
         chatApp: { registered: !!chatApp?.secretEnc, clientEmail: typeof chatApp?.meta['clientEmail'] === 'string' ? chatApp.meta['clientEmail'] : '', updatedAt: chatApp?.updatedAt ?? null },
         updatedAt: google?.updatedAt ?? null,
@@ -334,6 +337,14 @@ export function connectionsRoute(deps: AppDeps) {
    *
    * @remarks ブラウザー用の鍵（参照元を M2Office の画面に限ったもの）なので秘密の値ではないが、画面には登録済みかどうかだけを返す
    */
+  /** 「有効にした」（足りない API の行を消す。まだ有効でなければ、次に断られたときにまた出る。第6.6.2節） */
+  app.delete('/google/api-gaps/:service', async (c) => {
+    const service = c.req.param('service');
+    if (!/^[a-z-]+\.googleapis\.com$/.test(service)) return c.json({ error: 'API の名前が違います' }, 400);
+    await deps.apiGaps.clear(c.get('ctx').tenant.id, service);
+    return c.json({ ok: true });
+  });
+
   app.put('/google/picker', async (c) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<{ apiKey?: unknown }>().catch(() => ({} as { apiKey?: unknown }));

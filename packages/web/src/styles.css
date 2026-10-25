@@ -2740,3 +2740,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .slide-design-thumb.sheet-standard { display: grid; grid-template-rows: repeat(4, 1fr); gap: 2px; padding: 8px; background: var(--panel); box-sizing: border-box; }
 .slide-design-thumb.sheet-standard span { display: block; border-radius: 1px; background: var(--line); }
 .slide-design-thumb.sheet-standard span:first-child { background: var(--accent); }
+/* Google Workspace の画面（仕様書 第6.6.2節「画面の構成」）。状態の一覧と追加の機能 */
+.google-status { list-style: none; padding: 0; margin: 0; display: grid; gap: calc(6px * var(--space-scale)); }
+.google-status li { display: flex; align-items: center; justify-content: space-between; gap: calc(12px * var(--space-scale)); max-width: 420px; }
+.google-extra { border-top: 1px solid var(--line); padding: calc(10px * var(--space-scale)) 0; }
+.google-extra:first-of-type { border-top: none; }
+.google-extra summary { display: flex; flex-wrap: wrap; align-items: center; gap: calc(4px * var(--space-scale)) calc(10px * var(--space-scale)); cursor: pointer; }
+.google-extra-name { font-weight: 600; }
+.google-extra-uses { flex-basis: 100%; }
+.google-extra > .field { margin-top: calc(10px * var(--space-scale)); }
+.google-status li.google-gap { max-width: none; flex-wrap: wrap; }

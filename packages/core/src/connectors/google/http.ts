@@ -12,6 +12,7 @@ import {
 } from '../../google/oauth.js';
 import { ConnectorUnavailableError, type ConnectorPrincipal } from '../types.js';
 import { recordHealth } from '../../health/recorder.js';
+import { noteApiDisabled, noteApiOk } from '../../google/api-gaps.js';
 
 /** 接続先の健全性の記録に使う、サービスの呼び名（ドキュメント・スプレッドシート・スライドはドライブにまとめる。仕様書 第6.7.6節）。 */
 const HEALTH_TARGET: Record<GoogleApiName, string> = {
@@ -19,6 +20,21 @@ const HEALTH_TARGET: Record<GoogleApiName, string> = {
   ドライブ: 'google:drive', ドキュメント: 'google:drive', スプレッドシート: 'google:drive', スライド: 'google:drive',
   連絡先: 'google:contacts', Meet: 'google:meet',
 };
+
+/**
+ * 呼んだ URL から、Google Cloud の API の名前（`gmail.googleapis.com` など）を決める（仕様書 第6.6.2節「足りない API を知らせる」）。
+ * 分からなければ `null`。テストの呼び先（Google でない）も `null`。
+ */
+export function googleServiceOf(url: string): string | null {
+  let u: URL;
+  try { u = new URL(url); } catch { return null; }
+  if (u.hostname === 'www.googleapis.com') {
+    if (/^\/(upload\/)?drive\//.test(u.pathname)) return 'drive.googleapis.com';
+    if (u.pathname.startsWith('/calendar/')) return 'calendar-json.googleapis.com';
+    return null;
+  }
+  return /^[a-z]+\.googleapis\.com$/.test(u.hostname) ? u.hostname : null;
+}
 
 /**
  * 失敗を健全性の種類に直す（仕様書 第6.7.6節）。
@@ -219,10 +235,16 @@ async function requestGoogle(
   try {
     const res = await requestGoogleOnce(tokens, p, api, url, init);
     recordHealth(p.tenantId, HEALTH_TARGET[api], true, Date.now() - started);
+    // 足りないと覚えていた API なら、有効になったので消す（第6.6.2節「足りない API を知らせる」）
+    const service = googleServiceOf(url);
+    if (service) noteApiOk(p.tenantId, service);
     return res;
   } catch (err) {
     const kind = healthKindOf(err);
     if (kind) recordHealth(p.tenantId, HEALTH_TARGET[api], false, Date.now() - started, kind);
+    // API が有効になっていないと断られたら、会社ごとに覚えて管理者ページに出す
+    const service = err instanceof ConnectorUnavailableError ? (err as ConnectorUnavailableError & { service?: string }).service : undefined;
+    if (service) noteApiDisabled(p.tenantId, service);
     throw err;
   }
 }
@@ -252,7 +274,7 @@ async function requestGoogleOnce(
     }
     if (res.ok) return res;
 
-    const body = (await res.json().catch(() => ({}))) as { error?: { status?: string; message?: string; errors?: { reason?: string }[]; details?: { reason?: string }[] } };
+    const body = (await res.json().catch(() => ({}))) as { error?: { status?: string; message?: string; errors?: { reason?: string }[]; details?: { reason?: string; metadata?: { service?: string } }[] } };
     // Chat は、会社の Google Cloud で Chat アプリを設定していないと 404 を返す（2026-09-25 に確認）。
     // 「見つからない」と取り違えず、会社の準備が要ることとして断る。文を見るのはここだけで、利用者には出さない
     if (res.status === 404 && /Chat app not found/i.test(body.error?.message ?? '')) {
@@ -273,7 +295,12 @@ async function requestGoogleOnce(
       throw new ConnectorUnavailableError('insufficient-scope', `この操作に要る Google の許可（${api}）がありません。個人設定の「Google 連携」で接続し直して、許可を追加してください`);
     }
     if (res.status === 403 && reasons.some((r) => /SERVICE_DISABLED|accessNotConfigured/i.test(r))) {
-      throw new ConnectorUnavailableError('api-disabled', `会社の Google Cloud で ${api} の API が有効になっていません。管理者に伝えてください`);
+      const err = new ConnectorUnavailableError('api-disabled', `会社の Google Cloud で ${api} の API が有効になっていません。管理者に伝えてください`);
+      // どの API か（Google の応答にあればそれ、無ければ呼んだ先から）。管理者ページの「有効になっていない API」に使う
+      const named = (body.error?.details ?? []).map((d) => d.metadata?.service).find((x): x is string => typeof x === 'string' && /^[a-z-]+\.googleapis\.com$/.test(x));
+      const service = named ?? googleServiceOf(url);
+      if (service) Object.assign(err, { service });
+      throw err;
     }
     if ((res.status === 429 || res.status >= 500) && attempt === 1) {
       await new Promise((r) => setTimeout(r, 1000));

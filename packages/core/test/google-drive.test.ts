@@ -24,6 +24,8 @@ import { findSlideDesign } from '@m2office/shared';
 import { describeTemplate } from '../src/slides/template.js';
 import { isPublicImageBase } from '../src/slides/image-host.js';
 import { SlideThemeUnavailableError } from '../src/slides/theme.js';
+import { installApiGapSink } from '../src/google/api-gaps.js';
+import { googleServiceOf } from '../src/connectors/google/http.js';
 import { SlidePlanError } from '../src/slides/plan.js';
 
 const P = { tenantId: 't1', userId: 'u1' };
@@ -117,6 +119,10 @@ async function fakeDrive(pdf: Uint8Array) {
     const file = /^\/drive\/files\/([^/]+)$/.exec(s.path);
     // 作り直す前のスライドの状態（第9.4.2節「作ったスライドの扱い」）
     if (s.path === '/drive/files/OLDDECK' && s.method === 'GET') return json(200, { modifiedTime: '2026-10-25T03:00:00.000Z', trashed: false });
+    // API が有効になっていない（第6.6.2節「足りない API を知らせる」）
+    if (s.path === '/drive/files/NOAPI' && s.method === 'GET') {
+      return json(403, { error: { code: 403, status: 'PERMISSION_DENIED', details: [{ reason: 'SERVICE_DISABLED', metadata: { service: 'drive.googleapis.com' } }] } });
+    }
     // 文書のテンプレートの確かめ（第9.5.5.2節「文書のテンプレート」）
     if (s.path === '/drive/files/DOCTPL' && s.method === 'GET') return json(200, { name: '提案書', mimeType: `${G}document`, trashed: false, thumbnailLink: 'https://evil.example/thumb' });
     if (file && s.method === 'GET') {
@@ -639,6 +645,23 @@ test('スプレッドシート: 作る表に見た目を付け、テンプレー
     assert.ok(await c.sheets.export(P, 'SHEET1', 'xlsx') instanceof Uint8Array);
     assert.equal(seen.filter((x) => x.path === '/drive/files/SHEET1/export').at(-1)!.query.get('mimeType'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   });
+});
+
+test('足りない API: 「API が有効になっていません」と断られたら、Google の応答の API の名前で会社ごとに覚える（第6.6.2節）', async () => {
+  const seen: [string, string, string][] = [];
+  installApiGapSink({ disabled: (t, svc) => seen.push(['disabled', t, svc]), ok: (t, svc) => seen.push(['ok', t, svc]) });
+  try {
+    await withDrive(async (c) => {
+      await assert.rejects(c.drive.read(P, 'NOAPI'), /API が有効になっていません/);
+    });
+    assert.deepEqual(seen.filter((x) => x[0] === 'disabled'), [['disabled', P.tenantId, 'drive.googleapis.com']]);
+  } finally {
+    installApiGapSink(null);
+  }
+  assert.equal(googleServiceOf('https://gmail.googleapis.com/gmail/v1/users/me/messages'), 'gmail.googleapis.com');
+  assert.equal(googleServiceOf('https://www.googleapis.com/upload/drive/v3/files'), 'drive.googleapis.com');
+  assert.equal(googleServiceOf('https://www.googleapis.com/calendar/v3/calendars/primary/events'), 'calendar-json.googleapis.com');
+  assert.equal(googleServiceOf('http://127.0.0.1:3000/drive/files'), null, 'Google でない呼び先は覚えない');
 });
 
 test('スライド: PowerPoint の形で受け取る。Google の書き出しの上限を超えたら too-large', async () => {
