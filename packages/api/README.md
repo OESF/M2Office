@@ -127,6 +127,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/agents` | 本人が使える業務の一覧（`agents`。入力スキーマと、定時実行に登録できるかの `schedulable` を含む）。メニューのピン止めは個人設定（`menu.pinned`。仕様書 第6.1.1節） |
 | `GET /v1/agents/slide-designs` | スライドの作成で選べる会社のテンプレート（名前と説明だけ）と、会社の既定（組み込みのデザインの ID かテンプレートの名前）。組み込みのデザインは画面が持つ（仕様書 第9.4.2節「組み込みのデザイン」） |
 | `GET /v1/slide-decks`・`GET /v1/slide-decks/:id` | 作ったスライドの一覧（本人のもの `mine` と会社で共有されたもの `shared`）と 1 件。構成は出さない（仕様書 第9.4.2節「作ったスライドの扱い」） |
+| `GET /v1/slide-decks/:id/export?format=` | 取り出す（スライドは `pptx`、文書は `docx`・`pdf`）。M2Office が Google の書き出しで受け取って返す。読めないもの・大きすぎるものは 409 と `fallback`（仕様書 第9.5.5.2節「文書の作成の扱い」）。一覧は `GET /v1/slide-decks?kind=doc` で文書 |
 | `GET /v1/slide-decks/:id/pptx` | PowerPoint の形で受け取る（M2Office が Google の書き出しで受け取って返す）。本人の権限で読めないもの・10 MB を超えるものは 409 と Google の書き出しの道（`fallback`） |
 | `GET/POST /v1/slide-themes`・`DELETE /v1/slide-themes/:id` | Google スライドのテーマ（本人が選んだプレゼンテーション）の一覧・追加（`fileId`。`company: true` は管理者だけ）・削除（仕様書 第9.4.2節「Google スライドのテーマを使う」） |
 | `GET /v1/slide-themes/:id/thumbnail`・`/access`・`GET /v1/slide-themes/picker` | テーマの見本の縮小の絵、本人がファイルを開けるか（会社のテーマを初めて使うとき）、Google のファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン） |

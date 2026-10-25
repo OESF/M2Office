@@ -145,7 +145,7 @@ test('共有: 会社の Workspace のドメインへの閲覧だけ。ドメイ�
   assert.deepEqual(listed.shared.map((d) => [d.title, d.ownerName, d.mine]), [['新しい道具の導入', '見本 太郎', false]]);
   assert.ok(await s.service.get({ tenantId: 't', userId: 'v' }, id));
   assert.ok('error' in await s.service.share({ tenantId: 't', userId: 'v' }, id, 'private'));
-  assert.equal(await s.service.remove({ tenantId: 't', userId: 'v' }, id), 'スライドが見つかりません');
+  assert.equal(await s.service.remove({ tenantId: 't', userId: 'v' }, id), '見つかりません');
   // 自分だけに戻す
   const back = await s.service.share({ tenantId: 't', userId: 'u' }, id, 'private');
   assert.ok(!('error' in back) && back.sharing === 'private');
@@ -191,7 +191,7 @@ test('削除: ファイルはドライブのごみ箱へ移し、一覧から消
 test('置き場: 会社をまたいで読めない・書けない', async () => {
   const store = new InMemorySlideDeckStore();
   const deck: SlideDeck = {
-    id: 'd1', tenantId: 't', userId: 'u', presentationId: 'P', title: 'x', design: null, template: null, theme: null, sharing: 'company', request: '',
+    id: 'd1', kind: 'slides', body: null, tenantId: 't', userId: 'u', presentationId: 'P', title: 'x', design: null, template: null, theme: null, sharing: 'company', request: '',
     plan: { title: 'x', slides: [] }, imagePrompts: {}, runId: null, builtAt: '2026-10-25T00:00:00.000Z', createdAt: '2026-10-25T00:00:00.000Z', updatedAt: '2026-10-25T00:00:00.000Z',
   };
   await store.save(deck);

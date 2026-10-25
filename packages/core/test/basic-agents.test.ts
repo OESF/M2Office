@@ -29,7 +29,7 @@ test('基本の業務は送らない・社外に共有しない（ツールは r
     for (const name of def.tools) {
       const risk = registry.get(name)!.risk;
       // スライドの作成は、頼まれれば会社の中（Workspace のドメイン）で閲覧の共有をする（第9.4.2節「作ったスライドの扱い」）
-      if (id === 'slides' && name === 'slides.share') { assert.equal(risk, 'write-internal'); continue; }
+      if ((id === 'slides' && name === 'slides.share') || (id === 'document-draft' && name === 'docs.share')) { assert.equal(risk, 'write-internal'); continue; }
       assert.ok(RISK_ORDER[risk] <= RISK_ORDER.draft, `${id} の ${name}（${risk}）は下書きまで`);
     }
     assert.ok(!def.steps.some((s) => s.type === 'approval'), `${id} に承認は無い`);

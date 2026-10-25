@@ -233,5 +233,39 @@ export function googleDocs(ctx: Ctx): DocsConnector {
       });
       return res ? { documentId: f.id } : null;
     },
+
+    replace: async (p, d) => {
+      if (!d.documentId.trim()) return null;
+      const id = encodeURIComponent(d.documentId);
+      const f = (await callGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.drive}/files/${id}?fields=${FIELDS}`)) as DriveMeta | null;
+      if (!f || f.trashed || f.mimeType !== MIME.document) return null;
+      // 本文を HTML にして、同じファイルに取り込ませ直す（URL と共有はそのまま。前の形は版の履歴に残る）
+      const boundary = `m2office-${Math.random().toString(36).slice(2)}`;
+      const body = [
+        `--${boundary}`, 'Content-Type: application/json; charset=UTF-8', '', JSON.stringify({ name: d.title }),
+        `--${boundary}`, 'Content-Type: text/html; charset=UTF-8', '', markdownToDocHtml(d.body),
+        `--${boundary}--`, '',
+      ].join('\r\n');
+      const res = (await callGoogle(ctx().tokens, p, 'ドキュメント', `${ctx().endpoints.driveUpload}/files/${id}?uploadType=multipart&fields=${FIELDS}`, {
+        method: 'PATCH', raw: { contentType: `multipart/related; boundary=${boundary}`, data: body },
+      })) as DriveMeta | null;
+      return res ? toFile(res) : null;
+    },
+
+    export: async (p, documentId, format) => {
+      const mime = format === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/pdf';
+      try {
+        const got = await downloadGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.drive}/files/${encodeURIComponent(documentId)}/export?mimeType=${encodeURIComponent(mime)}`, EXPORT_MAX_BYTES);
+        if (!got) return null;
+        return 'tooLarge' in got ? 'too-large' : got.bytes;
+      } catch (err) {
+        // Google の書き出しの上限（10 MB）を超えたとき
+        if (err instanceof Error && /exportSizeLimitExceeded/i.test(err.message)) return 'too-large';
+        throw err;
+      }
+    },
   };
 }
+
+/** Word・PDF の書き出しの上限（Google の書き出しの上限と同じ 10 MB）。 */
+const EXPORT_MAX_BYTES = 10 * 1024 * 1024;

@@ -1,18 +1,26 @@
 /**
- * @file 作ったスライドの部品（仕様書 第9.4.2節「作ったスライドの扱い」、Q-264）。
+ * @file 作ったスライドと文書の部品（仕様書 第9.4.2節「作ったスライドの扱い」、第9.5.5.2節「文書の作成の扱い」、Q-264・Q-266）。
  *
- * 実行の結果の画面には、URL を並べずに「Google スライドで開く」「PowerPoint でダウンロード」のボタンと、共有の範囲と、
- * 「直してほしいこと」を書いて作り直す欄を出す（`SlideDeckActions`）。
- * 「スライドの作成」の画面の頼む欄の下には、作ったスライドの一覧を出す（`SlideDeckList`）。
- * 作り直しは業務「スライドの作成」の実行（`deckId` と直す頼み）で行う。説明文は置かない（原則 u11）。
+ * 実行の結果の画面には、URL を並べずに「Google スライドで開く」「PowerPoint でダウンロード」（文書は「Google ドキュメントで開く」
+ * 「Word でダウンロード」「PDF でダウンロード」）のボタンと、共有の範囲と、「直してほしいこと」を書いて作り直す欄を出す（`SlideDeckActions`）。
+ * 業務の画面の頼む欄の下には、作ったものの一覧を出す（`SlideDeckList`）。
+ * 作り直しは、その業務の実行（`deckId` と直す頼み）で行う。説明文は置かない（原則 u11）。
  */
 
 import { useEffect, useState } from 'react';
-import { SLIDE_DECK_SHARING_LABEL, type SlideDeckSharing, type SlideDeckSummary } from '@m2office/shared';
+import { SLIDE_DECK_FORMAT_LABEL, SLIDE_DECK_SHARING_LABEL, type SlideDeckFormat, type SlideDeckKind, type SlideDeckSharing, type SlideDeckSummary } from '@m2office/shared';
 import { api, describeError } from './api.js';
 
 /** 業務「スライドの作成」の ID。 */
 export const SLIDES_AGENT_ID = 'slides';
+/** 業務「文書の作成」の ID。 */
+export const DOCUMENT_AGENT_ID = 'document-draft';
+
+/** 種類ごとの、作り直す業務・開くボタン・一覧の見出し。 */
+const KIND: Record<SlideDeckKind, { agent: string; open: string; list: string }> = {
+  slides: { agent: SLIDES_AGENT_ID, open: 'Google スライドで開く', list: '作ったスライド' },
+  doc: { agent: DOCUMENT_AGENT_ID, open: 'Google ドキュメントで開く', list: '作った文書' },
+};
 
 const SHARINGS: SlideDeckSharing[] = ['private', 'company'];
 
@@ -20,10 +28,10 @@ const SHARINGS: SlideDeckSharing[] = ['private', 'company'];
 const day = (iso: string) => new Date(iso).toLocaleDateString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric' });
 
 /**
- * PowerPoint でダウンロード。新しいタブを開かず、M2Office が Google から受け取って保存する。作っている間は回る印と経過の秒を出す
- * （第9.4.2節「PowerPoint の取り出し」）。M2Office が受け取れないもの（ほかの人のもの・大きすぎるもの）は Google の書き出しを開く。
+ * PowerPoint・Word・PDF でダウンロード。新しいタブを開かず、M2Office が Google から受け取って保存する。作っている間は回る印と経過の秒を出す
+ * （第9.4.2節「PowerPoint の取り出し」・第9.5.5.2節）。M2Office が受け取れないもの（ほかの人のもの・大きすぎるもの）は Google の書き出しを開く。
  */
-function PptxButton({ deck, small }: { deck: SlideDeckSummary; small?: boolean }) {
+function DownloadButton({ deck, format, small }: { deck: SlideDeckSummary; format: SlideDeckFormat; small?: boolean }) {
   const [since, setSince] = useState<number | null>(null);
   const [, tick] = useState(0);
   const [note, setNote] = useState<string | null>(null);
@@ -36,23 +44,24 @@ function PptxButton({ deck, small }: { deck: SlideDeckSummary; small?: boolean }
     setSince(Date.now());
     setNote(null);
     try {
-      const r = await api.downloadSlideDeckPptx(deck.id);
+      const r = await api.downloadSlideDeck(deck.id, format);
       if (r) {
         setNote(r.reason);
         window.open(r.fallback, '_blank', 'noopener');
       }
     } catch (err) {
-      setNote(describeError(err, 'PowerPoint にできませんでした'));
+      setNote(describeError(err, '取り出せませんでした'));
     } finally {
       setSince(null);
     }
   }
-  const label = small ? 'PowerPoint' : 'PowerPoint でダウンロード';
+  const name = SLIDE_DECK_FORMAT_LABEL[format];
+  const label = small ? name : `${name} でダウンロード`;
   return (
     <>
       <button type="button" className={`btn ghost${small ? ' small' : ''}`} disabled={since !== null} onClick={() => void download()}>
         {since !== null
-          ? <span className="busy-label"><span className="spin" aria-hidden="true" />PowerPoint を作っています…{Math.floor((Date.now() - since) / 1000)} 秒</span>
+          ? <span className="busy-label"><span className="spin" aria-hidden="true" />{name} を作っています…{Math.floor((Date.now() - since) / 1000)} 秒</span>
           : label}
       </button>
       {note && <span className="muted small">{note}</span>}
@@ -60,13 +69,13 @@ function PptxButton({ deck, small }: { deck: SlideDeckSummary; small?: boolean }
   );
 }
 
-/** 開く・PowerPoint のボタン。見本の接続口で作ったもの（道が無い）は出さない。 */
+/** 開く・取り出しのボタン。見本の接続口で作ったもの（道が無い）は出さない。 */
 function OpenButtons({ deck, small }: { deck: SlideDeckSummary; small?: boolean }) {
   if (!deck.url) return null;
   return (
     <>
-      <a className={`btn${small ? ' small' : ''}`} href={deck.url} target="_blank" rel="noreferrer">{small ? '開く' : 'Google スライドで開く'}</a>
-      {deck.pptxUrl && <PptxButton deck={deck} {...(small ? { small } : {})} />}
+      <a className={`btn${small ? ' small' : ''}`} href={deck.url} target="_blank" rel="noreferrer">{small ? '開く' : KIND[deck.kind].open}</a>
+      {deck.downloads.map((f) => <DownloadButton key={f} deck={deck} format={f} {...(small ? { small } : {})} />)}
     </>
   );
 }
@@ -105,7 +114,7 @@ function ReviseBox({ deck, onOpenRun }: { deck: SlideDeckSummary; onOpenRun: (ru
     setBusy(true);
     setError(null);
     try {
-      const { runId } = await api.createJob(SLIDES_AGENT_ID, { request: text.trim(), deckId: deck.id });
+      const { runId } = await api.createJob(KIND[deck.kind].agent, { request: text.trim(), deckId: deck.id });
       onOpenRun(runId);
     } catch (err) {
       setError(describeError(err, '作り直しを始められませんでした'));
@@ -192,21 +201,21 @@ function DeckRow({ deck, onOpenRun, onChanged, onRemoved }: {
 }
 
 /**
- * 作ったスライドの一覧（本人のものと、会社で共有されたもの）。「スライドの作成」の画面の頼む欄の下に置く。
+ * 作ったスライド・文書の一覧（本人のものと、会社で共有されたもの）。業務の画面の頼む欄の下に置く。
  */
-export function SlideDeckList({ onOpenRun }: { onOpenRun: (runId: string) => void }) {
+export function SlideDeckList({ kind = 'slides', onOpenRun }: { kind?: SlideDeckKind; onOpenRun: (runId: string) => void }) {
   const [mine, setMine] = useState<SlideDeckSummary[] | null>(null);
   const [shared, setShared] = useState<SlideDeckSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    api.slideDecks().then((r) => {
+    api.slideDecks(kind).then((r) => {
       if (!alive) return;
       setMine(r.mine);
       setShared(r.shared);
-    }).catch((err) => { if (alive) setError(describeError(err, '作ったスライドを読めませんでした')); });
+    }).catch((err) => { if (alive) setError(describeError(err, '一覧を読めませんでした')); });
     return () => { alive = false; };
-  }, []);
+  }, [kind]);
   if (error) return <p className="error">{error}</p>;
   if (!mine || (mine.length === 0 && shared.length === 0)) return null;
   const replace = (d: SlideDeckSummary) => setMine((list) => (list ?? []).map((x) => (x.id === d.id ? d : x)));
@@ -215,7 +224,7 @@ export function SlideDeckList({ onOpenRun }: { onOpenRun: (runId: string) => voi
     <section className="slide-decks">
       {mine.length > 0 && (
         <>
-          <h2>作ったスライド</h2>
+          <h2>{KIND[kind].list}</h2>
           <ul className="slide-deck-list card">
             {mine.map((d) => <DeckRow key={d.id} deck={d} onOpenRun={onOpenRun} onChanged={replace} onRemoved={removed} />)}
           </ul>

@@ -7,7 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from 'react';
-import { SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
+import { DOCUMENT_AGENT_ID, SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, swapCategories, togglePinned, type MenuSection,
@@ -722,6 +722,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               )}
               {/* 作ったスライドの一覧（第9.4.2節「作ったスライドの扱い」） */}
               {view.agent.id === SLIDES_AGENT_ID && <SlideDeckList key={`decks-${view.agent.id}`} onOpenRun={(runId) => setView({ kind: 'run', runId })} />}
+              {/* 作った文書の一覧（第9.5.5.2節「文書の作成の扱い」） */}
+              {view.agent.id === DOCUMENT_AGENT_ID && <SlideDeckList key={`docs-${view.agent.id}`} kind="doc" onOpenRun={(runId) => setView({ kind: 'run', runId })} />}
             </>
           )}
           {view.kind === 'run' && (

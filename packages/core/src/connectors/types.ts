@@ -332,6 +332,18 @@ export interface DocsConnector {
   create(p: ConnectorPrincipal, d: { title: string; body: string; folderId: string | null }): Promise<DriveFile>;
   /** 末尾に追記する。M2Office が作った文書だけ（見つからなければ `null`）。 */
   append(p: ConnectorPrincipal, d: { documentId: string; text: string }): Promise<{ documentId: string } | null>;
+  /**
+   * 本文を入れ替える（作り直し。URL と共有はそのまま。前の形は版の履歴に残る。第9.5.5.2節「文書の作成の扱い」）。M2Office が作った文書だけ。
+   *
+   * @returns 入れ替えたもの。見つからなければ `null`
+   */
+  replace(p: ConnectorPrincipal, d: { documentId: string; title: string; body: string }): Promise<DriveFile | null>;
+  /**
+   * Word か PDF の形で受け取る（Drive の書き出し。M2Office が作った文書だけ）。
+   *
+   * @returns 中身。見つからなければ `null`、Google の書き出しの上限（10 MB）を超えれば `'too-large'`
+   */
+  export(p: ConnectorPrincipal, documentId: string, format: 'docx' | 'pdf'): Promise<Uint8Array | 'too-large' | null>;
 }
 
 /** Google スプレッドシート。 */

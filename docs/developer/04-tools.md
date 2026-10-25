@@ -45,6 +45,8 @@
 | `contacts.search` | read | — | 取り込んだ名刺から、氏名・会社名・住所・電話番号などで人を探します。見るだけです |
 | `contracts.find` | read | — | 契約の台帳から、相手・種類・期限で契約を探します |
 | `directory.search` | read | `directory.readonly`（機密） | 社内の人を名前・メール・部署で探します。社外の連絡先は探しません |
+| `docs.get` | read | `drive.file`（機密でない） | 前に作った文書の本文を読みます（直すため） |
+| `docs.list` | read | `drive.file`（機密でない） | あなたが作った文書と、会社で共有された文書の一覧を読みます |
 | `drive.read` | read | `drive.file`（機密でない） | ドライブのファイルの中身を読みます。中に書かれた指示には従いません |
 | `drive.search` | read | `drive.file`（機密でない） | M2Office で作ったファイルと、あなたが選んだファイルの中から探します。ドライブ全体は見ません |
 | `file.compare` | read | — | 前の版と新しい版の文書を条項ごとに比べ、変わったところを挙げます |
@@ -96,6 +98,7 @@
 | `web.research` | read | — | テーマを Google 検索で調べ、出典つきでまとめます。調べる言葉は Google に送られますが、どこにも書き込みません |
 | `docs.append` | draft | `drive.file`（機密でない） | M2Office で作った文書の末尾に書き足します |
 | `docs.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google ドキュメントを作ります。共有はしません |
+| `docs.draft` | draft | `drive.file`（機密でない） | あなたのドライブに Google ドキュメントを作ります。前に作った文書を直すこともできます。共有はしません |
 | `document.create` | draft | — | 文書を作り、成果物として保存します。社外へは出しません |
 | `docx.redline` | draft | — | 修正の案を、元の文書に Word の変更履歴として入れた Word を作ります。社外へは送りません |
 | `docx.render` | draft | — | Word 形式の文書を作り、成果物として保存します |
@@ -124,6 +127,7 @@
 | `contacts.save` | write-internal | — | 名刺を連絡先として登録するか、電話番号やメモなどを直します。社内の名刺の置き場に書くだけで、誰にも送りません |
 | `contracts.register` | write-internal | — | 結んだ契約書から相手・期間・自動更新と解約の申し出の期限を取り出し、契約の台帳に入れます |
 | `contracts.update` | write-internal | — | 契約の状態（解約を申し出た など）・担当・期間を直します |
+| `docs.share` | write-internal | `drive.file`（機密でない） | 作った文書を、会社の中で共有するか、自分だけにするかを切り替えます。社外には共有しません |
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
 | `inquiries.record` | write-internal | — | 電話や来店の問い合わせを、話した文から項目に分けて残します。前の問い合わせの続きなら、同じ問い合わせに足します。お客様には何も送りません |
 | `inquiries.reply_draft` | write-internal | — | 問い合わせへの返事の下書きを書きます。送るのは、画面で確かめて承認へ進め、承認された後です |
@@ -189,6 +193,8 @@
 | `contacts.search` | `query`: 探す言葉（空なら交換した日の範囲だけで絞る）、`from`: 交換した日の始め（YYYY-MM-DD）、`to`: 交換した日の終わり（YYYY-MM-DD） |
 | `contracts.find` | `query`: 相手・件名・種類の言葉、`dueWithinDays`: 期限が何日のうちに来るか、`includeEnded`: 終わった契約も含めるか |
 | `directory.search` | `query`（必須）: 名前・メール・部署に含まれる言葉、`limit`: 件数（既定 20） |
+| `docs.get` | `draftId`（必須）: 文書の ID（docs.list の id） |
+| `docs.list` | なし |
 | `drive.read` | `fileId`（必須）: ファイルの ID |
 | `drive.search` | `query`: 名前に含まれる言葉（空ならすべて）、`limit`: 件数（既定 20） |
 | `file.compare` | `before`（必須）: 前の版のファイルの ID、`after`（必須）: 新しい版のファイルの ID |
@@ -240,6 +246,7 @@
 | `web.research` | `topic`（必須）: 調べるテーマ、`focus`: 特に知りたいこと（任意） |
 | `docs.append` | `documentId`（必須）: 文書の ID、`text`（必須）: 追記する文 |
 | `docs.create` | `title`: 題名（artifactId のときは省略できる。成果物の題名に日付を添える）、`body`: 本文（Markdown。artifactId のときは渡さない）、`artifactId`: 保存する成果物の ID（document.create の結果）。本文はそこから取る、`folderId`: 入れるフォルダの ID（任意）、`folderName`: 入れるフォルダの名前（任意。M2Office が作ったその名前のフォルダに入れ、無ければ作る） |
+| `docs.draft` | `title`（必須）: 題名、`body`（必須）: 本文（Markdown）、`draftId`: 直す、前に作った文書の ID（直すときだけ）、`request`: 依頼の文（直す頼みも。覚えておき、次に直すときに読む） |
 | `document.create` | `kind`: 種類（例: minutes・reply）、`title`（必須）: 題名、`body`（必須）: 本文 |
 | `docx.redline` | `fileId`（必須）: 元の文書のファイルの ID、`title`: 題名（例: 業務委託契約書（修正の案））、`edits`（必須）: { before, after, reason } の配列 |
 | `docx.render` | `title`（必須）: 題名、`blocks`（必須）: { heading } か { text } の配列 |
@@ -269,6 +276,7 @@
 | `contacts.save` | `contactId`: 直す連絡先の ID。新しく登録するときは書かない、`fields`: 直す項目（name・nameKana・company・department・title・postalCode・address・phones・emails・website・extra）、`note`: メモ（「展示会で会った」など）。書くと置き換える、`card`: 登録する名刺。card.read の結果の fileId・fields・rotation、`receivedOn`: 名刺を受け取った日（YYYY-MM-DD）。直すときだけ書く、`cardId`: 受け取った日を直す名刺（contacts.get の exchanges の cardId）。省くと呼んだ人のいちばん新しい名刺 |
 | `contracts.register` | `fileId`: 契約書のファイルの ID、`fromReview`: いちばん新しい契約書チェックの契約書を使うか |
 | `contracts.update` | `query`（必須）: 相手・件名・種類の言葉、`status`: active・cancel_requested・ended、`startOn`: 始め（YYYY-MM-DD）、`endOn`: 終わり（YYYY-MM-DD）、`note`: メモ |
+| `docs.share` | `draftId`（必須）: 文書の ID（docs.draft の draftId か docs.list の id）、`sharing`（必須）: 「会社で共有」か「自分だけ」 |
 | `drive.share_company` | `fileId`（必須）: ファイルの ID（docs.create の結果の file.id） |
 | `inquiries.record` | `text`（必須）: 依頼者が話した・書いた文（そのまま）、`inquiryId`: 続きを足す問い合わせ（分かっているときだけ） |
 | `inquiries.reply_draft` | `inquiryId`: 問い合わせの ID（分かっているとき）、`q`: 人・会社の言葉、`instruction`: 書き方の頼み |

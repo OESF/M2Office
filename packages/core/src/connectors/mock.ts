@@ -388,6 +388,16 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       f.file = { ...f.file, modifiedAt: this.now().toISOString() };
       return { documentId: d.documentId };
     },
+    // 作り直し（本文の入れ替え）。M2Office が作った文書だけ
+    replace: async (p: ConnectorPrincipal, d: { documentId: string; title: string; body: string }) => {
+      const f = this.driveFiles.get(d.documentId);
+      if (!f || f.owner !== key(p) || f.file.kind !== 'document') return null;
+      f.text = d.body;
+      f.file = { ...f.file, name: d.title, modifiedAt: this.now().toISOString() };
+      return f.file;
+    },
+    // 見本の接続口では書き出せない
+    export: async () => null,
   };
 
   sheets = {

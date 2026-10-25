@@ -13,6 +13,7 @@ import type { Tool } from './registry.js';
 import { SlidePlanError, normalizeSlidePlan, planOutline, type SlidePlan } from '../slides/plan.js';
 import { pieChartPng } from '../slides/pie.js';
 import { SlideThemeUnavailableError } from '../slides/theme.js';
+import { HAND_EDIT_GRACE_MS } from '../slides/decks.js';
 import { palette } from '../connectors/google/slide-infographics.js';
 
 /**
@@ -274,7 +275,7 @@ export const slidesCreate: Tool = {
     // 直す前のもの（作った人だけが直せる。第9.4.2節「作ったスライドの扱い」）
     const deckId = typeof args['deckId'] === 'string' ? args['deckId'].trim() : '';
     const prev = deckId && ctx.slideDecks ? await ctx.slideDecks.store.get(ctx.tenantId, deckId) : null;
-    if (deckId && (!prev || prev.userId !== ctx.userId)) return { error: '直すスライドが見つかりません（作った人だけが直せます。slides.list で探してください）' };
+    if (deckId && (!prev || prev.userId !== ctx.userId || prev.kind !== 'slides')) return { error: '直すスライドが見つかりません（作った人だけが直せます。slides.list で探してください）' };
     // 見た目（第9.4.2節）: 組み込みのデザインか会社のテンプレート。指定が無ければ前と同じ、前も無ければ会社の既定
     const chosen = await chooseLook(ctx, wantedLook(args) || (prev ? (prev.theme ? `${SLIDE_THEME_PREFIX}${prev.theme}` : null) ?? prev.template ?? prev.design ?? '' : ''));
     if (chosen.warning) warnings.push(chosen.warning);
@@ -356,7 +357,7 @@ export const slidesCreate: Tool = {
     const builtAt = (await ctx.connector.slides.fileState(who, created.presentationId).catch(() => null))?.modifiedTime || now;
     const request = typeof args['request'] === 'string' ? args['request'].trim().slice(0, 2000) : '';
     const deck = ctx.slideDecks ? {
-      id: prev && !asNew ? prev.id : randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, presentationId: created.presentationId,
+      id: prev && !asNew ? prev.id : randomUUID(), kind: 'slides' as const, body: null, tenantId: ctx.tenantId, userId: ctx.userId, presentationId: created.presentationId,
       title: plan.title, design: designName, template: used?.name ?? null, theme: theme?.id ?? null, sharing,
       request: [prev && !asNew ? prev.request : '', request].filter(Boolean).join('\n直す頼み: ').slice(-4000),
       plan, imagePrompts: prepared.prompts, runId: ctx.runId, builtAt,
@@ -382,9 +383,6 @@ export const slidesCreate: Tool = {
     };
   },
 };
-
-/** 作った後にこれより長く経ってから変わっていれば、人が手を入れたとみなす（組み立ての後の画像とメモの書き込みの分の余裕）。 */
-const HAND_EDIT_GRACE_MS = 30_000;
 
 /**
  * 作ったスライドの一覧（本人のものと、会社で共有されたもの）。
@@ -426,7 +424,7 @@ export const slidesGet: Tool = {
   async invoke(args, ctx) {
     if (!ctx.slideDecks) return { error: '作ったスライドを読めません' };
     const d = await ctx.slideDecks.get({ tenantId: ctx.tenantId, userId: ctx.userId }, String(args['deckId'] ?? ''));
-    if (!d) return { error: 'スライドが見つかりません' };
+    if (!d || d.kind !== 'slides') return { error: 'スライドが見つかりません' };
     return {
       deckId: d.id, title: d.title, design: d.template ?? d.design, sharing: SLIDE_DECK_SHARING_LABEL[d.sharing], request: d.request,
       mine: d.userId === ctx.userId, plan: d.plan,

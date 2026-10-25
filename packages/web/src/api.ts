@@ -25,7 +25,7 @@ import type { RuntimeEnvironment, NodeSecurityNotice, DeliveryView, DataRecipien
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
   Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
-  EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
+  EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckFormat, SlideDeckKind, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -2800,7 +2800,7 @@ export const api = {
   /** スライドの作成で選べる会社のテンプレートと、会社の既定（第9.4.2節「組み込みのデザイン」）。組み込みのデザインは画面が持つ。 */
   slideDesigns: () => call<{ templates: { name: string; description: string }[]; defaultChoice: string }>('/agents/slide-designs'),
   /** 作ったスライドの一覧（本人のものと会社で共有されたもの。仕様書 第9.4.2節「作ったスライドの扱い」）。 */
-  slideDecks: () => call<{ mine: SlideDeckSummary[]; shared: SlideDeckSummary[] }>('/slide-decks'),
+  slideDecks: (kind: SlideDeckKind = 'slides') => call<{ mine: SlideDeckSummary[]; shared: SlideDeckSummary[] }>(`/slide-decks?kind=${kind}`),
   /** 作ったスライド 1 件。 */
   slideDeck: (id: string) => call<SlideDeckSummary>(`/slide-decks/${encodeURIComponent(id)}`),
   /** 共有の範囲を切り替える（作った人だけ）。 */
@@ -2809,19 +2809,19 @@ export const api = {
   /** 削除する（ファイルはドライブのごみ箱へ。作った人だけ）。 */
   deleteSlideDeck: (id: string) => call<{ ok: true }>(`/slide-decks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /**
-   * PowerPoint の形で受け取り、そのまま保存する（新しいタブを開かない。仕様書 第9.4.2節「PowerPoint の取り出し」）。
+   * PowerPoint・Word・PDF の形で受け取り、そのまま保存する（新しいタブを開かない。仕様書 第9.4.2節「PowerPoint の取り出し」・第9.5.5.2節）。
    *
    * @returns 保存したら `null`。M2Office が受け取れないもの（ほかの人のもの・大きすぎるもの）は Google の書き出しの道と理由
    */
-  downloadSlideDeckPptx: async (id: string): Promise<{ fallback: string; reason: string } | null> => {
-    const res = await fetch(`/v1/slide-decks/${encodeURIComponent(id)}/pptx`, { credentials: 'same-origin', headers: devTenant ? { 'x-tenant': devTenant } : {} });
+  downloadSlideDeck: async (id: string, format: SlideDeckFormat): Promise<{ fallback: string; reason: string } | null> => {
+    const res = await fetch(`/v1/slide-decks/${encodeURIComponent(id)}/export?format=${format}`, { credentials: 'same-origin', headers: devTenant ? { 'x-tenant': devTenant } : {} });
     if (res.status === 409) return (await res.json()) as { fallback: string; reason: string };
     if (!res.ok) {
       const b = await res.json().catch(() => ({} as { error?: string }));
-      throw new ApiError(b.error ?? `PowerPoint にできませんでした（${res.status}）`, res.status);
+      throw new ApiError(b.error ?? `取り出せませんでした（${res.status}）`, res.status);
     }
     const named = /filename\*=UTF-8''([^;]+)/i.exec(res.headers.get('content-disposition') ?? '')?.[1];
-    saveBlob(await res.blob(), named ? decodeURIComponent(named) : 'slides.pptx');
+    saveBlob(await res.blob(), named ? decodeURIComponent(named) : `file.${format}`);
     return null;
   },
   /** Google スライドのテーマ（本人のものと会社のもの。仕様書 第9.4.2節「Google スライドのテーマを使う」）。 */

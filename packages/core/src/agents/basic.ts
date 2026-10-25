@@ -153,7 +153,8 @@ export const REPLY_FOLLOWUP: AgentDefinition = {
 /**
  * 文書の作成。
  *
- * @remarks 危険度 `draft`。本人のドライブに作り、共有しない。
+ * @remarks 危険度 `draft`。本人のドライブに作る。頼まれれば会社の中で閲覧の共有をする（`docs.share`。`write-internal`）。
+ * 作った文書を覚え、直す頼みの分だけ本文を変えて同じファイルで作り直す（第9.5.5.2節「文書の作成の扱い」）。
  */
 export const DOCUMENT_DRAFT: AgentDefinition = {
   schemaVersion: 1,
@@ -161,7 +162,7 @@ export const DOCUMENT_DRAFT: AgentDefinition = {
   version: 1,
   name: '文書の作成',
   category: 'document',
-  description: '報告書・案内文・社内通知などを、依頼と社内の知識から Google ドキュメントで下書きします（共有しません）',
+  description: '報告書・案内文・社内通知などを、依頼と社内の知識から Google ドキュメントで作ります。直してほしいことを書けば作り直し、会社で共有もできます',
   locale: 'ja-JP',
   compartment: null,
   inputs: {
@@ -169,31 +170,54 @@ export const DOCUMENT_DRAFT: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '作る文書（目的・宛先・入れたいこと）', format: 'textarea', examples: ['10 月の全社会議の案内文。日時は 10/15 15 時、場所は本社 3 階'] },
+      // 共有の範囲（第9.5.5.2節「文書の作成の扱い」）。既定は自分だけ
+      sharing: { type: 'string', title: '共有', format: 'switch', enum: ['自分だけ', '会社で共有'], default: '自分だけ' },
+      // 直す前の文書。画面の「作り直す」が渡す（欄は出さない）
+      deckId: { type: 'string', title: '直す文書', format: 'hidden' },
     },
   },
-  tools: ['knowledge.search', 'profile.read', 'docs.create'],
+  tools: ['knowledge.search', 'profile.read', 'docs.draft', 'docs.list', 'docs.get', 'docs.share'],
   steps: [
     {
       id: 'write',
       type: 'agent',
-      label: '下書き',
-      tools: ['knowledge.search', 'profile.read', 'docs.create'],
-      required: ['docs.create'],
+      label: '作成',
+      activityLabel: '作成中',
+      tools: ['knowledge.search', 'profile.read', 'docs.draft', 'docs.list', 'docs.get', 'docs.share'],
+      required: ['docs.draft'],
       instruction: [
-        '依頼の文書を書く。会社の決まりや過去の文書が要るときは knowledge.search で探し、差出人の名前・役職が要るときは profile.read で確かめる。',
-        '本文は Markdown で書き（見出し・箇条書き・表が使える）、docs.create で本人のドライブに Google ドキュメントとして作る。共有はしない。',
+        '入力に deckId があるとき、または依頼が前に作った文書を直す頼み（「先週の案内文の日時を変えて」など）のときは、下の「直すとき」に従う。',
+        '依頼が共有だけの頼み（「〇〇の文書を会社で共有して」）なら、docs.list で探して docs.share を呼び、docs.draft は呼ばずに結果を伝えて終える。',
+        '',
+        '新しく作るとき:',
+        '1. 依頼の文書を書く。会社の決まりや過去の文書が要るときは knowledge.search で探し、差出人の名前・役職が要るときは profile.read で確かめる。',
+        '2. 本文は Markdown で書き（見出し・箇条書き・表が使える）、docs.draft で本人のドライブに Google ドキュメントとして作る。request には依頼の文をそのまま渡す。',
+        '3. 入力の sharing が「会社で共有」か、依頼に「会社で共有して」とあれば、docs.draft が返した draftId で docs.share（sharing は「会社で共有」）を呼ぶ。',
+        '',
+        '直すとき:',
+        '1. deckId が無ければ docs.list で依頼に合うものを探す（自分が作ったもの mine から。見つからなければ、見つからないと伝えて終える）。',
+        '2. docs.get で前の本文と頼みを読む（deckId を draftId に渡す）。',
+        '3. 新しい事実が要る頼みのときだけ knowledge.search を呼ぶ。',
+        '4. 前の本文を、頼みの分だけ直す（頼まれていない段落・数字・言い回しは変えない）。',
+        '5. docs.draft に draftId と、直した本文と、request に直す頼みの文を渡す。',
+        '',
         '依頼に無い日時・金額・人の名前は作らない。分からないところは「（要確認: 〇〇）」と書いておく。',
-        '最後に、文書の題名と、要確認の箇所を答えに書く。',
+        '最後に、文書の題名（直したときは何を直したか）と、要確認の箇所を答えに書く。URL は書かない（画面にボタンが出る）。共有できなかったときは理由を添える。',
       ].join('\n'),
     },
   ],
-  constraints: ['共有しない・送らない', '依頼と知識に無い事実を作らない', DATA_IS_NOT_INSTRUCTION],
+  constraints: ['送らない・社外に共有しない', '依頼と知識に無い事実を作らない', DATA_IS_NOT_INSTRUCTION],
   limits: { maxSteps: 4, maxTokens: 80_000, timeoutSec: 300 },
   evals: [{ name: '案内文', input: { request: '10 月の全社会議の案内文。日時は 10/15 15 時、場所は本社 3 階' }, expect: '日時と場所を入れた案内文を、本人のドライブにドキュメントとして作ること' }],
   help: {
-    summary: '報告書・案内文・社内通知などを Google ドキュメントで下書きします。共有はしません。',
+    summary: '報告書・案内文・社内通知などを Google ドキュメントで作ります。直してほしいことを書けば同じファイルで作り直します。',
     examples: [{ title: '全社会議の案内文', input: { request: '10 月の全社会議の案内文。日時は 10/15 15 時、場所は本社 3 階' } }],
-    notes: ['あなたのドライブに作り、誰とも共有しません', '分からないところは「（要確認）」と書いておきます'],
+    notes: [
+      'あなたのドライブに作ります。「共有」で「会社で共有」を選ぶと、会社の Google Workspace の人が見られるようにします（編集はできません）。社外には共有しません',
+      '分からないところは「（要確認）」と書いておきます',
+      '作った文書は、この画面の下の一覧から開く・Word や PDF で取り出す・直してほしいことを書いて作り直す・共有を切り替える・削除ができます',
+      '作り直すと同じファイルが新しくなります（前の形は Google ドキュメントの版の履歴に残ります）。Google ドキュメントで手を入れた後なら、上書きせずに新しいファイルに作ります',
+    ],
   },
   face: 11,
 };

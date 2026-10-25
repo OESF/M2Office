@@ -110,6 +110,8 @@ async function fakeDrive(pdf: Uint8Array) {
       return json(200, { id: 'NEWDOC', name: '作った文書', mimeType: `${G}document`, modifiedTime: '2026-09-25T03:00:00.000Z', webViewLink: 'https://docs.example/NEWDOC' });
     }
     if (s.path === '/docs/documents/DOC1:batchUpdate' && s.method === 'POST') return json(200, { documentId: 'DOC1' });
+    // 文書の作り直し（本文の入れ替え。第9.5.5.2節「文書の作成の扱い」）
+    if (s.path === '/upload/files/DOC1' && s.method === 'PATCH') return json(200, meta('DOC1'));
     // スライド。題名が「失敗」なら組み立てで断る
     if (s.path === '/slides/presentations' && s.method === 'POST') {
       const bad = JSON.parse(raw).title === '失敗';
@@ -530,6 +532,22 @@ test('スライド: テーマで作るときは、テーマを複製して見本
       c.slides.createPresentation(P, { title: 'x', plan, template: null, theme: { presentationId: 'GONETHEME', name: '消えたテーマ' } }),
       (err: unknown) => err instanceof SlideThemeUnavailableError && /消えたテーマ/.test(err.message),
     );
+  });
+});
+
+test('ドキュメント: 作り直しは同じファイルに本文を取り込ませ直す。文書でないものは書き換えない。Word と PDF で受け取る', async () => {
+  await withDrive(async (c, seen) => {
+    const f = await c.docs.replace(P, { documentId: 'DOC1', title: '直した議事録', body: '# 決定\n- B 案' });
+    assert.equal(f?.id, 'DOC1');
+    const up = seen.find((x) => x.path === '/upload/files/DOC1' && x.method === 'PATCH')!;
+    assert.equal(up.query.get('uploadType'), 'multipart');
+    assert.ok(up.body.includes('"name":"直した議事録"') && up.body.includes('<h1>決定</h1>'), '題名と本文（HTML）を送る');
+    assert.equal(await c.docs.replace(P, { documentId: 'SHEET1', title: 'x', body: 'y' }), null, '文書でないものは書き換えない');
+    const docx = await c.docs.export(P, 'DOC1', 'docx');
+    assert.ok(docx instanceof Uint8Array);
+    assert.equal(seen.filter((x) => x.path === '/drive/files/DOC1/export').at(-1)!.query.get('mimeType'), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    await c.docs.export(P, 'DOC1', 'pdf');
+    assert.equal(seen.filter((x) => x.path === '/drive/files/DOC1/export').at(-1)!.query.get('mimeType'), 'application/pdf');
   });
 });
 

@@ -8415,5 +8415,34 @@ console.log('\n■ 123. Google スライドのテーマと PowerPoint の取り�
   }
 }
 
+console.log('\n■ 124. 作った文書（スライドと分けて並べる・取り出す形を確かめる・会社ごと。第9.5.5.2節「文書の作成の扱い」）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const key = `smoke-doc-${Date.now().toString(36)}`;
+  try {
+    const { rows: users } = await owner.query(`select id from users where tenant_id = 't-alpha' and email = 'admin@alpha.example.jp'`);
+    await owner.query(`insert into slide_decks (id, kind, tenant_id, user_id, presentation_id, title, sharing, body, built_at) values ($1, 'doc', 't-alpha', $2, $3, $4, 'company', '本文', now())`,
+      [key, users[0]?.id, `mock-${key}`, `${key} 文書`]);
+    const { body: docs } = await call('a', '/v1/slide-decks?kind=doc', {}, 'member');
+    const { body: slides } = await call('a', '/v1/slide-decks', {}, 'member');
+    const { body: beta } = await call('b', '/v1/slide-decks?kind=doc');
+    const badFormat = await call('a', `/v1/slide-decks/${key}/export?format=xlsx`);
+    const mockExport = await call('a', `/v1/slide-decks/${key}/export?format=docx`);
+    const titles = (b) => [...(b?.mine ?? []), ...(b?.shared ?? [])].map((d) => d.title).filter((t) => t.startsWith(key));
+    const good = titles(docs).length === 1 && (docs.shared ?? []).some((d) => d.title.startsWith(key) && d.kind === 'doc') && titles(slides).length === 0
+      && titles(beta).length === 0 && badFormat.status === 400 && mockExport.status === 400;
+    good
+      ? ok('文書はスライドと分けて並び、別の会社からは見えない。取り出せない形と見本の文書は断る')
+      : ng('作った文書の扱いが違う', JSON.stringify({ docs: titles(docs), slides: titles(slides), beta: titles(beta), badFormat: badFormat.status, mockExport: mockExport.status }));
+  } catch (err) {
+    ng('作った文書の確認が途中で止まった', String(err));
+  } finally {
+    await owner.query('delete from slide_decks where id = $1', [key]).catch(() => undefined);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
