@@ -103,7 +103,10 @@ export {
   normalizeSlidePlan, planOutline, isStandardLayout, SlidePlanError, SLIDE_LAYOUTS, CHART_TYPES, MAX_SLIDES,
   type SlidePlan, type SlideSpec, type SlideLayout, type ChartType,
 } from './slides/plan.js';
-export { PostgresSlideImageHost, SLIDE_IMAGE_TTL_MS } from './slides/image-host.js';
+export { PostgresSlideImageHost, isPublicImageBase, SLIDE_IMAGE_TTL_MS } from './slides/image-host.js';
+export { PostgresSlideThemeStore, InMemorySlideThemeStore, SlideThemeService, SLIDE_THEMES_MAX, type SlideTheme, type SlideThemeStore, type SlideThemeViewer } from './slides/themes.js';
+export { readTheme, SlideThemeUnavailableError, THEME_FIELDS, type ThemeLook, type ThemeLayout } from './slides/theme.js';
+export { PostgresSlideDeckStore, InMemorySlideDeckStore, SlideDeckService, SLIDE_DECK_LIST_MAX, slideDeckLinks, type SlideDeck, type SlideDeckStore, type SlideDeckViewer } from './slides/decks.js';
 export { pieChartPng, pieChartSvg } from './slides/pie.js';
 export {
   describeTemplate, TEMPLATE_FIELDS, type TemplateManifest, type TemplateLayout, type TemplateSlot, type SlidesPresentation,

@@ -329,7 +329,7 @@ function PickerKey({ registered, onSaved }: { registered: boolean; onSaved: () =
   };
   return (
     <div className="field">
-      <label>Picker の API キー（ドライブの写真）</label>
+      <label>Picker の API キー（ドライブからファイルを選ぶ）</label>
       <div className="row">
         <input value={key} autoComplete="off" onChange={(e) => setKey(e.target.value)} placeholder={registered ? '●●●●●●●●（登録済み）' : 'AIza…'} />
         <button className="btn ghost small" disabled={!key.trim()} onClick={() => void save(key.trim())}>保存</button>

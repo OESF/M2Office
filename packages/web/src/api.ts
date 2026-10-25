@@ -25,7 +25,7 @@ import type { RuntimeEnvironment, NodeSecurityNotice, DeliveryView, DataRecipien
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
   Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
-  EffectFigures, EffectPeriod, EffectReport, EffectReportBrief,
+  EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 
@@ -1103,8 +1103,10 @@ export interface JsonSchemaField {
    * 説明の文を足すより、例のほうが短く確実に伝わる。
    */
   examples?: string[];
-  /** 選ぶ値（JSON Schema の `enum`）。あれば選ぶ欄にする。 */
+  /** 選ぶ値（JSON Schema の `enum`）。あれば選ぶ欄にする。形 `switch` では [切った値, 入れた値] の 2 つ。 */
   enum?: string[];
+  /** 何も選んでいないときの値（JSON Schema の `default`）。形 `switch` の初めの位置に使う。 */
+  default?: string;
 }
 
 export interface RunDetail {
@@ -1116,7 +1118,8 @@ export interface RunDetail {
   /** 誰がいつ判断したか（仕様書 第6.2.5節）。自動で通過した承認は判断した人が無い。 */
   decisions?: { runStepId: string; decision: string; decidedBy: string | null; decidedAt: string | null; comment: string | null }[];
   /** 業務の段の並び（動いている間の進み具合に使う。仕様書 第6.2.2.2節）。 */
-  plan?: { stepId: string; label: string; kind: 'agent' | 'approval' }[];
+  /** 段の並び。`activityLabel` は動いている間に出す言葉（無ければ `label`）。 */
+  plan?: { stepId: string; label: string; kind: 'agent' | 'approval'; activityLabel?: string }[];
 }
 
 /** 自分が判断した承認 1 件（仕様書 第6.2.5節）。 */
@@ -2796,6 +2799,46 @@ export const api = {
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   /** スライドの作成で選べる会社のテンプレートと、会社の既定（第9.4.2節「組み込みのデザイン」）。組み込みのデザインは画面が持つ。 */
   slideDesigns: () => call<{ templates: { name: string; description: string }[]; defaultChoice: string }>('/agents/slide-designs'),
+  /** 作ったスライドの一覧（本人のものと会社で共有されたもの。仕様書 第9.4.2節「作ったスライドの扱い」）。 */
+  slideDecks: () => call<{ mine: SlideDeckSummary[]; shared: SlideDeckSummary[] }>('/slide-decks'),
+  /** 作ったスライド 1 件。 */
+  slideDeck: (id: string) => call<SlideDeckSummary>(`/slide-decks/${encodeURIComponent(id)}`),
+  /** 共有の範囲を切り替える（作った人だけ）。 */
+  shareSlideDeck: (id: string, sharing: SlideDeckSharing) =>
+    call<SlideDeckSummary>(`/slide-decks/${encodeURIComponent(id)}/share`, { method: 'POST', body: JSON.stringify({ sharing }) }),
+  /** 削除する（ファイルはドライブのごみ箱へ。作った人だけ）。 */
+  deleteSlideDeck: (id: string) => call<{ ok: true }>(`/slide-decks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /**
+   * PowerPoint の形で受け取り、そのまま保存する（新しいタブを開かない。仕様書 第9.4.2節「PowerPoint の取り出し」）。
+   *
+   * @returns 保存したら `null`。M2Office が受け取れないもの（ほかの人のもの・大きすぎるもの）は Google の書き出しの道と理由
+   */
+  downloadSlideDeckPptx: async (id: string): Promise<{ fallback: string; reason: string } | null> => {
+    const res = await fetch(`/v1/slide-decks/${encodeURIComponent(id)}/pptx`, { credentials: 'same-origin', headers: devTenant ? { 'x-tenant': devTenant } : {} });
+    if (res.status === 409) return (await res.json()) as { fallback: string; reason: string };
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({} as { error?: string }));
+      throw new ApiError(b.error ?? `PowerPoint にできませんでした（${res.status}）`, res.status);
+    }
+    const named = /filename\*=UTF-8''([^;]+)/i.exec(res.headers.get('content-disposition') ?? '')?.[1];
+    saveBlob(await res.blob(), named ? decodeURIComponent(named) : 'slides.pptx');
+    return null;
+  },
+  /** Google スライドのテーマ（本人のものと会社のもの。仕様書 第9.4.2節「Google スライドのテーマを使う」）。 */
+  slideThemes: () => call<{ items: SlideThemeSummary[] }>('/slide-themes'),
+  /** 本人が選んだプレゼンテーションをテーマにする（`company` は管理者だけ）。 */
+  addSlideTheme: (fileId: string, company = false) =>
+    call<SlideThemeSummary>('/slide-themes', { method: 'POST', body: JSON.stringify({ fileId, company }) }),
+  deleteSlideTheme: (id: string) => call<{ ok: true }>(`/slide-themes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** 本人がテーマのファイルを開けるか（会社のテーマを初めて使うときは、選ぶ画面で選んでもらう）。 */
+  slideThemeAccess: (id: string) => call<{ ok: true } | { ok: false; fileId: string }>(`/slide-themes/${encodeURIComponent(id)}/access`),
+  /** テーマを選ぶ画面の材料。 */
+  slideThemePicker: () => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>('/slide-themes/picker'),
+  /** テーマの見本の縮小の絵（`URL.createObjectURL`）。無ければ `null`。 */
+  slideThemeThumbnail: async (id: string): Promise<string | null> => {
+    const res = await fetch(`/v1/slide-themes/${encodeURIComponent(id)}/thumbnail`, { credentials: 'same-origin', headers: devTenant ? { 'x-tenant': devTenant } : {} }).catch(() => null);
+    return res?.ok ? URL.createObjectURL(await res.blob()) : null;
+  },
   /** 個人設定「サービスとの接続」（仕様書 第6.5.9節）。 */
   myConnections: () => call<{ items: MyConnectionView[] }>('/me/connections'),
   /** 結び付いている外部のアプリ（個人設定の「サービスとの接続」。仕様書 第11.12節）。 */

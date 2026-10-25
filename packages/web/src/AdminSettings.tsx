@@ -16,7 +16,7 @@ import { api, describeError, type ConsolidationView, type KnowledgeItemView, typ
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
-import { SlideDesignPicker } from './slide-design-picker.js';
+import { SlideDesignPicker, useSlideThemes } from './slide-design-picker.js';
 
 type Catalog = {
   id: string; name: string; description: string; usesWriteInternal: boolean; defaultMinutes: number;
@@ -446,11 +446,13 @@ function SlideTemplateSettings({ initial, initialDesign, onSaved }: { initial: S
   // 会社の既定にした組み込みのデザイン（第9.4.2節「組み込みのデザイン」）。決めていればテンプレートの既定より先に使う
   const [design, setDesign] = useState<string | null>(initialDesign);
   const saver = useSaver();
+  // 会社のテーマ（Google スライドのテーマ。第9.4.2節「Google スライドのテーマを使う」）。ここで加えたものは会社の人がみな選べる
+  const themes = useSlideThemes(true);
   useEffect(() => { setItems(initial.map(toDraft)); }, [initial]);
   useEffect(() => { setDesign(initialDesign); }, [initialDesign]);
   const choice = design ?? items.find((t) => t.isDefault && t.name)?.name ?? SLIDE_DESIGNS[0]!.id;
   const choose = (v: string) => {
-    if (SLIDE_DESIGNS.some((d) => d.id === v)) { setDesign(v); return; }
+    if (SLIDE_DESIGNS.some((d) => d.id === v) || v.startsWith('theme:')) { setDesign(v); return; }
     setDesign(null);
     setItems(items.map((x) => ({ ...x, isDefault: x.name === v })));
   };
@@ -461,7 +463,7 @@ function SlideTemplateSettings({ initial, initialDesign, onSaved }: { initial: S
     <div className="card">
       <div className="field">
         <label>会社の既定</label>
-        <SlideDesignPicker value={choice} templates={items.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), description: t.description }))} onChange={choose} />
+        <SlideDesignPicker value={choice} templates={items.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), description: t.description }))} onChange={choose} themes={themes} />
       </div>
       <h3>会社のテンプレート</h3>
       <p className="muted small">ファイルは社内で共有してください</p>

@@ -62,7 +62,9 @@ export function runsRoute(deps: AppDeps) {
       decisions.push({ runStepId: a.runStepId, decision: a.decision, decidedBy: who, decidedAt: a.decidedAt, comment: a.comment });
     }
     // 段の並び（動いている間の進み具合に使う。第6.2.2.2節）。定義が見つからなければ空
-    const plan = (def?.steps ?? []).map((st) => ({ stepId: st.id, label: stepLabel(st), kind: st.type }));
+    const plan = (def?.steps ?? []).map((st) => ({
+      stepId: st.id, label: stepLabel(st), kind: st.type, ...(st.type === 'agent' && st.activityLabel ? { activityLabel: st.activityLabel } : {}),
+    }));
     return c.json({ run, job, steps: labelled, artifacts, decisions, plan });
   });
 

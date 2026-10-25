@@ -487,7 +487,9 @@ function splitList(v: string): string[] {
 /** 前のステップの結果から件数だけを拾い、ブリーフの本文にする。 */
 function summarizeForBrief(previous: string): string {
   const count = (tool: string) => {
-    const re = new RegExp(`"name":\\s*"${tool.replace('.', '\\.')}"[\\s\\S]*?"count":\\s*(\\d+)`);
+    // 前の段の結果が長いと、ツールの結果は文字列に包まれて渡る（引用符が \\" になる。第9.3.2節「前の段の結果」）。どちらの形でも拾う
+    const q = '\\\\?"';
+    const re = new RegExp(`${q}name${q}:\\s*${q}${tool.replace('.', '\\.')}${q}[\\s\\S]*?${q}count${q}:\\s*(\\d+)`);
     const m = re.exec(previous);
     return m ? `${m[1]} 件` : '取得できませんでした';
   };

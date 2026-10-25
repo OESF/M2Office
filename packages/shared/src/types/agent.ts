@@ -58,6 +58,10 @@ export interface AgentStep {
   type: 'agent';
   /** 画面に出す短い名前（例: 取得）。省略時はステップ ID（仕様書 第9.2.4節）。 */
   label?: string;
+  /**
+   * 動いている間に出す言葉（例: 作成中）。ツールを呼んでいない間に「〇〇…」と出す。省略時は `label`（仕様書 第6.2.2.2節、第9.4.2節「作ったスライドの扱い」）。
+   */
+  activityLabel?: string;
   /** 推論に与える指示。Markdown で記述する。 */
   instruction: string;
   /**

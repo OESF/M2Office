@@ -9,6 +9,8 @@
  * @see 仕様書 第9.4節 ツールと承認の対応
  */
 
+import type { SlideDeckService } from '../slides/decks.js';
+import type { SlideThemeService } from '../slides/themes.js';
 import { withAiUsage } from '../usage/ai-usage.js';
 import { transcribeRecording } from '../files/transcribe.js';
 import { voiceWords } from '../secretary/voice-words.js';
@@ -218,6 +220,10 @@ export interface RunEngineDeps {
    * ローカルの形では渡さない（Google から届かないため、本人のドライブで一時的に共有する）。
    */
   publishSlideImage?(tenantId: string, bytes: Uint8Array, mimeType: string): Promise<{ url: string; done(): Promise<void> }>;
+  /** 作ったスライド（仕様書 第9.4.2節「作ったスライドの扱い」）。ツールに渡す。 */
+  slideDecks?: SlideDeckService;
+  /** Google スライドのテーマ（第9.4.2節）。ツールに渡す。 */
+  slideThemes?: SlideThemeService;
   /** 会員とポイント（内蔵の拡張。仕様書 第40章）。ツールに渡す。 */
   members?: {
     service: MemberService;
@@ -1102,6 +1108,8 @@ export class RunEngine {
         ...(llm?.generateImage ? { generate: (prompt: string, aspectRatio: '16:9' | '3:4') => llm.generateImage!({ model: imageModel(), aspectRatio, prompt }) } : {}),
         ...(this.deps.publishSlideImage ? { publish: (bytes: Uint8Array, mimeType: string) => this.deps.publishSlideImage!(run.tenantId, bytes, mimeType) } : {}),
       },
+      ...(this.deps.slideDecks ? { slideDecks: this.deps.slideDecks } : {}),
+      ...(this.deps.slideThemes ? { slideThemes: this.deps.slideThemes } : {}),
       ...(llm ? { expandQuery: (q: string) => expandQuery(llm, q) } : {}),
       ...(llm && queryEmbedder(llm, this.log) ? { embedQuery: queryEmbedder(llm, this.log)! } : {}),
       // スキルの補助のファイル。skill.read で開く（仕様書 第12.12.2節）

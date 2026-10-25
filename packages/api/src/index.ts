@@ -54,6 +54,8 @@ import { unsubscribeRoute } from './routes/unsubscribe.js';
 import { columnsPublicRoute } from './routes/columns-public.js';
 import { inventoryPublicRoute } from './routes/inventory-public.js';
 import { slideImagesPublicRoute } from './routes/slide-images.js';
+import { slideDecksRoute } from './routes/slide-decks.js';
+import { slideThemesRoute } from './routes/slide-themes.js';
 import { noticesRoute } from './routes/notices.js';
 import { adminRoute } from './routes/admin.js';
 import { mcpConnectionsRoute } from './routes/mcp-connections.js';
@@ -268,6 +270,8 @@ app.route('/v1/me', meRoute(deps));
 // アプリの鍵でなければ画面の道へ回す）
 app.route('/v1', appFunctionsRoute(deps));
 app.route('/v1/agents', agentsRoute(deps));
+app.route('/v1/slide-decks', slideDecksRoute(deps));
+app.route('/v1/slide-themes', slideThemesRoute(deps));
 app.route('/v1/jobs', jobsRoute(deps));
 app.route('/v1/briefs', briefsRoute(deps));
 app.route('/v1/runs', runsRoute(deps));

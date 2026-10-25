@@ -126,6 +126,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/auth/logout` | ログアウト |
 | `GET /v1/agents` | 本人が使える業務の一覧（`agents`。入力スキーマと、定時実行に登録できるかの `schedulable` を含む）。メニューのピン止めは個人設定（`menu.pinned`。仕様書 第6.1.1節） |
 | `GET /v1/agents/slide-designs` | スライドの作成で選べる会社のテンプレート（名前と説明だけ）と、会社の既定（組み込みのデザインの ID かテンプレートの名前）。組み込みのデザインは画面が持つ（仕様書 第9.4.2節「組み込みのデザイン」） |
+| `GET /v1/slide-decks`・`GET /v1/slide-decks/:id` | 作ったスライドの一覧（本人のもの `mine` と会社で共有されたもの `shared`）と 1 件。構成は出さない（仕様書 第9.4.2節「作ったスライドの扱い」） |
+| `GET /v1/slide-decks/:id/pptx` | PowerPoint の形で受け取る（M2Office が Google の書き出しで受け取って返す）。本人の権限で読めないもの・10 MB を超えるものは 409 と Google の書き出しの道（`fallback`） |
+| `GET/POST /v1/slide-themes`・`DELETE /v1/slide-themes/:id` | Google スライドのテーマ（本人が選んだプレゼンテーション）の一覧・追加（`fileId`。`company: true` は管理者だけ）・削除（仕様書 第9.4.2節「Google スライドのテーマを使う」） |
+| `GET /v1/slide-themes/:id/thumbnail`・`/access`・`GET /v1/slide-themes/picker` | テーマの見本の縮小の絵、本人がファイルを開けるか（会社のテーマを初めて使うとき）、Google のファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン） |
+| `POST /v1/slide-decks/:id/share`・`DELETE /v1/slide-decks/:id` | 共有の範囲の切り替え（`sharing`: `private`・`company`。会社の Workspace のドメインへの閲覧だけ）と削除（ファイルはドライブのごみ箱へ）。作った人だけ。作り直しは業務「スライドの作成」の実行（`deckId`） |
 | `GET /v1/public/slide-images/:token` | ログイン不要: スライドの画像の使い捨ての道。Google スライドが画像を貼るときに 1 度だけ読む。鍵（32 バイトの乱数）が違う・5 分を過ぎた・貼り終えたものは 404（仕様書 第9.4.2節「段 2」） |
 | `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節）。呼ばれたとき、まだなら朝のブリーフの定時実行（平日 7:30）を秘書が用意する（`secretary/morning.ts`。第9.5.5.1節） |
 | `GET /v1/me/photo` | 本人のアバター（Google のプロフィール写真）。**本人の写真だけ**を返し、利用者の ID は受け取らない。`nosniff` と読み込みを禁じる CSP を付ける（仕様書 第6.5.1.1節） |

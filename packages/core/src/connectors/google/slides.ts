@@ -7,14 +7,16 @@
  * 色・字体・表紙の飾りは、組み込みのデザイン（`SLIDE_DESIGNS`。第9.4.2節「組み込みのデザイン」）で切り替える。
  */
 
+import { randomUUID } from 'node:crypto';
 import { DEFAULT_SLIDE_DESIGN_ID, findSlideDesign, type SlideDesign, type SlideRgb } from '@m2office/shared';
 import { drawInfographic, onColor, type ShapeKind, type SlideDraw, type TextStyle } from './slide-infographics.js';
 
 import { SlidePlanError, isStandardLayout, type SlidePlan, type SlideSpec } from '../../slides/plan.js';
 import { TEMPLATE_FIELDS, describeTemplate, type SlidesPresentation, type TemplateManifest } from '../../slides/template.js';
+import { KEEP_PLACEHOLDERS, SlideThemeUnavailableError, THEME_FIELDS, readTheme, type ThemeLayout, type ThemeLook } from '../../slides/theme.js';
 import { ConnectorUnavailableError } from '../types.js';
 import type { ConnectorPrincipal, SlidesConnector } from '../types.js';
-import { callGoogle, type GoogleApiEndpoints, type GoogleTokenSource } from './http.js';
+import { callGoogle, downloadGoogle, type GoogleApiEndpoints, type GoogleTokenSource } from './http.js';
 
 /** 呼び出しに使うもの。接続口の組み立てより後に決まるため、呼ぶたびに引く。 */
 type Ctx = () => { tokens: GoogleTokenSource; endpoints: GoogleApiEndpoints };
@@ -31,6 +33,13 @@ export const TABLE_ROWS_MAX = 8;
 /** 出典のページに載せる件数の上限。 */
 export const SOURCES_MAX = 10;
 
+/** PowerPoint の形（Drive の書き出しの `mimeType`）。 */
+export const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+/** PowerPoint の書き出しの上限（Google の書き出しの上限と同じ 10 MB）。 */
+const PPTX_MAX_BYTES = 10 * 1024 * 1024;
+/** テーマの見本の縮小の絵の上限。 */
+const THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
+
 type Rgb = SlideRgb;
 
 /** 組み立ての後に画像を貼る場所（URL は貼るときに入れる）。 */
@@ -41,8 +50,11 @@ export interface ImagePlacement {
   elementProperties: Record<string, unknown>;
 }
 
-/** 画像を Google から読める URL で渡す手段（使い捨て。貼り終えたら `done` で消す。第9.4.2節「段 2」）。 */
-export type PublishImage = (bytes: Uint8Array, mimeType: string) => Promise<{ url: string; done(): Promise<void> }>;
+/**
+ * 画像を Google から読める URL で渡す手段（使い捨て。貼り終えたら `done` で消す。第9.4.2節「段 2」）。
+ * `alternates` は、`url` を Google が読めなかったときに順に試す別の URL。
+ */
+export type PublishImage = (bytes: Uint8Array, mimeType: string) => Promise<{ url: string; alternates?: string[]; done(): Promise<void> }>;
 
 /** 既定のデザイン（ビジネス）。 */
 const DEFAULT_DESIGN = findSlideDesign(DEFAULT_SLIDE_DESIGN_ID)!;
@@ -59,12 +71,14 @@ type Box = { x: number; y: number; w: number; h: number };
  * @param o.design 組み込みのデザイン（無ければ既定の「ビジネス」）
  * @param o.footer 表紙と各ページの下の隅に出す会社名（無ければ出さない）
  * @param o.images 用意できた画像の場所の名前（`cover`・`m2slide<n>`・`m2slide<n>_pie`）。あるものだけ、画像の場所を空けて組む
+ * @param o.theme Google スライドのテーマ（第9.4.2節「Google スライドのテーマを使う」）。あれば、表紙・区切り・題名だけのページをテーマのレイアウトで作り、
+ *   背景・飾り・題名の見た目はテーマに任せる（背景を塗らない・会社名を置かない）。図は `o.design`（テーマの配色と字体）で描く
  * @returns 要求の並び、ページ数、注意（切り詰めたことなど。黙って捨てない）、ページごとの発表者のメモ（ページの ID → 文）、
  *   画像を貼る場所（組み立ての後に、画像の URL を入れて貼る）
  */
 export function slideRequests(
   plan: SlidePlan, page: { width: number; height: number }, initialSlide: string | null,
-  o: { design?: SlideDesign; footer?: string; images?: ReadonlySet<string> } = {},
+  o: { design?: SlideDesign; footer?: string; images?: ReadonlySet<string>; theme?: ThemeLook } = {},
 ): { requests: Request[]; pages: number; warnings: string[]; notes: Record<string, string>; placements: ImagePlacement[] } {
   const sx = page.width / BASE.width;
   const sy = page.height / BASE.height;
@@ -72,7 +86,9 @@ export function slideRequests(
   const warnings: string[] = [];
   const d = o.design ?? DEFAULT_DESIGN;
   const COLOR = { accent: d.accent, accentLight: d.accentLight, text: d.text, muted: d.muted };
-  const footer = (o.footer ?? '').trim().slice(0, 40);
+  // テーマで作るときは会社名を置かない（テーマのフッターに任せる）
+  const footer = o.theme ? '' : (o.footer ?? '').trim().slice(0, 40);
+  const theme = o.theme ?? null;
 
   const at = (pageObjectId: string, b: Box) => ({
     pageObjectId,
@@ -112,8 +128,9 @@ export function slideRequests(
     if (o.center) requests.push({ updateParagraphStyle: { objectId: id, style: { alignment: 'CENTER' }, textRange: { type: 'ALL' }, fields: 'alignment' } });
     if (o.bullets) requests.push({ createParagraphBullets: { objectId: id, textRange: { type: 'ALL' }, bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE' } });
   };
-  /** ページの背景を塗る。 */
+  /** ページの背景を塗る（テーマで作るときは塗らない）。 */
   const background = (slide: string, color: Rgb) => {
+    if (theme) return;
     requests.push({
       updatePageProperties: {
         objectId: slide, pageProperties: { pageBackgroundFill: { solidFill: { color: { rgbColor: color } } } }, fields: 'pageBackgroundFill.solidFill.color',
@@ -162,9 +179,36 @@ export function slideRequests(
       requests.push({ createParagraphBullets: { objectId: id, textRange: from > 0 ? { type: 'FROM_START_INDEX', startIndex: from } : { type: 'ALL' }, bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE' } });
     },
   };
-  /** 題名の無いページ（大きな一文・区切り）を足す。 */
+  /**
+   * テーマのレイアウトでページを足す（第9.4.2節「Google スライドのテーマを使う」）。枠ごとに ID を決め、文があれば入れ、無い枠は消す
+   * （空の枠を残さない）。ページ番号・フッターなどの枠はテーマのまま残す。
+   *
+   * @param fill 枠の種類 → 入れる文（`TITLE` は `CENTERED_TITLE` にも使う）
+   */
+  const fromLayout = (id: string, layout: ThemeLayout, fill: Record<string, string>) => {
+    const used = layout.placeholders.filter((ph) => !KEEP_PLACEHOLDERS.has(ph.type));
+    const idOf = (ph: { type: string; index: number }) => `${id}_${ph.type.toLowerCase()}${ph.index}`;
+    requests.push({
+      createSlide: {
+        objectId: id, slideLayoutReference: { layoutId: layout.objectId },
+        placeholderIdMappings: used.map((ph) => ({ layoutPlaceholder: { type: ph.type, index: ph.index }, objectId: idOf(ph) })),
+      },
+    });
+    const done = new Set<string>();
+    for (const ph of used) {
+      const key = ph.type === 'CENTERED_TITLE' ? 'TITLE' : ph.type;
+      const value = done.has(key) ? '' : (fill[key] ?? '');
+      if (value) {
+        text(idOf(ph), value);
+        done.add(key);
+      } else requests.push({ deleteObject: { objectId: idOf(ph) } });
+    }
+  };
+  /** 題名の無いページ（大きな一文・区切り）を足す。テーマでは白紙のレイアウト（無ければ題名だけのレイアウトの枠を消したもの）。 */
   const blank = (id: string, color: Rgb) => {
-    requests.push({ createSlide: { objectId: id, slideLayoutReference: { predefinedLayout: 'BLANK' } } });
+    const plain = theme?.layouts.blank ?? theme?.layouts.titleOnly;
+    if (plain) fromLayout(id, plain, {});
+    else requests.push({ createSlide: { objectId: id, slideLayoutReference: { predefinedLayout: 'BLANK' } } });
     background(id, color);
   };
   /** 発表者のメモ（ページの ID → 文）。組み立ての後に、メモの枠の ID を読んで入れる。 */
@@ -179,6 +223,16 @@ export function slideRequests(
   const RIGHT_IMAGE: Box = { x: 5.78, y: 0, w: 4.22, h: 5.625 };
   /** 題名だけの型のスライドを足し、題名を入れる。背景・題名の色と字体・題名の下の線・下の隅の会社名をデザインに合わせる。 */
   const titled = (id: string, title: string) => {
+    if (theme) {
+      // テーマの題名だけのレイアウト。題名の大きさ・色・字体はテーマのまま
+      if (theme.layouts.titleOnly) {
+        fromLayout(id, theme.layouts.titleOnly, { TITLE: title });
+      } else {
+        blank(id, d.background);
+        g.shape(`${id}_t`, id, { x: 0.5, y: 0.35, w: 9, h: 0.8 }, 'TEXT_BOX', null, title, { size: 24, bold: true, heading: true, color: COLOR.accent, valign: 'BOTTOM' });
+      }
+      return;
+    }
     requests.push({
       createSlide: {
         objectId: id, slideLayoutReference: { predefinedLayout: 'TITLE_ONLY' },
@@ -195,7 +249,16 @@ export function slideRequests(
 
   // 表紙。象徴的な画像があれば右の半分に置き、題名と副題は左に（第9.4.2節「段 2」）
   if (plan.notes) notes['m2cover'] = plan.notes;
-  if (image('cover', 'm2cover', RIGHT_IMAGE)) {
+  if (theme) {
+    // テーマの表紙のレイアウト（飾りがあるため画像は置かない）。無ければ白紙に題名と副題
+    if (theme.layouts.title) {
+      fromLayout('m2cover', theme.layouts.title, { TITLE: plan.title, SUBTITLE: plan.subtitle ?? '' });
+    } else {
+      blank('m2cover', d.background);
+      g.shape('m2cover_t', 'm2cover', { x: 0.8, y: 1.6, w: 8.4, h: 1.6 }, 'TEXT_BOX', null, plan.title, { size: 34, bold: true, heading: true, color: COLOR.accent, valign: 'BOTTOM' });
+      if (plan.subtitle) g.shape('m2cover_s', 'm2cover', { x: 0.8, y: 3.3, w: 8.4, h: 0.8 }, 'TEXT_BOX', null, plan.subtitle, { size: 16, color: COLOR.muted });
+    }
+  } else if (image('cover', 'm2cover', RIGHT_IMAGE)) {
     requests.push({ createSlide: { objectId: 'm2cover', slideLayoutReference: { predefinedLayout: 'BLANK' } } });
     background('m2cover', d.cover.background);
     if (d.cover.style === 'band') shape('m2cover_band', 'm2cover', { x: 0, y: 0, w: 0.35, h: 5.625 }, 'RECTANGLE', COLOR.accent);
@@ -231,8 +294,8 @@ export function slideRequests(
     footerText('m2cover', d.cover.subtitle);
   }
 
-  // 本文のスライド。中身は題名の下から、伝えたいこと（takeaway）の帯の上まで
-  const content: Box = { x: 0.5, y: 1.45, w: 9, h: 3.7 };
+  // 本文のスライド。中身は題名の下から、伝えたいこと（takeaway）の帯の上まで（テーマでは題名の枠の下から）
+  const content: Box = theme ? { x: 0.5, y: theme.contentTop, w: 9, h: 5.15 - theme.contentTop } : { x: 0.5, y: 1.45, w: 9, h: 3.7 };
   plan.slides.forEach((s: SlideSpec, i) => {
     // Slides API はオブジェクトの ID に 5 文字以上を求める（短いと 400。AI Radio での知見）
     const id = `m2slide${i + 1}`;
@@ -246,9 +309,15 @@ export function slideRequests(
       footerText(id, COLOR.muted);
       return;
     }
+    if (s.layout === 'SECTION' && theme?.layouts.section) {
+      // テーマの区切りのレイアウト。番号は章の名前の前に
+      fromLayout(id, theme.layouts.section, { TITLE: [s.number, s.title].filter(Boolean).join('　'), BODY: s.sub ?? '', SUBTITLE: s.sub ?? '' });
+      return;
+    }
     if (s.layout === 'SECTION') {
-      // 区切り。強調の色で塗り、番号と章の名前を大きく
+      // 区切り。強調の色で塗り、番号と章の名前を大きく（テーマでは背景を塗らないため、強調の色の四角を敷く）
       blank(id, COLOR.accent);
+      if (theme) shape(`${id}_bg`, id, { x: 0, y: 0, w: 10, h: 5.625 }, 'RECTANGLE', COLOR.accent);
       const fg = onColor(COLOR.accent);
       // 象徴的な画像があれば右の半分に（第9.4.2節「段 2」）
       const w = image(id, id, RIGHT_IMAGE) ? 4.6 : 8.4;
@@ -490,32 +559,56 @@ export function googleSlides(ctx: Ctx): SlidesConnector {
       await remove();
       throw err;
     }
-    return { url: `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`, done: remove };
+    // ドライブの共有のリンクは、Google の側の都合で読めない形があるため、別の形も渡す
+    return {
+      url: `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`,
+      alternates: [`https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}`],
+      done: remove,
+    };
   };
 
   /**
    * 画像を貼る（組み立ての後。1 枚ずつ。貼れなかった画像は注意にして、スライドは残す）。
+   * 使い捨ての URL を Google が読めなければ（会社のアドレスの設定の誤りなど）、本人のドライブで一時的に共有して貼り直す。
    *
    * @returns 注意
    */
   const placeImages = async (
     p: ConnectorPrincipal, id: string, placements: ImagePlacement[], images: Record<string, { bytes: Uint8Array; mimeType: string }>, publish: PublishImage | undefined,
+    reused: Record<string, string> = {},
   ): Promise<string[]> => {
     const warnings: string[] = [];
     for (const pl of placements) {
       const img = images[pl.key];
-      if (!img) continue;
-      let handle: Awaited<ReturnType<PublishImage>> | null = null;
-      try {
-        handle = await (publish ?? driveTempImage(p))(img.bytes, img.mimeType);
-        await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, {
-          method: 'POST', body: { requests: [{ createImage: { objectId: pl.objectId, url: handle.url, elementProperties: pl.elementProperties } }] },
-        });
-      } catch (err) {
-        warnings.push(`${pl.key === 'cover' ? '表紙' : pl.key.endsWith('_pie') ? '円グラフ' : 'ページ'}の画像を置けませんでした（${err instanceof Error ? err.message : String(err)}）`);
-      } finally {
-        await handle?.done().catch(() => undefined);
+      // 作り直しで使い回す前の画像は、Google が出した画像の URL（30 分有効）をそのまま渡す
+      const again = reused[pl.key];
+      if (!img && !again) continue;
+      const ways: PublishImage[] = !img
+        ? [async () => ({ url: again!, done: async () => undefined })]
+        : publish ? [publish, driveTempImage(p)] : [driveTempImage(p)];
+      let last: unknown = null;
+      placed: for (const way of ways) {
+        let handle: Awaited<ReturnType<PublishImage>> | null = null;
+        try {
+          handle = await way(img?.bytes ?? new Uint8Array(), img?.mimeType ?? 'image/png');
+          for (const url of [handle.url, ...(handle.alternates ?? [])]) {
+            try {
+              await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, {
+                method: 'POST', body: { requests: [{ createImage: { objectId: pl.objectId, url, elementProperties: pl.elementProperties } }] },
+              });
+              last = null;
+              break placed;
+            } catch (err) {
+              last = err;
+            }
+          }
+        } catch (err) {
+          last = err;
+        } finally {
+          await handle?.done().catch(() => undefined);
+        }
       }
+      if (last) warnings.push(`${pl.key === 'cover' ? '表紙' : pl.key.endsWith('_pie') ? '円グラフ' : 'ページ'}の画像を置けませんでした（${last instanceof Error ? last.message : String(last)}）`);
     }
     return warnings;
   };
@@ -539,28 +632,102 @@ export function googleSlides(ctx: Ctx): SlidesConnector {
   };
 
   /** 標準の見た目で作る（第9.4.2節「標準の見た目」）。組み込みのデザインがあれば、その色・字体・飾りで。 */
+  /**
+   * 作り直すために、今のページを空ける（第9.4.2節「作ったスライドの扱い」）。
+   * ページの ID は作るたびに同じ名前を使うため、仮のページを 1 枚だけ残して今のページをすべて消す（仮のページは組み立ての最後に消える）。
+   * 使い回す画像は、消す前に Google が出した画像の URL を読んでおく。
+   *
+   * @returns ページの大きさ・仮のページ・使い回す画像の URL（新しい場所の名前 → URL）。見つからなければ `null`
+   */
+  const clearForRebuild = async (p: ConnectorPrincipal, id: string, reuse: Record<string, string>) => {
+    const got = await slides(p, `/presentations/${encodeURIComponent(id)}?fields=${encodeURIComponent('pageSize,slides(objectId,pageElements(objectId,image(contentUrl)))')}`);
+    if (!got) return null;
+    const size = got['pageSize'] as { width?: { magnitude?: number }; height?: { magnitude?: number } } | undefined;
+    const list = (got['slides'] as { objectId?: string; pageElements?: { objectId?: string; image?: { contentUrl?: string } }[] }[] | undefined) ?? [];
+    const urls = new Map<string, string>();
+    for (const sl of list) for (const el of sl.pageElements ?? []) if (el.objectId && el.image?.contentUrl) urls.set(el.objectId, el.image.contentUrl);
+    const reused: Record<string, string> = {};
+    for (const [key, old] of Object.entries(reuse)) {
+      const url = urls.get(`${old}_img`);
+      if (url) reused[key] = url;
+    }
+    const temp = `m2tmp${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, {
+      method: 'POST',
+      body: { requests: [{ createSlide: { objectId: temp, insertionIndex: 0 } }, ...list.flatMap((sl) => sl.objectId ? [{ deleteObject: { objectId: sl.objectId } }] : [])] },
+    });
+    return { page: { width: size?.width?.magnitude || BASE.width, height: size?.height?.magnitude || BASE.height }, first: temp, reused };
+  };
+
+  /**
+   * テーマのファイルを本人のドライブに複製する（第9.4.2節「Google スライドのテーマを使う」）。
+   * 開けなければ {@link SlideThemeUnavailableError}（本人がまだ選んでいない会社のテーマ・共有が外れた・消された）。
+   */
+  const copyTheme = async (p: ConnectorPrincipal, theme: { presentationId: string; name: string }, title: string): Promise<string> => {
+    let copied: Record<string, unknown> | null;
+    try {
+      copied = await drive(p, `/files/${encodeURIComponent(theme.presentationId)}/copy?fields=id`, { method: 'POST', body: { name: title } });
+    } catch (err) {
+      throw new SlideThemeUnavailableError(`テーマ「${theme.name}」のファイルを開けませんでした（${err instanceof Error ? err.message : String(err)}）`);
+    }
+    const id = String(copied?.['id'] ?? '');
+    if (!id) throw new SlideThemeUnavailableError(`テーマ「${theme.name}」のファイルが見つかりませんでした（消されたか、共有が外れたかもしれません。選び直してください）`);
+    return id;
+  };
+
   const standard = async (p: ConnectorPrincipal, input: {
     title: string; plan: SlidePlan; design?: SlideDesign | null; footer?: string;
     images?: Record<string, { bytes: Uint8Array; mimeType: string }>; publishImage?: PublishImage;
+    rebuild?: string; reuseImages?: Record<string, string>; theme?: { presentationId: string; name: string } | null;
   }) => {
-    const made = await slides(p, '/presentations', { method: 'POST', body: { title: input.title } });
-    const id = String(made?.['presentationId'] ?? '');
-    if (!id) throw new Error('スライドを作れませんでした');
-    const size = made?.['pageSize'] as { width?: { magnitude?: number }; height?: { magnitude?: number } } | undefined;
-    const page = { width: size?.width?.magnitude || BASE.width, height: size?.height?.magnitude || BASE.height };
-    const first = (made?.['slides'] as { objectId?: string }[] | undefined)?.[0]?.objectId ?? null;
+    let id: string;
+    let page: { width: number; height: number };
+    let first: string | null;
+    let reused: Record<string, string> = {};
+    // テーマで作るときは、テーマを複製したものの中身を入れ替える（作り直しなら、前のファイルにテーマが入っている）
+    const target = input.rebuild ?? (input.theme ? await copyTheme(p, input.theme, input.title) : undefined);
+    const fresh = !input.rebuild && !!target;
+    let look: ThemeLook | undefined;
+    if (input.theme && target) {
+      const pres = await slides(p, `/presentations/${encodeURIComponent(target)}?fields=${encodeURIComponent(THEME_FIELDS)}`).catch(() => null);
+      if (!pres) {
+        if (fresh) await discard(p, target);
+        throw new SlideThemeUnavailableError(`テーマ「${input.theme.name}」を読めませんでした`);
+      }
+      look = readTheme(pres, input.theme.name);
+    }
+    const cleared = target ? await clearForRebuild(p, target, input.reuseImages ?? {}) : null;
+    if (target && !cleared) {
+      if (fresh) await discard(p, target);
+      throw new Error('作り直すスライドがドライブに見つかりませんでした');
+    }
+    if (cleared) {
+      id = target!;
+      ({ page, first, reused } = cleared);
+      // ファイルの名前も題名に合わせる
+      if (!fresh) await drive(p, `/files/${encodeURIComponent(id)}`, { method: 'PATCH', body: { name: input.title } }).catch(() => null);
+    } else {
+      const made = await slides(p, '/presentations', { method: 'POST', body: { title: input.title } });
+      id = String(made?.['presentationId'] ?? '');
+      if (!id) throw new Error('スライドを作れませんでした');
+      const size = made?.['pageSize'] as { width?: { magnitude?: number }; height?: { magnitude?: number } } | undefined;
+      page = { width: size?.width?.magnitude || BASE.width, height: size?.height?.magnitude || BASE.height };
+      first = (made?.['slides'] as { objectId?: string }[] | undefined)?.[0]?.objectId ?? null;
+    }
     const { requests, pages, warnings, notes, placements } = slideRequests(input.plan, page, first, {
-      ...(input.design ? { design: input.design } : {}), ...(input.footer ? { footer: input.footer } : {}), images: new Set(Object.keys(input.images ?? {})),
+      ...(look ? { design: look.design, theme: look } : input.design ? { design: input.design } : {}), ...(input.footer ? { footer: input.footer } : {}),
+      images: new Set([...Object.keys(input.images ?? {}), ...Object.keys(reused)]),
     });
     try {
       await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests } });
     } catch (err) {
-      await discard(p, id);
-      throw new Error(`スライドを組み立てられませんでした: ${err instanceof Error ? err.message : String(err)}`);
+      // 作り直しでは本人のファイルなので消さない（Google スライドの版の履歴から前の形に戻せる）
+      if (!cleared || fresh) await discard(p, id);
+      throw new Error(`スライドを組み立てられませんでした: ${err instanceof Error ? err.message : String(err)}${cleared && !fresh ? '（前の形は Google スライドの版の履歴から戻せます）' : ''}`);
     }
     // 発表者のメモと画像（第9.4.2節「段 2」）。入れられなくてもスライドは残す
     warnings.push(...await writeNotes(p, id, notes));
-    if (placements.length) warnings.push(...await placeImages(p, id, placements, input.images ?? {}, input.publishImage));
+    if (placements.length) warnings.push(...await placeImages(p, id, placements, input.images ?? {}, input.publishImage, reused));
     return { presentationId: id, ...links(id), templateApplied: false, pages, warnings };
   };
 
@@ -570,7 +737,61 @@ export function googleSlides(ctx: Ctx): SlidesConnector {
       return 'reason' in got ? { unavailable: got.reason } : got;
     },
 
+    fileState: async (p, id) => {
+      const got = await drive(p, `/files/${encodeURIComponent(id)}?fields=modifiedTime,trashed`);
+      return got ? { modifiedTime: String(got['modifiedTime'] ?? ''), trashed: got['trashed'] === true } : null;
+    },
+
+    share: async (p, id, domain) => {
+      const list = await drive(p, `/files/${encodeURIComponent(id)}/permissions?fields=${encodeURIComponent('permissions(id,type,domain)')}`);
+      if (!list) return false;
+      const current = ((list['permissions'] as { id?: string; type?: string; domain?: string }[] | undefined) ?? []).filter((x) => x.type === 'domain');
+      // 決めたドメイン以外の会社の共有は外す（ほかのドメインに出さない）
+      for (const x of current) {
+        if (x.id && x.domain !== domain) await drive(p, `/files/${encodeURIComponent(id)}/permissions/${encodeURIComponent(x.id)}`, { method: 'DELETE' });
+      }
+      if (domain && !current.some((x) => x.domain === domain)) {
+        await drive(p, `/files/${encodeURIComponent(id)}/permissions?sendNotificationEmail=false`, {
+          method: 'POST', body: { type: 'domain', domain, role: 'reader', allowFileDiscovery: false },
+        });
+      }
+      return true;
+    },
+
+    trash: async (p, id) => !!(await drive(p, `/files/${encodeURIComponent(id)}`, { method: 'PATCH', body: { trashed: true } })),
+
+    inspectTheme: async (p, id) => {
+      const got = await slides(p, `/presentations/${encodeURIComponent(id)}?fields=${encodeURIComponent('title,slides(objectId),layouts(objectId)')}`).catch(() => null);
+      if (!got) return null;
+      const first = (got['slides'] as { objectId?: string }[] | undefined)?.[0]?.objectId ?? (got['layouts'] as { objectId?: string }[] | undefined)?.[0]?.objectId;
+      let thumbnail: { bytes: Uint8Array; mimeType: string } | null = null;
+      if (first) {
+        // 見本の縮小の絵。Google が出す絵の URL（しばらく有効）を読み、M2Office が持つ
+        const t = await slides(p, `/presentations/${encodeURIComponent(id)}/pages/${encodeURIComponent(first)}/thumbnail?thumbnailProperties.mimeType=PNG&thumbnailProperties.thumbnailSize=SMALL`).catch(() => null);
+        const url = typeof t?.['contentUrl'] === 'string' ? t['contentUrl'] : '';
+        if (/^https:\/\/[a-z0-9.-]+\.(googleusercontent|google)\.com\//.test(url)) {
+          const res = await fetch(url).catch(() => null);
+          const buf = res?.ok ? new Uint8Array(await res.arrayBuffer()) : null;
+          if (buf && buf.byteLength <= THUMBNAIL_MAX_BYTES) thumbnail = { bytes: buf, mimeType: 'image/png' };
+        }
+      }
+      return { name: String(got['title'] ?? '').trim() || 'テーマ', layouts: ((got['layouts'] as unknown[] | undefined) ?? []).length, thumbnail };
+    },
+
+    exportPptx: async (p, id) => {
+      try {
+        const got = await downloadGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.drive}/files/${encodeURIComponent(id)}/export?mimeType=${encodeURIComponent(PPTX_MIME)}`, PPTX_MAX_BYTES);
+        if (!got) return null;
+        return 'tooLarge' in got ? 'too-large' : got.bytes;
+      } catch (err) {
+        // Google の書き出しの上限（10 MB）を超えたとき
+        if (err instanceof Error && /exportSizeLimitExceeded/i.test(err.message)) return 'too-large';
+        throw err;
+      }
+    },
+
     createPresentation: async (p, input) => {
+      if (input.theme) return { ...(await standard(p, input)), design: input.theme.name };
       if (!input.template) return { ...(await standard(p, input)), ...(input.design ? { design: input.design.name } : {}) };
       const t = input.template;
       const got = await read(p, t.presentationId, t.name);

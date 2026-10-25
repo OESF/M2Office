@@ -82,6 +82,8 @@
 | `sheet.read` | read | — | Excel・CSV を表として読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
 | `skill.read` | read | — | このスキルに入っている資料を読みます |
+| `slides.get` | read | `drive.file`（機密でない） | 前に作ったスライドの構成を読みます（直すため） |
+| `slides.list` | read | `drive.file`（機密でない） | あなたが作ったスライドと、会社で共有されたスライドの一覧を読みます |
 | `slides.template` | read | `drive`（制限付き） | 会社が登録したスライドのテンプレートの、使えるレイアウトを確かめます。どこにも書き込みません |
 | `subsidies.brief` | read | — | 朝のブリーフに載せる、締め切りの近い「気になる」の補助金・助成金を読みます |
 | `subsidies.find` | read | — | 会社に合いそうな補助金・助成金の候補を、締め切りの近い順に引きます |
@@ -103,7 +105,7 @@
 | `quote.create` | draft | — | 見積書を PDF で作り、あなたのドライブにも保存します。社外へは送りません |
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
 | `sheets.create` | draft | `drive.file`（機密でない） | あなたのドライブに Google スプレッドシートを作ります。共有はしません |
-| `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。PowerPoint 形式でも取り出せます。共有はしません |
+| `slides.create` | draft | `drive.file`（機密でない）・`drive`（制限付き） | 調べた内容をスライドにまとめ、あなたのドライブに作ります。前に作ったスライドを直すこともできます。PowerPoint 形式でも取り出せます。共有はしません |
 | `announcements.draft` | write-internal | — | 頼みから、お知らせの題名・本文・期間と、Web サイト・LINE・サイネージの画面ごとの文を作ります。出すのは承認の後です |
 | `announcements.recipients` | write-internal | — | いちばん新しいお知らせの下書きの、メールの宛先を頼みに合わせて絞り直します（送るのは承認の後） |
 | `announcements.revise` | write-internal | — | いちばん新しいお知らせの下書きを、頼みに合わせて直します（書き方・予約の日時） |
@@ -141,6 +143,7 @@
 | `print.revise` | write-internal | — | 作った販促物を、頼みのとおりに直します（新しい版にします） |
 | `print.signage` | write-internal | — | 作った販促物を、サイネージのすべての画面に流します（止めることもできます） |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
+| `slides.share` | write-internal | `drive.file`（機密でない） | 作ったスライドを、会社の中で共有するか、自分だけにするかを切り替えます。社外には共有しません |
 | `subsidies.mark` | write-internal | — | 補助金・助成金の候補を「気になる」か「見送り」にします |
 | `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします |
 | `tasks.create` | write-internal | `tasks`（機密） | ToDo を登録します |
@@ -223,6 +226,8 @@
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
 | `skill.read` | `path`（必須）: ファイルの相対パス |
+| `slides.get` | `deckId`（必須）: スライドの ID（slides.list の id） |
+| `slides.list` | なし |
 | `slides.template` | `design`: デザインの名前（組み込みのデザインか会社のテンプレート。任意） |
 | `subsidies.brief` | なし |
 | `subsidies.find` | `query`: 制度の名前の言葉 |
@@ -244,7 +249,7 @@
 | `quote.create` | `to`: 宛先（会社名・担当者。例: 株式会社○○ 山田様）、`items`（必須）: 品目。{ name, quantity, unit, unitPrice, taxRate, group, discount } の配列。group は区分の見出し（任意）、discount は値引きの額（任意。依頼に書かれたものだけ）、`validDays`: 有効期限（発行から何日。既定は会社の見積書の設定）、`paymentTerms`: お支払い条件（任意。無ければ会社の既定）、`terms`: 納期などの条件（任意）、`notes`: 備考（任意） |
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
-| `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title・notes ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`notes`: 表紙で話す内容（発表者のメモ）、`imagePrompt`: 表紙の象徴的な画像の頼み（何を描くか）、`images`: 象徴的な画像を作るか（既定は作る）、`design`: デザインの名前（組み込みのデザインか会社のテンプレート。任意） |
+| `slides.create` | `title`（必須）: 表紙の題名、`subtitle`: 副題（任意）、`slides`（必須）: 本文のスライドの配列（layout・title・notes ほか。12 枚まで）、`sources`: 出典（title・url）の配列、`notes`: 表紙で話す内容（発表者のメモ）、`imagePrompt`: 表紙の象徴的な画像の頼み（何を描くか）、`images`: 象徴的な画像を作るか（既定は作る）、`design`: デザインの名前（組み込みのデザインか会社のテンプレート。任意）、`deckId`: 直す、前に作ったスライドの ID（直すときだけ）、`request`: 依頼の文（直す頼みも。覚えておき、次に直すときに読む） |
 | `announcements.draft` | `request`（必須）: 依頼者の頼み（そのまま） |
 | `announcements.recipients` | `request`（必須）: 宛先の頼み |
 | `announcements.revise` | `instruction`: 書き方の頼み、`publishAt`: 予約の日時（ISO 8601） |
@@ -283,6 +288,7 @@
 | `print.revise` | `query`: 物の題名の言葉、`instruction`（必須）: 直したいこと、`photoFileId`: 写真のファイルの ID |
 | `print.signage` | `query`: 物の題名の言葉、`action`: start か stop |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
+| `slides.share` | `deckId`（必須）: スライドの ID（slides.create の deckId か slides.list の id）、`sharing`（必須）: 「会社で共有」か「自分だけ」 |
 | `subsidies.mark` | `query`（必須）: 制度の名前の言葉、`status`（必須）: interested・skipped・new |
 | `tasks.complete` | `taskId`（必須）: ToDo の ID |
 | `tasks.create` | `title`（必須）: ToDo の題名、`due`: 期限（YYYY-MM-DD。任意） |

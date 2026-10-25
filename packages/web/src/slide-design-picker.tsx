@@ -4,11 +4,13 @@
  * 組み込みのデザイン（`SLIDE_DESIGNS`）は、表紙と本文の 2 枚を小さく描いた絵で、会社が登録したテンプレートは名前と説明のカードで並べる。
  * 見本の絵はデザインの定義（色・表紙の飾り）から描く（外へ取りに行かない。デザインを足せば絵も自動で増える）。
  * 「スライドの作成」の入力（形 `slide-design`）と、管理者ページの「スライドの見本」（会社の既定）で使う。
+ * Google スライドのテーマ（本人が選んだプレゼンテーション）も見本に並べ、「＋ Google スライドのテーマ」から加える（第9.4.2節「Google スライドのテーマを使う」）。
  */
 
-import { useEffect, useState } from 'react';
-import { SLIDE_DESIGNS, slideRgbCss, type SlideDesign } from '@m2office/shared';
-import { api } from './api.js';
+import { useCallback, useEffect, useState } from 'react';
+import { SLIDE_DESIGNS, SLIDE_THEME_PREFIX, slideRgbCss, type SlideDesign, type SlideThemeSummary } from '@m2office/shared';
+import { api, describeError } from './api.js';
+import { pickDrivePresentation } from './google-picker.js';
 
 /** 会社が登録したテンプレート（選ぶための名前と説明だけ）。 */
 export interface SlideTemplateChoice {
@@ -49,35 +51,168 @@ function DesignPreview({ d }: { d: SlideDesign }) {
   );
 }
 
+/** Google スライドのテンプレート ギャラリー（テーマにするファイルを作る場所）。 */
+const GALLERY_URL = 'https://docs.google.com/presentation/u/0/?tgif=d';
+
+/** テーマの見本の縮小の絵（読み込めなければ名前だけ）。 */
+function ThemeThumb({ theme }: { theme: SlideThemeSummary }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!theme.thumbnail) return undefined;
+    let alive = true;
+    let made: string | null = null;
+    void api.slideThemeThumbnail(theme.id).then((u) => { made = u; if (alive) setUrl(u); });
+    return () => { alive = false; if (made) URL.revokeObjectURL(made); };
+  }, [theme.id, theme.thumbnail]);
+  return url
+    ? <img className="slide-design-thumb" src={url} alt="" />
+    : <span className="slide-design-thumb is-empty" aria-hidden="true" />;
+}
+
+/**
+ * Google スライドのテーマの一覧と、加える・削除する・使えるようにする手続き（第9.4.2節「Google スライドのテーマを使う」）。
+ *
+ * @param company 会社のテーマを扱うか（管理者ページ）。`false` なら本人のテーマと会社のテーマ
+ */
+export function useSlideThemes(company: boolean) {
+  const [themes, setThemes] = useState<SlideThemeSummary[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // 見本の接続口の会社では、見本のドライブのファイルから選ぶ
+  const [mockItems, setMockItems] = useState<{ id: string; name: string }[] | null>(null);
+  const reload = useCallback(async () => {
+    const r = await api.slideThemes().catch(() => ({ items: [] as SlideThemeSummary[] }));
+    setThemes(company ? r.items.filter((t) => t.company) : r.items);
+  }, [company]);
+  useEffect(() => { void reload(); }, [reload]);
+
+  /** 選んだファイルをテーマにする。 */
+  const register = async (fileId: string): Promise<string | null> => {
+    const t = await api.addSlideTheme(fileId, company);
+    await reload();
+    return `${SLIDE_THEME_PREFIX}${t.id}`;
+  };
+  /** 選ぶ画面を開き、選んだプレゼンテーションをテーマにする。加えたテーマの値（`theme:<ID>`）を返す。 */
+  const add = async (): Promise<string | null> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const p = await api.slideThemePicker();
+      if (p.kind === 'mock') { setMockItems(p.items); return null; }
+      const picked = await pickDrivePresentation(p);
+      return picked ? await register(picked.id) : null;
+    } catch (err) {
+      setError(describeError(err, 'テーマを加えられませんでした'));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+  /** 見本のドライブのファイルを選んだとき。 */
+  const pickMock = async (fileId: string): Promise<string | null> => {
+    setMockItems(null);
+    try {
+      return await register(fileId);
+    } catch (err) {
+      setError(describeError(err, 'テーマを加えられませんでした'));
+      return null;
+    }
+  };
+  const remove = async (id: string) => {
+    if (!window.confirm('このテーマを見本から削除します（Google スライドのファイルはそのまま残ります）。')) return;
+    try {
+      await api.deleteSlideTheme(id);
+      await reload();
+    } catch (err) {
+      setError(describeError(err, '削除できませんでした'));
+    }
+  };
+  /** 会社のテーマを初めて使うとき、選ぶ画面でそのファイルを選んでもらう（`drive.file` の決まり）。 */
+  const ensureAccess = async (id: string) => {
+    try {
+      const a = await api.slideThemeAccess(id);
+      if (a.ok) return;
+      const p = await api.slideThemePicker();
+      if (p.kind === 'google') await pickDrivePresentation({ ...p, fileId: a.fileId });
+    } catch {
+      // 使えなければ、作るときに標準のデザインにして理由を出す
+    }
+  };
+  return { themes, busy, error, mockItems, add, pickMock, remove, ensureAccess, closeMock: () => setMockItems(null) };
+}
+
 /**
  * デザインのカードの一覧。
  *
- * @param value 選んでいるもの（組み込みのデザインの ID か、テンプレートの名前）
+ * @param value 選んでいるもの（組み込みのデザインの ID、テーマの `theme:<ID>`、テンプレートの名前）
  * @param templates 会社が登録したテンプレート
+ * @param themes Google スライドのテーマ（`useSlideThemes`）。無ければテーマを並べない
  */
-export function SlideDesignPicker({ value, templates, onChange }: {
-  value: string; templates: SlideTemplateChoice[]; onChange: (v: string) => void;
+export function SlideDesignPicker({ value, templates, onChange, themes }: {
+  value: string; templates: SlideTemplateChoice[]; onChange: (v: string) => void; themes?: ReturnType<typeof useSlideThemes>;
 }) {
+  const choose = async (v: string) => {
+    onChange(v);
+    const t = themes?.themes.find((x) => `${SLIDE_THEME_PREFIX}${x.id}` === v);
+    if (t?.company && themes) await themes.ensureAccess(t.id);
+  };
+  const added = async (v: string | null) => { if (v) onChange(v); };
   return (
-    <div className="slide-design-grid" role="radiogroup">
-      {SLIDE_DESIGNS.map((d) => (
-        <button type="button" key={d.id} role="radio" aria-checked={value === d.id} title={d.description}
-          className={`slide-design-card${value === d.id ? ' is-selected' : ''}`} onClick={() => onChange(d.id)}>
-          <DesignPreview d={d} />
-          <span className="slide-design-name">{d.name}</span>
-        </button>
-      ))}
-      {templates.map((t) => (
-        <button type="button" key={`t:${t.name}`} role="radio" aria-checked={value === t.name} title={t.description || t.name}
-          className={`slide-design-card is-template${value === t.name ? ' is-selected' : ''}`} onClick={() => onChange(t.name)}>
-          <span className="slide-design-template">
-            <span className="slide-design-badge">会社のテンプレート</span>
-            <span className="small muted">{t.description}</span>
-          </span>
-          <span className="slide-design-name">{t.name}</span>
-        </button>
-      ))}
-    </div>
+    <>
+      <div className="slide-design-grid" role="radiogroup">
+        {SLIDE_DESIGNS.map((d) => (
+          <button type="button" key={d.id} role="radio" aria-checked={value === d.id} title={d.description}
+            className={`slide-design-card${value === d.id ? ' is-selected' : ''}`} onClick={() => onChange(d.id)}>
+            <DesignPreview d={d} />
+            <span className="slide-design-name">{d.name}</span>
+          </button>
+        ))}
+        {themes?.themes.map((t) => {
+          const v = `${SLIDE_THEME_PREFIX}${t.id}`;
+          return (
+            <div key={v} className={`slide-design-card is-theme${value === v ? ' is-selected' : ''}`}>
+              <button type="button" role="radio" aria-checked={value === v} className="slide-design-pick" title={t.name} onClick={() => void choose(v)}>
+                <ThemeThumb theme={t} />
+                <span className="slide-design-name">{t.name}</span>
+                <span className="slide-design-badge">{t.company ? '会社のテーマ' : 'マイテーマ'}</span>
+              </button>
+              {t.removable && (
+                <button type="button" className="slide-design-remove" aria-label={`${t.name}を削除`} onClick={() => void themes.remove(t.id)}>×</button>
+              )}
+            </div>
+          );
+        })}
+        {templates.map((t) => (
+          <button type="button" key={`t:${t.name}`} role="radio" aria-checked={value === t.name} title={t.description || t.name}
+            className={`slide-design-card is-template${value === t.name ? ' is-selected' : ''}`} onClick={() => onChange(t.name)}>
+            <span className="slide-design-template">
+              <span className="slide-design-badge">会社のテンプレート</span>
+              <span className="small muted">{t.description}</span>
+            </span>
+            <span className="slide-design-name">{t.name}</span>
+          </button>
+        ))}
+        {themes && (
+          <div className="slide-design-card is-add">
+            <button type="button" className="slide-design-pick" disabled={themes.busy} onClick={() => void themes.add().then(added)}>
+              <span className="slide-design-plus" aria-hidden="true">＋</span>
+              <span className="slide-design-name">{themes.busy ? '開いています…' : 'Google スライドのテーマ'}</span>
+            </button>
+            <a className="small" href={GALLERY_URL} target="_blank" rel="noreferrer">ギャラリー</a>
+          </div>
+        )}
+      </div>
+      {themes?.mockItems && (
+        <div className="slide-theme-mock card">
+          {themes.mockItems.length === 0 && <p className="muted small">見本のドライブにファイルがありません</p>}
+          {themes.mockItems.map((f) => (
+            <button key={f.id} type="button" className="btn ghost small" onClick={() => void themes.pickMock(f.id).then(added)}>{f.name}</button>
+          ))}
+          <button type="button" className="btn ghost small" onClick={themes.closeMock}>閉じる</button>
+        </div>
+      )}
+      {themes?.error && <p className="error small">{themes.error}</p>}
+    </>
   );
 }
 
@@ -86,6 +221,7 @@ export function SlideDesignPicker({ value, templates, onChange }: {
  */
 export function SlideDesignField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   const [templates, setTemplates] = useState<SlideTemplateChoice[]>([]);
+  const themes = useSlideThemes(false);
   useEffect(() => {
     let alive = true;
     api.slideDesigns().then((r) => {
@@ -100,7 +236,7 @@ export function SlideDesignField({ label, value, onChange }: { label: string; va
   return (
     <div className="field">
       <label>{label}</label>
-      <SlideDesignPicker value={value} templates={templates} onChange={onChange} />
+      <SlideDesignPicker value={value} templates={templates} onChange={onChange} themes={themes} />
     </div>
   );
 }

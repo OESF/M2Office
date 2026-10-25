@@ -14,6 +14,7 @@ import { Icon } from './nav.js';
 import { keyLabel, useHotkey } from './keys.js';
 import { RecorderDialog } from './Recorder.js';
 import { SlideDesignField } from './slide-design-picker.js';
+import { SlideDeckActions } from './slide-decks.js';
 
 /**
  * 通常の停止の間と、停止の予告の間に、画面の上部に出す案内（仕様書 第23.8.6節）。どちらでもなければ何も出さない。
@@ -209,19 +210,43 @@ export function InputFields({ agent, values, onChange }: {
 }) {
   const props = agent.inputs?.properties ?? {};
   const required = new Set(agent.inputs?.required ?? []);
+  // 続いて並ぶスライドのスイッチ（2 択）は、横に並べる
+  const groups: [string, JsonSchemaField][][] = [];
+  for (const entry of Object.entries(props)) {
+    const last = groups.at(-1);
+    if (entry[1].format === 'switch' && last?.[0]?.[1].format === 'switch') last.push(entry);
+    else groups.push([entry]);
+  }
+  const field = ([key, f]: [string, JsonSchemaField]) => (
+    <Field key={key} name={key} field={f} required={required.has(key)} value={values[key] ?? ''} onChange={(v) => onChange(key, v)} />
+  );
   return (
     <>
-      {Object.entries(props).map(([key, field]) => (
-        <Field
-          key={key}
-          name={key}
-          field={field}
-          required={required.has(key)}
-          value={values[key] ?? ''}
-          onChange={(v) => onChange(key, v)}
-        />
-      ))}
+      {groups.map((g) => (g[0]![1].format === 'switch'
+        ? <div key={g[0]![0]} className="field-switches">{g.map(field)}</div>
+        : field(g[0]!)))}
     </>
+  );
+}
+
+/**
+ * 2 択の欄（形 `switch`。`enum` は [切った値, 入れた値]）。スライドのスイッチにし、右に今の値を出す。
+ */
+function SwitchField({ name, field, value, onChange }: { name: string; field: JsonSchemaField; value: string; onChange: (v: string) => void }) {
+  const [off, on] = [field.enum?.[0] ?? '', field.enum?.[1] ?? ''];
+  const current = value || field.default || off;
+  const checked = current === on;
+  return (
+    <div className="field switch-field">
+      <label className="switch-label" htmlFor={name}>
+        <span>{field.title ?? name}</span>
+        <button
+          id={name} type="button" role="switch" aria-checked={checked} className={checked ? 'switch on' : 'switch'}
+          onClick={() => onChange(checked ? off : on)}
+        ><span /></button>
+        <span className="muted small">{current}</span>
+      </label>
+    </div>
   );
 }
 
@@ -237,6 +262,10 @@ function Field({
   const label = `${field.title ?? name}${required ? '（必須）' : ''}`;
   // 説明の文を足すより、例を薄く置く（仕様書 第6.10.4.1節）。例が無ければ何も出さない
   const hint = field.examples?.[0] ? `例: ${field.examples[0]}` : undefined;
+  // 画面の操作が渡す値（作り直すスライドの ID など）。欄は出さない
+  if (field.format === 'hidden') return null;
+  // 2 択はスライドのスイッチ（第9.4.2節「作ったスライドの扱い」）
+  if (field.format === 'switch' && field.enum?.length === 2) return <SwitchField name={name} field={field} value={value} onChange={onChange} />;
   if (field.format === 'date') return <DateField name={name} label={label} optional={!required} value={value} onChange={onChange} />;
   if (field.format === 'file') return <FileField name={name} label={label} value={value} onChange={onChange} />;
   // スライドのデザイン（第9.4.2節「組み込みのデザイン」）。見本の絵のカードから選ぶ
@@ -493,11 +522,13 @@ function StepProgress({ plan, steps }: { plan: { stepId: string; label: string }
  * @param onCancelled 中止したあとに呼ぶ。呼び出し側が読み直す
  */
 export function RunView({
-  detail, viewerId, onCancelled,
+  detail, viewerId, onCancelled, onOpenRun,
 }: {
   detail: RunDetail;
   viewerId: string;
   onCancelled: () => void;
+  /** 別の実行を開く（作ったスライドの作り直し。第9.4.2節「作ったスライドの扱い」）。無ければ作り直しの欄を出さない。 */
+  onOpenRun?: (runId: string) => void;
 }) {
   const { run, steps, artifacts } = detail;
   const [cancelling, setCancelling] = useState(false);
@@ -550,7 +581,7 @@ export function RunView({
             {run.status !== 'awaiting_approval' && <span className="spin" aria-hidden="true" />}
             {run.status === 'awaiting_approval'
               ? '承認をお待ちしています'
-              : `${activity ?? doing?.label ?? '準備しています'}…`}
+              : `${activity ?? detail.plan?.find((p) => p.stepId === doing?.stepId)?.activityLabel ?? doing?.label ?? '準備しています'}…`}
             {/* 経過した時間（第6.2.2.2節）。承認待ちは人の番なので数えない */}
             {run.status !== 'awaiting_approval' && since && <Elapsed since={String(since)} />}
           </p>
@@ -589,6 +620,8 @@ export function RunView({
         <div className="card" key={a.id}>
           {/* 題名は、成果物が 2 つ以上あって見分けが要るときだけ出す */}
           {artifacts.length > 1 && <h3>{a.title}</h3>}
+          {/* 作ったスライドは URL を並べずにボタンにし、共有と作り直しを置く（第9.4.2節「作ったスライドの扱い」） */}
+          {a.slideDeckId && <SlideDeckActions deckId={a.slideDeckId} {...(onOpenRun && detail.job?.requestedBy === viewerId ? { onOpenRun } : {})} />}
           {/* 書式として読み、改行を保つ。生の文字で出すと「## 決定事項」「**…**」がそのまま見える（2026-09-25 に確認） */}
           <div className="reply"><Markdown text={a.body} lineBreaks /></div>
           {a.fileId && (

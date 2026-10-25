@@ -23,11 +23,13 @@ test('基本の業務は公式に入り、定義の検証を通る', () => {
   }
 });
 
-test('基本の業務は送らない・共有しない（ツールは read か draft、承認は無い）', () => {
+test('基本の業務は送らない・社外に共有しない（ツールは read か draft、承認は無い。スライドの会社の中の共有だけは write-internal）', () => {
   for (const id of IDS) {
     const def = OFFICIAL_AGENTS.find((a) => a.id === id)!;
     for (const name of def.tools) {
       const risk = registry.get(name)!.risk;
+      // スライドの作成は、頼まれれば会社の中（Workspace のドメイン）で閲覧の共有をする（第9.4.2節「作ったスライドの扱い」）
+      if (id === 'slides' && name === 'slides.share') { assert.equal(risk, 'write-internal'); continue; }
       assert.ok(RISK_ORDER[risk] <= RISK_ORDER.draft, `${id} の ${name}（${risk}）は下書きまで`);
     }
     assert.ok(!def.steps.some((s) => s.type === 'approval'), `${id} に承認は無い`);

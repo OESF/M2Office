@@ -6,17 +6,22 @@
  */
 
 /** Google Picker の、ここで使う所だけの型。 */
-interface DocsView { setMimeTypes(m: string): DocsView; setIncludeFolders(b: boolean): DocsView; setFileIds?(ids: string): DocsView }
+interface DocsView {
+  setMimeTypes(m: string): DocsView; setIncludeFolders(b: boolean): DocsView; setFileIds?(ids: string): DocsView;
+  setMode?(m: string): DocsView; setLabel?(l: string): DocsView;
+}
 interface PickerData { action: string; docs?: { id: string; name: string }[] }
 interface PickerBuilder {
   addView(v: DocsView): PickerBuilder; setOAuthToken(t: string): PickerBuilder; setDeveloperKey(k: string): PickerBuilder;
   setAppId(a: string): PickerBuilder; setLocale(l: string): PickerBuilder; setCallback(cb: (d: PickerData) => void): PickerBuilder;
+  setTitle?(t: string): PickerBuilder;
   build(): { setVisible(v: boolean): void };
 }
 interface PickerNamespace {
   DocsView: new (viewId: string) => DocsView;
   PickerBuilder: new () => PickerBuilder;
-  ViewId: { DOCS_IMAGES: string; DOCS: string };
+  ViewId: { DOCS_IMAGES: string; DOCS: string; PRESENTATIONS?: string };
+  DocsViewMode?: { LIST: string; GRID: string };
   Action: { PICKED: string; CANCEL: string };
 }
 
@@ -85,6 +90,38 @@ export async function pickDriveFile(p: { apiKey: string; appId: string; accessTo
     let view = new picker.DocsView(picker.ViewId.DOCS).setMimeTypes(SECRETARY_MIMES).setIncludeFolders(true);
     if (p.fileId && view.setFileIds) view = view.setFileIds(p.fileId);
     new picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(p.accessToken)
+      .setDeveloperKey(p.apiKey)
+      .setAppId(p.appId)
+      .setLocale('ja')
+      .setCallback((data) => {
+        if (data.action === picker.Action.PICKED && data.docs?.[0]) resolve({ id: data.docs[0].id, name: data.docs[0].name });
+        else if (data.action === picker.Action.CANCEL) resolve(null);
+      })
+      .build()
+      .setVisible(true);
+  });
+}
+
+/**
+ * Google スライドのテーマにするプレゼンテーションを 1 つ選ぶ（仕様書 第9.4.2節「Google スライドのテーマを使う」）。
+ *
+ * @param p.fileId 会社のテーマを初めて使うとき、そのファイルを選んだ状態で開く（押すだけで使えるようになる）
+ * @returns 選んだファイルの ID と名前。やめたら `null`
+ */
+export async function pickDrivePresentation(p: { apiKey: string; appId: string; accessToken: string; fileId?: string }): Promise<{ id: string; name: string } | null> {
+  await loadPicker();
+  const picker = (window as unknown as { google: { picker: PickerNamespace } }).google.picker;
+  return new Promise((resolve) => {
+    // フォルダをたどらせず、Google スライドだけを新しい順に名前と日付で並べる（何を選ぶのか迷わないように）
+    let view = new picker.DocsView(picker.ViewId.PRESENTATIONS ?? picker.ViewId.DOCS).setMimeTypes('application/vnd.google-apps.presentation').setIncludeFolders(false);
+    if (picker.DocsViewMode && view.setMode) view = view.setMode(picker.DocsViewMode.LIST);
+    if (view.setLabel) view = view.setLabel('Google スライド');
+    if (p.fileId && view.setFileIds) view = view.setFileIds(p.fileId);
+    let builder = new picker.PickerBuilder();
+    if (builder.setTitle) builder = builder.setTitle(p.fileId ? '会社のテーマを使えるようにする（このまま「選択」）' : 'テーマにする Google スライドを選択');
+    builder
       .addView(view)
       .setOAuthToken(p.accessToken)
       .setDeveloperKey(p.apiKey)

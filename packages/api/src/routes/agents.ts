@@ -31,10 +31,12 @@ export function agentsRoute(deps: AppDeps) {
     const { tenant } = c.get('ctx');
     const slides = (await deps.repo.getTenantSettings(tenant.id)).slides;
     const design = slides.defaultDesign ? findSlideDesign(slides.defaultDesign) : null;
+    // 会社の既定が会社のテーマ（`theme:<ID>`）のときは、そのテーマ（第9.4.2節「Google スライドのテーマを使う」）
+    const theme = slides.defaultDesign?.startsWith('theme:') ? slides.defaultDesign : null;
     const template = slides.templates.find((t) => t.isDefault);
     return c.json({
       templates: slides.templates.map((t) => ({ name: t.name, description: t.description })),
-      defaultChoice: design?.id ?? template?.name ?? 'business',
+      defaultChoice: design?.id ?? theme ?? template?.name ?? 'business',
     });
   });
 

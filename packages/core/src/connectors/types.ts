@@ -426,7 +426,19 @@ export interface SlidesConnector {
       /** 用意した画像（場所の名前 → 画像。`cover`・`m2slide<n>`・`m2slide<n>_pie`。第9.4.2節「段 2」）。標準の見た目のときだけ使う。 */
       images?: Record<string, { bytes: Uint8Array; mimeType: string }>;
       /** 画像を Google から読める使い捨ての URL で渡す手段（クラウドの形）。無ければ本人のドライブで一時的に共有して渡す。 */
-      publishImage?: (bytes: Uint8Array, mimeType: string) => Promise<{ url: string; done(): Promise<void> }>;
+      publishImage?: (bytes: Uint8Array, mimeType: string) => Promise<{ url: string; alternates?: string[]; done(): Promise<void> }>;
+      /**
+       * 作り直す先（第9.4.2節「作ったスライドの扱い」）。標準の見た目のときだけ、このプレゼンテーションの中身を入れ替える（URL と共有はそのまま）。
+       * 会社のテンプレートでは使わない（見本を複製し直すため、呼ぶ側が新しいファイルに作る）。
+       */
+      rebuild?: string;
+      /** 前の画像を使い回す（新しい場所の名前 → 前の場所の名前）。`rebuild` のときだけ効く。 */
+      reuseImages?: Record<string, string>;
+      /**
+       * Google スライドのテーマ（第9.4.2節「Google スライドのテーマを使う」）。あれば、テーマのファイルを複製し（作り直しなら前のファイルのまま）、
+       * テーマのレイアウトと配色と字体で組み立てる。開けなければ `SlideThemeUnavailableError`
+       */
+      theme?: { presentationId: string; name: string } | null;
     },
   ): Promise<{
     presentationId: string; url: string | null; pptxUrl: string | null;
@@ -434,6 +446,42 @@ export interface SlidesConnector {
     /** 標準の見た目で作ったときの、使ったデザインの名前。 */
     design?: string;
   }>;
+
+  /**
+   * ファイルの状態（作り直す前に、人が手を入れたかを見る。第9.4.2節「作ったスライドの扱い」）。
+   *
+   * @returns 最後に変わった時刻とごみ箱にあるか。見つからない・見本の接続口では `null`
+   */
+  fileState(p: ConnectorPrincipal, presentationId: string): Promise<{ modifiedTime: string; trashed: boolean } | null>;
+
+  /**
+   * 会社の中での共有を切り替える。`domain` があれば、そのドメインの人が見られるようにし（閲覧だけ）、`null` なら外す。
+   *
+   * @remarks 社外に出す共有（誰でも・ほかのドメイン）はしない。ドメインが会社のものかは呼ぶ側が確かめる（境界 2）
+   * @returns 見つからなければ `false`
+   */
+  share(p: ConnectorPrincipal, presentationId: string, domain: string | null): Promise<boolean>;
+
+  /**
+   * テーマにするプレゼンテーションを確かめる（本人が選んだもの）。名前・レイアウトの数・見本の縮小の絵（1 枚目）を返す。
+   *
+   * @returns 開けない・見本の接続口では `null`
+   */
+  inspectTheme(p: ConnectorPrincipal, presentationId: string): Promise<{ name: string; layouts: number; thumbnail: { bytes: Uint8Array; mimeType: string } | null } | null>;
+
+  /**
+   * PowerPoint の形で受け取る（Drive の書き出し。M2Office が作ったファイルだけ）。
+   *
+   * @returns 中身。見つからなければ `null`、Google の書き出しの上限（10 MB）を超えれば `'too-large'`
+   */
+  exportPptx(p: ConnectorPrincipal, presentationId: string): Promise<Uint8Array | 'too-large' | null>;
+
+  /**
+   * ドライブのごみ箱に移す（消しはしない。30 日は戻せる）。
+   *
+   * @returns 見つからなければ `false`
+   */
+  trash(p: ConnectorPrincipal, presentationId: string): Promise<boolean>;
 }
 
 /**

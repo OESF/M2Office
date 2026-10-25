@@ -22,6 +22,8 @@ import { sheetRange, toCell } from '../src/connectors/google/sheets.js';
 import { SOURCES_MAX, TABLE_ROWS_MAX, slideRequests } from '../src/connectors/google/slides.js';
 import { findSlideDesign } from '@m2office/shared';
 import { describeTemplate } from '../src/slides/template.js';
+import { isPublicImageBase } from '../src/slides/image-host.js';
+import { SlideThemeUnavailableError } from '../src/slides/theme.js';
 import { SlidePlanError } from '../src/slides/plan.js';
 
 const P = { tenantId: 't1', userId: 'u1' };
@@ -92,6 +94,8 @@ async function fakeDrive(pdf: Uint8Array) {
       return json(200, { id: 'perm1' });
     }
     const file = /^\/drive\/files\/([^/]+)$/.exec(s.path);
+    // 作り直す前のスライドの状態（第9.4.2節「作ったスライドの扱い」）
+    if (s.path === '/drive/files/OLDDECK' && s.method === 'GET') return json(200, { modifiedTime: '2026-10-25T03:00:00.000Z', trashed: false });
     if (file && s.method === 'GET') {
       const id = file[1]!;
       if (!FILES[id]) return json(404, { error: { code: 404 } });
@@ -111,13 +115,57 @@ async function fakeDrive(pdf: Uint8Array) {
       const bad = JSON.parse(raw).title === '失敗';
       return json(200, { presentationId: bad ? 'BADDECK' : 'NEWDECK', pageSize: { width: { magnitude: 9144000 }, height: { magnitude: 5143500 } }, slides: [{ objectId: 'p' }] });
     }
-    if (s.path === '/slides/presentations/NEWDECK:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
+    if (s.path === '/slides/presentations/NEWDECK:batchUpdate' && s.method === 'POST') {
+      // Google が読めない画像の URL は断る（開発の lvh.me など）
+      const url = String((JSON.parse(raw).requests as Record<string, any>[])[0]?.['createImage']?.url ?? '');
+      if (url.includes('unreadable') || (rejectDriveUc && url.includes('/uc?'))) return json(400, { error: { code: 400, status: 'INVALID_ARGUMENT' } });
+      return json(200, { replies: [] });
+    }
     // 発表者のメモの枠（標準の見た目）と、画像を一時的に置くドライブのファイル（第9.4.2節「段 2」）
     if (s.path === '/slides/presentations/NEWDECK' && s.method === 'GET') {
       return json(200, { slides: ['m2cover', 'm2slide1', 'm2slide2'].map((id) => ({ objectId: id, slideProperties: { notesPage: { notesProperties: { speakerNotesObjectId: `${id}_notes` } } } })) });
     }
     if (s.path === '/drive/files/NEWDOC/permissions' && s.method === 'POST') return json(200, { id: 'anyoneWithLink' });
     if (s.path === '/drive/files/NEWDOC' && s.method === 'DELETE') { res.writeHead(204); return res.end(); }
+    // 作り直す前のスライド（第9.4.2節「作ったスライドの扱い」）。表紙に前の画像がある
+    if (s.path === '/slides/presentations/OLDDECK' && s.method === 'GET') {
+      if ((s.query.get('fields') ?? '').includes('pageSize')) {
+        return json(200, { pageSize: { width: { magnitude: 9144000 }, height: { magnitude: 5143500 } }, slides: [
+          { objectId: 'm2cover', pageElements: [{ objectId: 'cover_img', image: { contentUrl: 'https://lh.example/old-cover' } }, { objectId: 'm2cover_title' }] },
+          { objectId: 'm2slide1', pageElements: [] },
+        ] });
+      }
+      return json(200, { slides: ['m2cover', 'm2slide1'].map((id) => ({ objectId: id, slideProperties: { notesPage: { notesProperties: { speakerNotesObjectId: `${id}_notes` } } } })) });
+    }
+    if (s.path === '/slides/presentations/OLDDECK:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
+    if (s.path === '/drive/files/OLDDECK' && s.method === 'PATCH') return json(200, { id: 'OLDDECK' });
+    if (s.path === '/drive/files/OLDDECK/permissions' && s.method === 'GET') {
+      return json(200, { permissions: [{ id: 'own', type: 'user' }, { id: 'dom-other', type: 'domain', domain: 'other.example' }] });
+    }
+    if (s.path === '/drive/files/OLDDECK/permissions' && s.method === 'POST') return json(200, { id: 'dom-new' });
+    if (s.path === '/drive/files/OLDDECK/permissions/dom-other' && s.method === 'DELETE') { res.writeHead(204); return res.end(); }
+    // Google スライドのテーマ（第9.4.2節「Google スライドのテーマを使う」）。THEME1 は複製できる。GONETHEME は消された
+    if (s.path === '/drive/files/THEME1/copy' && s.method === 'POST') return json(200, { id: 'THEMECOPY' });
+    if (s.path === '/drive/files/GONETHEME/copy' && s.method === 'POST') return json(404, { error: { code: 404 } });
+    if (s.path === '/slides/presentations/THEMECOPY' && s.method === 'GET') {
+      const fields = s.query.get('fields') ?? '';
+      if (fields.includes('masters')) {
+        return json(200, {
+          pageSize: { width: { magnitude: 9144000 }, height: { magnitude: 5143500 } },
+          masters: [{ pageProperties: { colorScheme: { colors: [{ type: 'ACCENT1', color: { red: 0.2, green: 0.4, blue: 0.8 } }] } } }],
+          layouts: [
+            { objectId: 'LT', layoutProperties: { name: 'TITLE' }, pageElements: [{ shape: { placeholder: { type: 'CENTERED_TITLE', index: 0 } } }] },
+            { objectId: 'LO', layoutProperties: { name: 'TITLE_ONLY' }, pageElements: [{ shape: { placeholder: { type: 'TITLE', index: 0 } } }] },
+          ],
+        });
+      }
+      if (fields.includes('pageSize')) return json(200, { pageSize: { width: { magnitude: 9144000 }, height: { magnitude: 5143500 } }, slides: [{ objectId: 'sample1', pageElements: [] }] });
+      return json(200, { slides: [] });
+    }
+    if (s.path === '/slides/presentations/THEMECOPY:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
+    // PowerPoint の書き出し
+    if (s.path === '/drive/files/NEWDECK/export' && s.method === 'GET') return bytes('PPTX', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+    if (s.path === '/drive/files/BIGDECK/export' && s.method === 'GET') return json(403, { error: { code: 403, errors: [{ reason: 'exportSizeLimitExceeded' }] } });
     // 会社のテンプレート。TPL は読める。NOSHARE は共有されていない
     if ((s.path === '/slides/presentations/TPL' || s.path === '/slides/presentations/COPYDECK') && s.method === 'GET') {
       if ((s.query.get('fields') ?? '').includes('notesPage')) {
@@ -140,6 +188,9 @@ async function fakeDrive(pdf: Uint8Array) {
   };
   return { endpoints, seen, close: () => new Promise<void>((r) => server.close(() => r())) };
 }
+
+/** 見本の Google が、ドライブの共有のリンク（`uc?`）の画像を読めないふりをする。 */
+let rejectDriveUc = false;
 
 async function withDrive(fn: (c: GoogleWorkspaceConnector, seen: Seen[]) => Promise<void>) {
   const pdf = await renderPdf({ title: '請求書', to: '株式会社アルファ 御中', from: ['見本'], fields: [], rows: [{ name: '利用料', quantity: 1, unitPrice: 3000 }], notes: [] });
@@ -391,6 +442,113 @@ test('スライド: 発表者のメモを入れ、画像は使い捨ての URL �
     assert.match(url, /drive\.google\.com\/uc\?export=view&id=NEWDOC/);
     assert.ok(seen.some((x) => x.path === '/drive/files/NEWDOC' && x.method === 'DELETE'), '貼ったらファイルごと消す');
   });
+});
+
+test('スライド: 使い捨ての URL を Google が読めなければ本人のドライブで貼り直し、ドライブのリンクも読めなければ別の形で貼る（第9.4.2節「段 2」）', async () => {
+  const plan = { title: '表紙', slides: [{ layout: 'STATEMENT' as const, title: '', message: 'まとめ' }] };
+  const png = { bytes: new Uint8Array([137, 80, 78, 71]), mimeType: 'image/png' };
+  await withDrive(async (c, seen) => {
+    let done = 0;
+    const made = await c.slides.createPresentation(P, {
+      title: '表紙', plan, template: null, images: { cover: png },
+      publishImage: async () => ({ url: 'https://unreadable.example/v1/public/slide-images/abc', done: async () => { done += 1; } }),
+    });
+    const urls = seen.filter((x) => x.path === '/slides/presentations/NEWDECK:batchUpdate').flatMap((x) => JSON.parse(x.body).requests).filter((r: Record<string, any>) => r['createImage']).map((r: Record<string, any>) => r['createImage'].url);
+    assert.equal(urls.length, 2);
+    assert.match(urls[1], /drive\.google\.com\/uc\?export=view&id=NEWDOC/);
+    assert.equal(done, 1, '読めなかった使い捨ての URL も消す');
+    assert.ok(seen.some((x) => x.path === '/drive/files/NEWDOC' && x.method === 'DELETE'));
+    assert.ok(!(made.warnings ?? []).some((w) => w.includes('画像を置けませんでした')), JSON.stringify(made.warnings));
+  });
+  rejectDriveUc = true;
+  try {
+    await withDrive(async (c, seen) => {
+      const made = await c.slides.createPresentation(P, { title: '表紙', plan, template: null, images: { cover: png } });
+      const urls = seen.filter((x) => x.path === '/slides/presentations/NEWDECK:batchUpdate').flatMap((x) => JSON.parse(x.body).requests).filter((r: Record<string, any>) => r['createImage']).map((r: Record<string, any>) => r['createImage'].url);
+      assert.deepEqual(urls.slice(-1), ['https://lh3.googleusercontent.com/d/NEWDOC']);
+      assert.ok(!(made.warnings ?? []).some((w) => w.includes('画像を置けませんでした')));
+    });
+  } finally {
+    rejectDriveUc = false;
+  }
+  await withDrive(async (c) => {
+    const made = await c.slides.createPresentation(P, {
+      title: '表紙', plan, template: null, images: { cover: png },
+      publishImage: async () => ({ url: 'https://unreadable.example/x', alternates: ['https://unreadable.example/y'], done: async () => undefined }),
+    });
+    assert.ok(!(made.warnings ?? []).some((w) => w.includes('画像を置けませんでした')), 'ドライブで貼れれば注意を出さない');
+  });
+});
+
+test('スライド: 作り直しは同じファイルの中身を入れ替え、前の画像を Google の画像の URL で使い回す（第9.4.2節「作ったスライドの扱い」）', async () => {
+  const plan = { title: '直した題名', notes: '表紙', slides: [{ layout: 'STATEMENT' as const, title: '', message: 'まとめ', notes: '話す' }] };
+  await withDrive(async (c, seen) => {
+    const made = await c.slides.createPresentation(P, { title: '直した題名', plan, template: null, rebuild: 'OLDDECK', reuseImages: { cover: 'cover' } });
+    assert.equal(made.presentationId, 'OLDDECK');
+    assert.ok(!seen.some((x) => x.path === '/slides/presentations' && x.method === 'POST'), '新しいファイルを作らない');
+    const batches = seen.filter((x) => x.path === '/slides/presentations/OLDDECK:batchUpdate').map((x) => JSON.parse(x.body).requests as Record<string, any>[]);
+    // 1 回目: 仮のページを作り、前のページをすべて消す
+    assert.ok(batches[0]![0]!['createSlide'].objectId.startsWith('m2tmp'));
+    assert.deepEqual(batches[0]!.slice(1).map((r) => r['deleteObject'].objectId), ['m2cover', 'm2slide1']);
+    // 組み立ての最後に仮のページを消す
+    assert.ok(batches[1]!.some((r) => String(r['deleteObject']?.objectId ?? '').startsWith('m2tmp')));
+    const images = batches.flat().filter((r) => r['createImage']).map((r) => r['createImage'].url);
+    assert.deepEqual(images, ['https://lh.example/old-cover'], '前の画像を使い回す');
+    assert.ok(!seen.some((x) => x.path === '/upload/files'), '使い回す画像はドライブに置かない');
+    assert.deepEqual(JSON.parse(seen.find((x) => x.path === '/drive/files/OLDDECK' && x.method === 'PATCH')!.body), { name: '直した題名' });
+  });
+});
+
+test('スライド: 会社で共有は決めたドメインへの閲覧だけ。ほかのドメインの共有は外す。状態の読み取りとごみ箱', async () => {
+  await withDrive(async (c, seen) => {
+    assert.equal(await c.slides.share(P, 'OLDDECK', 'example.co.jp'), true);
+    assert.deepEqual(JSON.parse(seen.find((x) => x.path === '/drive/files/OLDDECK/permissions' && x.method === 'POST')!.body),
+      { type: 'domain', domain: 'example.co.jp', role: 'reader', allowFileDiscovery: false });
+    assert.ok(seen.some((x) => x.path === '/drive/files/OLDDECK/permissions/dom-other' && x.method === 'DELETE'), 'ほかのドメインには出さない');
+    assert.deepEqual(await c.slides.fileState(P, 'OLDDECK'), { modifiedTime: '2026-10-25T03:00:00.000Z', trashed: false });
+    assert.equal(await c.slides.fileState(P, 'GONE'), null);
+    assert.equal(await c.slides.trash(P, 'OLDDECK'), true);
+    assert.deepEqual(JSON.parse(seen.filter((x) => x.path === '/drive/files/OLDDECK' && x.method === 'PATCH').at(-1)!.body), { trashed: true });
+  });
+});
+
+test('スライド: テーマで作るときは、テーマを複製して見本のページを消し、テーマのレイアウトで組み立てる。開けなければテーマの誤り', async () => {
+  const plan = { title: 'テーマの資料', slides: [{ layout: 'STATEMENT' as const, title: '', message: 'まとめ' }] };
+  await withDrive(async (c, seen) => {
+    const made = await c.slides.createPresentation(P, { title: 'テーマの資料', plan, template: null, theme: { presentationId: 'THEME1', name: '青のテーマ' } });
+    assert.equal(made.presentationId, 'THEMECOPY');
+    assert.equal(made.design, '青のテーマ');
+    assert.deepEqual(JSON.parse(seen.find((x) => x.path === '/drive/files/THEME1/copy')!.body), { name: 'テーマの資料' });
+    const batches = seen.filter((x) => x.path === '/slides/presentations/THEMECOPY:batchUpdate').map((x) => JSON.parse(x.body).requests as Record<string, any>[]);
+    assert.deepEqual(batches[0]!.slice(1).map((r) => r['deleteObject'].objectId), ['sample1'], 'テーマの見本のページを消す');
+    const layoutIds = batches[1]!.filter((r) => r['createSlide']).map((r) => r['createSlide'].slideLayoutReference.layoutId ?? r['createSlide'].slideLayoutReference.predefinedLayout);
+    assert.deepEqual(layoutIds, ['LT', 'LO'], '表紙はテーマの表紙、白紙が無ければ題名だけのレイアウトの枠を消して使う');
+    assert.ok(!batches[1]!.some((r) => r['updatePageProperties']));
+  });
+  await withDrive(async (c) => {
+    await assert.rejects(
+      c.slides.createPresentation(P, { title: 'x', plan, template: null, theme: { presentationId: 'GONETHEME', name: '消えたテーマ' } }),
+      (err: unknown) => err instanceof SlideThemeUnavailableError && /消えたテーマ/.test(err.message),
+    );
+  });
+});
+
+test('スライド: PowerPoint の形で受け取る。Google の書き出しの上限を超えたら too-large', async () => {
+  await withDrive(async (c, seen) => {
+    const got = await c.slides.exportPptx(P, 'NEWDECK');
+    assert.ok(got instanceof Uint8Array && new TextDecoder().decode(got) === 'PPTX');
+    assert.equal(seen.find((x) => x.path === '/drive/files/NEWDECK/export')!.query.get('mimeType'), 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+    assert.equal(await c.slides.exportPptx(P, 'BIGDECK'), 'too-large');
+    assert.equal(await c.slides.exportPptx(P, 'NODECK'), null);
+  });
+});
+
+test('スライドの画像: Google から読めるアドレスのときだけ使い捨ての URL を使う（開発の lvh.me・社内の名前・私的な IP・http は使わない）', () => {
+  assert.equal(isPublicImageBase('https://a.m2office.example'), true);
+  assert.equal(isPublicImageBase('https://203.0.113.5'), true);
+  for (const u of ['http://a.lvh.me:3100', 'https://a.lvh.me:3100', 'https://a.localhost:3100', 'https://m2.office.test', 'https://m2.local', 'https://192.168.1.20', 'https://10.0.0.5', 'https://172.20.1.1', 'https://127.0.0.1:3100', 'http://a.m2office.example', 'ない']) {
+    assert.equal(isPublicImageBase(u), false, u);
+  }
 });
 
 test('スライド: 組み立てに失敗したら、作りかけをごみ箱に移して理由を返す（空のスライドを残さない）', async () => {

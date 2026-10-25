@@ -7,6 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from 'react';
+import { SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, swapCategories, togglePinned, type MenuSection,
@@ -719,6 +720,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   onSubmitted={(runId) => setView({ kind: 'run', runId })}
                 />
               )}
+              {/* 作ったスライドの一覧（第9.4.2節「作ったスライドの扱い」） */}
+              {view.agent.id === SLIDES_AGENT_ID && <SlideDeckList key={`decks-${view.agent.id}`} onOpenRun={(runId) => setView({ kind: 'run', runId })} />}
             </>
           )}
           {view.kind === 'run' && (
@@ -734,7 +737,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                       onSubmitted={(runId) => setView({ kind: 'run', runId })}
                     />
                   )}
-                  <RunView detail={detail} viewerId={me.user.id} onCancelled={() => void api.run(view.runId).then(setDetail)} />
+                  <RunView
+                    detail={detail} viewerId={me.user.id} onCancelled={() => void api.run(view.runId).then(setDetail)}
+                    onOpenRun={(runId) => setView({ kind: 'run', runId })}
+                  />
                   {/* 契約書チェックの結果から、結んだ契約を台帳に入れる（契約の管理を使う人で、チェックを頼んだ本人だけ。第38.5節） */}
                   {me.contracts && detail.job?.agentId === CONTRACT_REVIEW_AGENT_ID && detail.job.requestedBy === me.user.id && detail.run.status === 'completed' && (
                     <ContractFromReview runId={detail.run.id} onOpen={(contractId) => setView({ kind: 'contracts', contractId })} />

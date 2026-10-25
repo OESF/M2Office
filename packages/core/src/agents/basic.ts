@@ -2,7 +2,8 @@
  * @file Google Workspace だけでできる基本の業務のエージェント定義（会議の準備・返信待ちの追跡・文書の作成・表の作成・スライドの作成）。
  *
  * 秘書が仕事のあらゆる場面で頼める先として、公式に揃える（仕様書 第9.5.5.2節、ADR-0035）。
- * **どれも送らない・共有しない。** 作ったものは本人のドライブと Gmail の下書きに置く。危険度は `read` か `draft` で、承認は無い。
+ * **どれも送らない・社外に共有しない。** 作ったものは本人のドライブと Gmail の下書きに置く。危険度は `read` か `draft` で、承認は無い。
+ * スライドの作成だけは、頼まれれば会社の中（Workspace のドメイン）で閲覧の共有をする（`write-internal`。第9.4.2節「作ったスライドの扱い」）。
  *
  * @see 仕様書 第9.5.5.2節 Google Workspace だけでできる基本の業務
  */
@@ -259,7 +260,8 @@ export const SHEET_BUILDER: AgentDefinition = {
 /**
  * スライドの作成（公式）。見本の拡張機能（`extensions/research-slides`）と同じ動き。
  *
- * @remarks 危険度 `draft`。本人のドライブに作り、共有しない。会社のテンプレートがあれば使う（第9.4.2節）。
+ * @remarks 危険度 `draft`。本人のドライブに作る。会社のテンプレートがあれば使う（第9.4.2節）。
+ * 頼まれれば会社の中で閲覧の共有をする（`slides.share`。`write-internal`）。前に作ったスライドを、直す頼みの分だけ変えて同じファイルで作り直す（第9.4.2節「作ったスライドの扱い」）。
  */
 export const SLIDES: AgentDefinition = {
   schemaVersion: 1,
@@ -277,20 +279,40 @@ export const SLIDES: AgentDefinition = {
       // 組み込みのデザインか会社のテンプレート。画面では見本の絵のカードから選ぶ（第9.4.2節「組み込みのデザイン」）
       design: { type: 'string', title: 'デザイン', format: 'slide-design' },
       request: { type: 'string', title: '作るスライド（テーマとページ数）', format: 'textarea', examples: ['ローカルで動く LLM の最近の製品動向を 8 ページで'] },
+      // 象徴的な画像を入れるか（第9.4.2節「段 2」）。既定は入れる
+      images: { type: 'string', title: '画像', format: 'switch', enum: ['入れない', '入れる'], default: '入れる' },
+      // 共有の範囲（第9.4.2節「作ったスライドの扱い」）。既定は自分だけ
+      sharing: { type: 'string', title: '共有', format: 'switch', enum: ['自分だけ', '会社で共有'], default: '自分だけ' },
+      // 直す前のスライド。画面の「作り直す」が渡す（欄は出さない）
+      deckId: { type: 'string', title: '直すスライド', format: 'hidden' },
     },
   },
-  tools: ['web.research', 'slides.template', 'slides.create'],
+  tools: ['web.research', 'slides.template', 'slides.create', 'slides.list', 'slides.get', 'slides.share'],
   steps: [
     {
       id: 'work',
       type: 'agent',
-      label: '作る',
+      label: '作成',
+      activityLabel: '作成中',
       required: ['slides.create'],
       instruction: [
+        '入力に deckId があるとき、または依頼が前に作ったスライドを直す頼み（「先週のスライドを 5 ページに」など）のときは、下の「直すとき」に従う。',
+        '依頼が共有だけの頼み（「〇〇のスライドを会社で共有して」）なら、slides.list で探して slides.share を呼び、slides.create は呼ばずに結果を伝えて終える。',
+        '',
+        '新しく作るとき:',
         '1. web.research と slides.template を同時に呼ぶ。web.research の topic には依頼のテーマを渡し、数値・比較・時系列の変化など表にできるデータを集める。',
-        '   入力に design があれば、slides.template と slides.create の design にそのまま渡す。無ければ、依頼の文にデザインの名前（ビジネス・ナチュラル・ポップ・モノトーン・クリーン・ダーク・会社のテンプレートの名前）があればそれを渡し、無ければ渡さない（会社の既定になる）。',
-        '2. 調べた結果から構成を決め、slides.create を 1 回だけ呼ぶ。',
-        '3. 最後に、作ったスライドの題名とページ数を 1〜2 文で伝える。',
+        '   入力に design があれば、slides.template と slides.create の design にそのまま渡す（theme: で始まる値も）。無ければ、依頼の文にデザインの名前（ビジネス・ナチュラル・ポップ・モノトーン・クリーン・ダーク・テーマの名前・会社のテンプレートの名前）があればそれを渡し、無ければ渡さない（会社の既定になる）。',
+        '2. 調べた結果から構成を決め、slides.create を 1 回だけ呼ぶ。request には依頼の文をそのまま渡す。',
+        '3. 入力の sharing が「会社で共有」か、依頼に「会社で共有して」とあれば、slides.create が返した deckId で slides.share（sharing は「会社で共有」）を呼ぶ。',
+        '4. 最後に、作ったスライドの題名とページ数を 1〜2 文で伝える。URL は書かない（画面にボタンが出る）。共有できなかったときは理由を添える。',
+        '',
+        '直すとき:',
+        '1. deckId が無ければ slides.list で依頼に合うものを探す（自分が作ったもの mine から。見つからなければ、見つからないと伝えて終える）。',
+        '2. slides.get で前の構成（plan）と頼みを読む。',
+        '3. 新しい数字や話題が要る頼みのときだけ web.research を呼ぶ。',
+        '4. 前の構成を、頼みの分だけ変える（頼まれていないページ・文・数字は変えない）。画像を変える頼みでなければ imagePrompt は前のまま書く（前の画像が使い回される）。',
+        '5. slides.create に deckId と、変えた構成と、request に直す頼みの文を渡す。design は前と同じなら渡さなくてよい。',
+        '6. 最後に、何を直したかを 1〜2 文で伝える。URL は書かない。',
         '',
         '会社のテンプレートを使うとき（slides.template が layouts を返したとき）は、その見本の名前だけで構成する。',
         '各要素は layout に見本の名前、values に差し込み口（slots の key）ごとの値を書く。表紙も見本の 1 枚として slides に入れ、ページ数は slides の枚数そのもの（依頼に無ければ 8）。',
@@ -312,6 +334,10 @@ export const SLIDES: AgentDefinition = {
         'MATRIX（2×2。xAxis・yAxis・items 4 つ（左上・右上・左下・右下）に title・text）／PYRAMID（積み上げ。items 3〜4 に title・text。上が先）／',
         'CHECKLIST（チェック。items 3〜5 に title・text）／TABLE（表。chartCategories・chartSeries。図にできないときだけ）／BULLET（箇条書き。body）。',
         '箇条書きの行頭に「・」や「-」を付けない。出典を sources に入れる。',
+        '割合を円グラフで見せたいときは SHARE の shareStyle を pie にする（数値から正確に描く）。',
+        '表紙で話す内容を全体の notes に書く。',
+        '象徴的な画像: 全体の imagePrompt に表紙の画像を、SECTION（と IMAGE）の imagePrompt にそのページの画像を、何を描くかで書く（合わせて 4 枚まで。100 文字まで）。',
+        '画像は情景・物・抽象的な形で表し、文字・数字・人の顔・ロゴ・商標を描かせない。入力の images が「入れない」か、依頼に「画像なしで」とあれば、slides.create の images に false を渡す。',
       ].join('\n'),
     },
   ],
@@ -327,9 +353,13 @@ export const SLIDES: AgentDefinition = {
     notes: [
       '調べる言葉（テーマ）は Google に送られます。社外に出してはならない情報を書かないでください',
       'デザインは、見本の絵から選べます（ビジネス・ナチュラル・ポップ・モノトーン・クリーン・ダーク）。会社のテンプレートが登録されていれば、それも選べます。秘書に頼むときは「ナチュラルで」のように言えます',
+      '見本の「＋ Google スライドのテーマ」から、Google スライドのテンプレート ギャラリーで作ったファイルを選ぶと、そのテーマ（背景・字体・飾り）で作れます。選んだテーマは次から見本に並びます',
+      '「PowerPoint でダウンロード」を押すと、その場で PowerPoint のファイルを作って保存します（数秒から数十秒かかります）',
       '発表で使う形で作ります。1 枚に 1 つのメッセージを、グラフ・手順・カードなどの図で見せ、話す内容は各ページの発表者のメモ（スピーカーノート）に入れます',
       '表紙などに、テーマを象徴する画像を AI が作って入れます（4 枚まで）。いらなければ「画像」で「入れない」を選ぶか、「画像なしで」と頼んでください。会社が外部の AI を使わない設定なら、画像は作りません',
-      'スライドを誰かと共有することはありません',
+      '「共有」で「会社で共有」を選ぶと、会社の Google Workspace の人が見られるようにします（編集はできません）。社外には共有しません',
+      '作ったスライドは、この画面の下の一覧から開く・PowerPoint で取り出す・直してほしいことを書いて作り直す・共有を切り替える・削除ができます',
+      '作り直すと同じファイルが新しくなります（前の形は Google スライドの版の履歴に残ります）。Google スライドで手を入れた後なら、上書きせずに新しいファイルに作ります',
     ],
   },
   face: 13,

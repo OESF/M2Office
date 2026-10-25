@@ -437,7 +437,8 @@ console.log('\n■ 11. AG-05 週次ブリーフ（定時実行 → 本人へ通�
   let latest;
   while (Date.now() < deadline) {
     const { body: after } = await call('a', '/v1/notifications', {}, 'member');
-    latest = after.items.find((n) => n.kind === 'brief' && n.createdAt >= since);
+    // 朝のブリーフが同じころに届くことがあるため、週次ブリーフの題名で絞る
+    latest = after.items.find((n) => n.kind === 'brief' && n.title.startsWith('週次ブリーフ') && n.createdAt >= since);
     if (latest) break;
     await sleep(1000);
   }
@@ -8331,6 +8332,85 @@ console.log('\n■ 121. スライドの画像の使い捨ての道（鍵が違�
   } catch (err) {
     ng('スライドの画像の道の確認が途中で止まった', String(err));
   } finally {
+    await owner.end();
+  }
+}
+
+console.log('\n■ 122. 作ったスライド（本人のものと会社で共有されたものだけ・直す共有削除は作った人だけ・会社ごと。第9.4.2節「作ったスライドの扱い」）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const tag = `確認用スライド${Date.now().toString(36)}`;
+  // ID は道の形（英数字）に合わせる
+  const key = `smoke-deck-${Date.now().toString(36)}`;
+  const ids = { open: `${key}-open`, mine: `${key}-mine` };
+  try {
+    const { rows: users } = await owner.query(`select id, email from users where tenant_id = 't-alpha' and email = 'admin@alpha.example.jp'`);
+    const admin = users[0]?.id;
+    for (const [id, sharing] of [[ids.open, 'company'], [ids.mine, 'private']]) {
+      await owner.query(
+        `insert into slide_decks (id, tenant_id, user_id, presentation_id, title, sharing, plan, built_at) values ($1, 't-alpha', $2, $3, $4, $5, '{"title":"x","slides":[]}', now())`,
+        [id, admin, `mock-${id}`, `${tag} ${sharing}`, sharing],
+      );
+    }
+    const { body: adminList } = await call('a', '/v1/slide-decks');
+    const { body: memberList } = await call('a', '/v1/slide-decks', {}, 'member');
+    const { body: beta } = await call('b', '/v1/slide-decks');
+    const hidden = await call('a', `/v1/slide-decks/${ids.mine}`, {}, 'member');
+    const otherShare = await call('a', `/v1/slide-decks/${ids.open}/share`, { method: 'POST', body: JSON.stringify({ sharing: 'private' }) }, 'member');
+    const otherDelete = await call('a', `/v1/slide-decks/${ids.open}`, { method: 'DELETE' }, 'member');
+    const crossTenant = await call('b', `/v1/slide-decks/${ids.open}`);
+    const removed = await call('a', `/v1/slide-decks/${ids.mine}`, { method: 'DELETE' });
+    const { rows: left } = await owner.query('select id from slide_decks where id = any($1)', [[ids.open, ids.mine]]);
+    const { rows: rls } = await owner.query(`select relrowsecurity from pg_class where relname = 'slide_decks'`);
+    const titles = (list) => (list ?? []).map((d) => d.title).filter((t) => t.startsWith(tag)).sort();
+    const good = titles(adminList.mine).length === 2 && titles(memberList.shared).join() === `${tag} company` && titles(memberList.mine).length === 0
+      && titles(beta.mine).length === 0 && titles(beta.shared).length === 0 && hidden.status === 404 && otherShare.status === 404 && otherDelete.status === 404
+      && crossTenant.status === 404 && removed.status === 200 && left.map((r) => r.id).join() === ids.open && rls[0]?.relrowsecurity === true
+      && !JSON.stringify(adminList).includes('"plan"');
+    good
+      ? ok('一覧は本人のものと会社で共有されたものだけ。ほかの人は共有の切り替え・削除ができず、別の会社からは見えない。構成は一覧に出さない')
+      : ng('作ったスライドの扱いが違う', JSON.stringify({ admin: titles(adminList.mine), member: titles(memberList.shared), hidden: hidden.status, otherShare: otherShare.status, otherDelete: otherDelete.status, crossTenant: crossTenant.status, removed: removed.status, left, rls: rls[0] }));
+  } catch (err) {
+    ng('作ったスライドの確認が途中で止まった', String(err));
+  } finally {
+    await owner.query('delete from slide_decks where id = any($1)', [[ids.open, ids.mine]]).catch(() => undefined);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 123. Google スライドのテーマと PowerPoint の取り出し（会社のテーマは管理者だけ・会社ごと。第9.4.2節「Google スライドのテーマを使う」）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const key = `smoke-theme-${Date.now().toString(36)}`;
+  try {
+    // 会社のテーマ（管理者が登録したもの）と、管理者のマイテーマを入れておく
+    const { rows: users } = await owner.query(`select id from users where tenant_id = 't-alpha' and email = 'admin@alpha.example.jp'`);
+    await owner.query(`insert into slide_themes (id, tenant_id, user_id, presentation_id, name) values ($1, 't-alpha', null, 'GALLERYCOMPANY1', $2), ($3, 't-alpha', $4, 'GALLERYMINE0001', $5)`,
+      [`${key}-co`, `${key} 会社`, `${key}-me`, users[0]?.id, `${key} 自分`]);
+    const { body: memberList } = await call('a', '/v1/slide-themes', {}, 'member');
+    const { body: beta } = await call('b', '/v1/slide-themes');
+    const names = (b) => (b?.items ?? []).map((t) => t.name).filter((n) => n.startsWith(key));
+    const companyByMember = await call('a', '/v1/slide-themes', { method: 'POST', body: JSON.stringify({ fileId: 'GALLERYCOMPANY1', company: true }) }, 'member');
+    const badFile = await call('a', '/v1/slide-themes', { method: 'POST', body: JSON.stringify({ fileId: '../x' }) }, 'member');
+    const delCompany = await call('a', `/v1/slide-themes/${key}-co`, { method: 'DELETE' }, 'member');
+    const delMine = await call('a', `/v1/slide-themes/${key}-me`, { method: 'DELETE' }, 'member');
+    const thumb = await call('a', `/v1/slide-themes/${key}-co/thumbnail`, {}, 'member');
+    const crossAccess = await call('b', `/v1/slide-themes/${key}-co/access`);
+    const pptx = await call('a', '/v1/slide-decks/smoke-none/pptx');
+    const { rows: rls } = await owner.query(`select relrowsecurity from pg_class where relname = 'slide_themes'`);
+    const good = names(memberList).join() === `${key} 会社` && names(beta).length === 0 && companyByMember.status === 403 && badFile.status === 400
+      && delCompany.status === 403 && delMine.status === 404 && thumb.status === 404 && crossAccess.status === 404 && pptx.status === 404 && rls[0]?.relrowsecurity === true;
+    good
+      ? ok('ほかの人には会社のテーマだけが見え、会社のテーマの登録と削除は管理者だけ。別の会社からは見えない。PowerPoint は見えるスライドだけ')
+      : ng('テーマの扱いが違う', JSON.stringify({ member: names(memberList), beta: names(beta), companyByMember: companyByMember.status, badFile: badFile.status, delCompany: delCompany.status, delMine: delMine.status, thumb: thumb.status, crossAccess: crossAccess.status, pptx: pptx.status, rls: rls[0] }));
+  } catch (err) {
+    ng('テーマの確認が途中で止まった', String(err));
+  } finally {
+    await owner.query('delete from slide_themes where id like $1', [`${key}-%`]).catch(() => undefined);
     await owner.end();
   }
 }

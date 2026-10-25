@@ -15,6 +15,31 @@ export const SLIDE_IMAGE_TTL_MS = 5 * 60_000;
 
 const hashOf = (token: string) => createHash('sha256').update(token).digest('hex');
 
+/**
+ * 会社のアドレスが、Google からインターネット越しに読めるか（使い捨ての URL を使ってよいか）。
+ *
+ * 開発（`http://a.lvh.me:3100` など）や、社内の名前・私的な IP のアドレスは読めないため `false`。
+ * そのときは本人のドライブで一時的に共有する（第9.4.2節「段 2」）。
+ *
+ * @param baseUrl 会社の画面のアドレス
+ */
+export function isPublicImageBase(baseUrl: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(baseUrl);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host === 'lvh.me' || /\.(localhost|lvh\.me|test|local|internal|lan|home\.arpa)$/.test(host)) return false;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    const [a, b] = host.split('.').map(Number) as [number, number];
+    return !(a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127));
+  }
+  return !host.includes(':');
+}
+
 /** 画像の使い捨ての置き場（PostgreSQL。移行 158）。 */
 export class PostgresSlideImageHost {
   private readonly pool: pg.Pool;

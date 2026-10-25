@@ -69,7 +69,10 @@ export function driveFilesFor(deps: Pick<AppDeps, 'repo' | 'box' | 'connector' |
         return { kind: 'mock', items: files.filter((f) => f.kind !== 'folder').map((f) => ({ id: f.id, name: f.name })) };
       }
       const s = await settings(who.tenantId, who.userId);
-      if (!s.ready || !s.cred?.secretEnc || !s.conn) return { error: 'ドライブから渡せません（会社の Google 接続の設定か、本人の Google の接続がありません）' };
+      // 足りないものを、誰が何をすればよいかの形で返す（会社の設定は管理者、本人の接続は本人）
+      if (!s.cred?.secretEnc || !s.clientId) return { error: 'ドライブから選べません。会社の Google 接続が設定されていません（管理者ページ「接続」の Google）' };
+      if (!s.apiKey) return { error: 'ドライブから選べません。管理者ページ「接続」の Google に「Picker の API キー」が登録されていません（管理者に登録を頼んでください）' };
+      if (!s.conn || !s.conn.scopes.includes('drive.file')) return { error: 'ドライブから選べません。個人設定の「Google 連携」で Google と接続し直してください' };
       try {
         const t = await refreshGoogleAccessToken({
           clientId: s.clientId, clientSecret: deps.box.decrypt(s.cred.secretEnc), refreshToken: deps.box.decrypt(s.conn.refreshTokenEnc), scope: DRIVE_FILE_SCOPE,

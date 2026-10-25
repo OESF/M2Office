@@ -538,16 +538,16 @@ export class PostgresRepository implements Repository {
 
   async createArtifact(a: Artifact): Promise<void> {
     await this.q(a.tenantId, 
-      `insert into artifacts (id, run_id, tenant_id, kind, title, body, file_id, created_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [a.id, a.runId, a.tenantId, a.kind, a.title, a.body, a.fileId ?? null, a.createdAt],
+      `insert into artifacts (id, run_id, tenant_id, kind, title, body, file_id, slide_deck_id, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [a.id, a.runId, a.tenantId, a.kind, a.title, a.body, a.fileId ?? null, a.slideDeckId ?? null, a.createdAt],
     );
   }
 
   async listArtifacts(tenantId: string, runId: string): Promise<Artifact[]> {
     return this.q<Artifact>(tenantId, 
       `select id, run_id as "runId", tenant_id as "tenantId", kind, title, body,
-              file_id as "fileId", created_at as "createdAt"
+              file_id as "fileId", slide_deck_id as "slideDeckId", created_at as "createdAt"
          from artifacts where tenant_id = $1 and run_id = $2 order by created_at`,
       [tenantId, runId],
     );

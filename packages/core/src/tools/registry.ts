@@ -4,6 +4,8 @@
  * @see 仕様書 第9.4節 ツールと承認の対応
  */
 
+import type { SlideDeckService } from '../slides/decks.js';
+import type { SlideThemeService } from '../slides/themes.js';
 import type { RiskLevel } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
@@ -54,6 +56,10 @@ export interface ToolContext {
     generate?(prompt: string, aspectRatio: '16:9' | '3:4'): Promise<{ bytes: Uint8Array; mimeType: string } | null>;
     publish?(bytes: Uint8Array, mimeType: string): Promise<{ url: string; done(): Promise<void> }>;
   };
+  /** 作ったスライド（仕様書 第9.4.2節「作ったスライドの扱い」）。作ったものを覚え、直す・共有する・一覧に使う。無ければ覚えない。 */
+  slideDecks?: SlideDeckService;
+  /** Google スライドのテーマ（第9.4.2節「Google スライドのテーマを使う」）。無ければテーマを使わない。 */
+  slideThemes?: SlideThemeService;
   /**
    * 呼び出したステップより後に、定義に残っている承認ステップの数。
    *

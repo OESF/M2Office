@@ -138,6 +138,15 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       this.outbox.push({ kind: 'slides', principal: p, body: input });
       return { presentationId: `mock-deck-${randomUUID().slice(0, 8)}`, url: null, pptxUrl: null };
     },
+    // ファイルが無いので、状態は読めない・共有とごみ箱は何もしない。テーマは名前だけ（見本のドライブのファイルの名前）
+    fileState: async () => null,
+    inspectTheme: async (p: ConnectorPrincipal, id: string) => {
+      const f = (await this.drive.search(p, { query: '', limit: 100 })).find((x) => x.id === id);
+      return f ? { name: f.name.replace(/\.[a-z0-9]+$/i, ''), layouts: 0, thumbnail: null } : null;
+    },
+    exportPptx: async () => null,
+    share: async () => true,
+    trash: async () => true,
   };
 
   calendar = {
@@ -420,6 +429,8 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
         file: { id: id(4 + i), name: m.name, kind: 'other' as const, modifiedAt: jst(addDays(today, -7), 10), url: null } as DriveFile,
         mimeType: 'image/png', get bytes() { return mockPhoto(m.color); },
       })),
+      // 見本のプレゼンテーション（スライドの「＋ Google スライドのテーマ」。第9.4.2節）
+      { file: { id: id(4 + MOCK_PHOTOS.length), name: '会社紹介のテーマ（見本）', kind: 'presentation' as const, modifiedAt: jst(addDays(today, -10), 10), url: null } },
     ];
     return [...samples, ...[...this.driveFiles.values()].filter((f) => f.owner === key(p))];
   }

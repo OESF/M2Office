@@ -799,9 +799,12 @@ function validateSection(
       const first = templates.findIndex((x) => x.isDefault);
       templates.forEach((x, i) => { x.isDefault = i === (first === -1 ? 0 : first); });
       // 会社の既定にした組み込みのデザイン（第9.4.2節「組み込みのデザイン」）。決めていればテンプレートの既定より先に使う
-      const design = typeof o['defaultDesign'] === 'string' && o['defaultDesign'] ? findSlideDesign(o['defaultDesign']) : null;
-      if (typeof o['defaultDesign'] === 'string' && o['defaultDesign'] && !design) return { error: '組み込みのデザインが見つかりません' };
-      return { section: 'slides', value: { templates, defaultDesign: design?.id ?? null } };
+      const wanted = typeof o['defaultDesign'] === 'string' ? o['defaultDesign'] : '';
+      const design = wanted ? findSlideDesign(wanted) : null;
+      // 会社のテーマ（`theme:<ID>`）も既定にできる（第9.4.2節「Google スライドのテーマを使う」）。会社のテーマでなければ、使うときに会社の既定から外れる
+      const theme = !design && /^theme:[A-Za-z0-9_-]{1,80}$/.test(wanted) ? wanted : null;
+      if (wanted && !design && !theme) return { error: '組み込みのデザインか会社のテーマが見つかりません' };
+      return { section: 'slides', value: { templates, defaultDesign: design?.id ?? theme } };
     }
     case 'privacy': {
       // Google から取得したデータを残す日数（仕様書 第14.3.2節）。短くはできるが、7 日より長くはできない

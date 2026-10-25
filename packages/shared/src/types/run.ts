@@ -105,6 +105,8 @@ export interface Artifact {
   body: string;
   /** 成果物がファイルの場合、その ID。 */
   fileId?: string | null;
+  /** 作ったスライドの ID（業務「スライドの作成」。結果の画面でボタンと作り直しを出す。第9.4.2節「作ったスライドの扱い」）。 */
+  slideDeckId?: string | null;
   createdAt: string;
 }
 

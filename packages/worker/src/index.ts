@@ -20,7 +20,7 @@ import {
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
-  SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS,
+  SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, isPublicImageBase, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -165,9 +165,17 @@ const inventorySales = new InventorySales({
   apps: new ExternalApps({ store: new PostgresAppStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo }),
 });
 inventoryWatch = new InventoryWatch({ repo, service: inventory, bookings: inventoryBookings, sales: inventorySales, logger: log });
-// 外部のアプリからの配信の依頼（第13.4.4節）。承認された配信を窓口のアカウントから 1 人に 1 通ずつ送り、停止の返信と送れなかった知らせを読む
+/**
+ * 会社の画面のアドレス。通知の控えに載せるリンク（仕様書 第6.5.5.2節）と、スライドの画像の使い捨ての URL（第9.4.2節「段 2」）に使う。
+ *
+ * @remarks `APP_BASE_URL` の `{tenant}` をサブドメインに置き換える。開発では `http://{tenant}.lvh.me:3100`
+ */
+const appUrl = (subdomain: string): string =>
+  (process.env['APP_BASE_URL'] ?? `http://{tenant}.${process.env['BASE_DOMAIN'] ?? 'lvh.me'}:${process.env['WEB_PORT'] ?? 3100}`)
+    .replace('{tenant}', subdomain);
 // スライドの画像の使い捨ての置き場（第9.4.2節「段 2」）。公開の道は API が受ける
 const slideImageHost = new PostgresSlideImageHost(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+// 外部のアプリからの配信の依頼（第13.4.4節）。承認された配信を窓口のアカウントから 1 人に 1 通ずつ送り、停止の返信と送れなかった知らせを読む
 const deliveryApps = new ExternalApps({
   store: new PostgresAppStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo,
 });
@@ -407,8 +415,17 @@ const engine = new RunEngine({
   reservations: { service: reservations, access: reservationsAccess(repo) },
   // 外部のアプリからの配信（第13.4.4節）。承認の後の「送る」の段が使う
   deliveries: { service: deliveries },
-  // スライドの画像を使い捨ての URL で Google に渡す（クラウドの形だけ。ローカルの形は本人のドライブで一時的に共有する。第9.4.2節「段 2」）
-  ...(deploymentFromEnv(process.env) === 'cloud' ? {
+  // 作ったスライドを覚え、直す・共有する（第9.4.2節「作ったスライドの扱い」）
+  slideDecks: new SlideDeckService({
+    store: new PostgresSlideDeckStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, connector,
+  }),
+  // Google スライドのテーマ（第9.4.2節「Google スライドのテーマを使う」）
+  slideThemes: new SlideThemeService({
+    store: new PostgresSlideThemeStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), connector,
+  }),
+  // スライドの画像を使い捨ての URL で Google に渡す（クラウドの形で、会社のアドレスが Google から読めるときだけ。
+  // ローカルの形と開発（lvh.me など）は、本人のドライブで一時的に共有する。第9.4.2節「段 2」）
+  ...(deploymentFromEnv(process.env) === 'cloud' && isPublicImageBase(appUrl('tenant')) ? {
     publishSlideImage: async (tenantId: string, bytes: Uint8Array, mimeType: string) =>
       slideImageHost.publish(tenantId, appUrl((await repo.findTenantById(tenantId))?.subdomain ?? ''), bytes, mimeType),
   } : {}),
@@ -443,14 +460,6 @@ const proactive = new ProactiveWatcher({
 });
 
 // 通知の控えを Chat へ届ける（仕様書 第6.5.5.2節）。送信口は B-2 のあとに差し替える
-/**
- * 会社の画面のアドレス。通知の控えに載せるリンクに使う（仕様書 第6.5.5.2節）。
- *
- * @remarks `APP_BASE_URL` の `{tenant}` をサブドメインに置き換える。開発では `http://{tenant}.lvh.me:3100`
- */
-const appUrl = (subdomain: string): string =>
-  (process.env['APP_BASE_URL'] ?? `http://{tenant}.${process.env['BASE_DOMAIN'] ?? 'lvh.me'}:${process.env['WEB_PORT'] ?? 3100}`)
-    .replace('{tenant}', subdomain);
 
 // 通知の控えの送信口（第6.5.5.2.1節）。見本の接続口を使う会社（開発）は見本、ほかは会社の Chat アプリ
 const notifier = new NotificationDelivery({
