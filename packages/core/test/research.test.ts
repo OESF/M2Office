@@ -12,7 +12,7 @@ import type { AddressInfo } from 'node:net';
 import type { AgentDefinition } from '@m2office/shared';
 import {
   BUILTIN_TOOLS, GeminiResearchProvider, MockResearchProvider, MockWorkspaceConnector, ToolRegistry,
-  normalizeSlidePlan, planOutline, validateDefinition, type ToolContext,
+  normalizeSlidePlan, planOutline, validateDefinition, pieChartPng, pieChartSvg, type ToolContext,
 } from '../src/index.js';
 
 const registry = new ToolRegistry();
@@ -63,7 +63,9 @@ test('発表の決まり: 箇条書きは 2 枚まで・同じレイアウトを
   assert.match(bad([b('1'), kpi, b('2'), kpi, b('3')]), /BULLET.*2 枚まで/);
   assert.match(bad([kpi, kpi]), /同じレイアウト/);
   assert.match(bad([b('1'), table, kpi, b('2'), table]), /文字だけのページ.*多すぎます/);
-  assert.equal(bad([b('1'), kpi, b('2'), { layout: 'STATEMENT', title: '', message: 'まとめ' }]), '');
+  const n = (x: Record<string, unknown>) => ({ ...x, notes: '話すこと' });
+  assert.equal(bad([n(b('1')), n(kpi), n(b('2')), n({ layout: 'STATEMENT', title: '', message: 'まとめ' })]), '');
+  assert.match(bad([n(b('1')), kpi, n(b('2'))]), /発表者のメモ.*2 枚目/, '3 枚以上ならすべてのページに発表者のメモを求める');
   // 会社のテンプレートの見本で書いた構成には当てない
   const r = normalizeSlidePlan({ title: 't', slides: [{ layout: '箇条書き', values: { 本文: 'a' } }, { layout: '箇条書き', values: { 本文: 'b' } }] });
   assert.ok(!('error' in r));
@@ -91,6 +93,52 @@ test('図のレイアウト: 項目の数・数の値・アイコンを確かめ
   const statement = one({ layout: 'STATEMENT', title: '', message: '伝えたい一文', notes: '話すこと' });
   if ('error' in statement) assert.fail(statement.error);
   assert.equal(statement.plan.slides[0]!.notes, '話すこと');
+});
+
+test('象徴的な画像と円グラフ: デザインの作風で 4 枚まで作り、円グラフは数値から描く。使い捨ての URL の手段を渡す。画像なしも頼める（第9.4.2節「段 2」）', async () => {
+  const prompts: { prompt: string; aspect: string }[] = [];
+  const png = { bytes: new Uint8Array([137, 80, 78, 71]), mimeType: 'image/png' };
+  const withImages = (c: ReturnType<typeof ctx>, fail = false) => Object.assign(c, {
+    slideImages: {
+      generate: async (prompt: string, aspect: '16:9' | '3:4') => { prompts.push({ prompt, aspect }); if (fail && prompts.length === 2) throw new Error('上限'); return png; },
+      publish: async () => ({ url: 'https://example.com/x', done: async () => {} }),
+    },
+  });
+  const plan = {
+    title: '見本', notes: '表紙で話すこと', imagePrompt: '朝の港に光が差す情景',
+    slides: [
+      { layout: 'SECTION', title: '背景', number: '01', imagePrompt: '霧の中の灯台', notes: 'n' },
+      { layout: 'SHARE', title: '半分はメール', shareStyle: 'pie', items: [{ label: 'メール', value: 50 }, { label: '電話', value: 50 }], notes: 'n' },
+      { layout: 'IMAGE', title: '現場の様子', imagePrompt: '整った作業台', caption: '説明', notes: 'n' },
+      { layout: 'SECTION', title: 'まとめ', imagePrompt: '夕焼けの道', notes: 'n' },
+      { layout: 'STATEMENT', title: '', message: '小さく始める', imagePrompt: '描かない（図のページ）', notes: 'n' },
+    ],
+  };
+  const c = withImages(ctx(), true);
+  const out = await registry.get('slides.create')!.invoke({ ...plan, design: 'ポップ' }, c) as { warnings: string[] };
+  assert.equal(prompts.length, 4, '表紙・区切り・画像のページで 4 枚まで（図のページには作らない）');
+  assert.deepEqual(prompts.map((x) => x.aspect), ['3:4', '3:4', '16:9', '3:4']);
+  assert.ok(prompts.every((x) => x.prompt.includes('明るい平面のイラスト') && x.prompt.includes('文字・数字・ロゴ')), 'デザインの作風と描かないもの');
+  assert.ok(out.warnings.some((w) => w.includes('画像を作れませんでした')), '作れなかった画像は注意にする');
+  const body = c.connector.outbox.at(-1)!.body as { images: Record<string, unknown>; publishImage?: unknown; plan: { notes?: string; sources?: { title: string }[] } };
+  assert.deepEqual(Object.keys(body.images).sort(), ['cover', 'm2slide2_pie', 'm2slide3', 'm2slide4'], '作れた画像と円グラフ');
+  assert.ok(body.publishImage, '使い捨ての URL の手段を渡す');
+  assert.equal(body.plan.notes, '表紙で話すこと');
+  assert.match(body.plan.sources![0]!.title, /AI.*作ったもの/, 'AI の画像を使ったら出典の先頭に書く');
+  prompts.length = 0;
+  const none = withImages(ctx());
+  await registry.get('slides.create')!.invoke({ ...plan, images: false }, none);
+  assert.equal(prompts.length, 0, '画像なしで頼めば作らない');
+  assert.deepEqual(Object.keys((none.connector.outbox.at(-1)!.body as { images: Record<string, unknown> }).images), ['m2slide2_pie'], '円グラフは AI を使わないので描く');
+});
+
+test('円グラフの画像: 値の割合でドーナツ型に描き、すき間は背景の色', () => {
+  const svg = pieChartSvg([30, 70], [{ red: 1, green: 0, blue: 0 }, { red: 0, green: 0, blue: 1 }], { red: 0, green: 0, blue: 0 });
+  assert.equal((svg.match(/<path/g) ?? []).length, 2);
+  assert.ok(svg.includes('#ff0000') && svg.includes('#0000ff') && svg.includes('stroke="#000000"'));
+  assert.match(pieChartSvg([5], [{ red: 0, green: 1, blue: 0 }]), /<circle/, '1 つで全体なら輪');
+  const png = pieChartPng([1, 2, 3], [{ red: 0.5, green: 0.5, blue: 0.5 }]);
+  assert.deepEqual([...png.slice(1, 4)].map((x) => String.fromCharCode(x)).join(''), 'PNG');
 });
 
 test('本文を配列で渡されても 1 行ずつの箇条書きとして読む（比較の本文も）', () => {

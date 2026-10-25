@@ -4,7 +4,8 @@
  * 大きな数字・棒グラフ・割合・進み具合・手順・時の流れ・カード・対比・2×2・積み上げ・チェックを、
  * Slides API の図形と文字だけで描く（画像のファイルもスプレッドシートも使わない。権限は `drive.file` のまま）。
  * 色と字体は組み込みのデザイン（`SlideDesign`）から取る。位置はインチ（既定の大きさ 10 × 5.625）で決め、呼ぶ側が伸び縮みさせる。
- * 円グラフは描かない（Slides API では扇形の角度を決められないため）。割合は帯か 10×10 のます目で見せる。
+ * 円グラフは図形では描けない（Slides API では扇形の角度を決められない）ため、M2Office が描いた画像を貼る（`SHARE` の `pie`。第9.4.2節「段 2」）。
+ * 画像が用意できなければ、帯で見せる。
  */
 
 import type { SlideDesign, SlideRgb } from '@m2office/shared';
@@ -37,6 +38,8 @@ export interface SlideDraw {
   restyle(id: string, start: number, end: number, style: TextStyle): void;
   /** 箇条書きの印を付ける（`from` の文字から後ろだけ。見出しの行に印を付けないため）。 */
   bullets(id: string, from?: number): void;
+  /** 画像の置き場所を決める（組み立ての後に貼る）。画像が用意されていれば `true`。 */
+  image?(key: string, slide: string, b: Box): boolean;
 }
 
 /** 明るさ（0〜1）。 */
@@ -142,6 +145,11 @@ export function drawInfographic(g: SlideDraw, s: SlideSpec, id: string, area: Bo
         g.shape(`${id}_sk${k + 1}`, id, { x, y: y + k * 0.48 + 0.08, w: 0.26, h: 0.26 }, 'RECTANGLE', colors[k]!);
         g.shape(`${id}_sl${k + 1}`, id, { x: x + 0.38, y: y + k * 0.48, w: w - 0.4, h: 0.42 }, 'TEXT_BOX', null, `${nameOf(it)}　${Math.round(pct[k]!)}%`, { size: 14, color: d.text, valign: 'MIDDLE' });
       });
+      if (s.shareStyle === 'pie' && g.image?.(`${id}_pie`, id, { x: area.x + 0.4, y: area.y + 0.05, w: area.h - 0.1, h: area.h - 0.1 })) {
+        // 円グラフは画像（数値から M2Office が描く）。項目の名前と割合は文字で右に
+        legend(area.x + area.h + 0.9, area.y + Math.max(0, (area.h - items.length * 0.48) / 2), area.w - area.h - 1);
+        return true;
+      }
       if (s.shareStyle === 'grid') {
         // 10×10 のます目。上の行から順に、項目ごとの数だけ塗る
         const cell = Math.min(0.33, (area.h - 0.1) / 10);

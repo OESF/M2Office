@@ -8315,5 +8315,25 @@ console.log('\n■ 120. 外部のアプリからの配信の依頼（断りは a
   }
 }
 
+console.log('\n■ 121. スライドの画像の使い捨ての道（鍵が違えば 404・置き場は会社ごと。第9.4.2節「段 2」）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  try {
+    const miss = await fetch(`${API}/v1/public/slide-images/${'A'.repeat(43)}`);
+    const bad = await fetch(`${API}/v1/public/slide-images/short`);
+    const { rows: rls } = await owner.query(`select relrowsecurity from pg_class where relname = 'slide_images'`);
+    const { rows: cols } = await owner.query(`select column_name from information_schema.columns where table_name = 'slide_images'`);
+    miss.status === 404 && bad.status === 404 && rls[0]?.relrowsecurity === true && cols.some((c) => c.column_name === 'token_hash') && !cols.some((c) => c.column_name === 'token')
+      ? ok('知らない鍵・形の違う鍵は 404。置き場は行単位で会社ごとに分け、鍵はハッシュだけを持つ')
+      : ng('スライドの画像の道の扱いが違う', JSON.stringify({ miss: miss.status, bad: bad.status, rls: rls[0], cols: cols.map((c) => c.column_name) }));
+  } catch (err) {
+    ng('スライドの画像の道の確認が途中で止まった', String(err));
+  } finally {
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

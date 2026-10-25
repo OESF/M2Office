@@ -33,6 +33,17 @@ export const SOURCES_MAX = 10;
 
 type Rgb = SlideRgb;
 
+/** 組み立ての後に画像を貼る場所（URL は貼るときに入れる）。 */
+export interface ImagePlacement {
+  /** 画像の場所の名前（`cover`・`m2slide<n>`・`m2slide<n>_pie`）。 */
+  key: string;
+  objectId: string;
+  elementProperties: Record<string, unknown>;
+}
+
+/** 画像を Google から読める URL で渡す手段（使い捨て。貼り終えたら `done` で消す。第9.4.2節「段 2」）。 */
+export type PublishImage = (bytes: Uint8Array, mimeType: string) => Promise<{ url: string; done(): Promise<void> }>;
+
 /** 既定のデザイン（ビジネス）。 */
 const DEFAULT_DESIGN = findSlideDesign(DEFAULT_SLIDE_DESIGN_ID)!;
 type Request = Record<string, unknown>;
@@ -47,12 +58,14 @@ type Box = { x: number; y: number; w: number; h: number };
  * @param initialSlide 作ったときに入っている 1 枚目。最後に消す
  * @param o.design 組み込みのデザイン（無ければ既定の「ビジネス」）
  * @param o.footer 表紙と各ページの下の隅に出す会社名（無ければ出さない）
- * @returns 要求の並び、ページ数、注意（切り詰めたことなど。黙って捨てない）、ページごとの発表者のメモ（ページの ID → 文）
+ * @param o.images 用意できた画像の場所の名前（`cover`・`m2slide<n>`・`m2slide<n>_pie`）。あるものだけ、画像の場所を空けて組む
+ * @returns 要求の並び、ページ数、注意（切り詰めたことなど。黙って捨てない）、ページごとの発表者のメモ（ページの ID → 文）、
+ *   画像を貼る場所（組み立ての後に、画像の URL を入れて貼る）
  */
 export function slideRequests(
   plan: SlidePlan, page: { width: number; height: number }, initialSlide: string | null,
-  o: { design?: SlideDesign; footer?: string } = {},
-): { requests: Request[]; pages: number; warnings: string[]; notes: Record<string, string> } {
+  o: { design?: SlideDesign; footer?: string; images?: ReadonlySet<string> } = {},
+): { requests: Request[]; pages: number; warnings: string[]; notes: Record<string, string>; placements: ImagePlacement[] } {
   const sx = page.width / BASE.width;
   const sy = page.height / BASE.height;
   const requests: Request[] = [];
@@ -117,8 +130,16 @@ export function slideRequests(
       },
     });
   };
+  /** 画像を貼る場所（第9.4.2節「段 2」）。 */
+  const placements: ImagePlacement[] = [];
+  const image = (key: string, slide: string, b: Box): boolean => {
+    if (!o.images?.has(key)) return false;
+    placements.push({ key, objectId: `${key}_img`, elementProperties: at(slide, b) });
+    return true;
+  };
   /** 図のレイアウトを描く道具（第9.4.2節「プレゼンテーションの表現」）。 */
   const g: SlideDraw = {
+    image,
     design: d,
     shape: (id: string, slide: string, b: Box, kind: ShapeKind, fill: Rgb | null, value?: string, st?: TextStyle) => {
       requests.push({ createShape: { objectId: id, shapeType: kind, elementProperties: at(slide, b) } });
@@ -148,12 +169,14 @@ export function slideRequests(
   };
   /** 発表者のメモ（ページの ID → 文）。組み立ての後に、メモの枠の ID を読んで入れる。 */
   const notes: Record<string, string> = {};
-  /** 下の隅の会社名。 */
-  const footerText = (slide: string, color: Rgb) => {
+  /** 下の隅の会社名（右の半分に画像があるページは左の隅）。 */
+  const footerText = (slide: string, color: Rgb, left = false) => {
     if (!footer) return;
-    box(`${slide}_f`, slide, { x: 5.5, y: 5.28, w: 4, h: 0.3 }, footer, { size: 9, color });
-    requests.push({ updateParagraphStyle: { objectId: `${slide}_f`, style: { alignment: 'END' }, textRange: { type: 'ALL' }, fields: 'alignment' } });
+    box(`${slide}_f`, slide, { x: left ? 0.6 : 5.5, y: 5.28, w: 4, h: 0.3 }, footer, { size: 9, color });
+    if (!left) requests.push({ updateParagraphStyle: { objectId: `${slide}_f`, style: { alignment: 'END' }, textRange: { type: 'ALL' }, fields: 'alignment' } });
   };
+  /** 右の半分の画像の場所（3:4。表紙と区切り）。 */
+  const RIGHT_IMAGE: Box = { x: 5.78, y: 0, w: 4.22, h: 5.625 };
   /** 題名だけの型のスライドを足し、題名を入れる。背景・題名の色と字体・題名の下の線・下の隅の会社名をデザインに合わせる。 */
   const titled = (id: string, title: string) => {
     requests.push({
@@ -170,32 +193,43 @@ export function slideRequests(
     footerText(id, COLOR.muted);
   };
 
-  // 表紙
-  requests.push({
-    createSlide: {
-      objectId: 'm2cover', slideLayoutReference: { predefinedLayout: 'TITLE' },
-      placeholderIdMappings: [
-        { layoutPlaceholder: { type: 'CENTERED_TITLE', index: 0 }, objectId: 'm2cover_t' },
-        { layoutPlaceholder: { type: 'SUBTITLE', index: 0 }, objectId: 'm2cover_s' },
-      ],
-    },
-  });
-  background('m2cover', d.cover.background);
-  // 表紙の飾り（帯・線・角・全面）。全面は背景の色だけで表す
-  if (d.cover.style === 'band') shape('m2cover_band', 'm2cover', { x: 0, y: 0, w: 0.35, h: 5.625 }, 'RECTANGLE', COLOR.accent);
-  // 線は題名の上に短く置く（題名の下は副題の枠と重なるため）
-  if (d.cover.style === 'line') shape('m2cover_line', 'm2cover', { x: 4.5, y: 1.0, w: 1, h: 0.06 }, 'RECTANGLE', COLOR.accent);
-  if (d.cover.style === 'corner') {
-    shape('m2cover_c1', 'm2cover', { x: 8.2, y: -1, w: 2.6, h: 2.6 }, 'ELLIPSE', COLOR.accentLight);
-    shape('m2cover_c2', 'm2cover', { x: -1, y: 4, w: 2.6, h: 2.6 }, 'ELLIPSE', COLOR.accent);
+  // 表紙。象徴的な画像があれば右の半分に置き、題名と副題は左に（第9.4.2節「段 2」）
+  if (plan.notes) notes['m2cover'] = plan.notes;
+  if (image('cover', 'm2cover', RIGHT_IMAGE)) {
+    requests.push({ createSlide: { objectId: 'm2cover', slideLayoutReference: { predefinedLayout: 'BLANK' } } });
+    background('m2cover', d.cover.background);
+    if (d.cover.style === 'band') shape('m2cover_band', 'm2cover', { x: 0, y: 0, w: 0.35, h: 5.625 }, 'RECTANGLE', COLOR.accent);
+    if (d.cover.style === 'line' || d.cover.style === 'corner') shape('m2cover_line', 'm2cover', { x: 0.7, y: 1.3, w: 1, h: 0.06 }, 'RECTANGLE', COLOR.accent);
+    g.shape('m2cover_t', 'm2cover', { x: 0.7, y: 1.5, w: 4.8, h: 1.9 }, 'TEXT_BOX', null, plan.title, { size: 30, bold: true, heading: true, color: d.cover.title, valign: 'BOTTOM' });
+    if (plan.subtitle) g.shape('m2cover_s', 'm2cover', { x: 0.7, y: 3.5, w: 4.8, h: 0.9 }, 'TEXT_BOX', null, plan.subtitle, { size: 15, color: d.cover.subtitle });
+    footerText('m2cover', d.cover.subtitle, true);
+  } else {
+    requests.push({
+      createSlide: {
+        objectId: 'm2cover', slideLayoutReference: { predefinedLayout: 'TITLE' },
+        placeholderIdMappings: [
+          { layoutPlaceholder: { type: 'CENTERED_TITLE', index: 0 }, objectId: 'm2cover_t' },
+          { layoutPlaceholder: { type: 'SUBTITLE', index: 0 }, objectId: 'm2cover_s' },
+        ],
+      },
+    });
+    background('m2cover', d.cover.background);
+    // 表紙の飾り（帯・線・角・全面）。全面は背景の色だけで表す
+    if (d.cover.style === 'band') shape('m2cover_band', 'm2cover', { x: 0, y: 0, w: 0.35, h: 5.625 }, 'RECTANGLE', COLOR.accent);
+    // 線は題名の上に短く置く（題名の下は副題の枠と重なるため）
+    if (d.cover.style === 'line') shape('m2cover_line', 'm2cover', { x: 4.5, y: 1.0, w: 1, h: 0.06 }, 'RECTANGLE', COLOR.accent);
+    if (d.cover.style === 'corner') {
+      shape('m2cover_c1', 'm2cover', { x: 8.2, y: -1, w: 2.6, h: 2.6 }, 'ELLIPSE', COLOR.accentLight);
+      shape('m2cover_c2', 'm2cover', { x: -1, y: 4, w: 2.6, h: 2.6 }, 'ELLIPSE', COLOR.accent);
+    }
+    text('m2cover_t', plan.title);
+    if (plan.title) style('m2cover_t', { bold: true, color: d.cover.title, font: d.font.heading });
+    if (plan.subtitle) {
+      text('m2cover_s', plan.subtitle);
+      style('m2cover_s', { color: d.cover.subtitle, font: d.font.body });
+    } else requests.push({ deleteObject: { objectId: 'm2cover_s' } });
+    footerText('m2cover', d.cover.subtitle);
   }
-  text('m2cover_t', plan.title);
-  if (plan.title) style('m2cover_t', { bold: true, color: d.cover.title, font: d.font.heading });
-  if (plan.subtitle) {
-    text('m2cover_s', plan.subtitle);
-    style('m2cover_s', { color: d.cover.subtitle, font: d.font.body });
-  } else requests.push({ deleteObject: { objectId: 'm2cover_s' } });
-  footerText('m2cover', d.cover.subtitle);
 
   // 本文のスライド。中身は題名の下から、伝えたいこと（takeaway）の帯の上まで
   const content: Box = { x: 0.5, y: 1.45, w: 9, h: 3.7 };
@@ -216,9 +250,11 @@ export function slideRequests(
       // 区切り。強調の色で塗り、番号と章の名前を大きく
       blank(id, COLOR.accent);
       const fg = onColor(COLOR.accent);
+      // 象徴的な画像があれば右の半分に（第9.4.2節「段 2」）
+      const w = image(id, id, RIGHT_IMAGE) ? 4.6 : 8.4;
       if (s.number) g.shape(`${id}_n`, id, { x: 0.8, y: 1.3, w: 3, h: 1.2 }, 'TEXT_BOX', null, s.number, { size: 60, bold: true, heading: true, color: fg, valign: 'BOTTOM' });
-      g.shape(`${id}_t`, id, { x: 0.8, y: 2.55, w: 8.4, h: 1.2 }, 'TEXT_BOX', null, s.title, { size: 36, bold: true, heading: true, color: fg, valign: 'TOP' });
-      if (s.sub) g.shape(`${id}_s`, id, { x: 0.8, y: 3.75, w: 8.4, h: 0.6 }, 'TEXT_BOX', null, s.sub, { size: 16, color: fg });
+      g.shape(`${id}_t`, id, { x: 0.8, y: 2.55, w, h: 1.2 }, 'TEXT_BOX', null, s.title, { size: w < 5 ? 30 : 36, bold: true, heading: true, color: fg, valign: 'TOP' });
+      if (s.sub) g.shape(`${id}_s`, id, { x: 0.8, y: 3.75, w, h: 0.6 }, 'TEXT_BOX', null, s.sub, { size: 16, color: fg });
       return;
     }
     titled(id, s.title);
@@ -232,8 +268,12 @@ export function slideRequests(
       const rows = Math.min(cats.length, TABLE_ROWS_MAX);
       requests.push(...tableRequests(`${id}_tbl`, at(id, { ...area, h: Math.min(area.h, 0.4 * (rows + 1)) }), s, `${i + 1} 枚目`, warnings, d));
     } else if (s.layout === 'IMAGE') {
-      // 画像の生成は後の段階（第9.4.2節）。説明だけを出す
-      box(`${id}_c`, id, area, s.caption ?? s.body ?? '', { size: 20, center: true, color: COLOR.muted });
+      // 画像（16:9）を大きく、説明を下に。画像が用意できなければ説明だけ（第9.4.2節「段 2」）
+      if (image(id, id, { x: 1.8, y: 1.35, w: 6.4, h: 3.6 })) {
+        if (s.caption ?? s.body) box(`${id}_c`, id, { x: 0.5, y: 4.98, w: 9, h: 0.35 }, s.caption ?? s.body ?? '', { size: 14, center: true, color: COLOR.muted });
+      } else {
+        box(`${id}_c`, id, area, s.caption ?? s.body ?? '', { size: 20, center: true, color: COLOR.muted });
+      }
     } else {
       // 会社のテンプレートの見本の名前で構成されたが、テンプレートを使えなかった。値を箇条書きにして失わない
       box(`${id}_b`, id, area, Object.values(s.values ?? {}).filter(Boolean).join('\n'), { size: 16, bullets: true });
@@ -264,7 +304,7 @@ export function slideRequests(
     pages += 1;
   }
   if (initialSlide) requests.push({ deleteObject: { objectId: initialSlide } });
-  return { requests, pages, warnings, notes };
+  return { requests, pages, warnings, notes, placements };
 }
 
 /**
@@ -423,36 +463,104 @@ export function googleSlides(ctx: Ctx): SlidesConnector {
     }
   };
 
+  /**
+   * 画像を、本人のドライブに置いて一時的にリンクで読めるようにする（ローカルの形。Google から M2Office に届かないため。第9.4.2節「段 2」）。
+   * 貼り終えたら `done` でファイルごと消す。会社がリンクでの共有を禁じていれば、Google が断る（呼ぶ側が注意にする）。
+   */
+  const driveTempImage = (p: ConnectorPrincipal): PublishImage => async (bytes, mimeType) => {
+    const boundary = `m2office-${Math.random().toString(36).slice(2)}`;
+    const head = new TextEncoder().encode([
+      `--${boundary}`, 'Content-Type: application/json; charset=UTF-8', '', JSON.stringify({ name: 'M2Office のスライドの画像（自動で消えます）', mimeType }),
+      `--${boundary}`, `Content-Type: ${mimeType}`, '', '',
+    ].join('\r\n'));
+    const tail = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
+    const data = new Uint8Array(head.length + bytes.length + tail.length);
+    data.set(head, 0);
+    data.set(bytes, head.length);
+    data.set(tail, head.length + bytes.length);
+    const made = await callGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.driveUpload}/files?uploadType=multipart&fields=id`, {
+      method: 'POST', raw: { contentType: `multipart/related; boundary=${boundary}`, data },
+    });
+    const fileId = String(made?.['id'] ?? '');
+    if (!fileId) throw new Error('画像をドライブに置けませんでした');
+    const remove = () => drive(p, `/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }).then(() => undefined).catch(() => undefined);
+    try {
+      await drive(p, `/files/${encodeURIComponent(fileId)}/permissions`, { method: 'POST', body: { type: 'anyone', role: 'reader' } });
+    } catch (err) {
+      await remove();
+      throw err;
+    }
+    return { url: `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`, done: remove };
+  };
+
+  /**
+   * 画像を貼る（組み立ての後。1 枚ずつ。貼れなかった画像は注意にして、スライドは残す）。
+   *
+   * @returns 注意
+   */
+  const placeImages = async (
+    p: ConnectorPrincipal, id: string, placements: ImagePlacement[], images: Record<string, { bytes: Uint8Array; mimeType: string }>, publish: PublishImage | undefined,
+  ): Promise<string[]> => {
+    const warnings: string[] = [];
+    for (const pl of placements) {
+      const img = images[pl.key];
+      if (!img) continue;
+      let handle: Awaited<ReturnType<PublishImage>> | null = null;
+      try {
+        handle = await (publish ?? driveTempImage(p))(img.bytes, img.mimeType);
+        await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, {
+          method: 'POST', body: { requests: [{ createImage: { objectId: pl.objectId, url: handle.url, elementProperties: pl.elementProperties } }] },
+        });
+      } catch (err) {
+        warnings.push(`${pl.key === 'cover' ? '表紙' : pl.key.endsWith('_pie') ? '円グラフ' : 'ページ'}の画像を置けませんでした（${err instanceof Error ? err.message : String(err)}）`);
+      } finally {
+        await handle?.done().catch(() => undefined);
+      }
+    }
+    return warnings;
+  };
+
+  /** 発表者のメモを入れる（ページの ID → 文）。メモの枠の ID は作った後にしか分からないため、読み直してから入れる。 */
+  const writeNotes = async (p: ConnectorPrincipal, id: string, notes: Record<string, string>): Promise<string[]> => {
+    if (Object.keys(notes).length === 0) return [];
+    try {
+      const read = await slides(p, `/presentations/${encodeURIComponent(id)}?fields=${encodeURIComponent('slides(objectId,slideProperties(notesPage(notesProperties(speakerNotesObjectId))))')}`);
+      const list = (read?.['slides'] as { objectId?: string; slideProperties?: { notesPage?: { notesProperties?: { speakerNotesObjectId?: string } } } }[] | undefined) ?? [];
+      const inserts = list.flatMap((sl) => {
+        const notesId = sl.slideProperties?.notesPage?.notesProperties?.speakerNotesObjectId;
+        const text = sl.objectId ? notes[sl.objectId] : undefined;
+        return notesId && text ? [{ insertText: { objectId: notesId, text, insertionIndex: 0 } }] : [];
+      });
+      if (inserts.length) await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests: inserts } });
+      return [];
+    } catch (err) {
+      return [`発表者のメモを入れられませんでした（${err instanceof Error ? err.message : String(err)}）`];
+    }
+  };
+
   /** 標準の見た目で作る（第9.4.2節「標準の見た目」）。組み込みのデザインがあれば、その色・字体・飾りで。 */
-  const standard = async (p: ConnectorPrincipal, input: { title: string; plan: SlidePlan; design?: SlideDesign | null; footer?: string }) => {
+  const standard = async (p: ConnectorPrincipal, input: {
+    title: string; plan: SlidePlan; design?: SlideDesign | null; footer?: string;
+    images?: Record<string, { bytes: Uint8Array; mimeType: string }>; publishImage?: PublishImage;
+  }) => {
     const made = await slides(p, '/presentations', { method: 'POST', body: { title: input.title } });
     const id = String(made?.['presentationId'] ?? '');
     if (!id) throw new Error('スライドを作れませんでした');
     const size = made?.['pageSize'] as { width?: { magnitude?: number }; height?: { magnitude?: number } } | undefined;
     const page = { width: size?.width?.magnitude || BASE.width, height: size?.height?.magnitude || BASE.height };
     const first = (made?.['slides'] as { objectId?: string }[] | undefined)?.[0]?.objectId ?? null;
-    const { requests, pages, warnings, notes } = slideRequests(input.plan, page, first, { ...(input.design ? { design: input.design } : {}), ...(input.footer ? { footer: input.footer } : {}) });
+    const { requests, pages, warnings, notes, placements } = slideRequests(input.plan, page, first, {
+      ...(input.design ? { design: input.design } : {}), ...(input.footer ? { footer: input.footer } : {}), images: new Set(Object.keys(input.images ?? {})),
+    });
     try {
       await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests } });
     } catch (err) {
       await discard(p, id);
       throw new Error(`スライドを組み立てられませんでした: ${err instanceof Error ? err.message : String(err)}`);
     }
-    // 発表者のメモ（話す内容）。メモの枠の ID は作った後にしか分からないため、読み直してから入れる。入れられなくてもスライドは残す
-    if (Object.keys(notes).length > 0) {
-      try {
-        const read = await slides(p, `/presentations/${encodeURIComponent(id)}?fields=${encodeURIComponent('slides(objectId,slideProperties(notesPage(notesProperties(speakerNotesObjectId))))')}`);
-        const list = (read?.['slides'] as { objectId?: string; slideProperties?: { notesPage?: { notesProperties?: { speakerNotesObjectId?: string } } } }[] | undefined) ?? [];
-        const inserts = list.flatMap((sl) => {
-          const notesId = sl.slideProperties?.notesPage?.notesProperties?.speakerNotesObjectId;
-          const text = sl.objectId ? notes[sl.objectId] : undefined;
-          return notesId && text ? [{ insertText: { objectId: notesId, text, insertionIndex: 0 } }] : [];
-        });
-        if (inserts.length) await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests: inserts } });
-      } catch (err) {
-        warnings.push(`発表者のメモを入れられませんでした（${err instanceof Error ? err.message : String(err)}）`);
-      }
-    }
+    // 発表者のメモと画像（第9.4.2節「段 2」）。入れられなくてもスライドは残す
+    warnings.push(...await writeNotes(p, id, notes));
+    if (placements.length) warnings.push(...await placeImages(p, id, placements, input.images ?? {}, input.publishImage));
     return { presentationId: id, ...links(id), templateApplied: false, pages, warnings };
   };
 
@@ -485,18 +593,17 @@ export function googleSlides(ctx: Ctx): SlidesConnector {
         checkTemplatePlan(input.plan, deck);
         const { requests, warnings } = templateRequests(input.plan, deck, { ...input.deckDefaults, ...input.plan.deck });
         await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests } });
-        // 出典は、見た目を崩さないよう最後のスライドの発表者のメモに書く
+        // 発表者のメモ（各ページの話す内容）と、出典（見た目を崩さないよう最後のページのメモの後ろに書く。第9.4.2節「段 2」）
+        const tplNotes: Record<string, string> = {};
+        input.plan.slides.forEach((sl, i) => { if (sl.notes) tplNotes[`m2tpl${i + 1}`] = sl.notes; });
         const sources = input.plan.sources ?? [];
         if (sources.length > 0) {
-          const notes = await slides(p, `/presentations/${encodeURIComponent(id)}?fields=${encodeURIComponent('slides(objectId,slideProperties(notesPage(notesProperties(speakerNotesObjectId))))')}`);
-          const last = (notes?.['slides'] as { slideProperties?: { notesPage?: { notesProperties?: { speakerNotesObjectId?: string } } } }[] | undefined)?.at(-1);
-          const notesId = last?.slideProperties?.notesPage?.notesProperties?.speakerNotesObjectId;
-          if (notesId) {
-            const text = ['出典', ...sources.map((x, k) => `${k + 1}. ${x.title}${x.url ? ` ${x.url}` : ''}`)].join('\n');
-            await slides(p, `/presentations/${encodeURIComponent(id)}:batchUpdate`, { method: 'POST', body: { requests: [{ insertText: { objectId: notesId, text, insertionIndex: 0 } }] } });
-          }
+          const lastId = `m2tpl${input.plan.slides.length}`;
+          const list = ['出典', ...sources.map((x, k) => `${k + 1}. ${x.title}${x.url ? ` ${x.url}` : ''}`)].join('\n');
+          tplNotes[lastId] = tplNotes[lastId] ? `${tplNotes[lastId]}\n\n${list}` : list;
         }
-        return { presentationId: id, ...links(id), templateApplied: true, pages: input.plan.slides.length, warnings: [...got.warnings, ...warnings] };
+        const noteWarnings = await writeNotes(p, id, tplNotes);
+        return { presentationId: id, ...links(id), templateApplied: true, pages: input.plan.slides.length, warnings: [...got.warnings, ...warnings, ...noteWarnings] };
       } catch (err) {
         await discard(p, id);
         if (err instanceof SlidePlanError) throw err;

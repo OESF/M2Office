@@ -112,6 +112,12 @@ async function fakeDrive(pdf: Uint8Array) {
       return json(200, { presentationId: bad ? 'BADDECK' : 'NEWDECK', pageSize: { width: { magnitude: 9144000 }, height: { magnitude: 5143500 } }, slides: [{ objectId: 'p' }] });
     }
     if (s.path === '/slides/presentations/NEWDECK:batchUpdate' && s.method === 'POST') return json(200, { replies: [] });
+    // 発表者のメモの枠（標準の見た目）と、画像を一時的に置くドライブのファイル（第9.4.2節「段 2」）
+    if (s.path === '/slides/presentations/NEWDECK' && s.method === 'GET') {
+      return json(200, { slides: ['m2cover', 'm2slide1', 'm2slide2'].map((id) => ({ objectId: id, slideProperties: { notesPage: { notesProperties: { speakerNotesObjectId: `${id}_notes` } } } })) });
+    }
+    if (s.path === '/drive/files/NEWDOC/permissions' && s.method === 'POST') return json(200, { id: 'anyoneWithLink' });
+    if (s.path === '/drive/files/NEWDOC' && s.method === 'DELETE') { res.writeHead(204); return res.end(); }
     // 会社のテンプレート。TPL は読める。NOSHARE は共有されていない
     if ((s.path === '/slides/presentations/TPL' || s.path === '/slides/presentations/COPYDECK') && s.method === 'GET') {
       if ((s.query.get('fields') ?? '').includes('notesPage')) {
@@ -357,6 +363,36 @@ test('スライド: 標準の見た目で組み立てる。表紙・各レイア
   });
 });
 
+test('スライド: 発表者のメモを入れ、画像は使い捨ての URL か、本人のドライブで一時的に共有して貼り、貼ったら消す（第9.4.2節「段 2」）', async () => {
+  const plan = {
+    title: '表紙', notes: '表紙で話す',
+    slides: [{ layout: 'SECTION' as const, title: '章', notes: '章で話す' }, { layout: 'STATEMENT' as const, title: '', message: 'まとめ', notes: 'まとめで話す' }],
+  };
+  const png = { bytes: new Uint8Array([137, 80, 78, 71]), mimeType: 'image/png' };
+  await withDrive(async (c, seen) => {
+    let done = 0;
+    await c.slides.createPresentation(P, {
+      title: '表紙', plan, template: null, images: { cover: png, m2slide1: png },
+      publishImage: async () => ({ url: 'https://m2.example/v1/public/slide-images/abc', done: async () => { done += 1; } }),
+    });
+    const batches = seen.filter((x) => x.path === '/slides/presentations/NEWDECK:batchUpdate').map((x) => JSON.parse(x.body).requests as Record<string, any>[]);
+    const notes = batches.flat().filter((r) => r['insertText']?.objectId?.endsWith('_notes')).map((r) => [r['insertText'].objectId, r['insertText'].text]);
+    assert.deepEqual(notes, [['m2cover_notes', '表紙で話す'], ['m2slide1_notes', '章で話す'], ['m2slide2_notes', 'まとめで話す']]);
+    const images = batches.flat().filter((r) => r['createImage']).map((r) => r['createImage'].url);
+    assert.deepEqual(images, ['https://m2.example/v1/public/slide-images/abc', 'https://m2.example/v1/public/slide-images/abc']);
+    assert.equal(done, 2, '貼り終えたら使い捨ての URL を消す');
+    assert.ok(!seen.some((x) => x.path.includes('/permissions')), '使い捨ての URL があればドライブで共有しない');
+  });
+  await withDrive(async (c, seen) => {
+    await c.slides.createPresentation(P, { title: '表紙', plan, template: null, images: { cover: png } });
+    assert.ok(seen.some((x) => x.path === '/upload/files' && x.method === 'POST'), '本人のドライブに置く');
+    assert.deepEqual(JSON.parse(seen.find((x) => x.path === '/drive/files/NEWDOC/permissions')!.body), { type: 'anyone', role: 'reader' });
+    const url = seen.filter((x) => x.path === '/slides/presentations/NEWDECK:batchUpdate').flatMap((x) => JSON.parse(x.body).requests).find((r: Record<string, any>) => r['createImage'])!['createImage'].url;
+    assert.match(url, /drive\.google\.com\/uc\?export=view&id=NEWDOC/);
+    assert.ok(seen.some((x) => x.path === '/drive/files/NEWDOC' && x.method === 'DELETE'), '貼ったらファイルごと消す');
+  });
+});
+
 test('スライド: 組み立てに失敗したら、作りかけをごみ箱に移して理由を返す（空のスライドを残さない）', async () => {
   await withDrive(async (c, seen) => {
     await assert.rejects(
@@ -399,6 +435,28 @@ test('組み込みのデザイン: 背景・題名の色と字体・表紙の飾
   const plain = slideRequests(plan, page, null);
   assert.ok(plain.requests.some((x) => x['createShape']?.objectId === 'm2cover_band'), '指定が無ければビジネス（帯）');
   assert.equal(plain.pages, natural.pages, 'デザインはページの数を変えない');
+});
+
+test('画像の置き場所: 用意できた画像だけ場所を空け、表紙は題名を左に、区切りは右の半分、円グラフは凡例を右に（第9.4.2節「段 2」）', () => {
+  const plan = {
+    title: '表紙', subtitle: '副題', notes: '表紙で話す',
+    slides: [
+      { layout: 'SECTION' as const, title: '章', number: '01', notes: 'a' },
+      { layout: 'SHARE' as const, title: '割合', shareStyle: 'pie' as const, items: [{ label: 'x', value: 60 }, { label: 'y', value: 40 }], notes: 'b' },
+      { layout: 'IMAGE' as const, title: '絵', caption: '説明', notes: 'c' },
+    ],
+  };
+  const page = { width: 9144000, height: 5143500 };
+  const r = slideRequests(plan, page, null, { images: new Set(['cover', 'm2slide1', 'm2slide2_pie', 'm2slide3']) });
+  assert.deepEqual(r.placements.map((x) => x.key), ['cover', 'm2slide1', 'm2slide2_pie', 'm2slide3']);
+  assert.equal(r.requests.find((x) => x['createSlide']?.objectId === 'm2cover')!['createSlide'].slideLayoutReference.predefinedLayout, 'BLANK', '画像のある表紙は題名を自分で置く');
+  assert.ok(r.requests.some((x) => x['insertText']?.objectId === 'm2slide2_sl1'), '円グラフの凡例は文字で置く');
+  assert.ok(!r.requests.some((x) => x['createShape']?.objectId === 'm2slide2_s1'), '円グラフのときは帯を描かない');
+  assert.deepEqual(r.notes, { m2cover: '表紙で話す', m2slide1: 'a', m2slide2: 'b', m2slide3: 'c' }, '表紙にも発表者のメモ');
+  const plain = slideRequests(plan, page, null);
+  assert.deepEqual(plain.placements, [], '画像が無ければ場所を空けない');
+  assert.ok(plain.requests.some((x) => x['createShape']?.objectId === 'm2slide2_s1'), '円グラフの画像が無ければ帯で示す');
+  assert.equal(plain.requests.find((x) => x['createSlide']?.objectId === 'm2cover')!['createSlide'].slideLayoutReference.predefinedLayout, 'TITLE');
 });
 
 test('テンプレート: 見本のスライドと差し込み口を読む。名前・入る量・図の置き場所（囲む枠）・マスターの変数', () => {

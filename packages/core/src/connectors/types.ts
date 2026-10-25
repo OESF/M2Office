@@ -423,6 +423,10 @@ export interface SlidesConnector {
       design?: SlideDesign | null;
       /** 標準の見た目で、表紙と各ページの下の隅に出す会社名。 */
       footer?: string;
+      /** 用意した画像（場所の名前 → 画像。`cover`・`m2slide<n>`・`m2slide<n>_pie`。第9.4.2節「段 2」）。標準の見た目のときだけ使う。 */
+      images?: Record<string, { bytes: Uint8Array; mimeType: string }>;
+      /** 画像を Google から読める使い捨ての URL で渡す手段（クラウドの形）。無ければ本人のドライブで一時的に共有して渡す。 */
+      publishImage?: (bytes: Uint8Array, mimeType: string) => Promise<{ url: string; done(): Promise<void> }>;
     },
   ): Promise<{
     presentationId: string; url: string | null; pptxUrl: string | null;

@@ -20,7 +20,7 @@ import {
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
-  SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS,
+  SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -166,6 +166,8 @@ const inventorySales = new InventorySales({
 });
 inventoryWatch = new InventoryWatch({ repo, service: inventory, bookings: inventoryBookings, sales: inventorySales, logger: log });
 // 外部のアプリからの配信の依頼（第13.4.4節）。承認された配信を窓口のアカウントから 1 人に 1 通ずつ送り、停止の返信と送れなかった知らせを読む
+// スライドの画像の使い捨ての置き場（第9.4.2節「段 2」）。公開の道は API が受ける
+const slideImageHost = new PostgresSlideImageHost(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const deliveryApps = new ExternalApps({
   store: new PostgresAppStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo,
 });
@@ -405,6 +407,11 @@ const engine = new RunEngine({
   reservations: { service: reservations, access: reservationsAccess(repo) },
   // 外部のアプリからの配信（第13.4.4節）。承認の後の「送る」の段が使う
   deliveries: { service: deliveries },
+  // スライドの画像を使い捨ての URL で Google に渡す（クラウドの形だけ。ローカルの形は本人のドライブで一時的に共有する。第9.4.2節「段 2」）
+  ...(deploymentFromEnv(process.env) === 'cloud' ? {
+    publishSlideImage: async (tenantId: string, bytes: Uint8Array, mimeType: string) =>
+      slideImageHost.publish(tenantId, appUrl((await repo.findTenantById(tenantId))?.subdomain ?? ''), bytes, mimeType),
+  } : {}),
   llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
   // 業務ごとの AI（ローカル・外部）と、社外の接続に送ってよいか（第16.3.7.1節）
   llmForRun: (tenantId, def, registry, previous) => ai.llmForRun(tenantId, def, registry, previous),

@@ -47,6 +47,14 @@ export interface ToolContext {
   /** Web での調査の提供者（`web.research` が使う。仕様書 第9.4.2節）。 */
   research?: ResearchProvider;
   /**
+   * スライドの画像（仕様書 第9.4.2節「段 2」）。`generate` は象徴的な画像を作る（推論が画像を作れないとき・外部の AI に渡さない会社では無い）。
+   * `publish` は画像を Google から読める使い捨ての URL で渡す（クラウドの形だけ。無ければ本人のドライブで一時的に共有する）。
+   */
+  slideImages?: {
+    generate?(prompt: string, aspectRatio: '16:9' | '3:4'): Promise<{ bytes: Uint8Array; mimeType: string } | null>;
+    publish?(bytes: Uint8Array, mimeType: string): Promise<{ url: string; done(): Promise<void> }>;
+  };
+  /**
    * 呼び出したステップより後に、定義に残っている承認ステップの数。
    *
    * @remarks

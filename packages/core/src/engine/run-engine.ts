@@ -21,7 +21,7 @@ import {
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
-import { costJpy } from '../llm/models.js';
+import { imageModel, costJpy } from '../llm/models.js';
 import { validateToolArgs, type PreparedCall, type Tool, type ToolContext, type ToolRegistry } from '../tools/registry.js';
 import { ConnectorUnavailableError, type WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
@@ -211,9 +211,14 @@ export interface RunEngineDeps {
     service: SubsidyService;
     access(tenantId: string, userId: string): Promise<SubsidySettings | null>;
   };
-  /** 会員とポイント（内蔵の拡張。仕様書 第40章）。ツールに渡す。 */
   /** 外部のアプリからの配信（第13.4.4節）。業務「外部のアプリからの配信」のツールが使う。 */
   deliveries?: { service: DeliveryService };
+  /**
+   * スライドの画像を Google から読める使い捨ての URL で渡す（クラウドの形。仕様書 第9.4.2節「段 2」）。
+   * ローカルの形では渡さない（Google から届かないため、本人のドライブで一時的に共有する）。
+   */
+  publishSlideImage?(tenantId: string, bytes: Uint8Array, mimeType: string): Promise<{ url: string; done(): Promise<void> }>;
+  /** 会員とポイント（内蔵の拡張。仕様書 第40章）。ツールに渡す。 */
   members?: {
     service: MemberService;
     access(tenantId: string, userId: string): Promise<MemberSettings | null>;
@@ -1092,6 +1097,11 @@ export class RunEngine {
         onChunk: (i, n) => progress?.(n > 1 ? `録音を文字にしています（${n} のうち ${i} つ目）` : '録音を文字にしています'),
       }) } : {}),
       ...(progress ? { progress } : {}),
+      // スライドの画像（第9.4.2節「段 2」）。推論が画像を作れなければ作らない（ローカル AI・外部の AI に渡さない会社）
+      slideImages: {
+        ...(llm?.generateImage ? { generate: (prompt: string, aspectRatio: '16:9' | '3:4') => llm.generateImage!({ model: imageModel(), aspectRatio, prompt }) } : {}),
+        ...(this.deps.publishSlideImage ? { publish: (bytes: Uint8Array, mimeType: string) => this.deps.publishSlideImage!(run.tenantId, bytes, mimeType) } : {}),
+      },
       ...(llm ? { expandQuery: (q: string) => expandQuery(llm, q) } : {}),
       ...(llm && queryEmbedder(llm, this.log) ? { embedQuery: queryEmbedder(llm, this.log)! } : {}),
       // スキルの補助のファイル。skill.read で開く（仕様書 第12.12.2節）

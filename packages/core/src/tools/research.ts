@@ -10,7 +10,9 @@
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_SLIDE_DESIGN_ID, SLIDE_DESIGNS, findSlideDesign, type SlideDesign } from '@m2office/shared';
 import type { Tool } from './registry.js';
-import { SlidePlanError, normalizeSlidePlan, planOutline } from '../slides/plan.js';
+import { SlidePlanError, normalizeSlidePlan, planOutline, type SlidePlan } from '../slides/plan.js';
+import { pieChartPng } from '../slides/pie.js';
+import { palette } from '../connectors/google/slide-infographics.js';
 
 /**
  * テーマを Google 検索で調べ、出典つきの文章を返す。
@@ -64,6 +66,57 @@ async function chooseLook(ctx: Parameters<Tool['invoke']>[1], wanted: string): P
   const def = slides.templates.find((t) => t.isDefault);
   if (def) return { template: { presentationId: def.presentationId, name: def.name }, design: null, warning };
   return { template: null, design: findSlideDesign(DEFAULT_SLIDE_DESIGN_ID), warning };
+}
+
+/** 1 つの資料に入れる象徴的な画像の上限（表紙を含む。第9.4.2節「段 2」）。 */
+export const SLIDE_IMAGES_MAX = 4;
+
+/**
+ * 象徴的な画像と円グラフの画像を用意する（第9.4.2節「段 2」）。象徴的な画像は表紙・区切り・画像のページに 4 枚まで、デザインの作風で作る。
+ * 円グラフは数値から M2Office が描く（AI は使わない）。作れなかった画像は注意にして、スライドは作る。
+ *
+ * @returns 場所の名前（`cover`・`m2slide<n>`・`m2slide<n>_pie`）ごとの画像と、AI の画像を作れた数
+ */
+async function prepareImages(
+  ctx: Parameters<Tool['invoke']>[1], plan: SlidePlan, design: SlideDesign, wantAi: boolean, warnings: string[],
+): Promise<{ images: Record<string, { bytes: Uint8Array; mimeType: string }>; aiCount: number }> {
+  const images: Record<string, { bytes: Uint8Array; mimeType: string }> = {};
+  // 円グラフ（ドーナツ型）
+  plan.slides.forEach((s, i) => {
+    if (s.layout !== 'SHARE' || s.shareStyle !== 'pie' || !s.items?.length) return;
+    try {
+      images[`m2slide${i + 1}_pie`] = { bytes: pieChartPng(s.items.map((it) => it.value ?? 0), palette(design, s.items.length), design.background), mimeType: 'image/png' };
+    } catch (err) {
+      warnings.push(`${i + 1} 枚目の円グラフを描けなかったため、帯で示しました（${err instanceof Error ? err.message : String(err)}）`);
+    }
+  });
+  const generate = ctx.slideImages?.generate;
+  if (!wantAi || !generate) return { images, aiCount: 0 };
+  // 象徴的な画像。表紙を先に、区切りと画像のページを順に、上限まで
+  const jobs: { key: string; prompt: string; aspect: '16:9' | '3:4' }[] = [];
+  if (plan.imagePrompt) jobs.push({ key: 'cover', prompt: plan.imagePrompt, aspect: '3:4' });
+  plan.slides.forEach((s, i) => {
+    if (!s.imagePrompt || (s.layout !== 'SECTION' && s.layout !== 'IMAGE')) return;
+    jobs.push({ key: `m2slide${i + 1}`, prompt: s.imagePrompt, aspect: s.layout === 'IMAGE' ? '16:9' : '3:4' });
+  });
+  if (jobs.length > SLIDE_IMAGES_MAX) warnings.push(`画像は 1 つの資料で ${SLIDE_IMAGES_MAX} 枚までにしました（${jobs.length} 枚の頼み）`);
+  const chosen = jobs.slice(0, SLIDE_IMAGES_MAX);
+  if (chosen.length === 0) return { images, aiCount: 0 };
+  await ctx.progress?.('スライドの画像を作っています');
+  // 頼みは外部のデータではなく推論が書いた文。作風をそろえ、文字・数字・ロゴ・実在の人物を描かせない
+  const rules = `${design.imageStyle}。画像の中に文字・数字・ロゴ・商標・実在の人物を描かない。発表のスライドに置く、余白のある落ち着いた構図`;
+  const done = await Promise.allSettled(chosen.map((j) => generate(`${j.prompt}。${rules}`, j.aspect)));
+  let aiCount = 0;
+  done.forEach((r, k) => {
+    const j = chosen[k]!;
+    if (r.status === 'fulfilled' && r.value) {
+      images[j.key] = r.value;
+      aiCount += 1;
+    } else {
+      warnings.push(`${j.key === 'cover' ? '表紙' : `${j.key.replace('m2slide', '')} 枚目`}の画像を作れませんでした${r.status === 'rejected' ? `（${r.reason instanceof Error ? r.reason.message : String(r.reason)}）` : ''}`);
+    }
+  });
+  return { images, aiCount };
 }
 
 /** 選べる見た目の名前（推論が依頼の言葉から選ぶため）。 */
@@ -159,9 +212,18 @@ export const slidesCreate: Tool = {
     + 'COMPARISON（compareLeftTitle・compareLeftBody・compareRightTitle・compareRightBody、mode は vs か before-after）・MATRIX（xAxis・yAxis・items 4 つ）・'
     + 'PYRAMID（items に title・text）・CHECKLIST（items に title・text）・TABLE（chartCategories・chartSeries）・BULLET（body。3 行まで）。'
     + '本文の半分以上を図にし、同じ layout を続けず、BULLET は 2 枚まで（合わなければ作らずに直し方を返す）。本文のスライドは 12 枚まで。'
+    + '3 枚以上なら、すべてのページに notes（話す内容を 100〜300 文字）を書き、表紙で話す内容を全体の notes に書く。'
+    + '象徴的な画像: 全体の imagePrompt（表紙の画像。何を描くか 100 文字まで）と、SECTION・IMAGE の imagePrompt（4 枚まで。文字や人物でなく情景や物で表す）。'
+    + 'images に false を渡せば画像を作らない。SHARE の shareStyle は band・grid・pie（円グラフ）。'
     + '会社のテンプレートがあるときは slides.template で見本を確かめ、layout に見本の名前、values に差し込み口ごとの値、deck にマスターの変数の値を書く。'
     + 'design に組み込みのデザインの名前（ビジネス・ナチュラル・ポップ・モノトーン・クリーン・ダーク）か会社のテンプレートの名前を渡せばそれを、無ければ会社の既定を使う',
-  args: { properties: { title: { type: 'string', description: '表紙の題名' }, subtitle: { type: 'string', description: '副題（任意）' }, slides: { type: 'array', description: '本文のスライドの配列（layout・title ほか。12 枚まで）' }, sources: { type: 'array', description: '出典（title・url）の配列' }, design: { type: 'string', description: 'デザインの名前（組み込みのデザインか会社のテンプレート。任意）' } }, required: ['title', 'slides'] },
+  args: { properties: {
+    title: { type: 'string', description: '表紙の題名' }, subtitle: { type: 'string', description: '副題（任意）' },
+    slides: { type: 'array', description: '本文のスライドの配列（layout・title・notes ほか。12 枚まで）' }, sources: { type: 'array', description: '出典（title・url）の配列' },
+    notes: { type: 'string', description: '表紙で話す内容（発表者のメモ）' }, imagePrompt: { type: 'string', description: '表紙の象徴的な画像の頼み（何を描くか）' },
+    images: { type: 'boolean', description: '象徴的な画像を作るか（既定は作る）' },
+    design: { type: 'string', description: 'デザインの名前（組み込みのデザインか会社のテンプレート。任意）' },
+  }, required: ['title', 'slides'] },
   google: { scope: 'drive.file', level: 'non-sensitive' },
   // 会社のテンプレートを本人のドライブへ複製するため（仕様書 第9.4.2節、Q-88）
   googleAlso: [{ scope: 'drive', level: 'restricted' }],
@@ -178,11 +240,20 @@ export const slidesCreate: Tool = {
     // マスターの {{会社名}} などは、構成に値が無ければ会社情報で埋める（第9.4.2節）
     const { company } = await ctx.repo.getTenantSettings(ctx.tenantId);
     const deckDefaults = { 会社名: company.legalName, 会社の略称: company.shortName || company.legalName };
+    // 象徴的な画像と円グラフ（第9.4.2節「段 2」）。会社のテンプレートで作るときは使わない（見た目は見本に任せる）
+    const look = chosen.design ?? findSlideDesign(DEFAULT_SLIDE_DESIGN_ID)!;
+    const prepared = template ? { images: {}, aiCount: 0 } : await prepareImages(ctx, plan, look, args['images'] !== false, warnings);
+    // AI が作った画像を使ったら、出典のページの先頭に 1 行書く（出典の数の上限で切られないように）
+    if (prepared.aiCount > 0) plan.sources = [{ title: '表紙などの画像は、AI（画像を作るモデル）が作ったものです' }, ...(plan.sources ?? [])];
     let created;
     try {
       created = await ctx.connector.slides.createPresentation(
         { tenantId: ctx.tenantId, userId: ctx.userId },
-        { title: plan.title, plan, template, deckDefaults, design: chosen.design, footer: company.shortName || company.legalName || '' },
+        {
+          title: plan.title, plan, template, deckDefaults, design: chosen.design, footer: company.shortName || company.legalName || '',
+          ...(Object.keys(prepared.images).length ? { images: prepared.images } : {}),
+          ...(ctx.slideImages?.publish ? { publishImage: ctx.slideImages.publish } : {}),
+        },
       );
     } catch (err) {
       // 見本に無い名前などは推論が直せる。段を失敗にせず、理由を返す

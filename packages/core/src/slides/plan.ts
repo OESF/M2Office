@@ -79,8 +79,8 @@ export interface SlideSpec {
   unit?: string;
   /** 棒の向き（BAR）。 */
   orientation?: 'horizontal' | 'vertical';
-  /** 割合の見せ方（SHARE）。帯か 10×10 のます目。 */
-  shareStyle?: 'band' | 'grid';
+  /** 割合の見せ方（SHARE）。帯・10×10 のます目・円グラフ（ドーナツ型。画像にして貼る。第9.4.2節「段 2」）。 */
+  shareStyle?: 'band' | 'grid' | 'pie';
   /** 対比の見せ方（COMPARISON）。並べて比べるか、前後か。 */
   mode?: 'vs' | 'before-after';
   /** 2×2 の軸の名前（MATRIX）。 */
@@ -108,6 +108,10 @@ export interface SlidePlan {
   sources?: { title: string; url?: string }[];
   /** テンプレートのマスターの変数の値（会社名など）。 */
   deck?: Record<string, string>;
+  /** 表紙で話す内容（発表者のメモ）。 */
+  notes?: string;
+  /** 表紙の象徴的な画像の頼み（何を描くか。第9.4.2節「段 2」）。 */
+  imagePrompt?: string;
 }
 
 /**
@@ -153,6 +157,9 @@ const NUMERIC_ITEMS: readonly SlideLayout[] = ['BAR', 'SHARE', 'PROGRESS'];
 
 /** 1 つの資料で使ってよい箇条書きの枚数。 */
 export const BULLET_MAX = 2;
+
+/** この枚数以上の資料では、すべてのページに発表者のメモを求める。 */
+export const NOTES_REQUIRED_FROM = 3;
 
 /** アイコン（絵文字 1 つ）。長すぎるものは捨てる。 */
 const iconOf = (v: unknown): string | undefined => {
@@ -227,7 +234,7 @@ export function normalizeSlidePlan(input: unknown): { plan: SlidePlan; warnings:
     if (r['number'] !== undefined) s.number = str(r['number'], 4, `${at}の番号`);
     if (r['highlight'] !== undefined) s.highlight = str(r['highlight'], LIMITS.item, `${at}の強調する項目`);
     if (r['orientation'] === 'vertical' || r['orientation'] === 'horizontal') s.orientation = r['orientation'];
-    if (r['shareStyle'] === 'grid' || r['shareStyle'] === 'band') s.shareStyle = r['shareStyle'];
+    if (r['shareStyle'] === 'grid' || r['shareStyle'] === 'band' || r['shareStyle'] === 'pie') s.shareStyle = r['shareStyle'];
     if (r['mode'] === 'before-after' || r['mode'] === 'vs') s.mode = r['mode'];
     if (layout === 'STATEMENT' && !s.message) {
       if (!s.title) return { error: `${at}: STATEMENT には message（大きな一文）が要ります` };
@@ -296,6 +303,11 @@ export function normalizeSlidePlan(input: unknown): { plan: SlidePlan; warnings:
     const problem = deckProblem(slides);
     if (problem) return { error: problem };
   }
+  // 発表者のメモ（第9.4.2節「段 2」）。3 枚以上の資料では、すべてのページに話す内容を求める（会社のテンプレートでも）
+  if (slides.length >= NOTES_REQUIRED_FROM) {
+    const missing = slides.map((x, k) => (x.notes ? 0 : k + 1)).filter(Boolean);
+    if (missing.length) return { error: `発表者のメモ（notes。話す内容を 100〜300 文字）が無いページがあります: ${missing.map((k) => `${k} 枚目`).join('・')}。すべてのページに書いてください` };
+  }
   const sources = Array.isArray(o['sources'])
     ? (o['sources'] as Record<string, unknown>[]).slice(0, 20).map((x) => ({
       title: String(x?.['title'] ?? x?.['url'] ?? '').slice(0, 200),
@@ -306,8 +318,13 @@ export function normalizeSlidePlan(input: unknown): { plan: SlidePlan; warnings:
   if (o['deck'] && typeof o['deck'] === 'object' && !Array.isArray(o['deck'])) {
     for (const [k, v] of Object.entries(o['deck'] as Record<string, unknown>)) deck[k.replace(/^\{\{\s*|\s*\}\}$/g, '').trim()] = str(v, 200, `「${k}」`);
   }
+  const notes = str(o['notes'], LIMITS.notes, '表紙の発表者のメモ');
+  const imagePrompt = str(o['imagePrompt'], LIMITS.prompt, '表紙の画像の頼み');
   return {
-    plan: { title, subtitle: str(o['subtitle'], 60, '副題') || undefined, slides, sources, ...(Object.keys(deck).length ? { deck } : {}) },
+    plan: {
+      title, subtitle: str(o['subtitle'], 60, '副題') || undefined, slides, sources, ...(Object.keys(deck).length ? { deck } : {}),
+      ...(notes ? { notes } : {}), ...(imagePrompt ? { imagePrompt } : {}),
+    },
     warnings,
   };
 }
@@ -346,6 +363,8 @@ function deckProblem(slides: SlideSpec[]): string | null {
 export function planOutline(plan: SlidePlan): string {
   const out: string[] = [`# ${plan.title}`];
   if (plan.subtitle) out.push(plan.subtitle);
+  if (plan.imagePrompt) out.push(`（表紙の画像）${plan.imagePrompt}`);
+  if (plan.notes) out.push(`（発表者のメモ）${plan.notes}`);
   plan.slides.forEach((s, i) => {
     out.push('', `## ${i + 1}. ${s.title || s.message || ''}（${s.layout}）`);
     if (s.message && s.message !== s.title) out.push(`**${s.message}**`);

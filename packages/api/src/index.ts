@@ -53,6 +53,7 @@ import { lineHooksRoute } from './routes/line-hooks.js';
 import { unsubscribeRoute } from './routes/unsubscribe.js';
 import { columnsPublicRoute } from './routes/columns-public.js';
 import { inventoryPublicRoute } from './routes/inventory-public.js';
+import { slideImagesPublicRoute } from './routes/slide-images.js';
 import { noticesRoute } from './routes/notices.js';
 import { adminRoute } from './routes/admin.js';
 import { mcpConnectionsRoute } from './routes/mcp-connections.js';
@@ -136,6 +137,8 @@ app.route('/v1/hooks/inventory', inventoryHooksRoute(deps));
 app.route('/v1/public/inventory', inventoryPublicRoute(deps));
 // コラムの貼るだけのページ（第32.18.4節）。在庫の公開と同じく、会社の判定とログインより前に置く
 app.route('/v1/public/columns', columnsPublicRoute(deps));
+// スライドの画像の使い捨ての道（第9.4.2節「段 2」）。Google スライドが画像を貼るときに 1 度だけ読む
+app.route('/v1/public/slide-images', slideImagesPublicRoute(deps));
 // LINE 公式アカウントの受け口（仕様書 第33.19節）。会社の判定とログインより前に置く
 app.route('/v1/hooks/line', lineHooksRoute(deps));
 // まとめてのメールの配信の停止（第27.9.1節）。受け取った人がログインなしに開く。URL の鍵から会社を決めるため、会社の判定より前に置く

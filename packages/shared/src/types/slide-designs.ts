@@ -41,6 +41,8 @@ export interface SlideDesign {
   font: { heading: string; body: string };
   /** 本文のスライドの題名の下に線を引くか。 */
   rule: boolean;
+  /** 象徴的な画像の作風（画像を作るモデルへの頼みに足す。第9.4.2節「段 2」）。 */
+  imageStyle: string;
 }
 
 const rgb = (red: number, green: number, blue: number): SlideRgb => ({ red, green, blue });
@@ -56,37 +58,37 @@ export const SLIDE_DESIGNS: readonly SlideDesign[] = [
     id: 'business', name: 'ビジネス', description: '紺と白。落ち着いた印象で、社内の報告や取引先への説明に',
     background: WHITE, text: rgb(0.2, 0.2, 0.2), muted: rgb(0.4, 0.4, 0.4), accent: rgb(0.1, 0.3, 0.55), accentLight: rgb(0.91, 0.94, 0.98),
     cover: { background: WHITE, title: rgb(0.1, 0.3, 0.55), subtitle: rgb(0.4, 0.4, 0.4), style: 'band' },
-    font: { heading: 'BIZ UDPGothic', body: 'BIZ UDPGothic' }, rule: true,
+    font: { heading: 'BIZ UDPGothic', body: 'BIZ UDPGothic' }, rule: true, imageStyle: '落ち着いた写真風。紺と白を基調にした、清潔で信頼感のある画面',
   },
   {
     id: 'natural', name: 'ナチュラル', description: '緑と生成り。やわらかい印象で、地域・暮らし・食の話題に',
     background: rgb(0.98, 0.97, 0.93), text: rgb(0.22, 0.24, 0.2), muted: rgb(0.42, 0.44, 0.38), accent: rgb(0.24, 0.47, 0.29), accentLight: rgb(0.89, 0.93, 0.86),
     cover: { background: rgb(0.98, 0.97, 0.93), title: rgb(0.24, 0.47, 0.29), subtitle: rgb(0.42, 0.44, 0.38), style: 'corner' },
-    font: { heading: 'M PLUS Rounded 1c', body: 'Noto Sans JP' }, rule: false,
+    font: { heading: 'M PLUS Rounded 1c', body: 'Noto Sans JP' }, rule: false, imageStyle: 'やわらかい自然光の写真風。緑と生成りを基調にした、温かみのある画面',
   },
   {
     id: 'pop', name: 'ポップ', description: 'オレンジと黄。明るい印象で、催しの案内や販促に',
     background: WHITE, text: rgb(0.2, 0.18, 0.16), muted: rgb(0.45, 0.4, 0.35), accent: rgb(0.93, 0.42, 0.1), accentLight: rgb(1, 0.95, 0.78),
     cover: { background: rgb(0.93, 0.42, 0.1), title: WHITE, subtitle: rgb(1, 0.95, 0.78), style: 'full' },
-    font: { heading: 'M PLUS Rounded 1c', body: 'M PLUS Rounded 1c' }, rule: false,
+    font: { heading: 'M PLUS Rounded 1c', body: 'M PLUS Rounded 1c' }, rule: false, imageStyle: '明るい平面のイラスト。オレンジと黄を基調にした、楽しく元気な画面',
   },
   {
     id: 'monotone', name: 'モノトーン', description: '黒と灰。すっきりした印象で、印刷する資料や硬い場面に',
     background: WHITE, text: rgb(0.15, 0.15, 0.15), muted: rgb(0.45, 0.45, 0.45), accent: rgb(0.15, 0.15, 0.15), accentLight: rgb(0.93, 0.93, 0.93),
     cover: { background: WHITE, title: rgb(0.15, 0.15, 0.15), subtitle: rgb(0.45, 0.45, 0.45), style: 'line' },
-    font: { heading: 'Noto Sans JP', body: 'Noto Sans JP' }, rule: true,
+    font: { heading: 'Noto Sans JP', body: 'Noto Sans JP' }, rule: true, imageStyle: '白黒の写真風。陰影のはっきりした、すっきりと上品な画面',
   },
   {
     id: 'clean', name: 'クリーン', description: '水色と白。清潔な印象で、医療・介護・説明会に',
     background: WHITE, text: rgb(0.2, 0.25, 0.3), muted: rgb(0.42, 0.48, 0.54), accent: rgb(0.12, 0.55, 0.75), accentLight: rgb(0.9, 0.96, 0.99),
     cover: { background: rgb(0.9, 0.96, 0.99), title: rgb(0.12, 0.55, 0.75), subtitle: rgb(0.42, 0.48, 0.54), style: 'line' },
-    font: { heading: 'Noto Sans JP', body: 'Noto Sans JP' }, rule: true,
+    font: { heading: 'Noto Sans JP', body: 'Noto Sans JP' }, rule: true, imageStyle: '明るく清潔な写真風。水色と白を基調にした、やさしく安心感のある画面',
   },
   {
     id: 'dark', name: 'ダーク', description: '濃い背景に明るい文字。会場で映す発表に',
     background: rgb(0.12, 0.14, 0.18), text: rgb(0.93, 0.94, 0.96), muted: rgb(0.72, 0.75, 0.8), accent: rgb(0.45, 0.78, 1), accentLight: rgb(0.2, 0.23, 0.29),
     cover: { background: rgb(0.08, 0.1, 0.13), title: WHITE, subtitle: rgb(0.72, 0.75, 0.8), style: 'line' },
-    font: { heading: 'Noto Sans JP', body: 'Noto Sans JP' }, rule: true,
+    font: { heading: 'Noto Sans JP', body: 'Noto Sans JP' }, rule: true, imageStyle: '暗い背景に光が浮かぶ写真風。青い光を効かせた、印象的で引き締まった画面',
   },
 ];
 
