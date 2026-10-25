@@ -29,7 +29,7 @@ export const CONTRACT_LEDGER: AgentDefinition = {
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['この契約を台帳に入れて', '〇〇社と NDA を結んでいる？'] },
       fileId: { type: 'string', title: '契約書', format: 'file' },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['contracts.find', 'contracts.register', 'contracts.update'],

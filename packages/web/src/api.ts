@@ -2876,6 +2876,11 @@ export const api = {
       body: JSON.stringify({ agentId, input, origin }),
     }),
   jobs: () => call<{ items: { run: Run; job: { agentId: string } | null }[] }>('/jobs'),
+  /** 本人のある業務の実行（新しい順。`before` で続き。社内ナレッジ Q&A のこれまでの質問。第9.5.4節）。 */
+  jobsOf: (agentId: string, o: { limit?: number; before?: string } = {}) =>
+    call<{ items: { run: Run; job: { agentId: string; input: Record<string, unknown>; createdAt: string } | null }[] }>(
+      `/jobs?${new URLSearchParams({ agentId, limit: String(o.limit ?? 20), ...(o.before ? { before: o.before } : {}) })}`,
+    ),
   /** 朝のブリーフ・週次ブリーフ（仕様書 第9.5.5.1.2節）。見られるのは本人だけ。 */
   briefs: {
     /** 新しい順に 30 件（本文は省く）と、いままとめている実行。`before` で続きを読む。 */

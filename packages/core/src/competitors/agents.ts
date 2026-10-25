@@ -31,7 +31,7 @@ export const COMPETITOR_FIND: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['競合を探して'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['competitors.discover', 'competitors.add', 'competitors.remove', 'competitors.list'],
@@ -93,7 +93,7 @@ export const COMPETITOR_ANALYZE: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '聞きたいこと', format: 'textarea', examples: ['競合の動きは？'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['competitors.report', 'competitors.facts', 'competitors.list', 'competitors.check'],

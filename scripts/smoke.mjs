@@ -8540,5 +8540,22 @@ console.log('\n■ 127. 有効になっていない Google の API（会社ご�
   }
 }
 
+console.log('\n■ 128. 実行の一覧を業務で絞る（社内ナレッジ Q&A のこれまでの質問。本人のものだけ。第9.5.4節）');
+{
+  const { body: qa } = await call('a', '/v1/jobs?agentId=knowledge-qa&limit=5', {}, 'member');
+  const { body: all } = await call('a', '/v1/jobs', {}, 'member');
+  const bad = await call('a', '/v1/jobs?agentId=../x', {}, 'member');
+  const badBefore = await call('a', '/v1/jobs?agentId=knowledge-qa&before=いつか', {}, 'member');
+  const items = qa?.items ?? [];
+  const last = items.at(-1);
+  const { body: next } = last ? await call('a', `/v1/jobs?agentId=knowledge-qa&limit=5&before=${encodeURIComponent(last.run.startedAt)}`, {}, 'member') : { body: { items: [] } };
+  const good = items.length <= 5 && items.every((x) => x.job?.agentId === 'knowledge-qa' && x.job?.requestedBy === 'u-a-member')
+    && (all?.items ?? []).every((x) => x.job?.requestedBy === 'u-a-member') && bad.status === 400 && badBefore.status === 400
+    && (next?.items ?? []).every((x) => Date.parse(x.run.startedAt) < Date.parse(last?.run.startedAt ?? ''));
+  good
+    ? ok(`業務で絞れて本人のものだけ（${items.length} 件）。続きは前の時刻より前だけ。形の違う指定は断る`)
+    : ng('実行の一覧の絞り込みが違う', JSON.stringify({ n: items.length, agents: items.map((x) => x.job?.agentId), bad: bad.status, badBefore: badBefore.status }));
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

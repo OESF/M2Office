@@ -90,7 +90,7 @@ export const CARD_UPDATE: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '直したいこと', format: 'textarea', examples: ['田中さんの電話番号を 03-1234-5678 に直して'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['contacts.search', 'contacts.get', 'contacts.save', 'contacts.google_push'],

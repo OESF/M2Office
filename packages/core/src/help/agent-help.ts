@@ -50,7 +50,7 @@ export function buildAgentHelp(
   registry: ToolRegistry,
 ): AgentHelpView {
   const tools = registry.allowed(def.tools);
-  const props = (def.inputs['properties'] ?? {}) as Record<string, { title?: string }>;
+  const props = (def.inputs['properties'] ?? {}) as Record<string, { title?: string; format?: string }>;
   const required = new Set((def.inputs['required'] ?? []) as string[]);
 
   const approvals = def.steps
@@ -69,7 +69,8 @@ export function buildAgentHelp(
     agentId: def.id,
     name: def.name,
     summary: def.help?.summary ?? def.description,
-    inputs: Object.entries(props).map(([key, p]) => ({ key, title: p.title ?? key, required: required.has(key) })),
+    // 形 hidden の欄は、画面の操作や秘書が渡す値であり、人が入力するものではない（仕様書 第9.2.8節）
+    inputs: Object.entries(props).filter(([, p]) => p.format !== 'hidden').map(([key, p]) => ({ key, title: p.title ?? key, required: required.has(key) })),
     // スキルの業務では、組み立てた段の名前とツールの説明を出さない（仕組みを見せるだけ。第12.12.4節）
     flow: def.skill ? [] : def.steps.map((s) => stepLabel(s)),
     approvals,

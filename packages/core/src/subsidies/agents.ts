@@ -27,7 +27,7 @@ export const SUBSIDY_GUIDE: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['使える補助金ある？', '人を雇うときの助成金は？'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['subsidies.find', 'subsidies.search', 'subsidies.mark'],

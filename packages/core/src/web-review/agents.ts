@@ -31,7 +31,7 @@ export const WEB_REVIEW_ASK: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '聞きたいこと', format: 'textarea', examples: ['先月の Web はどうだった？'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: TOOLS,

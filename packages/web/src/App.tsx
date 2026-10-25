@@ -7,6 +7,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from 'react';
+import { KnowledgeQa } from './knowledge-qa.js';
 import { DOCUMENT_AGENT_ID, SHEET_AGENT_ID, SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
@@ -708,10 +709,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 />
               </h1>
               {view.agent.id === KNOWLEDGE_QA_AGENT_ID && !view.agent.needsConnection?.length ? (
-                <AskBox
-                  key={view.agent.id} agentId={view.agent.id} fill={formFill}
+                // 答えをこの画面の中に出し、これまでの質問と答えを並べる（仕様書 第9.5.4節「これまでの質問と答え」）
+                <KnowledgeQa
+                  key={view.agent.id} agentId={view.agent.id} viewerId={me.user.id} fill={formFill}
                   placeholder={view.agent.inputs?.properties?.['question']?.examples?.[0] ? `例: ${view.agent.inputs.properties['question'].examples[0]}` : undefined}
-                  onSubmitted={(runId) => setView({ kind: 'run', runId })}
                 />
               ) : (
                 <AgentForm

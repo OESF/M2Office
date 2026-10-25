@@ -154,7 +154,8 @@ export function AskBox({ agentId, initial = '', fill, placeholder, onSubmitted }
   initial?: string;
   fill?: Record<string, string> | null;
   placeholder?: string;
-  onSubmitted: (runId: string) => void;
+  /** 始めた実行と、聞いた質問の文。 */
+  onSubmitted: (runId: string, question?: string) => void;
 }) {
   const [question, setQuestion] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -168,7 +169,7 @@ export function AskBox({ agentId, initial = '', fill, placeholder, onSubmitted }
     setError(null);
     try {
       const { runId } = await api.createJob(agentId, { question: question.trim() });
-      onSubmitted(runId);
+      onSubmitted(runId, question.trim());
     } catch (err) {
       setError(describeError(err, '実行を開始できませんでした'));
     } finally {
@@ -262,7 +263,7 @@ function Field({
   const label = `${field.title ?? name}${required ? '（必須）' : ''}`;
   // 説明の文を足すより、例を薄く置く（仕様書 第6.10.4.1節）。例が無ければ何も出さない
   const hint = field.examples?.[0] ? `例: ${field.examples[0]}` : undefined;
-  // 画面の操作が渡す値（作り直すスライドの ID など）。欄は出さない
+  // 画面の操作や秘書が渡す値（作り直すスライドの ID・これまでの会話など。仕様書 第9.2.8節）。欄は出さない
   if (field.format === 'hidden') return null;
   // 2 択はスライドのスイッチ（第9.4.2節「作ったスライドの扱い」）
   if (field.format === 'switch' && field.enum?.length === 2) return <SwitchField name={name} field={field} value={value} onChange={onChange} />;

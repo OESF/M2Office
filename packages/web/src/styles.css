@@ -2750,3 +2750,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .google-extra-uses { flex-basis: 100%; }
 .google-extra > .field { margin-top: calc(10px * var(--space-scale)); }
 .google-status li.google-gap { max-width: none; flex-wrap: wrap; }
+/* 社内ナレッジ Q&A のこれまでの質問と答え（仕様書 第9.5.4節） */
+.qa-list { list-style: none; padding: 0; margin: calc(12px * var(--space-scale)) 0; display: grid; gap: calc(8px * var(--space-scale)); }
+.qa-item { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.qa-item.is-open { border-color: var(--accent); }
+.qa-head { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); }
+.qa-question { all: unset; cursor: pointer; flex: 1; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: calc(4px * var(--space-scale)) calc(12px * var(--space-scale)); }
+.qa-question:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.qa-question > span:first-child { font-weight: 600; }
+.qa-answer { padding: 0 calc(12px * var(--space-scale)) calc(10px * var(--space-scale)); }
+.qa-answer .card { box-shadow: none; }

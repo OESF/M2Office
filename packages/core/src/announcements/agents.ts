@@ -29,7 +29,7 @@ export const ANNOUNCEMENT_DRAFT: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['年末年始の休業のお知らせを出して。12/28〜1/5'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['announcements.draft', 'announcements.revise', 'announcements.recipients', 'announcements.submit', 'announcements.list', 'announcements.closures'],

@@ -38,10 +38,12 @@ export interface Repository {
    * 実行とジョブを組にして新しい順に返す。
    *
    * @param opts.requestedBy 指定すれば、その利用者が依頼したものに絞る
+   * @param opts.agentId 指定すれば、その業務の実行に絞る（社内ナレッジ Q&A のこれまでの質問。第9.5.4節）
+   * @param opts.before 指定すれば、この時刻より前に始まったものだけ（続きを読む）
    */
   listRunsWithJobs(
     tenantId: string,
-    opts: { limit: number; requestedBy?: string },
+    opts: { limit: number; requestedBy?: string; agentId?: string; before?: string },
   ): Promise<{ run: Run; job: Job }[]>;
   /** エージェント別の実行件数・トークン・費用を集計する。 */
   usageByAgent(tenantId: string): Promise<{ agentId: string; runs: number; tokens: number; costJpy: number }[]>;

@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import {
-  OFFICIAL_AGENTS, ToolRegistry, BUILTIN_TOOLS, HelpCatalog, buildAgentHelp, helpConcepts, parseArticle, parseManual,
+  BUILTIN_EXTENSIONS, OFFICIAL_AGENTS, ToolRegistry, BUILTIN_TOOLS, HelpCatalog, buildAgentHelp, helpConcepts, parseArticle, parseManual,
   resolveOfficialAgent, type HelpContext,
 } from '../src/index.js';
 import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
@@ -22,6 +22,23 @@ test('すべての公式エージェントがヘルプの概要と実行例を�
     assert.ok(a.help?.summary, `${a.id} に help.summary がない`);
     assert.ok((a.help?.examples ?? []).length > 0, `${a.id} に実行例がない`);
   }
+});
+
+test('秘書が埋める欄（これまでの会話・ほかの書類）は形 hidden で、ヘルプの「入力するもの」に載らない（仕様書 第9.2.8節）', () => {
+  const all = [...OFFICIAL_AGENTS, ...BUILTIN_EXTENSIONS.flatMap((e) => e.pkg.agents)];
+  let seen = 0;
+  for (const a of all) {
+    const props = (a.inputs['properties'] ?? {}) as Record<string, { format?: string }>;
+    for (const key of ['context', 'moreFileIds']) {
+      if (!props[key]) continue;
+      seen++;
+      assert.equal(props[key]!.format, 'hidden', `${a.id} の ${key} が画面に出る形になっている`);
+      assert.ok(!buildAgentHelp(a, registry).inputs.some((i) => i.key === key), `${a.id} のヘルプに ${key} が載っている`);
+    }
+  }
+  assert.ok(seen > 0, '秘書が埋める欄を持つ業務が見つからない');
+  const lookup = all.find((a) => a.id === 'secretary-lookup')!;
+  assert.deepEqual(buildAgentHelp(lookup, registry).inputs.map((i) => i.key), ['request', 'fileId']);
 });
 
 test('すべてのツールが「すること」と活動の表示名を持つ', () => {

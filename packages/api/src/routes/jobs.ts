@@ -63,10 +63,19 @@ export function jobsRoute(deps: AppDeps) {
     return c.json({ jobId, runId, status: 'queued' }, 201);
   });
 
+  /**
+   * 本人の実行の一覧（新しい順）。`agentId` で業務を、`before`（時刻）で続きを、`limit`（1〜50）で件数を絞れる
+   * （社内ナレッジ Q&A のこれまでの質問。仕様書 第9.5.4節）。
+   */
   app.get('/', async (c) => {
     const ctx = c.get('ctx');
+    const agentId = c.req.query('agentId');
+    const before = c.req.query('before');
+    const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 50);
+    if (agentId !== undefined && !/^[a-z0-9-]{1,80}$/.test(agentId)) return c.json({ error: '業務の ID が違います' }, 400);
+    if (before !== undefined && Number.isNaN(Date.parse(before))) return c.json({ error: '時刻が違います' }, 400);
     const items = await deps.repo.listRunsWithJobs(ctx.tenant.id, {
-      limit: 50, requestedBy: ctx.user.id,
+      limit, requestedBy: ctx.user.id, ...(agentId ? { agentId } : {}), ...(before ? { before } : {}),
     });
     return c.json({ items });
   });

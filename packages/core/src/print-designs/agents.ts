@@ -28,7 +28,7 @@ export const PRINT_DESK: AgentDefinition = {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['春の決算セールのチラシを A4 で。3/1〜15、全品 10% オフ、駐車場あり', '見出しをもっと大きく'] },
       // 秘書に渡された写真（仕様書 第10.10節）。チラシの画像に使う
       fileId: { type: 'string', title: '使う写真', format: 'file' },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['print.create', 'print.revise', 'print.remake', 'print.find', 'print.signage', 'print.announce'],

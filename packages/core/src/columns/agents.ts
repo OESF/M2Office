@@ -32,7 +32,7 @@ export const WEB_COLUMN_DRAFT: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['子どもの歯みがきのコツでコラムを書いて'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['columns.draft', 'columns.themes', 'columns.prepare'],
@@ -167,7 +167,7 @@ export const WEB_COLUMN_COVER: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['歯みがきのコラムのカバーをもっと明るい絵にして'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['columns.cover'],
@@ -230,7 +230,7 @@ export const WEB_COLUMN_RULES: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['コラムの表現の決まりに薬機法を足して'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['columns.rules'],
@@ -286,7 +286,7 @@ export const WEB_COLUMN_SIGNAGE: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['歯みがきのコラムをサイネージの画面用にして'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['columns.signage_make'],

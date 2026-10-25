@@ -28,7 +28,7 @@ export const MEMBER_DESK: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['会員は何人？', '10 ポイントでドリンク 1 杯の特典を作って'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['members.find', 'members.points', 'members.rewards', 'members.rank'],

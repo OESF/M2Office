@@ -32,7 +32,7 @@ export const INVENTORY_RECORD: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '記録したいこと', format: 'textarea', examples: ['A4 用紙を 2 箱入庫して'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['inventory.search', 'inventory.move', 'inventory.reserve', 'inventory.mark_discontinued', 'inventory.orders', 'inventory.record_order'],

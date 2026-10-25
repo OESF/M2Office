@@ -245,7 +245,7 @@ export class PostgresRepository implements Repository {
 
   async listRunsWithJobs(
     tenantId: string,
-    opts: { limit: number; requestedBy?: string },
+    opts: { limit: number; requestedBy?: string; agentId?: string; before?: string },
   ): Promise<{ run: Run; job: Job }[]> {
     const rows = await this.q<{ run: Run; job: Job }>(tenantId, 
       `select json_build_object(
@@ -261,8 +261,9 @@ export class PostgresRepository implements Repository {
                 'planStepId', j.plan_step_id) as job
          from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
         where r.tenant_id = $1 and ($2::text is null or j.requested_by = $2)
+          and ($4::text is null or j.agent_id = $4) and ($5::timestamptz is null or r.started_at < $5)
         order by r.started_at desc limit $3`,
-      [tenantId, opts.requestedBy ?? null, opts.limit],
+      [tenantId, opts.requestedBy ?? null, opts.limit, opts.agentId ?? null, opts.before ?? null],
     );
     // json_build_object は時刻を ISO 形式の文字列で返すが、タイムゾーン表記を揃える
     return rows.map(({ run, job }) => ({

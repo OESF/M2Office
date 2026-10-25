@@ -42,9 +42,9 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
       // 秘書に渡されたファイル（仕様書 第10.10節）
       fileId: { type: 'string', title: '渡された書類', format: 'file' },
       // いくつも渡されたときの 2 つ目から（ファイルの ID を「,」で区切る。5 つまで。仕様書 第10.10.7節）
-      moreFileIds: { type: 'string', title: 'ほかに渡された書類' },
+      moreFileIds: { type: 'string', title: 'ほかに渡された書類', format: 'hidden' },
       // 秘書が添える今日の会話（「さっきの件」のような続きの依頼のため。仕様書 第10.9.6節）
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   // 読むだけのツールに限る（第10.11.4節）。送信・登録・作成のツールは持たせない。

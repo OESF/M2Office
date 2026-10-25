@@ -35,7 +35,7 @@ export const AG16_RECRUITING: AgentDefinition = {
         examples: ['営業事務（正社員）。受発注の入力と電話の応対。9:00〜18:00（休憩 1 時間）'],
       },
       fileId: { type: 'string', title: '応募書類（履歴書・職務経歴書）', format: 'file' },
-      moreFileIds: { type: 'string', title: 'ほかの応募書類' },
+      moreFileIds: { type: 'string', title: 'ほかの応募書類', format: 'hidden' },
     },
   },
   tools: ['file.read_text', 'knowledge.search', 'recruit.check_text', 'document.create'],

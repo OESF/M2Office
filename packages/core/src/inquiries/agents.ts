@@ -33,7 +33,7 @@ export const INQUIRY_RECORD: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['いま田中さんから電話。来月の法人向けプランの見積もりがほしい。ホームページを見たって'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['inquiries.record'],
@@ -99,7 +99,7 @@ export const INQUIRY_LOOKUP: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '聞きたいこと', format: 'textarea', examples: ['今週の問い合わせは？'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['inquiries.list', 'inquiries.review', 'inquiries.faq'],
@@ -160,7 +160,7 @@ export const INQUIRY_REPLY_DRAFT: AgentDefinition = {
     required: ['request'],
     properties: {
       request: { type: 'string', title: '頼みたいこと', format: 'textarea', examples: ['山本さんへの返事を書いて'] },
-      context: { type: 'string', title: 'これまでの会話', format: 'textarea' },
+      context: { type: 'string', title: 'これまでの会話', format: 'hidden' },
     },
   },
   tools: ['inquiries.reply_draft'],
