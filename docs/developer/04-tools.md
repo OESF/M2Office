@@ -273,8 +273,8 @@
 | `drive.create_folder` | `name`（必須）: フォルダの名前、`parentId`: 親のフォルダの ID（任意） |
 | `gmail.create_draft` | `replyTo`: 返信するメールの ID（任意）、`to`: 宛先（返信のときは省略可。元のメールの差出人になる）、`subject`（必須）: 件名、`body`（必須）: 本文 |
 | `pdf.render` | `title`（必須）: 表題（例: 請求書）、`to`: 宛先（例: 株式会社○○ 御中）、`from`: 差出人の各行、`fields`: { label, value } の配列（発行日・番号など）、`rows`（必須）: 明細。{ name, quantity, unitPrice, amount } の配列、`totals`: { label, value } の配列（小計・消費税・合計）。省略すると明細の合計だけ、`notes`: 備考の各行 |
-| `quote.create` | `to`: 宛先（会社名・担当者。例: 株式会社○○ 山田様）、`items`（必須）: 品目。{ name, quantity, unit, unitPrice, taxRate, group, discount } の配列。group は区分の見出し（任意）、discount は値引きの額（任意。依頼に書かれたものだけ）、`validDays`: 有効期限（発行から何日。既定は会社の見積書の設定）、`paymentTerms`: お支払い条件（任意。無ければ会社の既定）、`terms`: 納期などの条件（任意）、`notes`: 備考（任意） |
-| `sales.create_document` | `kind`（必須）: purchase_order・delivery・invoice・receipt、`documentId`: 直す下書きの書類（documentId か番号）、`to`: 宛先の会社名（個人なら氏名）、`department`: 宛先の部署（任意）、`person`: 宛先の担当者（任意）、`address`: 宛先の住所（任意）、`subject`: 件名（請求書の「〇〇の件」、領収書の但し書き）、`items`: 品目。{ name, code, quantity, unit, unitPrice, taxRate, discount } の配列、`orderNumber`: つなぐ受注の番号（S-…）、`deliveryNumbers`: 請求書にまとめる納品書の番号（D-…）、`collectFor`: 請求書: この取引先の未請求の納品書をまとめる、`invoiceNumber`: 領収書: 元の請求書の番号（I-…）、`amount`: 領収書: 受け取った額（税込。一部の入金のとき）、`dueOn`: 支払期限（請求書）・納期（注文書）。YYYY-MM-DD、`terms`: 支払い条件・納品場所などの条件、`notes`: 備考 |
+| `quote.create` | `to`: 宛先（会社名・担当者。例: 株式会社○○ 山田様）、`items`（必須）: 品目。{ name, quantity, unit, unitPrice, taxCategory, group, discount } の配列。group は区分の見出し（任意）、discount は値引きの額（任意。依頼に書かれたものだけ）、`validDays`: 有効期限（発行から何日。既定は会社の見積書の設定）、`paymentTerms`: お支払い条件（任意。無ければ会社の既定）、`terms`: 納期などの条件（任意）、`notes`: 備考（任意） |
+| `sales.create_document` | `kind`（必須）: purchase_order・delivery・invoice・receipt、`documentId`: 直す下書きの書類（documentId か番号）、`to`: 宛先の会社名（個人なら氏名）、`department`: 宛先の部署（任意）、`person`: 宛先の担当者（任意）、`address`: 宛先の住所（任意）、`subject`: 件名（請求書の「〇〇の件」、領収書の但し書き）、`items`: 品目。{ name, code, quantity, unit, unitPrice, taxCategory, discount } の配列。taxCategory は standard・food・news・exempt、`orderNumber`: つなぐ受注の番号（S-…）、`deliveryNumbers`: 請求書にまとめる納品書の番号（D-…）、`collectFor`: 請求書: この取引先の未請求の納品書をまとめる、`invoiceNumber`: 領収書: 元の請求書の番号（I-…）、`amount`: 領収書: 受け取った額（税込。一部の入金のとき）、`dueOn`: 支払期限（請求書）・納期（注文書）。YYYY-MM-DD、`terms`: 支払い条件・納品場所などの条件、`notes`: 備考 |
 | `sales.revise` | `number`（必須）: 訂正する書類の番号（I-… など）か documentId、`to`: 宛先の会社名（個人なら氏名）、`department`: 宛先の部署（任意）、`person`: 宛先の担当者（任意）、`address`: 宛先の住所（任意）、`subject`: 件名、`items`: 品目（すべて置き換える）、`dueOn`: 支払期限・納期（YYYY-MM-DD）、`terms`: 条件、`notes`: 備考 |
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |
@@ -320,7 +320,7 @@
 | `print.signage` | `query`: 物の題名の言葉、`action`: start か stop |
 | `sales.cancel` | `number`（必須）: 書類の番号、`reason`（必須）: 取り消しの理由 |
 | `sales.import_order` | `fileId`: 注文書のファイルの ID、`quoteNumber`: 見積書の番号（Q-…） |
-| `sales.record_order` | `party`（必須）: 取引先の名前、`person`: 先方の担当者（任意）、`items`（必須）: 品目 { name, quantity, unit, unitPrice } の配列、`dueOn`: 納期（YYYY-MM-DD）、`orderedOn`: 注文日（無ければ今日）、`customerRef`: 相手の注文番号（任意）、`deliverTo`: 納品先（任意）、`terms`: 支払い条件（任意）、`notes`: 備考（任意） |
+| `sales.record_order` | `party`（必須）: 取引先の名前、`person`: 先方の担当者（任意）、`items`（必須）: 品目 { name, quantity, unit, unitPrice, taxCategory } の配列（taxCategory は standard・food・news・exempt。分からなければ空）、`dueOn`: 納期（YYYY-MM-DD）、`orderedOn`: 注文日（無ければ今日）、`customerRef`: 相手の注文番号（任意）、`deliverTo`: 納品先（任意）、`terms`: 支払い条件（任意）、`notes`: 備考（任意） |
 | `sales.remember_party` | `name`（必須）: 取引先の名前、`paymentTerms`（必須）: 支払い条件 |
 | `sales.update_order` | `number`（必須）: 受注番号か相手の注文番号、`dueOn`: 納期、`orderedOn`: 注文日、`customerRef`: 相手の注文番号、`deliverTo`: 納品先、`terms`: 支払い条件、`items`: 品目（すべて置き換える）、`cancelReason`: 取り消すときの理由 |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |

@@ -6,7 +6,7 @@
 
 import type {
   Approval, Artifact, AuditEvent, Brief, Job, Notification, Run, RunStep, Schedule, Session,
-  StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
+  StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings, TaxCategory,
 } from '@m2office/shared';
 import type { ConnectorDeclaration } from '../extensions/connectors.js';
 
@@ -939,8 +939,10 @@ export interface QuoteItem {
   quantity: number;
   unit: string;
   unitPrice: number | null;
-  /** 消費税率（%）。10 か 8（軽減税率）。 */
-  taxRate: 10 | 8;
+  /** 当てた消費税率（%。10・8・1・0）。区分と発行の日から決めたもの（仕様書 第15.1.1節）。 */
+  taxRate: number;
+  /** 消費税の区分（第15.1.1節）。持たない前の品目は税率から読む。 */
+  taxCategory?: TaxCategory;
   /** 区分の見出し（例: 初期費用。第15.2.3節）。 */
   group?: string;
   /** 値引きの額（正の数。数量×単価から引く。第15.2.3節）。依頼に書かれた額だけを使う。 */

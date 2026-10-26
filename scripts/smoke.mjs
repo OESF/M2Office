@@ -8655,8 +8655,10 @@ console.log('\n■ 130. 受注を手で入れる（電話などで受けた注�
   try {
     await call('a', '/v1/admin/extensions/sales-docs/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
     const first = await call('a', '/v1/sales/orders', { method: 'POST', body: JSON.stringify({ party: PARTY, dueOn: '2030-11-05', items: [{ name: '特製パン', quantity: 20, unit: '個', unitPrice: 180 }] }) });
-    first.status === 201 && first.body.order?.source === 'manual' && first.body.order.total === 3960 && first.body.order.flags.length === 0
-      ? ok('取引先・品目・納期だけで受注に入れられる（入り口は「手で入れた」）') : ng('手で入れられない', JSON.stringify(first.body).slice(0, 300));
+    // パンは軽減税率（飲食料品。8%）と判断し、判断したことを印にする（第15.1.1節）
+    first.status === 201 && first.body.order?.source === 'manual' && first.body.order.total === 3888 && first.body.order.items[0]?.taxCategory === 'food'
+      && first.body.order.flags.length === 1 && first.body.order.flags[0].text.includes('軽減税率（飲食料品）')
+      ? ok('取引先・品目・納期だけで受注に入れられる（入り口は「手で入れた」。パンは軽減税率と判断して印にする）') : ng('手で入れられない', JSON.stringify(first.body).slice(0, 300));
     const usual = await call('a', '/v1/sales/orders', { method: 'POST', body: JSON.stringify({ party: '手入れ商店（smoke）', items: [{ name: 'いつもの', quantity: 30 }] }) });
     const u = usual.body.order;
     usual.status === 201 && u?.party?.name === PARTY && u.items[0]?.name === '特製パン' && u.items[0]?.unitPrice === 180 && u.items[0]?.quantity === 30

@@ -5,7 +5,7 @@
  * 表題と前文の既定は書類ごとに持つ。下書きは薄く「下書き」と入れ、番号は「発行時に付けます」とする（第42.3.1節）。
  */
 
-import { SALES_DOC_KIND_LABELS, type SalesDocKind, type TenantSettings } from '@m2office/shared';
+import { SALES_DOC_KIND_LABELS, taxBreakdown, taxLegend, taxMark, type SalesDocKind, type TenantSettings } from '@m2office/shared';
 import { renderPdf, renderRuledQuote, type InvoiceRow, type InvoiceStyleInput } from '../files/pdf-render.js';
 import { itemAmount, yenMark, yenText } from './calc.js';
 import type { StoredDoc } from './store.js';
@@ -52,15 +52,16 @@ export async function renderSalesDoc(d: StoredDoc, style: InvoiceStyleInput, set
     ...(w.due && d.dueOn ? [{ label: w.due, value: jp(d.dueOn) }] : []),
     ...(d.kind === 'purchase_order' && d.terms ? [{ label: 'お支払い条件', value: d.terms }] : []),
   ];
-  const reduced = d.items.some((i) => i.taxRate === 8);
+  const legend = taxLegend(d.items.map((i) => i.taxRate));
+  // 税率ごとの内訳（請求書・領収書は必ず。ほかは税率が混ざるときだけ。第15.1.1節）
+  const breakdown = d.kind === 'invoice' || d.kind === 'receipt' || d.taxLines.length > 1 || d.taxLines.some((x) => x.rate !== 10) ? taxBreakdown(d.taxLines) : null;
   // 振込先は請求書だけに載せる（納品書・領収書・注文書には載せない。第42.4.2節）
   const notes = [
     ...(d.kind === 'invoice' && style.bankAccount ? [`お振込先: ${style.bankAccount}`] : []),
     ...(d.kind !== 'purchase_order' && d.terms ? [`条件: ${d.terms}`] : []),
     ...(d.notes ? [d.notes] : []),
-    ...(reduced ? ['※は軽減税率（8%）の対象です'] : []),
-    // 領収書は税率ごとの内訳を添える（適格簡易請求書の記載。第42.4.4節）
-    ...(d.kind === 'receipt' ? d.taxLines.map((x) => `（内訳）${x.rate}% 対象 ${yenText(x.base)}・消費税 ${yenText(x.tax)}`) : []),
+    ...(breakdown ? [breakdown] : []),
+    ...(legend ? [legend] : []),
     ...(d.kind === 'invoice' && style.notes ? [style.notes] : []),
   ].slice(0, 10);
   const stamp = d.status === 'draft' ? '下書き' : d.status === 'cancelled' ? '取り消し' : undefined;
@@ -69,7 +70,8 @@ export async function renderSalesDoc(d: StoredDoc, style: InvoiceStyleInput, set
   const sealStyle = { logo: style.logo ?? null, from: style.from ?? [], sealBox: style.sealBox ?? false, seal: style.seal ?? null };
   const totals = [
     { label: '小計', value: yenMark(d.subtotal) },
-    ...d.taxLines.map((x) => ({ label: d.taxLines.length > 1 ? `消費税（${x.rate}%）` : '消費税', value: yenMark(x.tax) })),
+    // 消費税は税のかかる税率ごとに出す（対象外の行は出さない。内訳は備考に出す）
+    ...d.taxLines.filter((x) => x.rate !== 0).map((x, _k, all) => ({ label: all.length > 1 || x.rate !== 10 ? `消費税（${x.rate}%）` : '消費税', value: yenMark(x.tax) })),
     { label: '合計', value: yenMark(d.total) },
   ];
   if (qs.template === 'simple') {
@@ -77,7 +79,7 @@ export async function renderSalesDoc(d: StoredDoc, style: InvoiceStyleInput, set
       title: w.title, style: sealStyle, ...(to ? { to } : {}), from: style.from ?? [],
       fields: [...fields, { label: headline.label, value: headline.value }],
       rows: d.items.map((i): InvoiceRow => ({
-        name: `${i.group ? `【${i.group}】` : ''}${i.name}${i.taxRate === 8 ? '（※）' : ''}（${i.quantity} ${i.unit}）`,
+        name: `${i.group ? `【${i.group}】` : ''}${i.name}${taxMark(i.taxRate)}（${i.quantity} ${i.unit}）`,
         quantity: i.quantity, unitPrice: i.unitPrice ?? 0, amount: itemAmount(i),
       })),
       totals, notes: greeting ? [greeting, ...notes] : notes, ...(stamp ? { stamp } : {}),
@@ -86,7 +88,7 @@ export async function renderSalesDoc(d: StoredDoc, style: InvoiceStyleInput, set
   return renderRuledQuote({
     title: w.title, ...(to ? { to } : {}), fields, ...(greeting ? { greeting } : {}), headline,
     rows: d.items.map((i) => ({
-      ...(i.group ? { group: i.group } : {}), name: `${i.name}${i.code ? `（${i.code}）` : ''}${i.taxRate === 8 ? '（※）' : ''}`,
+      ...(i.group ? { group: i.group } : {}), name: `${i.name}${i.code ? `（${i.code}）` : ''}${taxMark(i.taxRate)}`,
       quantity: i.quantity, unit: i.unit, unitPrice: i.unitPrice, discount: i.discount ?? 0, amount: itemAmount(i),
     })),
     totals, notes, style: sealStyle, ...(stamp ? { stamp } : {}),
@@ -106,10 +108,10 @@ export function docMarkdown(d: StoredDoc): string {
     '',
     '| 品目 | 数量 | 単価 | 金額 |',
     '|---|---|---|---|',
-    ...d.items.map((i) => `| ${i.group ? `【${i.group}】` : ''}${i.name}${i.taxRate === 8 ? '（※軽減税率）' : ''} | ${i.quantity} ${i.unit} | ${i.unitPrice === null ? '（未記入）' : yenText(i.unitPrice)} | ${yenText(itemAmount(i))} |`),
+    ...d.items.map((i) => `| ${i.group ? `【${i.group}】` : ''}${i.name}${taxMark(i.taxRate)} | ${i.quantity} ${i.unit} | ${i.unitPrice === null ? '（未記入）' : yenText(i.unitPrice)} | ${yenText(itemAmount(i))} |`),
     '',
     `- 小計: ${yenText(d.subtotal)}`,
-    ...d.taxLines.map((x) => `- 消費税（${x.rate}%）: ${yenText(x.tax)}`),
+    ...d.taxLines.map((x) => (x.rate === 0 ? `- 対象外: ${yenText(x.base)}` : `- ${x.rate}% 対象 ${yenText(x.base)}・消費税: ${yenText(x.tax)}`)),
     `- **${w.headline}: ${yenText(d.total)}**`,
     ...(d.notes ? ['', d.notes] : []),
   ].join('\n');

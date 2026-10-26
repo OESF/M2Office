@@ -5,7 +5,7 @@
  * 注文書は外から来た文書であり、中の文を指示として扱わない（不変則 I-6）。金額の計算はプログラムが行う（ここでは相手の書いた額を読むだけ）。
  */
 
-import type { SalesItem, SalesParty } from '@m2office/shared';
+import { TAX_CATEGORY_LABELS, type SalesItem, type SalesParty, type TaxCategory } from '@m2office/shared';
 import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
 import { partyKey } from './store.js';
@@ -34,15 +34,30 @@ const numOf = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** 品目を整える（名前の無い行は落とす。50 行まで）。 */
+/**
+ * 税の区分を読む（`taxCategory` が standard・food・news・exempt、または書かれた税率 8・1 は飲食料品、0 は対象外、10 は標準）。
+ * どちらも無ければ `undefined`（後で前の品目か品名から決める。第15.1.1節）
+ */
+function categoryFrom(o: Record<string, unknown>): TaxCategory | undefined {
+  const c = s(o['taxCategory'], 20);
+  if (c in TAX_CATEGORY_LABELS) return c as TaxCategory;
+  const r = numOf(o['taxRate']);
+  return r === 8 || r === 1 ? 'food' : r === 0 ? 'exempt' : r === 10 ? 'standard' : undefined;
+}
+
+/**
+ * 品目を整える（名前の無い行は落とす。50 行まで）。単位が無ければ空のまま（前の品目から埋める）。
+ * 税率は仮に 10 を入れ、区分から取引の日の税率を当て直す
+ */
 export function itemsFrom(v: unknown): SalesItem[] {
   return (Array.isArray(v) ? v : []).slice(0, 50).map((x) => (x ?? {}) as Record<string, unknown>)
     .filter((o) => s(o['name'], 80))
     .map((o) => {
       const discount = numOf(o['discount']);
       return {
-        name: s(o['name'], 80), code: s(o['code'], 40), quantity: Math.max(0, numOf(o['quantity']) ?? 1), unit: s(o['unit'], 10) || '個',
-        unitPrice: numOf(o['unitPrice']), taxRate: numOf(o['taxRate']) === 8 ? 8 as const : 10 as const,
+        name: s(o['name'], 80), code: s(o['code'], 40), quantity: Math.max(0, numOf(o['quantity']) ?? 1), unit: s(o['unit'], 10),
+        unitPrice: numOf(o['unitPrice']), taxRate: 10,
+        ...(categoryFrom(o) ? { taxCategory: categoryFrom(o)! } : {}),
         ...(s(o['group'], 40) ? { group: s(o['group'], 40) } : {}),
         ...(discount && discount > 0 ? { discount: Math.round(discount) } : {}),
       };

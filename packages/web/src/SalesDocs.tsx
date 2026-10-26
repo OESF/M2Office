@@ -8,8 +8,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  SALES_DOC_KIND_LABELS, SALES_DOC_STATUS_LABELS, SALES_ORDER_STATUS_LABELS,
-  type SalesDocKind, type SalesDocStatus, type SalesDocument, type SalesOrder, type SalesOrderStatus, type SalesSuggestions,
+  SALES_DOC_KIND_LABELS, SALES_DOC_STATUS_LABELS, SALES_ORDER_STATUS_LABELS, TAX_CATEGORY_LABELS,
+  guessTaxCategory, plannedTaxNote, taxCategoryOf, taxRateLabel,
+  type TaxCategory, type SalesDocKind, type SalesDocStatus, type SalesDocument, type SalesOrder, type SalesOrderStatus, type SalesSuggestions,
 } from '@m2office/shared';
 import { api, describeError, type SalesDocDetail } from './api.js';
 import { BackButton } from './back-button.js';
@@ -152,8 +153,9 @@ function OrderList({ onOpen, changeKey }: { onOpen: (id: string) => void; change
 }
 
 /** 手で入れる品目の 1 行。 */
-interface ManualLine { name: string; quantity: string; unit: string; unitPrice: string; reduced: boolean }
-const emptyLine = (): ManualLine => ({ name: '', quantity: '1', unit: '', unitPrice: '', reduced: false });
+/** 手で入れる品目の 1 行。`picked` は区分を人が選び直したか（選び直したら品名で変えない）。 */
+interface ManualLine { name: string; quantity: string; unit: string; unitPrice: string; taxCategory: TaxCategory; picked: boolean }
+const emptyLine = (): ManualLine => ({ name: '', quantity: '1', unit: '', unitPrice: '', taxCategory: 'standard', picked: false });
 
 /**
  * 手で入れる欄（電話などで受けた注文。仕様書 第42.5.1.1節）。取引先・品目・納期だけを出し、ほかは「詳しく」を開いたときだけ。
@@ -176,9 +178,11 @@ function ManualOrderForm({ onDone }: { onDone: (orderId: string) => void }) {
   const setLine = (i: number, patch: Partial<ManualLine>) => setLines((cur) => cur.map((l, k) => {
     if (k !== i) return l;
     const next = { ...l, ...patch };
-    // 候補の品名を選んだら、単位と単価を入れる（入っていれば変えない）
+    // 候補の品名を選んだら、単位と単価と税の区分を入れる（入っていれば変えない）。候補に無い品名は、品名から区分を推し量る（第15.1.1節）
     const hit = patch.name !== undefined ? hints.items.find((x) => x.name === patch.name) : undefined;
-    return hit ? { ...next, unit: next.unit || hit.unit, unitPrice: next.unitPrice || (hit.unitPrice === null ? '' : String(hit.unitPrice)), reduced: hit.taxRate === 8 } : next;
+    if (hit) return { ...next, unit: next.unit || hit.unit, unitPrice: next.unitPrice || (hit.unitPrice === null ? '' : String(hit.unitPrice)), ...(next.picked ? {} : { taxCategory: hit.taxCategory }) };
+    if (patch.name !== undefined && !next.picked) return { ...next, taxCategory: guessTaxCategory(patch.name).category };
+    return next;
   }));
   const save = () => {
     setBusy(true);
@@ -186,7 +190,9 @@ function ManualOrderForm({ onDone }: { onDone: (orderId: string) => void }) {
     api.sales.recordOrder({
       party: party.trim(), dueOn: dueOn || undefined, ...Object.fromEntries(Object.entries(extra).filter(([, v]) => v.trim())),
       items: lines.filter((l) => l.name.trim()).map((l) => ({
-        name: l.name.trim(), quantity: l.quantity, unit: l.unit.trim(), unitPrice: l.unitPrice === '' ? null : l.unitPrice, taxRate: l.reduced ? 8 : 10,
+        name: l.name.trim(), quantity: l.quantity, unit: l.unit.trim(), unitPrice: l.unitPrice === '' ? null : l.unitPrice,
+        // 人が選び直した区分だけを渡す（それ以外はサーバーが前の品目と品名から決め、判断したことを印にする）
+        ...(l.picked ? { taxCategory: l.taxCategory } : {}),
       })),
     }).then((r) => {
       if (r.duplicate) setNote({ kind: 'error', text: `同じ注文がもう受注 ${r.order.number} にあります` });
@@ -207,7 +213,9 @@ function ManualOrderForm({ onDone }: { onDone: (orderId: string) => void }) {
           <label>数量<input type="number" min={0} className="num-input" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} /></label>
           <label>単位<input className="unit-input" value={l.unit} maxLength={10} onChange={(e) => setLine(i, { unit: e.target.value })} /></label>
           <label>単価<input type="number" min={0} className="num-input" value={l.unitPrice} onChange={(e) => setLine(i, { unitPrice: e.target.value })} /></label>
-          {more && <label className="check"><input type="checkbox" checked={l.reduced} onChange={(e) => setLine(i, { reduced: e.target.checked })} />軽減税率</label>}
+          <label>税<select value={l.taxCategory} onChange={(e) => setLine(i, { taxCategory: e.target.value as TaxCategory, picked: true })}>
+            {(Object.keys(TAX_CATEGORY_LABELS) as TaxCategory[]).map((c) => <option key={c} value={c}>{TAX_CATEGORY_LABELS[c]}</option>)}
+          </select></label>
           {lines.length > 1 && <button className="btn ghost small" aria-label="この品目を外す" onClick={() => setLines(lines.filter((_, k) => k !== i))}>×</button>}
         </div>
       ))}
@@ -280,12 +288,13 @@ function OrderView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () =
           <p className="small muted">{[o.party.department, o.party.person, o.party.address, o.party.phone, o.party.email].filter(Boolean).join('　')}</p>
         )}
         <div className="table-scroll"><table className="table">
-          <thead><tr><th>品名</th><th>品番</th><th className="num">数量</th><th className="num">納品済み</th><th className="num">単価</th></tr></thead>
+          <thead><tr><th>品名</th><th>品番</th><th className="num">数量</th><th className="num">納品済み</th><th className="num">単価</th><th>税</th></tr></thead>
           <tbody>{o.items.map((i, k) => (
             <tr key={k}>
-              <td>{i.name}{i.taxRate === 8 && <span className="small muted">（軽減税率）</span>}</td><td>{i.code || '—'}</td>
+              <td>{i.name}</td><td>{i.code || '—'}</td>
               <td className="num">{i.quantity} {i.unit}</td><td className="num">{o.delivered[k] ?? 0}</td>
               <td className="num">{i.unitPrice === null ? <span className="badge warn">なし</span> : yen(i.unitPrice)}</td>
+              <td className="nowrap small">{TAX_CATEGORY_LABELS[taxCategoryOf(i)]}</td>
             </tr>
           ))}</tbody>
         </table></div>
@@ -437,7 +446,9 @@ function DocView({ id, onBack, onOpen, onOpenRun, changeKey }: {
           <p><strong>{d.party.name || d.party.person || '宛先なし'}</strong></p>
           <p className="small">日付 {dayLabel(d.issuedOn)}{d.dueOn && <>　{d.kind === 'invoice' ? '支払期限' : '納期'} {dayLabel(d.dueOn)}</>}</p>
           <p>合計 <strong>{yen(d.total)}</strong></p>
-          <p className="small muted">{d.taxLines.map((x) => `${x.rate}% 対象 ${yen(x.base)}・消費税 ${yen(x.tax)}`).join('　')}</p>
+          <p className="small muted">{d.taxLines.map((x) => (x.rate === 0 ? `対象外 ${yen(x.base)}` : `${taxRateLabel(x.rate)} ${yen(x.base)}・消費税 ${yen(x.tax)}`)).join('　')}</p>
+          {/* まだ確定していない税率の変更（食料品の 1% など。第15.1.1節） */}
+          {[...new Set(d.items.map((i) => plannedTaxNote(taxCategoryOf(i), d.issuedOn)).filter((x): x is string => !!x))].map((n) => <p key={n} className="small"><span className="badge warn">予定</span> {n}</p>)}
           <div className="row wrap">
             <a className="btn ghost small" href={api.sales.pdfUrl(d.id, true)}>PDF を保存</a>
             {d.status === 'draft' && latest && (

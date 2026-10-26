@@ -6,6 +6,8 @@
  * 金額は数量と単価から決まった計算で出す（推論に計算させない）。
  */
 
+import type { TaxCategory } from './tax.js';
+
 /** 販売の書類と受注の拡張の ID（内蔵の拡張。第12.13節）。 */
 export const SALES_DOCS_EXTENSION_ID = 'sales-docs';
 
@@ -52,8 +54,12 @@ export interface SalesItem {
   unit: string;
   /** 単価（円）。分からなければ `null`（推測で埋めない） */
   unitPrice: number | null;
-  /** 消費税率（%）。10 か 8（軽減税率）。 */
-  taxRate: 10 | 8;
+  /**
+   * 当てた消費税率（%。10・8・1・0）。区分と取引の日から決めたもの（第15.1.1節）。発行した書類では変えない
+   */
+  taxRate: number;
+  /** 消費税の区分（第15.1.1節）。持たない前の品目は税率から読む（{@link taxCategoryOf}） */
+  taxCategory?: TaxCategory;
   /** 区分の見出し（まとめた請求書の納品書ごとの見出しなど） */
   group?: string;
   /** 値引きの額（正の数。依頼に書かれた額だけ） */
@@ -62,7 +68,8 @@ export interface SalesItem {
 
 /** 税率ごとの小計と消費税。 */
 export interface SalesTaxLine {
-  rate: 10 | 8;
+  /** 税率（0 は対象外） */
+  rate: number;
   base: number;
   tax: number;
 }
@@ -137,7 +144,7 @@ export interface SalesSuggestions {
   /** 前の受注・書類・見積書の取引先の名前 */
   parties: string[];
   /** 取引先の前の品目（多く頼まれた順）。取引先を指定しないときは会社全体 */
-  items: { name: string; code: string; unit: string; unitPrice: number | null; taxRate: 10 | 8; count: number }[];
+  items: { name: string; code: string; unit: string; unitPrice: number | null; taxCategory: TaxCategory; count: number }[];
 }
 
 /** 受注 1 件（第42.5.3節）。 */

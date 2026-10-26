@@ -10,6 +10,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   SALES_DOC_KIND_LABELS, SALES_DOC_NEEDS_ISSUE, SALES_DOC_PREFIX, SALES_DOCS_EXTENSION_ID, canUseAgent,
+  guessTaxCategory, plannedTaxNote, taxCategoryNote, taxCategoryOf, taxRateOn,
   type SalesDocKind, type SalesDocsSettings, type SalesDocument, type SalesItem, type SalesOrder, type SalesOrderFlag, type SalesOrderSource,
   type SalesOrderStatus, type SalesParty, type SalesSuggestions,
 } from '@m2office/shared';
@@ -215,9 +216,43 @@ export class SalesDocService {
     return `${prefix}${String(last + 1).padStart(3, '0')}`;
   }
 
+  /**
+   * 品目の税の区分を決め、取引の日の税率を当てる（仕様書 第15.1.1節）。区分の無い品目は、前に同じ品目があればその区分、
+   * 無ければ品名から推し量る（推論が業務で区分を渡していれば、それを使う）。
+   *
+   * @param fixed 税率をそのまま使う品目（まとめた納品書・元の請求書から写したもの。その取引の日の税率が当たっている）
+   * @returns 区分を判断したことの言葉（軽減・対象外・迷ったもの）と、まだ確定していない税率の変更の知らせ
+   */
+  private async classify(who: SalesViewer, partyName: string, items: SalesItem[], day: string, fixed: Set<SalesItem> = new Set()): Promise<{ judged: string[]; planned: string[] }> {
+    const judged: string[] = [];
+    const planned = new Set<string>();
+    const needPast = items.some((i) => !i.taxCategory && !fixed.has(i));
+    const past = needPast ? (await this.suggestions(who, partyName)).items : [];
+    for (const it of items) {
+      if (fixed.has(it)) {
+        it.taxCategory = taxCategoryOf(it);
+        continue;
+      }
+      if (!it.taxCategory) {
+        const before = past.find((x) => itemKey(x) === itemKey(it));
+        if (before) it.taxCategory = before.taxCategory;
+        else {
+          const g = guessTaxCategory(it.name);
+          it.taxCategory = g.category;
+          const note = taxCategoryNote(it.name, g.category, g.unsure);
+          if (note) judged.push(note);
+        }
+      }
+      it.taxRate = taxRateOn(it.taxCategory, day);
+      const p = plannedTaxNote(it.taxCategory, day);
+      if (p) planned.add(p);
+    }
+    return { judged, planned: [...planned] };
+  }
+
   /** 単価の無い品目に、同じ取引先の前の書類・受注・見積書の同じ品目の単価を入れる。 */
   private async fillPrices(who: SalesViewer, partyName: string, items: SalesItem[]): Promise<string[]> {
-    if (!items.some((i) => i.unitPrice === null)) return [];
+    if (!items.some((i) => i.unitPrice === null || !i.unit)) return [];
     const key = partyKey(partyName);
     const past = (await this.deps.store.listDocs(who.tenantId, { limit: 300 }))
       .filter((d) => d.status !== 'cancelled' && (!key || partyKey(d.party.name) === key)).flatMap((d) => d.items);
@@ -228,6 +263,8 @@ export class SalesDocService {
       .filter((o) => !o.cancelled && (!key || partyKey(o.party.name) === key)).flatMap((o) => o.items);
     const filled: string[] = [];
     for (const it of items) {
+      // 単位が無ければ前の同じ品目の単位、それも無ければ「個」
+      if (!it.unit) it.unit = [...past, ...orders, ...quotes].find((p) => itemKey(p) === itemKey(it) && p.unit)?.unit ?? '個';
       if (it.unitPrice !== null) continue;
       const hit = [...past, ...orders, ...quotes].find((p) => itemKey(p) === itemKey(it) && p.unitPrice !== null);
       if (hit) { it.unitPrice = hit.unitPrice; filled.push(it.name); }
@@ -297,6 +334,11 @@ export class SalesDocService {
       const items = input.items?.length ? input.items : cur.items;
       const party = { ...cur.party, ...cleanParty(input.party) };
       const filled = await this.fillPrices(who, party.name, items);
+      // 品目を直さなければ、下書きを作ったときの税率をそのまま使う
+      const fixedNow = new Set(input.items?.length ? [] : items);
+      const tax = await this.classify(who, party.name, items, cur.issuedOn, fixedNow);
+      notes.push(...tax.judged);
+      warnings.push(...tax.planned);
       const totals = docTotals(items, settings.company.taxRounding);
       const next: StoredDoc = {
         ...cur, party, items, ...totals,
@@ -325,6 +367,8 @@ export class SalesDocService {
     let orderId: string | null = null;
     let invoiceId: string | null = null;
     let deliveryIds: string[] = [];
+    // 写した品目の税率をそのまま使う（納品書の納品の日・元の請求書の日の税率。第15.1.1節）
+    const fixed = new Set<SalesItem>();
     let subject = str(input.subject, 80);
     let terms = str(input.terms, 120);
     let dueOn: string | null = input.dueOn && DATE.test(input.dueOn) ? input.dueOn : null;
@@ -377,6 +421,7 @@ export class SalesDocService {
       if (!orderId && picked.every((d) => d.orderId && d.orderId === picked[0]!.orderId)) orderId = picked[0]!.orderId;
       // 明細は納品書ごとに区分の見出しを付けて並べる
       items = picked.flatMap((d) => d.items.map((i) => ({ ...i, group: `${mmdd(d.issuedOn)} 納品 ${d.number ?? ''}`.trim() })));
+      for (const i of items) fixed.add(i);
       if (!subject) subject = picked.length > 1 ? `${mmdd(picked[0]!.issuedOn)}〜${mmdd(picked.at(-1)!.issuedOn)} 納品分` : `${mmdd(picked[0]!.issuedOn)} 納品分`;
     }
 
@@ -395,6 +440,7 @@ export class SalesDocService {
           items = part.items;
           notes.push(`一部の入金として ${yenText(Math.round(input.amount))} の領収書にしました`);
         } else items = inv.items.map((i) => ({ ...i }));
+        for (const i of items) fixed.add(i);
       }
     }
 
@@ -404,6 +450,9 @@ export class SalesDocService {
     if (filled.length) notes.push(`前の書類・見積書の単価を使いました: ${filled.join('、')}`);
     const missing = items.filter((i) => i.unitPrice === null).map((i) => i.name);
     if (missing.length) warnings.push(`単価が入っていない品目があります（0 円で作りました）: ${missing.join('、')}`);
+    const tax = await this.classify(who, party.name, items, today, fixed);
+    notes.push(...tax.judged);
+    warnings.push(...tax.planned);
     if ((input.kind === 'invoice' || input.kind === 'receipt') && !settings.company.invoiceRegistrationNumber) {
       warnings.push('登録番号が会社情報にありません（適格請求書の記載が足りません）');
     }
@@ -497,6 +546,8 @@ export class SalesDocService {
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
     const items = changes.items?.length ? changes.items.map((i) => ({ ...i })) : cur.items.map((i) => ({ ...i }));
     const filled = await this.fillPrices(who, cur.party.name, items);
+    // 品目を直さなければ、前の版の税率をそのまま使う。直した品目は前の版の取引の日の税率を当てる
+    const tax = await this.classify(who, cur.party.name, items, cur.issuedOn, new Set(changes.items?.length ? [] : items));
     const totals = docTotals(items, settings.company.taxRounding);
     const issueNow = !SALES_DOC_NEEDS_ISSUE[cur.kind];
     const next: NewDoc = {
@@ -516,8 +567,8 @@ export class SalesDocService {
       if (cur.kind === 'delivery' && cur.invoiceId) await this.noticeOnInvoice(who, cur.invoiceId, `納品書 ${cur.number} が訂正されました（訂正版 ${next.version}）。請求書の訂正版を作るか確かめてください`);
     }
     await this.audit(who, 'sales_doc.revise', 'sales_document', newId, { kind: cur.kind, number: cur.number, version: next.version, from: cur.id });
-    const notes = filled.length ? [`前の書類・見積書の単価を使いました: ${filled.join('、')}`] : [];
-    return { doc: this.view((await store.getDoc(who.tenantId, newId))!, await this.names(who.tenantId)), warnings: [], notes };
+    const notes = [...(filled.length ? [`前の書類・見積書の単価を使いました: ${filled.join('、')}`] : []), ...tax.judged];
+    return { doc: this.view((await store.getDoc(who.tenantId, newId))!, await this.names(who.tenantId)), warnings: tax.planned, notes };
   }
 
   /** 請求書に知らせを付け、作った人に知らせる。 */
@@ -679,7 +730,10 @@ export class SalesDocService {
       const now = (await store.getOrder(who.tenantId, dup.id))!;
       return { order: this.orderView(now, docs, await this.names(who.tenantId)), duplicate: true, ...(linked ? { linked } : {}) };
     }
+    // 税の区分を決める（受注の税率は目安。書類を作るときに取引の日の税率を当て直す）
+    const tax = await this.classify(who, r.party.name, r.items, r.orderedOn ?? jstToday());
     const flags: SalesOrderFlag[] = [
+      ...tax.judged.map((t) => ({ kind: 'guess' as const, text: t })),
       ...(r.unread ?? []).map((u) => ({ kind: 'unread' as const, text: `${u}が読み取れませんでした` })),
       ...(r.missing ?? []).map((u) => ({ kind: 'unread' as const, text: `${u}が入っていません` })),
       ...(r.guesses ?? []).map((g) => ({ kind: 'guess' as const, text: g })),
@@ -766,7 +820,7 @@ export class SalesDocService {
       const key = itemKey(i);
       const cur = counted.get(key);
       if (cur) { cur.count++; if (cur.unitPrice === null) cur.unitPrice = i.unitPrice; continue; }
-      counted.set(key, { name: i.name, code: i.code, unit: i.unit, unitPrice: i.unitPrice, taxRate: i.taxRate, count: 1 });
+      counted.set(key, { name: i.name, code: i.code, unit: i.unit, unitPrice: i.unitPrice, taxCategory: taxCategoryOf(i), count: 1 });
     }
     return {
       parties: (await this.knownParties(who.tenantId)).slice(0, 200),
@@ -792,12 +846,15 @@ export class SalesDocService {
       if (isUsualItem(it.name)) {
         const top = usual[0];
         if (!top) { missing.push('品名（「いつもの」と読める前の注文）'); continue; }
-        items.push({ ...it, name: top.name, code: top.code, unit: top.unit, unitPrice: top.unitPrice, taxRate: top.taxRate });
+        items.push({ ...it, name: top.name, code: top.code, unit: top.unit, unitPrice: top.unitPrice, taxCategory: top.taxCategory });
         guesses.push(`「${it.name}」を ${top.name} と読みました（前の注文 ${top.count} 回）`);
         continue;
       }
       const before = usual.find((x) => itemKey(x) === itemKey(it));
-      items.push({ ...it, name: str(it.name, 80), code: str(it.code, 40) || before?.code || '', unit: str(it.unit, 10) || before?.unit || '個', taxRate: it.taxRate === 8 ? 8 : 10 });
+      items.push({
+        ...it, name: str(it.name, 80), code: str(it.code, 40) || before?.code || '', unit: str(it.unit, 10) || before?.unit || '個',
+        ...(it.taxCategory ? {} : before ? { taxCategory: before.taxCategory } : {}),
+      });
     }
     if (items.length === 0 && missing.length === 0) return { error: '品目を入れてください' };
     const filled = await this.fillPrices(who, name, items);
@@ -925,7 +982,7 @@ function partialItems(amount: number, inv: StoredDoc, rounding: 'floor' | 'round
   const rate = [...rates][0] ?? 10;
   const guess = Math.floor(amount / (1 + rate / 100));
   for (let base = guess - 2; base <= guess + 3; base++) {
-    const item: SalesItem = { name: `${inv.number ?? '請求'} のお支払い（一部）`, code: '', quantity: 1, unit: '式', unitPrice: base, taxRate: rate };
+    const item: SalesItem = { name: `${inv.number ?? '請求'} のお支払い（一部）`, code: '', quantity: 1, unit: '式', unitPrice: base, taxRate: rate, taxCategory: taxCategoryOf(inv.items[0] ?? {}) };
     if (docTotals([item], rounding).total === amount) return { items: [item] };
   }
   return { error: 'この額では、消費税の内訳を決められませんでした' };

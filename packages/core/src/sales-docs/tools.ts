@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  SALES_DOC_KIND_LABELS, SALES_DOC_STATUS_LABELS, SALES_ORDER_STATUS_LABELS,
+  SALES_DOC_KIND_LABELS, SALES_DOC_STATUS_LABELS, SALES_ORDER_STATUS_LABELS, plannedTaxNote, taxCategoryOf, taxRateLabel,
   type SalesDocKind, type SalesDocsSettings, type SalesDocument, type SalesOrder, type SalesOrderStatus,
 } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
@@ -55,7 +55,8 @@ export function briefDoc(d: SalesDocument) {
   return {
     documentId: d.id, path: salesDocPath(d.id), kind: SALES_DOC_KIND_LABELS[d.kind], number: d.number ? numberText(d) : '（下書き。発行時に付けます）',
     status: SALES_DOC_STATUS_LABELS[d.status], to: d.party.name || d.party.person, subject: d.subject, date: d.issuedOn, due: d.dueOn,
-    subtotal: d.subtotal, tax: d.tax, total: d.total, taxLines: d.taxLines.map((x) => `${x.rate}% 対象 ${yenText(x.base)}・消費税 ${yenText(x.tax)}`),
+    subtotal: d.subtotal, tax: d.tax, total: d.total,
+    taxLines: d.taxLines.map((x) => (x.rate === 0 ? `対象外 ${yenText(x.base)}` : `${taxRateLabel(x.rate)} ${yenText(x.base)}・消費税 ${yenText(x.tax)}`)),
     items: d.items.map((i) => `${i.name} ${i.quantity}${i.unit}${i.unitPrice === null ? '（単価なし）' : ` × ${yenText(i.unitPrice)}`}`).slice(0, 20),
     ...(d.kind === 'delivery' ? { billed: !!d.invoiceId } : {}),
     ...(d.notices.length ? { notices: d.notices } : {}),
@@ -120,7 +121,7 @@ export const salesCreateDocument: Tool = {
   helpText: '注文書・納品書・請求書・領収書を PDF で作ります。注文書・請求書・領収書は下書きで、あなたの確認の後に発行します。社外へは送りません',
   description: [
     '書類を作る。kind は purchase_order（注文書）・delivery（納品書）・invoice（請求書）・receipt（領収書）。',
-    '品目（items）は { name, code, quantity, unit, unitPrice, taxRate, discount } の配列。**金額・消費税・合計を自分で計算しない**（ツールが計算する）。単価が分からなければ unitPrice を空にする。',
+    '品目（items）は { name, code, quantity, unit, unitPrice, taxCategory, discount } の配列。**金額・消費税・合計を自分で計算しない**（ツールが計算する）。単価が分からなければ unitPrice を空にする。taxCategory は消費税の区分で、standard（標準 10%）・food（飲食料品。軽減税率）・news（定期購読の新聞。軽減税率）・exempt（対象外: 対価の無い会費・寄付・印紙・切手など）。酒類・外食・ケータリングは standard。税率の数は渡さない（取引の日の税率をツールが当てる）。分からなければ空にする（ツールが品名から決める）。',
     '受注から作るときは orderNumber（S-…）。請求書で納品書をまとめるときは deliveryNumbers（D-… の配列）か、取引先の未請求の納品書をまとめるなら collectFor に取引先の名前。',
     '領収書は invoiceNumber（I-…）。一部の入金なら amount に受け取った額（税込）。下書きを直すときは documentId にその書類を渡し、直す項目だけを渡す。',
   ].join(''),
@@ -130,7 +131,7 @@ export const salesCreateDocument: Tool = {
       documentId: { type: 'string', description: '直す下書きの書類（documentId か番号）' },
       ...PARTY_ARGS,
       subject: { type: 'string', description: '件名（請求書の「〇〇の件」、領収書の但し書き）' },
-      items: { type: 'array', description: '品目。{ name, code, quantity, unit, unitPrice, taxRate, discount } の配列' },
+      items: { type: 'array', description: '品目。{ name, code, quantity, unit, unitPrice, taxCategory, discount } の配列。taxCategory は standard・food・news・exempt' },
       orderNumber: { type: 'string', description: 'つなぐ受注の番号（S-…）' },
       deliveryNumbers: { type: 'array', description: '請求書にまとめる納品書の番号（D-…）' },
       collectFor: { type: 'string', description: '請求書: この取引先の未請求の納品書をまとめる' },
@@ -276,8 +277,10 @@ export function issueLine(d: SalesDocument): string {
     `${SALES_DOC_KIND_LABELS[d.kind]}${d.number ? ` ${numberText(d)}` : ''}`,
     `宛先 ${d.party.name || d.party.person || '（未記入）'}`,
     `${w.headline} ${yenText(d.total)}`,
-    ...(d.taxLines.length ? [`（${d.taxLines.map((x) => `${x.rate}% 対象 ${yenText(x.base)}・消費税 ${yenText(x.tax)}`).join('、')}）`] : []),
+    ...(d.taxLines.length ? [`（${d.taxLines.map((x) => (x.rate === 0 ? `対象外 ${yenText(x.base)}` : `${taxRateLabel(x.rate)} ${yenText(x.base)}・消費税 ${yenText(x.tax)}`)).join('、')}）`] : []),
     ...(w.due && d.dueOn ? [`${w.due} ${d.dueOn}`] : []),
+    // まだ確定していない税率の変更（食料品の 1% など。第15.1.1節）
+    ...[...new Set(d.items.map((i) => plannedTaxNote(taxCategoryOf(i), d.issuedOn)).filter((x): x is string => !!x))],
   ].join('／');
 }
 
@@ -422,7 +425,7 @@ export const salesRecordOrder: Tool = {
   args: {
     properties: {
       party: { type: 'string', description: '取引先の名前' }, person: { type: 'string', description: '先方の担当者（任意）' },
-      items: { type: 'array', description: '品目 { name, quantity, unit, unitPrice } の配列' },
+      items: { type: 'array', description: '品目 { name, quantity, unit, unitPrice, taxCategory } の配列（taxCategory は standard・food・news・exempt。分からなければ空）' },
       dueOn: { type: 'string', description: '納期（YYYY-MM-DD）' }, orderedOn: { type: 'string', description: '注文日（無ければ今日）' },
       customerRef: { type: 'string', description: '相手の注文番号（任意）' }, deliverTo: { type: 'string', description: '納品先（任意）' },
       terms: { type: 'string', description: '支払い条件（任意）' }, notes: { type: 'string', description: '備考（任意）' },

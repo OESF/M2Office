@@ -46,7 +46,7 @@ function createInstruction(kind: SalesDocKind, extra: string[]): string {
   return [
     `頼みたいこと（request）から、sales.create_document を kind=${kind} で 1 回呼んで書類を作る。`,
     '入力に documentId があれば、新しく作らない: 下書きなら sales.create_document の documentId に渡して作り直す（直す項目があれば一緒に渡す）。発行済みの書類を直す頼みなら sales.revise にその番号と直す項目を渡す。直す頼みが無ければ、下書きは documentId だけを渡して作り直す。',
-    '品目ごとに name・quantity・unit・unitPrice（円。「3 万」は 30000）・taxRate（ふつうは 10。飲食料品などの軽減税率なら 8）を渡す。**金額・消費税・合計を自分で計算しない**（ツールが計算する）。単価が書かれていない品目は unitPrice を空にする（推測しない）。',
+    '品目ごとに name・quantity・unit・unitPrice（円。「3 万」は 30000）・taxCategory を渡す。taxCategory は消費税の区分で、standard（標準 10%）・food（飲食料品。軽減税率）・news（定期購読の新聞。軽減税率）・exempt（対象外: 対価の無い会費・寄付・印紙・切手など）。酒類・外食・ケータリングは standard。税率の数は渡さない（取引の日の税率をツールが当てる）。分からなければ空にする（ツールが品名から決める）。**金額・消費税・合計を自分で計算しない**（ツールが計算する）。単価が書かれていない品目は unitPrice を空にする（推測しない）。',
     '宛先（to）が入力か request にあれば渡す。番号（S-… の受注、D-… の納品書、I-… の請求書）が書かれていれば、それを渡す。番号が分からなければ sales.orders・sales.documents で探してよい。',
     '「〇〇社は 20 日締めの翌月末払い」のような取引先の条件が書かれていれば、sales.remember_party で覚える。',
     ...extra,
