@@ -11,3 +11,5 @@ export * from './store.js';
 export * from './service.js';
 export * from './tools.js';
 export * from './agents.js';
+export * from './watch.js';
+export * from './inventory-link.js';

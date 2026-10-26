@@ -13,7 +13,7 @@ import {
   type MailSummary, type TaskItem, type WorkspaceConnector,
 } from '../types.js';
 import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndpoints } from './http.js';
-import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, header, senderAuthenticated, type GmailPart } from './mime.js';
+import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, fromBase64Url, header, senderAuthenticated, type GmailPart } from './mime.js';
 import { externalOf, pickSpace, spaceIdOf, toChatText } from './chat.js';
 import { googleDocs, googleDrive } from './drive.js';
 import { googleSheets } from './sheets.js';
@@ -190,6 +190,25 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
     search: async (p: ConnectorPrincipal, q: { query: string; limit?: number }) => {
       const params = new URLSearchParams({ q: q.query, maxResults: String(clampLimit(q.limit)) });
       return this.summaries(p, await this.listIds(p, params));
+    },
+    attachments: async (p: ConnectorPrincipal, id: string, opts: { maxBytes?: number } = {}) => {
+      const m = await this.gmail(p, `/messages/${encodeURIComponent(id)}?format=full`) as GmailMessage | null;
+      if (!m?.payload) return { messageId: '', files: [] };
+      const max = opts.maxBytes ?? 10 * 1024 * 1024;
+      const parts: GmailPart[] = [];
+      const walk = (part: GmailPart) => { if (part.filename && part.body?.attachmentId) parts.push(part); for (const c of part.parts ?? []) walk(c); };
+      walk(m.payload);
+      const files: { name: string; mime: string; bytes: Uint8Array }[] = [];
+      let total = 0;
+      for (const part of parts.slice(0, 10)) {
+        if ((part.body?.size ?? 0) + total > max) continue;
+        const a = await this.gmail(p, `/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(part.body!.attachmentId!)}`) as { data?: string } | null;
+        if (!a?.data) continue;
+        const bytes = fromBase64Url(a.data);
+        total += bytes.byteLength;
+        files.push({ name: decodeHeaderWords(part.filename!), mime: part.mimeType ?? 'application/octet-stream', bytes });
+      }
+      return { messageId: header(m.payload, 'Message-ID'), files };
     },
     send: async (p: ConnectorPrincipal, mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string; attachments?: MailAttachment[] }) => {
       const thread = mail.replyTo ? await this.threadOf(p, mail.replyTo) : null;

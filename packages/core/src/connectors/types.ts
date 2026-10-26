@@ -129,6 +129,13 @@ export interface MailConnector {
   unread(p: ConnectorPrincipal, opts: { limit?: number; since?: string }): Promise<{ total: number; more: boolean; items: MailSummary[] }>;
   /** 1 通を本文つきで返す。見つからなければ `null`。 */
   get(p: ConnectorPrincipal, id: string): Promise<MailMessage | null>;
+  /**
+   * 1 通の添付と Message-ID を返す（受け取った注文書を受注に入れる。仕様書 第42.13.1節）。読むだけ。
+   *
+   * @param opts.maxBytes 合わせてこの大きさまで読む（超えた添付は読まない）
+   * @remarks 持たない接続口では未定義
+   */
+  attachments?(p: ConnectorPrincipal, id: string, opts?: { maxBytes?: number }): Promise<{ messageId: string; files: { name: string; mime: string; bytes: Uint8Array }[] }>;
   /** 検索の条件（Gmail の検索の書き方）で探す。本文は返さない。 */
   search(p: ConnectorPrincipal, q: { query: string; limit?: number }): Promise<MailSummary[]>;
   /**

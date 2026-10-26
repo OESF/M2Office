@@ -31,7 +31,7 @@ export const MORNING_BRIEF: AgentDefinition = {
   compartment: null,
   // 秘書が毎朝自分で起こす。会話の中で「今日の段取りを教えて」と頼まれたら秘書が取り次いでもよい
   inputs: { type: 'object', properties: {} },
-  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines', 'inquiries.brief', 'subsidies.brief', 'web.research'],
+  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines', 'inquiries.brief', 'subsidies.brief', 'sales.brief', 'web.research'],
   steps: [
     {
       id: 'collect',
@@ -42,7 +42,8 @@ export const MORNING_BRIEF: AgentDefinition = {
       // 労務の期限（第30.19.1節）は人事区画の人だけ。区画の外の人にはツールが「使えない」と返す
       // 問い合わせ（第33.18節）は問い合わせの記録を使う会社の、利用範囲の人だけ。ほかの人にはツールが「使えない」と返す
       // 補助金・助成金（第39.18節）は補助金・助成金の案内を使う会社の、利用範囲の人だけ。ほかの人にはツールが「使えない」と返す
-      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines', 'inquiries.brief', 'subsidies.brief'],
+      // 受注と請求書の下書き（第42.13.2節・第42.13.3節）は販売の書類と受注を使う会社の、利用範囲の人だけ
+      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines', 'inquiries.brief', 'subsidies.brief', 'sales.brief'],
       required: ['profile.read', 'brief.settings', 'notices.list'],
       instruction: [
         'profile.read（本人の自宅・勤務地・今日の日付）・brief.settings（関心の分野と外した項目）・notices.list（社内のお知らせ）を呼ぶ。',
@@ -51,6 +52,7 @@ export const MORNING_BRIEF: AgentDefinition = {
         'あわせて hr.deadlines を 1 回呼ぶ（7 日以内の労務の期限。available が false なら人事の担当者ではないので、何も書かない）。',
         'あわせて inquiries.brief を 1 回呼ぶ（本人が担当の今日が期限・期限を過ぎた問い合わせと、返事を待たせている問い合わせ。available が false なら何も書かない）。',
         'あわせて subsidies.brief を 1 回呼ぶ（「気になる」にした補助金・助成金のうち、締め切りが 7 日のうちのもの。available が false なら何も書かない）。',
+        'あわせて sales.brief を 1 回呼ぶ（発行を待っている請求書の下書きと、納期が明日・過ぎた受注。available が false なら何も書かない。下書きも受注も無ければ何も書かない）。',
         '取れなかったものは、推測で埋めずに「取得できなかった」と書く。',
         '**この段ではブリーフの文章を書かない。** ツールを呼び終えたら、取れたものの要点だけを短い箇条書きで書く（予定は今日の分だけ、メールは差出人と件名、お知らせは題名・締切・isNew）。これから調べる天気やニュースについては何も書かない。',
       ].join('\n'),

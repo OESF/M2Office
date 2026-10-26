@@ -120,14 +120,14 @@ export const salesCreateDocument: Tool = {
   activityLabel: '書類を作っています',
   helpText: '注文書・納品書・請求書・領収書を PDF で作ります。注文書・請求書・領収書は下書きで、あなたの確認の後に発行します。社外へは送りません',
   description: [
-    '書類を作る。kind は purchase_order（注文書）・delivery（納品書）・invoice（請求書）・receipt（領収書）。',
+    '書類を作る。kind は purchase_order（注文書）・delivery（納品書）・invoice（請求書）・receipt（領収書）・acknowledgement（注文請書。受けた注文の写しを相手に送る書類。orderNumber から作る）。',
     '品目（items）は { name, code, quantity, unit, unitPrice, taxCategory, discount } の配列。**金額・消費税・合計を自分で計算しない**（ツールが計算する）。単価が分からなければ unitPrice を空にする。taxCategory は消費税の区分で、standard（標準 10%）・food（飲食料品。軽減税率）・news（定期購読の新聞。軽減税率）・exempt（対象外: 対価の無い会費・寄付・印紙・切手など）。酒類・外食・ケータリングは standard。税率の数は渡さない（取引の日の税率をツールが当てる）。分からなければ空にする（ツールが品名から決める）。',
     '受注から作るときは orderNumber（S-…）。請求書で納品書をまとめるときは deliveryNumbers（D-… の配列）か、取引先の未請求の納品書をまとめるなら collectFor に取引先の名前。',
     '領収書は invoiceNumber（I-…）。一部の入金なら amount に受け取った額（税込）。下書きを直すときは documentId にその書類を渡し、直す項目だけを渡す。',
   ].join(''),
   args: {
     properties: {
-      kind: { type: 'string', description: 'purchase_order・delivery・invoice・receipt' },
+      kind: { type: 'string', description: 'purchase_order・delivery・invoice・receipt・acknowledgement' },
       documentId: { type: 'string', description: '直す下書きの書類（documentId か番号）' },
       ...PARTY_ARGS,
       subject: { type: 'string', description: '件名（請求書の「〇〇の件」、領収書の但し書き）' },
@@ -147,7 +147,7 @@ export const salesCreateDocument: Tool = {
     const service = await serviceOf(ctx);
     if (!service) return UNAVAILABLE;
     const kind = kindOf(args['kind']);
-    if (!kind) return { available: false, created: false, reason: 'kind は purchase_order・delivery・invoice・receipt のどれかです' };
+    if (!kind) return { available: false, created: false, reason: 'kind は purchase_order・delivery・invoice・receipt・acknowledgement のどれかです' };
     const input: CreateDocInput = { kind };
     const docRef = str(args['documentId'], 80);
     if (docRef) {
@@ -538,8 +538,36 @@ export const salesRememberParty: Tool = {
   },
 };
 
+/**
+ * 朝のブリーフに載せる、本人の請求書の下書きと、納期が明日・過ぎた受注（第42.13.2節・第42.13.3節）。
+ *
+ * @remarks 危険度 `read`
+ */
+export const salesBrief: Tool = {
+  name: 'sales.brief',
+  risk: 'read',
+  activityLabel: '受注と請求書の下書きを見ています',
+  helpText: '朝のブリーフに載せる、発行を待っている請求書の下書きと、納期の近い受注を読みます',
+  description: '本人が作った（締めで作られた）請求書の下書きと、本人が入れた受注のうち納期が明日か過ぎていて納品が終わっていないものを返す',
+  args: { properties: {} },
+  async invoke(_args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+    const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const drafts = (await service.list(who(ctx), { kind: 'invoice', status: 'draft', limit: 50 })).filter((d) => d.createdBy === ctx.userId);
+    const orders = (await service.listOrders(who(ctx), { limit: 500 }))
+      .filter((o) => o.createdBy === ctx.userId && (o.status === 'open' || o.status === 'partial') && o.dueOn && o.dueOn <= tomorrow);
+    return {
+      available: true, untrusted: true, path: '/sales',
+      draftInvoices: drafts.slice(0, 10).map((d) => ({ to: d.party.name, total: d.total, subject: d.subject })),
+      dueOrders: orders.slice(0, 10).map((o) => ({ from: o.party.name, number: o.number, dueOn: o.dueOn, late: !!o.dueOn && o.dueOn < today })),
+    };
+  },
+};
+
 /** 販売の書類と受注のツール。 */
 export const SALES_DOC_TOOLS: Tool[] = [
-  salesCreateDocument, salesRevise, salesIssue, salesCancel, salesDocuments, salesPrepareMail, salesImportOrder, salesRecordOrder, salesOrders, salesUpdateOrder,
+  salesBrief, salesCreateDocument, salesRevise, salesIssue, salesCancel, salesDocuments, salesPrepareMail, salesImportOrder, salesRecordOrder, salesOrders, salesUpdateOrder,
   salesRememberParty,
 ];

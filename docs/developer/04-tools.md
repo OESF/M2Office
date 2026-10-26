@@ -80,6 +80,7 @@
 | `quote.prepare_mail` | read | — | 見積書を送るメールの宛先と添えるファイルを確かめます。送るのは承認の後です |
 | `quote.search` | read | — | これまでに作った見積書を、宛先で探します |
 | `recruit.check_text` | read | — | 求人原稿・応募書類の要約・面接の質問に、使ってはならない言葉や抜けている明示事項がないかを確かめます |
+| `sales.brief` | read | — | 朝のブリーフに載せる、発行を待っている請求書の下書きと、納期の近い受注を読みます |
 | `sales.documents` | read | — | 作った注文書・納品書・請求書・領収書を、取引先・日付・金額で探します |
 | `sales.orders` | read | — | 受注を、取引先・注文番号・品名・状態で探します |
 | `sales.prepare_mail` | read | — | 書類を送るメールの宛先と添えるファイルを確かめます。送るのは承認の後です |
@@ -243,6 +244,7 @@
 | `quote.prepare_mail` | `quoteId`: quote.create が返した quoteId、`sendTo`: 送り先のメールアドレス（無ければ空） |
 | `quote.search` | `to`: 宛先に含まれる言葉（会社名など） |
 | `recruit.check_text` | `kind`（必須）: posting・summary・questions のどれか、`text`（必須）: 点検する文 |
+| `sales.brief` | なし |
 | `sales.documents` | `kind`: 書類の種類、`party`: 取引先の名前、`from`: 取引の日の始め、`to`: 取引の日の終わり、`min`: 合計の下限（円）、`max`: 合計の上限（円）、`status`: draft・issued・cancelled、`number`: 番号、`unbilled`: 未請求の納品書だけ |
 | `sales.orders` | `search`: 取引先・注文番号・品名、`status`: 状態、`notDelivered`: 納品が終わっていない受注だけ |
 | `sales.prepare_mail` | `documentId`: 送る書類の documentId か番号、`sendTo`: 送り先のメールアドレス（無ければ空） |
@@ -274,7 +276,7 @@
 | `gmail.create_draft` | `replyTo`: 返信するメールの ID（任意）、`to`: 宛先（返信のときは省略可。元のメールの差出人になる）、`subject`（必須）: 件名、`body`（必須）: 本文 |
 | `pdf.render` | `title`（必須）: 表題（例: 請求書）、`to`: 宛先（例: 株式会社○○ 御中）、`from`: 差出人の各行、`fields`: { label, value } の配列（発行日・番号など）、`rows`（必須）: 明細。{ name, quantity, unitPrice, amount } の配列、`totals`: { label, value } の配列（小計・消費税・合計）。省略すると明細の合計だけ、`notes`: 備考の各行 |
 | `quote.create` | `to`: 宛先（会社名・担当者。例: 株式会社○○ 山田様）、`items`（必須）: 品目。{ name, quantity, unit, unitPrice, taxCategory, group, discount } の配列。group は区分の見出し（任意）、discount は値引きの額（任意。依頼に書かれたものだけ）、`validDays`: 有効期限（発行から何日。既定は会社の見積書の設定）、`paymentTerms`: お支払い条件（任意。無ければ会社の既定）、`terms`: 納期などの条件（任意）、`notes`: 備考（任意） |
-| `sales.create_document` | `kind`（必須）: purchase_order・delivery・invoice・receipt、`documentId`: 直す下書きの書類（documentId か番号）、`to`: 宛先の会社名（個人なら氏名）、`department`: 宛先の部署（任意）、`person`: 宛先の担当者（任意）、`address`: 宛先の住所（任意）、`subject`: 件名（請求書の「〇〇の件」、領収書の但し書き）、`items`: 品目。{ name, code, quantity, unit, unitPrice, taxCategory, discount } の配列。taxCategory は standard・food・news・exempt、`orderNumber`: つなぐ受注の番号（S-…）、`deliveryNumbers`: 請求書にまとめる納品書の番号（D-…）、`collectFor`: 請求書: この取引先の未請求の納品書をまとめる、`invoiceNumber`: 領収書: 元の請求書の番号（I-…）、`amount`: 領収書: 受け取った額（税込。一部の入金のとき）、`dueOn`: 支払期限（請求書）・納期（注文書）。YYYY-MM-DD、`terms`: 支払い条件・納品場所などの条件、`notes`: 備考 |
+| `sales.create_document` | `kind`（必須）: purchase_order・delivery・invoice・receipt・acknowledgement、`documentId`: 直す下書きの書類（documentId か番号）、`to`: 宛先の会社名（個人なら氏名）、`department`: 宛先の部署（任意）、`person`: 宛先の担当者（任意）、`address`: 宛先の住所（任意）、`subject`: 件名（請求書の「〇〇の件」、領収書の但し書き）、`items`: 品目。{ name, code, quantity, unit, unitPrice, taxCategory, discount } の配列。taxCategory は standard・food・news・exempt、`orderNumber`: つなぐ受注の番号（S-…）、`deliveryNumbers`: 請求書にまとめる納品書の番号（D-…）、`collectFor`: 請求書: この取引先の未請求の納品書をまとめる、`invoiceNumber`: 領収書: 元の請求書の番号（I-…）、`amount`: 領収書: 受け取った額（税込。一部の入金のとき）、`dueOn`: 支払期限（請求書）・納期（注文書）。YYYY-MM-DD、`terms`: 支払い条件・納品場所などの条件、`notes`: 備考 |
 | `sales.revise` | `number`（必須）: 訂正する書類の番号（I-… など）か documentId、`to`: 宛先の会社名（個人なら氏名）、`department`: 宛先の部署（任意）、`person`: 宛先の担当者（任意）、`address`: 宛先の住所（任意）、`subject`: 件名、`items`: 品目（すべて置き換える）、`dueOn`: 支払期限・納期（YYYY-MM-DD）、`terms`: 条件、`notes`: 備考 |
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
 | `sheets.create` | `title`（必須）: 題名、`columns`（必須）: 列名、`rows`: 行の配列（各行は値の配列）、`folderId`: 入れるフォルダの ID（任意） |

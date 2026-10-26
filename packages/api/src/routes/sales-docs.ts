@@ -126,6 +126,33 @@ export function salesDocsRoute(deps: AppDeps) {
     });
   });
 
+  /** 受注から注文請書を作る（作ったら発行済み。第42.13.5節）。送るのは業務の承認の後。 */
+  app.post('/orders/:id/acknowledgement', async (c) => {
+    const id = c.req.param('id');
+    if (!ID.test(id)) return c.json({ error: '受注が見つかりません' }, 404);
+    const r = await service.createDocument(who(c), { kind: 'acknowledgement', orderId: id }, null);
+    return 'error' in r ? c.json(r, status(r.error)) : c.json(r, 201);
+  });
+
+  /** 受注の品目の在庫のつながりを直す（`index`・`itemId`。外すなら `null`。第42.13.4節）。 */
+  app.patch('/orders/:id/stock', async (c) => {
+    const id = c.req.param('id');
+    const b = await body(c);
+    const index = typeof b['index'] === 'number' ? b['index'] : -1;
+    const itemId = typeof b['itemId'] === 'string' && ID.test(b['itemId']) ? b['itemId'] : null;
+    const problem = ID.test(id) ? await service.relinkStock(who(c), id, index, itemId) : '受注が見つかりません';
+    if (problem) return c.json({ error: problem }, status(problem));
+    return c.json(await service.getOrder(who(c), id));
+  });
+
+  /** つなげる在庫の品目（在庫管理を使える人だけ）。 */
+  app.get('/stock-items', async (c) => {
+    const w = who(c);
+    const inv = service.deps.inventory;
+    if (!inv || !(await inv.access(w.tenantId, w.userId))) return c.json({ items: [] });
+    return c.json({ items: await inv.items(w.tenantId) });
+  });
+
   /** 受注の残りの数で納品書を作る（作ったら発行済み。第42.4.2節）。 */
   app.post('/orders/:id/delivery', async (c) => {
     const id = c.req.param('id');

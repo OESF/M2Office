@@ -8,11 +8,11 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { createPool } from '../repository/pool.js';
 import type {
-  SalesDocKind, SalesDocStatus, SalesDocument, SalesItem, SalesOrder, SalesOrderFlag, SalesOrderSource, SalesParty, SalesTaxLine,
+  SalesDocKind, SalesDocStatus, SalesDocument, SalesItem, SalesOrder, SalesOrderFlag, SalesOrderSource, SalesParty, SalesStockLink, SalesTaxLine,
 } from '@m2office/shared';
 
-/** 置き場に持つ書類（作った人の名前は持たない。見せるときに引く）。 */
-export type StoredDoc = Omit<SalesDocument, 'createdByName'>;
+/** 置き場に持つ書類（作った人の名前は持たない。見せるときに引く）。`stockMoves` は納品書で出庫した在庫の記録（第42.13.4節） */
+export type StoredDoc = Omit<SalesDocument, 'createdByName'> & { stockMoves: string[] };
 
 /** 新しく作る書類。 */
 export type NewDoc = Omit<StoredDoc, 'id' | 'createdAt' | 'updatedAt'>;
@@ -20,10 +20,10 @@ export type NewDoc = Omit<StoredDoc, 'id' | 'createdAt' | 'updatedAt'>;
 /** 直せる書類の項目。 */
 export type DocPatch = Partial<Pick<StoredDoc,
   'number' | 'status' | 'superseded' | 'party' | 'subject' | 'items' | 'subtotal' | 'tax' | 'total' | 'taxLines' | 'issuedOn' | 'dueOn'
-  | 'terms' | 'notes' | 'orderId' | 'invoiceId' | 'deliveryIds' | 'fileId' | 'cancelReason' | 'notices' | 'runId'>>;
+  | 'terms' | 'notes' | 'orderId' | 'invoiceId' | 'deliveryIds' | 'fileId' | 'cancelReason' | 'notices' | 'runId' | 'stockMoves'>>;
 
-/** 置き場に持つ受注（状態と納めた数は書類から求める）。 */
-export type StoredOrder = Omit<SalesOrder, 'status' | 'delivered' | 'createdByName'> & { cancelled: boolean };
+/** 置き場に持つ受注（状態と納めた数は書類から求める）。`dueNotifiedOn` は納期の見張りで知らせた日（第42.13.3節） */
+export type StoredOrder = Omit<SalesOrder, 'status' | 'delivered' | 'createdByName'> & { cancelled: boolean; dueNotifiedOn: string | null };
 
 /** 新しく作る受注。 */
 export type NewOrder = Omit<StoredOrder, 'id' | 'createdAt' | 'updatedAt'>;
@@ -31,7 +31,7 @@ export type NewOrder = Omit<StoredOrder, 'id' | 'createdAt' | 'updatedAt'>;
 /** 直せる受注の項目。 */
 export type OrderPatch = Partial<Pick<StoredOrder,
   'party' | 'customerRef' | 'orderedOn' | 'dueOn' | 'deliverTo' | 'terms' | 'notes' | 'items' | 'subtotal' | 'tax' | 'total' | 'statedTotal'
-  | 'cancelled' | 'cancelReason' | 'flags' | 'quoteNumber' | 'sourceFileId'>>;
+  | 'cancelled' | 'cancelReason' | 'flags' | 'quoteNumber' | 'sourceFileId' | 'mailMessageId' | 'stock' | 'dueNotifiedOn'>>;
 
 /** 書類の絞り込み（第42.6節: 取引の日付・金額・取引先で探せる）。 */
 export interface DocQuery {
@@ -91,6 +91,16 @@ export interface SalesDocStore {
   deleteOrder(tenantId: string, id: string): Promise<void>;
   getParty(tenantId: string, key: string): Promise<PartyMemo | null>;
   saveParty(tenantId: string, p: Omit<PartyMemo, 'updatedAt'>): Promise<void>;
+  /** メールの見回りの印（見た時刻・その日の取り込みの数）。無ければ `null` */
+  getMailCursor(tenantId: string, userId: string): Promise<{ checkedAt: string; day: string | null; dayCount: number } | null>;
+  setMailCursor(tenantId: string, userId: string, c: { checkedAt: string; day: string | null; dayCount: number }): Promise<void>;
+  /** まだ見ていないメールの ID だけを返す */
+  unseenMails(tenantId: string, userId: string, mailIds: string[]): Promise<string[]>;
+  markMailSeen(tenantId: string, userId: string, mailId: string): Promise<void>;
+  /** その日のその見回りを、まだしていなければ記録して `true`（日に 1 回にする） */
+  claimWatchRun(tenantId: string, kind: string, day: string): Promise<boolean>;
+  /** 締めの請求書の下書きを作った区切りを記録する。もう記録してあれば `false` */
+  claimClosing(tenantId: string, partyKey: string, cutoff: string): Promise<boolean>;
 }
 
 /** 取引先の名前を比べる形（法人格と空白を除く）。 */
@@ -115,6 +125,7 @@ interface DocRow {
   party: unknown; subject: string; items: SalesItem[] | null; subtotal: unknown; tax: unknown; total: unknown; tax_lines: SalesTaxLine[] | null;
   issued_on: unknown; due_on: unknown; terms: string; notes: string; order_id: string | null; invoice_id: string | null; delivery_ids: string[] | null;
   file_id: string | null; cancel_reason: string; notices: string[] | null; run_id: string | null; created_by: string; created_at: unknown; updated_at: unknown;
+  stock_moves: string[] | null;
 }
 
 const toDoc = (r: DocRow): StoredDoc => ({
@@ -122,14 +133,14 @@ const toDoc = (r: DocRow): StoredDoc => ({
   party: party(r.party), subject: r.subject, items: r.items ?? [], subtotal: n(r.subtotal), tax: n(r.tax), total: n(r.total), taxLines: r.tax_lines ?? [],
   issuedOn: day(r.issued_on) ?? '', dueOn: day(r.due_on), terms: r.terms, notes: r.notes, orderId: r.order_id, invoiceId: r.invoice_id,
   deliveryIds: r.delivery_ids ?? [], fileId: r.file_id, cancelReason: r.cancel_reason, notices: r.notices ?? [], runId: r.run_id,
-  createdBy: r.created_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
+  createdBy: r.created_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), stockMoves: r.stock_moves ?? [],
 });
 
 interface OrderRow {
   id: string; number: string; party: unknown; customer_ref: string; ordered_on: unknown; due_on: unknown; deliver_to: string; terms: string; notes: string;
   items: SalesItem[] | null; subtotal: unknown; tax: unknown; total: unknown; stated_total: unknown; cancelled: boolean; cancel_reason: string;
   flags: SalesOrderFlag[] | null; source_file_id: string | null; source: SalesOrderSource; quote_number: string | null; created_by: string;
-  created_at: unknown; updated_at: unknown;
+  created_at: unknown; updated_at: unknown; mail_message_id: string | null; stock: SalesStockLink[] | null; due_notified_on: unknown;
 }
 
 const toOrder = (r: OrderRow): StoredOrder => ({
@@ -137,7 +148,7 @@ const toOrder = (r: OrderRow): StoredOrder => ({
   deliverTo: r.deliver_to, terms: r.terms, notes: r.notes, items: r.items ?? [], subtotal: n(r.subtotal), tax: n(r.tax), total: n(r.total),
   statedTotal: r.stated_total === null || r.stated_total === undefined ? null : n(r.stated_total), cancelled: r.cancelled, cancelReason: r.cancel_reason,
   flags: r.flags ?? [], sourceFileId: r.source_file_id, source: r.source, quoteNumber: r.quote_number, createdBy: r.created_by,
-  createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
+  createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), mailMessageId: r.mail_message_id, stock: r.stock ?? [], dueNotifiedOn: day(r.due_notified_on),
 });
 
 /** 直せる項目と列の対応（利用者の入力を列名に使わない）。jsonb の列は値を JSON にして渡す。 */
@@ -146,13 +157,14 @@ const DOC_COLUMNS: Record<keyof DocPatch, [string, boolean]> = {
   items: ['items', true], subtotal: ['subtotal', false], tax: ['tax', false], total: ['total', false], taxLines: ['tax_lines', true],
   issuedOn: ['issued_on', false], dueOn: ['due_on', false], terms: ['terms', false], notes: ['notes', false], orderId: ['order_id', false],
   invoiceId: ['invoice_id', false], deliveryIds: ['delivery_ids', true], fileId: ['file_id', false], cancelReason: ['cancel_reason', false],
-  notices: ['notices', true], runId: ['run_id', false],
+  notices: ['notices', true], runId: ['run_id', false], stockMoves: ['stock_moves', true],
 };
 const ORDER_COLUMNS: Record<keyof OrderPatch, [string, boolean]> = {
   party: ['party', true], customerRef: ['customer_ref', false], orderedOn: ['ordered_on', false], dueOn: ['due_on', false], deliverTo: ['deliver_to', false],
   terms: ['terms', false], notes: ['notes', false], items: ['items', true], subtotal: ['subtotal', false], tax: ['tax', false], total: ['total', false],
   statedTotal: ['stated_total', false], cancelled: ['cancelled', false], cancelReason: ['cancel_reason', false], flags: ['flags', true],
-  quoteNumber: ['quote_number', false], sourceFileId: ['source_file_id', false],
+  quoteNumber: ['quote_number', false], sourceFileId: ['source_file_id', false], mailMessageId: ['mail_message_id', false], stock: ['stock', true],
+  dueNotifiedOn: ['due_notified_on', false],
 };
 
 /** 書類の絞り込みをメモリの上で当てる（メモリの置き場とテストのため）。 */
@@ -225,11 +237,11 @@ export class PostgresSalesDocStore implements SalesDocStore {
     const id = `sd-${randomUUID()}`;
     await this.q(tenantId,
       `insert into sales_documents (id, tenant_id, kind, number, version, previous_id, superseded, status, party, subject, items, subtotal, tax, total,
-         tax_lines, issued_on, due_on, terms, notes, order_id, invoice_id, delivery_ids, file_id, cancel_reason, notices, run_id, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
+         tax_lines, issued_on, due_on, terms, notes, order_id, invoice_id, delivery_ids, file_id, cancel_reason, notices, run_id, created_by, stock_moves)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
       [id, tenantId, d.kind, d.number, d.version, d.previousId, d.superseded, d.status, JSON.stringify(d.party), d.subject, JSON.stringify(d.items),
         d.subtotal, d.tax, d.total, JSON.stringify(d.taxLines), d.issuedOn, d.dueOn, d.terms, d.notes, d.orderId, d.invoiceId,
-        JSON.stringify(d.deliveryIds), d.fileId, d.cancelReason, JSON.stringify(d.notices), d.runId, d.createdBy]);
+        JSON.stringify(d.deliveryIds), d.fileId, d.cancelReason, JSON.stringify(d.notices), d.runId, d.createdBy, JSON.stringify(d.stockMoves ?? [])]);
     return id;
   }
 
@@ -266,10 +278,11 @@ export class PostgresSalesDocStore implements SalesDocStore {
     const id = `so-${randomUUID()}`;
     await this.q(tenantId,
       `insert into sales_orders (id, tenant_id, number, party, customer_ref, ordered_on, due_on, deliver_to, terms, notes, items, subtotal, tax, total,
-         stated_total, cancelled, cancel_reason, flags, source_file_id, source, quote_number, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+         stated_total, cancelled, cancel_reason, flags, source_file_id, source, quote_number, created_by, mail_message_id, stock, due_notified_on)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
       [id, tenantId, o.number, JSON.stringify(o.party), o.customerRef, o.orderedOn, o.dueOn, o.deliverTo, o.terms, o.notes, JSON.stringify(o.items),
-        o.subtotal, o.tax, o.total, o.statedTotal, o.cancelled, o.cancelReason, JSON.stringify(o.flags), o.sourceFileId, o.source, o.quoteNumber, o.createdBy]);
+        o.subtotal, o.tax, o.total, o.statedTotal, o.cancelled, o.cancelReason, JSON.stringify(o.flags), o.sourceFileId, o.source, o.quoteNumber, o.createdBy,
+        o.mailMessageId ?? null, JSON.stringify(o.stock ?? []), o.dueNotifiedOn ?? null]);
     return id;
   }
 
@@ -300,6 +313,39 @@ export class PostgresSalesDocStore implements SalesDocStore {
          payment_terms = excluded.payment_terms, learned_from = excluded.learned_from, updated_at = now()`,
       [tenantId, p.key, p.name, p.honorific, p.closingDay, p.paymentTerms, p.learnedFrom]);
   }
+
+  async getMailCursor(tenantId: string, userId: string): Promise<{ checkedAt: string; day: string | null; dayCount: number } | null> {
+    const rows = await this.q<{ checked_at: unknown; day: unknown; day_count: number }>(tenantId, 'select * from sales_mail_cursors where tenant_id = $1 and user_id = $2', [tenantId, userId]);
+    return rows[0] ? { checkedAt: iso(rows[0].checked_at), day: day(rows[0].day), dayCount: rows[0].day_count } : null;
+  }
+
+  async setMailCursor(tenantId: string, userId: string, c: { checkedAt: string; day: string | null; dayCount: number }): Promise<void> {
+    await this.q(tenantId,
+      `insert into sales_mail_cursors (tenant_id, user_id, checked_at, day, day_count) values ($1,$2,$3,$4,$5)
+       on conflict (tenant_id, user_id) do update set checked_at = excluded.checked_at, day = excluded.day, day_count = excluded.day_count`,
+      [tenantId, userId, c.checkedAt, c.day, c.dayCount]);
+  }
+
+  async unseenMails(tenantId: string, userId: string, mailIds: string[]): Promise<string[]> {
+    if (mailIds.length === 0) return [];
+    const rows = await this.q<{ mail_id: string }>(tenantId, 'select mail_id from sales_mail_seen where tenant_id = $1 and user_id = $2 and mail_id = any($3::text[])', [tenantId, userId, mailIds]);
+    const seen = new Set(rows.map((r) => r.mail_id));
+    return mailIds.filter((id) => !seen.has(id));
+  }
+
+  async markMailSeen(tenantId: string, userId: string, mailId: string): Promise<void> {
+    await this.q(tenantId, 'insert into sales_mail_seen (tenant_id, user_id, mail_id) values ($1,$2,$3) on conflict do nothing', [tenantId, userId, mailId]);
+  }
+
+  async claimWatchRun(tenantId: string, kind: string, d: string): Promise<boolean> {
+    const rows = await this.q<{ kind: string }>(tenantId, 'insert into sales_watch_runs (tenant_id, kind, day) values ($1,$2,$3) on conflict do nothing returning kind', [tenantId, kind, d]);
+    return rows.length > 0;
+  }
+
+  async claimClosing(tenantId: string, key: string, cutoff: string): Promise<boolean> {
+    const rows = await this.q<{ party_key: string }>(tenantId, 'insert into sales_closing_runs (tenant_id, party_key, cutoff) values ($1,$2,$3) on conflict do nothing returning party_key', [tenantId, key, cutoff]);
+    return rows.length > 0;
+  }
 }
 
 /** 受注が言葉に合うか（取引先・相手の注文番号・受注番号・品名）。 */
@@ -314,6 +360,9 @@ export class MemorySalesDocStore implements SalesDocStore {
   private readonly docs = new Map<string, StoredDoc & { tenantId: string }>();
   private readonly orders = new Map<string, StoredOrder & { tenantId: string }>();
   private readonly parties = new Map<string, PartyMemo>();
+  private readonly cursors = new Map<string, { checkedAt: string; day: string | null; dayCount: number }>();
+  private readonly seen = new Set<string>();
+  private readonly marks = new Set<string>();
 
   async listDocs(tenantId: string, q: DocQuery = {}): Promise<StoredDoc[]> {
     return [...this.docs.values()].filter((d) => d.tenantId === tenantId && matchDoc(d, q))
@@ -384,5 +433,35 @@ export class MemorySalesDocStore implements SalesDocStore {
 
   async saveParty(tenantId: string, p: Omit<PartyMemo, 'updatedAt'>): Promise<void> {
     this.parties.set(`${tenantId}:${p.key}`, { ...p, updatedAt: new Date().toISOString() });
+  }
+
+  async getMailCursor(tenantId: string, userId: string) {
+    return this.cursors.get(`${tenantId}:${userId}`) ?? null;
+  }
+
+  async setMailCursor(tenantId: string, userId: string, c: { checkedAt: string; day: string | null; dayCount: number }): Promise<void> {
+    this.cursors.set(`${tenantId}:${userId}`, { ...c });
+  }
+
+  async unseenMails(tenantId: string, userId: string, mailIds: string[]): Promise<string[]> {
+    return mailIds.filter((id) => !this.seen.has(`${tenantId}:${userId}:${id}`));
+  }
+
+  async markMailSeen(tenantId: string, userId: string, mailId: string): Promise<void> {
+    this.seen.add(`${tenantId}:${userId}:${mailId}`);
+  }
+
+  async claimWatchRun(tenantId: string, kind: string, d: string): Promise<boolean> {
+    const k = `run:${tenantId}:${kind}:${d}`;
+    if (this.marks.has(k)) return false;
+    this.marks.add(k);
+    return true;
+  }
+
+  async claimClosing(tenantId: string, key: string, cutoff: string): Promise<boolean> {
+    const k = `close:${tenantId}:${key}:${cutoff}`;
+    if (this.marks.has(k)) return false;
+    this.marks.add(k);
+    return true;
   }
 }

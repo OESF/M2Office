@@ -138,6 +138,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === WEB_REVIEW_EXTENSION_ID ? { webReview: settings.webReview } : {}),
         // 契約の管理: 契約書の置き場（第38.7節）
         ...(e.pkg.manifest.id === CONTRACTS_EXTENSION_ID ? { contracts: settings.contracts } : {}),
+        // 販売の書類と受注: メールに届いた注文書を受注に入れるか（第42.13.1節）
+        ...(e.pkg.manifest.id === SALES_DOCS_EXTENSION_ID ? { salesDocs: settings.salesDocs } : {}),
         // 補助金・助成金の案内: 会社の関心と業種（第39.3節）
         // 会員とポイント: 来店のポイント・購入の率・有効期限・LINE の会員証（第40.4節）
         ...(e.pkg.manifest.id === MEMBERS_EXTENSION_ID ? { members: settings.members } : {}),
@@ -1017,6 +1019,20 @@ export function extensionsRoute(deps: AppDeps) {
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const problem = await deps.members.service.saveSettings({ tenantId: tenant.id, userId: user.id }, body);
     return problem ? c.json({ error: problem }, problem.includes('管理者だけ') ? 403 : 400) : c.json({ ok: true });
+  });
+
+  /** 販売の書類と受注の設定（メールに届いた注文書を受注に入れるか。第42.13.1節）。 */
+  app.put(`/${SALES_DOCS_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ mailIntake?: unknown }>().catch(() => ({} as { mailIntake?: unknown }));
+    if (typeof body.mailIntake !== 'boolean') return c.json({ error: 'mailIntake に true か false を指定してください' }, 400);
+    const settings = await deps.repo.getTenantSettings(tenant.id);
+    await deps.repo.saveTenantSettings(tenant.id, 'salesDocs', { ...settings.salesDocs, mailIntake: body.mailIntake }, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'sales_docs.mail_intake', targetType: 'settings', targetId: 'salesDocs',
+      detail: { mailIntake: body.mailIntake }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true });
   });
 
   /** 補助金・助成金の案内の、会社の関心と業種を直す（管理者だけ。第39.12節）。 */

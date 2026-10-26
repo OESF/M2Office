@@ -18,6 +18,7 @@ import { BackButton } from './back-button.js';
 /** 書類の種類ごとの業務（送る・直すを頼む先）。 */
 const AGENT_OF: Record<SalesDocKind, string> = {
   purchase_order: 'sales-docs:purchase-order', delivery: 'sales-docs:delivery-note', invoice: 'sales-docs:invoice', receipt: 'sales-docs:receipt',
+  acknowledgement: 'sales-docs:acknowledgement',
 };
 const RECEIPT_AGENT = AGENT_OF.receipt;
 
@@ -247,9 +248,12 @@ function OrderView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () =
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
+  // つなげる在庫の品目（在庫管理を使える人だけ。第42.13.4節）
+  const [stockItems, setStockItems] = useState<{ id: string; name: string; unit: string; available: number }[]>([]);
   const load = useCallback(() => {
     api.sales.order(id).then((x) => { setR(x); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
   }, [id]);
+  useEffect(() => { api.sales.stockItems().then((x) => setStockItems(x.items)).catch(() => setStockItems([])); }, []);
   useEffect(load, [load, changeKey]);
   if (error) return <div className="contracts"><BackButton label="受注の一覧" onClick={onBack} /><p className="error">{error}</p></div>;
   if (!r) return <div className="contracts"><p className="muted">読み込み中…</p></div>;
@@ -288,13 +292,26 @@ function OrderView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () =
           <p className="small muted">{[o.party.department, o.party.person, o.party.address, o.party.phone, o.party.email].filter(Boolean).join('　')}</p>
         )}
         <div className="table-scroll"><table className="table">
-          <thead><tr><th>品名</th><th>品番</th><th className="num">数量</th><th className="num">納品済み</th><th className="num">単価</th><th>税</th></tr></thead>
+          <thead><tr><th>品名</th><th>品番</th><th className="num">数量</th><th className="num">納品済み</th><th className="num">単価</th><th>税</th>{stockItems.length > 0 && <th>在庫</th>}</tr></thead>
           <tbody>{o.items.map((i, k) => (
             <tr key={k}>
               <td>{i.name}</td><td>{i.code || '—'}</td>
               <td className="num">{i.quantity} {i.unit}</td><td className="num">{o.delivered[k] ?? 0}</td>
               <td className="num">{i.unitPrice === null ? <span className="badge warn">なし</span> : yen(i.unitPrice)}</td>
               <td className="nowrap small">{TAX_CATEGORY_LABELS[taxCategoryOf(i)]}</td>
+              {stockItems.length > 0 && (() => {
+                const link = o.stock.find((l) => l.index === k);
+                return (
+                  <td className="small">
+                    <select value={link?.itemId ?? ''} disabled={busy || o.status === 'cancelled'} aria-label={`${i.name} の在庫の品目`}
+                      onChange={(e) => act(api.sales.relinkStock(o.id, k, e.target.value || null), '在庫のつながりを直しました', '直せませんでした')}>
+                      <option value="">つながない</option>
+                      {stockItems.map((x) => <option key={x.id} value={x.id}>{x.name}（使える数 {x.available}{x.unit}）</option>)}
+                    </select>
+                    {link && link.held > 0 && <div className="muted">取り置き {link.held}</div>}
+                  </td>
+                );
+              })()}
             </tr>
           ))}</tbody>
         </table></div>
@@ -308,6 +325,9 @@ function OrderView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () =
         )}
         {unbilled.length > 0 && (
           <button className="btn small" disabled={busy} onClick={() => act(api.sales.invoice(unbilled.map((d) => d.id)), '請求書の下書きを作りました', '請求書を作れませんでした', (x) => onOpen((x as { doc: SalesDocument }).doc.id))}>請求書を作る</button>
+        )}
+        {o.status !== 'cancelled' && !r.documents.some((d) => d.kind === 'acknowledgement' && d.status === 'issued') && (
+          <button className="btn ghost small" disabled={busy} onClick={() => act(api.sales.acknowledge(o.id), '注文請書を作りました', '注文請書を作れませんでした', (x) => onOpen((x as { doc: SalesDocument }).doc.id))}>注文請書を作る</button>
         )}
         {o.status !== 'cancelled' && (
           <button className="btn ghost small" disabled={busy} onClick={() => {

@@ -87,6 +87,8 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
     },
     get: async (p: ConnectorPrincipal, id: string) =>
       this.mails(p).find((m) => m.id === id) ?? null,
+    // 見本のメールには添付が無い（受注の取り込みの確かめは、単体テストで偽の接続口を使う）
+    attachments: async (_p: ConnectorPrincipal, id: string) => ({ messageId: `<${id}@mock.m2office>`, files: [] }),
     search: async (p: ConnectorPrincipal, q: { query: string; limit?: number }) => {
       // 見本では、件名・差出人・本文の部分一致で探す（Gmail の検索の書き方のうち、言葉だけを見る）
       const words = q.query.replace(/\b(from|subject|is|in|label):\S+/g, ' ').split(/\s+/).filter(Boolean);

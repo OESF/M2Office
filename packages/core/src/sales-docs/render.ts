@@ -16,6 +16,7 @@ export const DOC_WORDS: Record<SalesDocKind, { title: string; greeting: string; 
   delivery: { title: '納品書', greeting: '下記の通り、納品いたします。', number: '納品番号', date: '納品日', due: '', headline: '合計金額' },
   invoice: { title: '御請求書', greeting: '下記の通り、ご請求申し上げます。', number: '請求番号', date: '請求日', due: 'お支払期限', headline: 'ご請求金額' },
   receipt: { title: '領収書', greeting: '', number: '領収番号', date: '日付', due: '', headline: '金額' },
+  acknowledgement: { title: '注文請書', greeting: '下記の通り、ご注文をお請けいたします。', number: '請書番号', date: '日付', due: '納期', headline: '合計金額' },
 };
 
 /** 宛名に敬称を付ける（個人の名前らしければ「様」、それ以外は「御中」。付いていればそのまま）。 */
@@ -41,7 +42,7 @@ export function numberText(d: Pick<StoredDoc, 'number' | 'version' | 'status'>):
  * @param style 会社の帳票の体裁（ロゴ・差出人・印影・振込先）
  * @param settings 会社の設定（型と端数）
  */
-export async function renderSalesDoc(d: StoredDoc, style: InvoiceStyleInput, settings: Pick<TenantSettings, 'invoice'>): Promise<Uint8Array> {
+export async function renderSalesDoc(d: Omit<StoredDoc, 'stockMoves'>, style: InvoiceStyleInput, settings: Pick<TenantSettings, 'invoice'>): Promise<Uint8Array> {
   const w = DOC_WORDS[d.kind];
   const qs = settings.invoice.quote;
   const to = addressee(d.party.name, d.party.person);
@@ -96,7 +97,7 @@ export async function renderSalesDoc(d: StoredDoc, style: InvoiceStyleInput, set
 }
 
 /** 書類の中身を Markdown にする（成果物。承認の画面に出す。第9.3.3節）。 */
-export function docMarkdown(d: StoredDoc): string {
+export function docMarkdown(d: Omit<StoredDoc, 'stockMoves'>): string {
   const w = DOC_WORDS[d.kind];
   return [
     `# ${w.title} ${numberText(d)}${d.status === 'draft' ? '（下書き）' : ''}`,

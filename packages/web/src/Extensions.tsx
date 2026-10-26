@@ -15,7 +15,7 @@ import { JinglePlayer } from './signage-audio.js';
 import { api, ApiError, describeError, type AccessOptions, type ExtensionView, type HrProposalField, type ScopeValue } from './api.js';
 import {
   INVENTORY_FEATURES, SIGNAGE_DEFAULT_COLOR, SIGNAGE_JINGLES, type HrSettings, type InventoryBookingSource, type InventoryFeature, type InventorySettings,
-  type SignageSettings, type SignageSound, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type ColumnBgmTrack, type WebColumnSettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type ContractSettings, type MemberSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
+  type SignageSettings, type SignageSound, COLUMN_INDUSTRIES, COLUMN_RULE_SET_LABELS, COLUMN_PLAN_FREQUENCY_LABELS, type ColumnPlanFrequency, type ColumnBgmTrack, type WebColumnSettings, COMPETITORS_AUTO_RANGE, COMPETITORS_NOTIFY_MAX, COMPETITOR_WATCH_LABELS, competitorAutoMax, competitorWatch, competitorsMax, type CompetitorSettings, type AnnouncementSettings, type ContractSettings, type SalesDocsSettings, type MemberSettings, type WebReviewSettings, type WebReviewCandidates, type WebReviewStatus,
 } from '@m2office/shared';
 import { HelpTip, Markdown } from './help.js';
 import { Icon } from './nav.js';
@@ -309,6 +309,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.announcements && on && <div className="row wrap small ext-inventory"><ConnectorLink page="wordpress">WordPress の接続</ConnectorLink><ConnectorLink page="line">LINE 公式アカウントの接続</ConnectorLink></div>}
       {x.webReview && on && <WebReviewFields settings={x.webReview} busy={busy} onChanged={onChanged} />}
       {x.contracts && on && <ContractStorageFields settings={x.contracts} busy={busy} onChanged={onChanged} />}
+      {x.salesDocs && on && <SalesDocsFields settings={x.salesDocs} busy={busy} onChanged={onChanged} />}
       {x.subsidies && on && <SubsidyFields settings={x.subsidies} busy={busy} onChanged={onChanged} />}
       {x.members && on && <MemberFields settings={x.members} busy={busy} onChanged={onChanged} />}
       <Details item={x} onChanged={onChanged} />
@@ -771,6 +772,23 @@ function ContractStorageFields({ settings, busy, onChanged }: { settings: Contra
         <span>契約書の置き場: {settings.storage ? <strong>{settings.storage.folderName}（Google ドライブ）</strong> : <span className="muted">つないでいません</span>}</span>
         <button className="btn ghost small" disabled={busy || working} onClick={connect}>{working ? 'つないでいます…' : settings.storage ? 'つなぎ直す' : 'つなぐ'}</button>
       </div>
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/** 販売の書類と受注の設定（仕様書 第42.13.1節）。メールに届いた注文書を受注に入れるか（人の受信箱を読むため既定は切り）。 */
+function SalesDocsFields({ settings, busy, onChanged }: { settings: SalesDocsSettings; busy: boolean; onChanged: () => void }) {
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toggle = (v: boolean) => {
+    setWorking(true);
+    api.admin.setSalesDocsMailIntake(v).then(() => { setError(null); onChanged(); })
+      .catch((e) => setError(describeError(e, '保存できませんでした'))).finally(() => setWorking(false));
+  };
+  return (
+    <div className="small ext-inventory">
+      <label className="check"><input type="checkbox" checked={settings.mailIntake} disabled={busy || working} onChange={(e) => toggle(e.target.checked)} />メールに届いた注文書を受注に入れる</label>
       {error && <p className="error">{error}</p>}
     </div>
   );

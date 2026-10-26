@@ -12,7 +12,7 @@ import {
   SALES_DOC_KIND_LABELS, SALES_DOC_NEEDS_ISSUE, SALES_DOC_PREFIX, SALES_DOCS_EXTENSION_ID, canUseAgent,
   effectiveTaxTable, guessTaxCategory, plannedTaxNote, taxCategoryNote, taxCategoryOf, taxRateOn,
   type SalesDocKind, type SalesDocsSettings, type SalesDocument, type SalesItem, type SalesOrder, type SalesOrderFlag, type SalesOrderSource,
-  type SalesOrderStatus, type SalesParty, type SalesSuggestions, type TaxRateEntry,
+  type SalesOrderStatus, type SalesParty, type SalesStockLink, type SalesSuggestions, type TaxRateEntry,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -43,7 +43,38 @@ export interface SalesDocServiceDeps {
   ocrFor?(tenantId: string): Promise<OcrFn | undefined>;
   /** 消費税の税率の表（運営がマスター管理画面で直したもの。無ければ同梱の表。第15.1.1.1節） */
   taxTable?(): Promise<TaxRateEntry[]>;
+  /** 在庫管理とのつなぎ（第42.13.4節）。在庫管理を使わない環境では無い */
+  inventory?: SalesInventory;
   logger?: Logger;
+}
+
+/**
+ * 在庫管理とのつなぎ（第42.13.4節）。在庫管理の処理を、販売の書類に要る口だけに絞って渡す。
+ */
+export interface SalesInventory {
+  /** その人が在庫管理を使えるか（使えなければ `null`） */
+  access(tenantId: string, userId: string): Promise<unknown | null>;
+  /** 品目と使える数 */
+  items(tenantId: string): Promise<{ id: string; name: string; sku: string; unit: string; available: number }[]>;
+  /** 取り置く（受注の引き当て）。取り置きの ID を返す */
+  hold(tenantId: string, userId: string, r: { itemId: string; qty: number; ref: string }): Promise<string>;
+  /** 取り置きを外す */
+  release(tenantId: string, reservationId: string): Promise<void>;
+  /** 出庫を記録する（納品書）。記録の ID を返す（記録できなければ `null`） */
+  out(tenantId: string, userId: string, r: { itemId: string; qty: number; reason: string; sourceId: string }): Promise<string | null>;
+  /** 出庫を戻す（納品書の取り消し） */
+  undo(tenantId: string, userId: string, moveId: string, reason: string, sourceId: string): Promise<void>;
+}
+
+/** メールから取り込むもの（第42.13.1節）。 */
+export interface MailOrderInput {
+  /** Gmail のメールの ID */
+  id: string;
+  /** メールの Message-ID（同じメールを何人も受け取ったときに 1 回だけ取り込む） */
+  messageId: string;
+  subject: string;
+  body: string;
+  files: { name: string; mime: string; bytes: Uint8Array }[];
 }
 
 /**
@@ -482,7 +513,7 @@ export class SalesDocService {
     const base: NewDoc = {
       kind: input.kind, number: null, version: 1, previousId: null, superseded: false, status: issueNow ? 'issued' : 'draft',
       party, subject, items, ...totals, issuedOn: today, dueOn, terms, notes: str(input.notes, 400),
-      orderId, invoiceId, deliveryIds, fileId: null, cancelReason: '', notices: [], runId, createdBy: who.userId,
+      orderId, invoiceId, deliveryIds, fileId: null, cancelReason: '', notices: [], runId, createdBy: who.userId, stockMoves: [],
     };
     // 納品書はすぐ番号を付ける（同じ番号が重なれば次の番号で作り直す）
     let id = '';
@@ -500,6 +531,11 @@ export class SalesDocService {
       }
     }
     await this.audit(who, issueNow ? 'sales_doc.issue' : 'sales_doc.create', 'sales_document', id, { kind: input.kind, total: totals.total, number: doc!.number });
+    // 受注から作った納品書は、在庫につないだ品目を出庫し、取り置きを残りの数にする（第42.13.4節）
+    if (input.kind === 'delivery' && orderId) {
+      const moved = await this.stockOut(who, doc!, orderId).catch((err) => { this.log.warn('納品書の出庫を記録できませんでした', { err }); return []; });
+      if (moved.length) { await store.updateDoc(who.tenantId, id, { stockMoves: moved }); doc = { ...doc!, stockMoves: moved }; notes.push(`在庫から出庫しました（${moved.length} 品目）`); }
+    }
     return { doc: this.view(doc!, await this.names(who.tenantId)), warnings, notes };
   }
 
@@ -626,6 +662,12 @@ export class SalesDocService {
         if (dl?.invoiceId === d.id) await store.updateDoc(who.tenantId, did, { invoiceId: null });
       }
     }
+    // 納品書を取り消したら、出庫を戻し、受注の取り置きを戻す（第42.13.4節）
+    if (d.kind === 'delivery' && d.stockMoves.length && this.deps.inventory) {
+      for (const m of d.stockMoves) await this.deps.inventory.undo(who.tenantId, who.userId, m, `納品書 ${d.number ?? ''} の取り消し`, d.id).catch((err) => this.log.warn('出庫を戻せませんでした', { err }));
+      await store.updateDoc(who.tenantId, d.id, { stockMoves: [] });
+      if (d.orderId) await this.syncHolds(who, d.orderId).catch(() => undefined);
+    }
     await this.audit(who, 'sales_doc.cancel', 'sales_document', d.id, { kind: d.kind, number: d.number, reason: why });
     return null;
   }
@@ -700,7 +742,7 @@ export class SalesDocService {
    *
    * @returns 同じ注文がもうあれば、取り込まずにその受注を返す（`duplicate: true`）
    */
-  async importOrder(who: SalesViewer, fileId: string, source: SalesOrderSource = 'upload'): Promise<ImportedOrder> {
+  async importOrder(who: SalesViewer, fileId: string, source: SalesOrderSource = 'upload', mailMessageId: string | null = null): Promise<ImportedOrder> {
     const ocr = this.deps.ocrFor ? await this.deps.ocrFor(who.tenantId).catch(() => undefined) : undefined;
     const read = await fileToText(this.deps.repo, this.deps.files, who.tenantId, fileId, who.userId, ocr);
     if (!read.ok) return { error: read.note ?? '注文書を読めませんでした' };
@@ -709,7 +751,7 @@ export class SalesDocService {
     const company = settings.company.legalName || settings.company.shortName || '';
     const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
     const r = await readOrder(llm, read.text, company, jstToday());
-    return this.saveOrder(who, { ...r, sourceFileId: fileId, source, quoteNumber: null });
+    return this.saveOrder(who, { ...r, sourceFileId: fileId, source, quoteNumber: null, mailMessageId });
   }
 
   /**
@@ -722,8 +764,15 @@ export class SalesDocService {
     guesses?: string[];
     /** 手で入れたときの、入っていない項目 */
     missing?: string[];
+    /** 取り込んだメールの Message-ID（第42.13.1節） */
+    mailMessageId?: string | null;
   }): Promise<ImportedOrder> {
     const { store } = this.deps;
+    // 同じメール（何人も受け取ったもの）はもう取り込んでいれば、その受注を返す
+    if (r.mailMessageId) {
+      const same = (await store.listOrders(who.tenantId, { limit: 500 })).find((o) => o.mailMessageId === r.mailMessageId && !o.cancelled);
+      if (same) return { order: this.orderView(same, await store.listDocs(who.tenantId, { withSuperseded: true, limit: 2000 }), await this.names(who.tenantId)), duplicate: true };
+    }
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
     const key = partyKey(r.party.name);
     // 二重の取り込み: 同じ取引先で、相手の注文番号が同じ（無ければ同じ注文日と同じ品目）
@@ -781,6 +830,7 @@ export class SalesDocService {
           number, party: r.party, customerRef: r.customerRef, orderedOn: r.orderedOn, dueOn: r.dueOn, deliverTo: r.deliverTo, terms: r.terms, notes: r.notes,
           items: r.items, subtotal: money.subtotal, tax: money.tax, total: money.total, statedTotal: r.statedTotal, cancelled: false, cancelReason: '',
           flags, sourceFileId: r.sourceFileId, source: r.source, quoteNumber, createdBy: who.userId,
+          mailMessageId: r.mailMessageId ?? null, stock: [], dueNotifiedOn: null,
         });
       } catch (err) {
         if (attempt === 4) throw err;
@@ -789,6 +839,8 @@ export class SalesDocService {
     // 支払い条件があれば、取引先の覚えにする（締め日と支払い条件。第42.4.2節）
     if (r.terms && r.party.name) await this.rememberParty(who, r.party.name, { paymentTerms: r.terms }, '注文書');
     await this.audit(who, 'sales_order.create', 'sales_order', id, { source: r.source, items: r.items.length, flags: flags.length });
+    // 在庫管理を使う会社では、品目を在庫の品目につなぎ、取り置く（第42.13.4節）
+    await this.linkStock(who, id).catch((err) => this.log.warn('受注を在庫につなげませんでした', { err }));
     const created = await store.getOrder(who.tenantId, id);
     return { order: this.orderView(created!, [], await this.names(who.tenantId)), duplicate: false };
   }
@@ -930,6 +982,12 @@ export class SalesDocService {
       notes: typeof body['notes'] === 'string' ? str(body['notes'], 300) : o.notes,
     });
     await this.audit(who, 'sales_order.update', 'sales_order', id, { fields: Object.keys(body).slice(0, 12) });
+    // 品目を直したら、在庫のつながりを付け直す（品目の並びが変わるため。第42.13.4節）
+    if (itemsChanged && o.stock.length && this.deps.inventory) {
+      for (const l of o.stock) if (l.reservationId) await this.deps.inventory.release(who.tenantId, l.reservationId).catch(() => undefined);
+      await store.updateOrder(who.tenantId, id, { stock: [] });
+    }
+    if (itemsChanged) await this.linkStock(who, id).catch(() => undefined);
     return null;
   }
 
@@ -941,6 +999,7 @@ export class SalesDocService {
     const why = str(reason, 200);
     if (!why) return '取り消しの理由を書いてください';
     await this.deps.store.updateOrder(who.tenantId, id, { cancelled: true, cancelReason: why });
+    await this.syncHolds(who, id).catch((err) => this.log.warn('受注の取り置きを外せませんでした', { err }));
     await this.audit(who, 'sales_order.cancel', 'sales_order', id, { reason: why });
     return null;
   }
@@ -957,6 +1016,149 @@ export class SalesDocService {
     await this.deps.store.deleteOrder(who.tenantId, id);
     await this.audit(who, 'sales_order.delete', 'sales_order', id, {});
     return null;
+  }
+
+  // ───────── 在庫とのつなぎ（第42.13.4節） ─────────
+
+  /** その人が在庫管理を使えるか。 */
+  private async stockOn(who: SalesViewer): Promise<SalesInventory | null> {
+    const inv = this.deps.inventory;
+    if (!inv) return null;
+    return (await inv.access(who.tenantId, who.userId).catch(() => null)) ? inv : null;
+  }
+
+  /**
+   * 受注の品目を在庫の品目に当てる（品番が同じなら品番、無ければ名前。1 つに決まらなければつながない）。当たった品目は取り置く。
+   * 足りない品目は印を付ける（取り置きは受注の数で行い、足りない分は在庫管理の発注の案に出る）
+   */
+  async linkStock(who: SalesViewer, orderId: string): Promise<void> {
+    const inv = await this.stockOn(who);
+    if (!inv) return;
+    const o = await this.deps.store.getOrder(who.tenantId, orderId);
+    if (!o || o.cancelled) return;
+    const items = await inv.items(who.tenantId);
+    const norm = (v: string) => quoteItemKey(v);
+    const links: SalesStockLink[] = [...o.stock];
+    for (const [index, it] of o.items.entries()) {
+      if (links.some((l) => l.index === index)) continue;
+      const byCode = it.code ? items.filter((x) => x.sku && x.sku.normalize('NFKC').toLowerCase() === it.code.normalize('NFKC').toLowerCase()) : [];
+      const byName = items.filter((x) => norm(x.name) === norm(it.name));
+      const near = byCode.length || byName.length ? [] : items.filter((x) => norm(x.name).includes(norm(it.name)) || norm(it.name).includes(norm(x.name)));
+      const hit = byCode.length === 1 ? byCode[0] : byName.length === 1 ? byName[0] : near.length === 1 ? near[0] : undefined;
+      if (!hit) continue;
+      links.push({ index, itemId: hit.id, itemName: hit.name, held: 0, reservationId: null, availableAtLink: hit.available });
+    }
+    await this.deps.store.updateOrder(who.tenantId, orderId, { stock: links });
+    await this.syncHolds(who, orderId);
+  }
+
+  /**
+   * 受注の取り置きを、まだ納めていない数にそろえる（納品書・取り消しのたびに呼ぶ）。足りない品目は印にする。
+   */
+  async syncHolds(who: SalesViewer, orderId: string): Promise<void> {
+    const inv = this.deps.inventory;
+    if (!inv) return;
+    const o = await this.deps.store.getOrder(who.tenantId, orderId);
+    if (!o || o.stock.length === 0) return;
+    const docs = await this.deps.store.listDocs(who.tenantId, { withSuperseded: true, limit: 2000 });
+    const view = this.orderView(o, docs, new Map());
+    const items = await inv.items(who.tenantId);
+    const short: string[] = [];
+    const links: SalesStockLink[] = [];
+    for (const l of o.stock) {
+      const need = o.cancelled ? 0 : Math.max(0, (o.items[l.index]?.quantity ?? 0) - (view.delivered[l.index] ?? 0));
+      if (l.reservationId) await inv.release(who.tenantId, l.reservationId).catch(() => undefined);
+      const available = (items.find((x) => x.id === l.itemId)?.available ?? 0) + l.held;
+      const reservationId = need > 0 ? await inv.hold(who.tenantId, who.userId, { itemId: l.itemId, qty: need, ref: `受注 ${o.number}` }) : null;
+      if (need > available) short.push(`${l.itemName} の在庫が ${Math.round((need - available) * 1000) / 1000} 足りません`);
+      links.push({ ...l, held: need, reservationId });
+    }
+    const flags = [...o.flags.filter((f) => f.kind !== 'stock'), ...short.map((t) => ({ kind: 'stock' as const, text: t }))];
+    await this.deps.store.updateOrder(who.tenantId, orderId, { stock: links, flags });
+  }
+
+  /** 受注の品目の在庫のつながりを直す（外す・別の品目につなぎ直す）。 */
+  async relinkStock(who: SalesViewer, orderId: string, index: number, itemId: string | null): Promise<string | null> {
+    const inv = await this.stockOn(who);
+    if (!inv) return '在庫管理を使っていません';
+    const o = await this.deps.store.getOrder(who.tenantId, orderId);
+    if (!o) return '受注が見つかりません';
+    if (!o.items[index]) return '品目が見つかりません';
+    const cur = o.stock.find((l) => l.index === index);
+    if (cur?.reservationId) await inv.release(who.tenantId, cur.reservationId).catch(() => undefined);
+    const rest = o.stock.filter((l) => l.index !== index);
+    if (itemId) {
+      const hit = (await inv.items(who.tenantId)).find((x) => x.id === itemId);
+      if (!hit) return '在庫の品目が見つかりません';
+      rest.push({ index, itemId: hit.id, itemName: hit.name, held: 0, reservationId: null, availableAtLink: hit.available });
+    }
+    await this.deps.store.updateOrder(who.tenantId, orderId, { stock: rest.sort((a, b) => a.index - b.index) });
+    await this.syncHolds(who, orderId);
+    await this.audit(who, 'sales_order.stock', 'sales_order', orderId, { index, itemId });
+    return null;
+  }
+
+  /** 納品書の品目のうち、受注で在庫につないだものを出庫する。記録の ID を返す。 */
+  private async stockOut(who: SalesViewer, d: StoredDoc, orderId: string): Promise<string[]> {
+    const inv = this.deps.inventory;
+    const o = await this.deps.store.getOrder(who.tenantId, orderId);
+    if (!inv || !o || o.stock.length === 0) return [];
+    const moves: string[] = [];
+    for (const it of d.items) {
+      const index = o.items.findIndex((x) => itemKey(x) === itemKey(it));
+      const link = o.stock.find((l) => l.index === index);
+      if (!link || it.quantity <= 0) continue;
+      const m = await inv.out(who.tenantId, who.userId, { itemId: link.itemId, qty: it.quantity, reason: `納品書 ${d.number ?? ''}`, sourceId: d.id });
+      if (m) moves.push(m);
+    }
+    await this.syncHolds(who, orderId);
+    return moves;
+  }
+
+  // ───────── メールから取り込む（第42.13.1節） ─────────
+
+  /**
+   * メールに届いた注文書を受注にする。添付があれば添付（注文書らしいものを 1 つ）、無ければ本文から読む。
+   * 同じメール（同じ Message-ID）はもう取り込んでいれば、その受注を返す
+   */
+  async importMail(who: SalesViewer, mail: MailOrderInput): Promise<ImportedOrder> {
+    const kindOf = (f: { name: string; mime: string }): 'pdf' | 'png' | 'jpeg' | 'xlsx' | 'docx' | 'csv' | null => {
+      const n = f.name.toLowerCase();
+      if (f.mime === 'application/pdf' || n.endsWith('.pdf')) return 'pdf';
+      if (f.mime === 'image/png' || n.endsWith('.png')) return 'png';
+      if (f.mime === 'image/jpeg' || /\.jpe?g$/.test(n)) return 'jpeg';
+      if (n.endsWith('.xlsx')) return 'xlsx';
+      if (n.endsWith('.docx')) return 'docx';
+      if (n.endsWith('.csv')) return 'csv';
+      return null;
+    };
+    const files = mail.files.filter((f) => kindOf(f) && f.bytes.byteLength <= 10 * 1024 * 1024);
+    // 名前に「注文」「発注」が入った添付を先に使う
+    const file = files.find((f) => /注文|発注|order|po/i.test(f.name)) ?? files[0];
+    if (file) {
+      const saved = await saveFile(this.deps.repo, this.deps.files, {
+        tenantId: who.tenantId, ownerUserId: who.userId, name: file.name, kind: kindOf(file)!, bytes: file.bytes, origin: 'upload', runId: null,
+      });
+      return this.importOrder(who, saved.id, 'mail', mail.messageId || null);
+    }
+    const settings = await this.deps.repo.getTenantSettings(who.tenantId);
+    const company = settings.company.legalName || settings.company.shortName || '';
+    const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
+    const r = await readOrder(llm, `${mail.subject}\n${mail.body}`.slice(0, 30_000), company, jstToday());
+    if (r.items.length === 0) return { error: '品目が読み取れませんでした' };
+    return this.saveOrder(who, { ...r, sourceFileId: null, source: 'mail', quoteNumber: null, mailMessageId: mail.messageId || null });
+  }
+
+  /** 未請求の納品書（朝の見回りが使う。第42.13.2節）。 */
+  async unbilled(tenantId: string): Promise<SalesDocument[]> {
+    const names = await this.names(tenantId);
+    return (await this.unbilledDeliveries(tenantId)).map((d) => this.view(d, names));
+  }
+
+  /** 下書きの請求書に入っている納品書の ID（締めの下書きを重ねないため）。 */
+  async draftedDeliveryIds(tenantId: string): Promise<Set<string>> {
+    const drafts = await this.deps.store.listDocs(tenantId, { kind: 'invoice', status: 'draft', limit: 2000 });
+    return new Set(drafts.flatMap((d) => d.deliveryIds));
   }
 
   // ───────── 取引先の覚え ─────────

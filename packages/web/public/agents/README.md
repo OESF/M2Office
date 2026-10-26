@@ -72,8 +72,9 @@ agent01.png ～ agent60.png
 | 48 | お知らせを出す（`announcements:publish`） | お知らせの作成 |
 | 49 | Web について聞く（`web-review:ask`） | Webの分析 |
 | 50 | Web の依頼文を送る（`web-review:request`） | Webの分析 |
+| 51 | 注文請書の作成（`sales-docs:acknowledgement`） | 販売の書類と受注 |
 
-**未使用: 51〜60**
+**未使用: 52〜60**
 
 ### 業務を足すとき
 

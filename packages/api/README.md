@@ -334,6 +334,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `PATCH` ／ `DELETE /v1/contracts/:id` ／ `GET /v1/contracts/:id/file` | 1 件 ／ 直す（日付や決まりを直すと期限を計算し直す）／ 削除（入れた人と管理者）／ 契約書を開く（置き場をつないだ管理者の許可でドライブから読む） |
 | `PUT /v1/admin/extensions/contracts/storage` | 管理者: 契約書の置き場（Google ドライブのフォルダ）をつなぐ・つなぎ直す |
 | `GET /v1/contracts/by-company?name=` ／ `POST /v1/contracts/:id/review` | 名刺管理の会社と同じ相手の契約（第38.18節）／ 契約書チェックで見直す（ドライブの契約書を本人のファイルに写して契約書チェックを起こす。実行の ID を返す） |
+| `POST /v1/sales/orders/:id/acknowledgement` ／ `PATCH /v1/sales/orders/:id/stock` ／ `GET /v1/sales/stock-items` | 受注から注文請書を作る（すぐ発行。第42.13.5節）／ 品目の在庫のつながりを直す（`index`・`itemId`。外すなら `null`。第42.13.4節）／ つなげる在庫の品目（在庫管理を使える人だけ。使えなければ空） |
+| `PUT /v1/admin/extensions/sales-docs/settings` | 管理者: メールに届いた注文書を受注に入れるか（`mailIntake`。第42.13.1節） |
 | `GET /v1/tax-rates` | 消費税の税率の表（読むだけ。運営が直したもの、無ければ同梱の表。仕様書 第15.1.1.1節） |
 | `POST /v1/sales/orders` ／ `GET /v1/sales/suggestions?party=` | 受注を手で入れる（電話などで受けた注文。`party`・`items`・`dueOn` ほか。品名「いつもの」は前の注文から読む。同じ注文は `duplicate: true`。第42.5.1.1節）／ 手で入れるときの候補（取引先と、その取引先の前の品目） |
 | `GET /v1/sales/orders` ／ `POST /v1/sales/orders/import` | 販売の書類と受注（仕様書 第42章）: 受注の一覧（`status`・`q`）／ 注文書（`fileId`）か見積書（`quoteNumber`）から受注にする（AI が読み、計算・見積との違い・読めなかった項目に印。同じ注文は取り込まずに `duplicate: true` で返す） |

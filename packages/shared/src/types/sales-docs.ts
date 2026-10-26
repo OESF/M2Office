@@ -11,22 +11,22 @@ import type { TaxCategory } from './tax.js';
 /** 販売の書類と受注の拡張の ID（内蔵の拡張。第12.13節）。 */
 export const SALES_DOCS_EXTENSION_ID = 'sales-docs';
 
-/** 書類の種類（第42.4節）。 */
-export type SalesDocKind = 'purchase_order' | 'delivery' | 'invoice' | 'receipt';
+/** 書類の種類（第42.4節。注文請書は第42.13.5節）。 */
+export type SalesDocKind = 'purchase_order' | 'delivery' | 'invoice' | 'receipt' | 'acknowledgement';
 
 /** 種類の呼び方。 */
 export const SALES_DOC_KIND_LABELS: Record<SalesDocKind, string> = {
-  purchase_order: '注文書', delivery: '納品書', invoice: '請求書', receipt: '領収書',
+  purchase_order: '注文書', delivery: '納品書', invoice: '請求書', receipt: '領収書', acknowledgement: '注文請書',
 };
 
 /** 番号の頭文字（第42.3節。見積書の `Q-` と同じ形）。 */
-export const SALES_DOC_PREFIX: Record<SalesDocKind, string> = { purchase_order: 'O', delivery: 'D', invoice: 'I', receipt: 'R' };
+export const SALES_DOC_PREFIX: Record<SalesDocKind, string> = { purchase_order: 'O', delivery: 'D', invoice: 'I', receipt: 'R', acknowledgement: 'A' };
 
 /**
  * 発行に本人の承認が要る種類（第42.3.1節）。作ったときは下書きで、承認で発行する。
  * 納品書は作ったら発行済み（見積書と同じ）。
  */
-export const SALES_DOC_NEEDS_ISSUE: Record<SalesDocKind, boolean> = { purchase_order: true, delivery: false, invoice: true, receipt: true };
+export const SALES_DOC_NEEDS_ISSUE: Record<SalesDocKind, boolean> = { purchase_order: true, delivery: false, invoice: true, receipt: true, acknowledgement: false };
 
 /** 書類の状態（第42.3.1節・第42.3.2節）。 */
 export type SalesDocStatus = 'draft' | 'issued' | 'cancelled';
@@ -131,9 +131,25 @@ export const SALES_ORDER_STATUS_LABELS: Record<SalesOrderStatus, string> = {
 
 /** 受注に付ける印（AI が確かめて合わなかったもの。第42.5.2節）。 */
 export interface SalesOrderFlag {
-  /** `guess` は AI が読んだもの（「いつもの」を前の注文から読んだ、など。第42.5.1.1節） */
-  kind: 'calc' | 'quote' | 'unread' | 'duplicate' | 'guess';
+  /** `guess` は AI が読んだもの（「いつもの」を前の注文から読んだ、など。第42.5.1.1節）。`stock` は在庫が足りないこと（第42.13.4節） */
+  kind: 'calc' | 'quote' | 'unread' | 'duplicate' | 'guess' | 'stock';
   text: string;
+}
+
+/**
+ * 受注の品目と在庫の品目のつながり（第42.13.4節）。在庫管理を使う会社だけ。
+ */
+export interface SalesStockLink {
+  /** 受注の品目の番号（並びの順） */
+  index: number;
+  itemId: string;
+  itemName: string;
+  /** 取り置いた数（使う単位） */
+  held: number;
+  /** 取り置きの ID（無ければ `null`） */
+  reservationId: string | null;
+  /** つないだときの使える数（取り置く前） */
+  availableAtLink: number;
 }
 
 /** 受注の入り口（`manual` は受注の画面で手で入れたもの。第42.5.1.1節）。 */
@@ -176,6 +192,10 @@ export interface SalesOrder {
   source: SalesOrderSource;
   /** つないだ見積書の番号 */
   quoteNumber: string | null;
+  /** 取り込んだメールの ID（メールから入れたとき。第42.13.1節） */
+  mailMessageId: string | null;
+  /** 在庫の品目とのつながり（第42.13.4節） */
+  stock: SalesStockLink[];
   cancelReason: string;
   createdBy: string;
   createdByName: string;
@@ -187,10 +207,18 @@ export interface SalesOrder {
 export interface SalesDocsSettings {
   /** 使うか（既定は切り）。 */
   enabled: boolean;
+  /** メールに届いた注文書を受注に入れるか（第42.13.1節。人の受信箱を読むため既定は切り。管理者が入れる） */
+  mailIntake: boolean;
 }
 
 /** 既定（切り）。 */
-export const DEFAULT_SALES_DOCS_SETTINGS: SalesDocsSettings = { enabled: false };
+export const DEFAULT_SALES_DOCS_SETTINGS: SalesDocsSettings = { enabled: false, mailIntake: false };
+
+/** 朝の見回り（締めの請求書の下書きと納期の見張り）の時刻（日本時間の時。第42.13.2節・第42.13.3節）。 */
+export const SALES_MORNING_HOUR = 7;
+
+/** メールから取り込む上限（1 人 1 日。第42.13.1節）。 */
+export const SALES_MAIL_DAILY_MAX = 50;
 
 /** 書類と元の注文書を残す年数（第42.6節。法人の帳簿書類は 7 年、欠損金のある年度は 10 年のため長いほう）。 */
 export const SALES_DOC_RETENTION_YEARS = 10;

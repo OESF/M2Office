@@ -15,7 +15,7 @@ import {
   fillApprovalCompartments, discardStaleRecordings, discardStaleLiveRecordings, PostgresSystemLogStore, SystemLogSink, attachLogSink, EvidenceBuilder, SYSTEM_LOG_KEEP_DAYS,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, SalesDocWatch, salesInventoryFrom, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
@@ -251,6 +251,8 @@ const taxTable = () => taxSide.taxRates();
 const salesDocs = new SalesDocService({
   store: new PostgresSalesDocStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log, taxTable,
+  // 受注の引き当てと納品書の出庫（第42.13.4節）
+  inventory: salesInventoryFrom(inventory, inventoryAccess(repo)),
   ocrFor: async (tenantId) => {
     const llm = await ai.llmFor(tenantId).catch(() => null);
     return llm?.readImage ? async (r) => (await llm.readImage!(r)).text : undefined;
@@ -628,6 +630,14 @@ let lastAnnouncementCheck = 0;
 /** 契約の期限を見張る間隔（第38.6節。既定は 1 時間。知らせは期限ごとに 1 回だけ）。 */
 const CONTRACT_INTERVAL_MS = Number(process.env['CONTRACT_INTERVAL_MS'] ?? 3_600_000);
 let lastContractCheck = 0;
+// 販売の書類と受注の見回り（第42.13節）。メールは 15 分ごと、朝の見回りは 5 分ごとに確かめて 7 時を過ぎたら日に 1 回
+const SALES_MAIL_INTERVAL_MS = Number(process.env['SALES_MAIL_INTERVAL_MS'] ?? 15 * 60_000);
+const SALES_MORNING_INTERVAL_MS = 5 * 60_000;
+let lastSalesMail = 0;
+let lastSalesMorning = 0;
+const salesWatch = new SalesDocWatch({
+  service: salesDocs, store: salesDocs.deps.store, repo, mail: connector.mail, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+});
 /** 終わって 1 年を過ぎた予約を消す間隔（第37.11節。1 日に 1 回で足りる）。 */
 const RESERVATION_PURGE_INTERVAL_MS = 86_400_000;
 let lastReservationPurge = 0;
@@ -1276,6 +1286,26 @@ while (running) {
       if (r.published + r.ended > 0) log.info('お知らせの予約を出し、期間の後を片付けました', { published: r.published, ended: r.ended });
     } catch (err) {
       log.warn('お知らせの見回りに失敗しました', { err });
+    }
+  }
+
+  // 販売の書類と受注: メールに届いた注文書の取り込み（第42.13.1節）と、朝の締めの請求書の下書き・納期の見張り（第42.13.2節・第42.13.3節）
+  if (Date.now() - lastSalesMail >= SALES_MAIL_INTERVAL_MS) {
+    lastSalesMail = Date.now();
+    try {
+      const n = await withAiUsage({ purpose: 'worker:sales-mail' }, () => salesWatch.mailTick(new Date()));
+      if (n > 0) log.info('メールに届いた注文書を受注に入れました', { imported: n });
+    } catch (err) {
+      log.warn('注文書のメールの見回りに失敗しました', { err });
+    }
+  }
+  if (Date.now() - lastSalesMorning >= SALES_MORNING_INTERVAL_MS) {
+    lastSalesMorning = Date.now();
+    try {
+      const r = await salesWatch.morningTick(new Date());
+      if (r.drafts + r.due > 0) log.info('締めの請求書の下書きを作り、納期の近い受注を知らせました', { drafts: r.drafts, due: r.due });
+    } catch (err) {
+      log.warn('販売の書類と受注の朝の見回りに失敗しました', { err });
     }
   }
 

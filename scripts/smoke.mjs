@@ -745,8 +745,8 @@ console.log('\n■ 18. ダッシュボード');
     : ng('業務の状態が足りない', JSON.stringify(states.map((a) => a.agentId)));
   // 絵の番号を業務ごとに返し、重ならない（第6.7.4.3節）
   const faces = states.map((a) => a.face);
-  // 絵は 50 枚（AGENT_FACE_COUNT。第 0.140.1 版）
-  faces.every((n) => Number.isInteger(n) && n >= 1 && n <= 50) && new Set(faces).size === faces.length
+  // 絵は 60 枚（AGENT_FACE_COUNT。第 0.140.1 版で 50、第 0.458.0 版で 60）
+  faces.every((n) => Number.isInteger(n) && n >= 1 && n <= 60) && new Set(faces).size === faces.length
     ? ok(`業務ごとに絵の番号を返す（${faces.join('・')}）`)
     : ng('絵の番号が不正か重なっている', JSON.stringify(faces));
   // まとまり（第6.7.4.2.1節）: 仕事の分野でまとめる（第 0.292.0 版、ADR-0075）
@@ -8674,6 +8674,39 @@ console.log('\n■ 130. 受注を手で入れる（電話などで受けた注�
     bad.status === 400 && (otherSug.status === 403 || !(otherSug.body.parties ?? []).includes(PARTY))
       ? ok('取引先の無い受注は断り、ほかの会社に候補は見えない') : ng('断り方か会社の境界が違う', JSON.stringify({ bad: bad.status, other: otherSug.status }));
   } finally {
+    await owner.query(`delete from sales_orders where party->>'name' = $1`, [PARTY]);
+    for (const r of saved) await owner.query(`update tenant_settings set sales_docs = $2, access = $3 where tenant_id = $1`, [r.tenant_id, r.sales_docs ? JSON.stringify(r.sales_docs) : null, r.access ? JSON.stringify(r.access) : null]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 131. 販売の書類と受注の段 2（メールの取り込みの入り切りは管理者だけ・注文請書・在庫の品目。第42.13節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, sales_docs, access from tenant_settings where tenant_id = 't-alpha'`);
+  const PARTY = '株式会社請書商店（smoke）';
+  try {
+    await call('a', '/v1/admin/extensions/sales-docs/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const memberSet = await call('a', '/v1/admin/extensions/sales-docs/settings', { method: 'PUT', body: JSON.stringify({ mailIntake: true }) }, 'member');
+    const bad = await call('a', '/v1/admin/extensions/sales-docs/settings', { method: 'PUT', body: JSON.stringify({ mailIntake: 'yes' }) });
+    const on = await call('a', '/v1/admin/extensions/sales-docs/settings', { method: 'PUT', body: JSON.stringify({ mailIntake: true }) });
+    const list = await call('a', '/v1/admin/extensions');
+    const ext = (list.body.items ?? []).find((x) => x.id === 'sales-docs');
+    memberSet.status === 403 && bad.status === 400 && on.status === 200 && ext?.salesDocs?.mailIntake === true
+      ? ok('メールに届いた注文書の取り込みは、管理者だけが入れられ、拡張機能の一覧に出る') : ng('メールの取り込みの設定が違う', JSON.stringify({ member: memberSet.status, bad: bad.status, on: on.status, ext: ext?.salesDocs }));
+    await call('a', '/v1/admin/extensions/sales-docs/settings', { method: 'PUT', body: JSON.stringify({ mailIntake: false }) });
+    const o = await call('a', '/v1/sales/orders', { method: 'POST', body: JSON.stringify({ party: PARTY, dueOn: '2030-11-05', items: [{ name: '取付工事', quantity: 1, unit: '式', unitPrice: 50000 }] }) });
+    const ack = await call('a', `/v1/sales/orders/${o.body.order?.id}/acknowledgement`, { method: 'POST', body: '{}' });
+    ack.status === 201 && ack.body.doc?.kind === 'acknowledgement' && ack.body.doc.status === 'issued' && /^A-\d{8}-\d{3}$/.test(ack.body.doc.number ?? '') && ack.body.doc.total === 55000
+      ? ok('受注から注文請書を作ると、すぐ発行して番号（A-）が付く') : ng('注文請書が違う', JSON.stringify(ack.body).slice(0, 300));
+    const items = await call('a', '/v1/sales/stock-items');
+    const relink = await call('a', `/v1/sales/orders/${o.body.order?.id}/stock`, { method: 'PATCH', body: JSON.stringify({ index: 0, itemId: null }) });
+    items.status === 200 && Array.isArray(items.body.items) && (relink.status === 200 || relink.status === 400)
+      ? ok('つなげる在庫の品目を返し（在庫管理を使えなければ空）、在庫のつながりを直す口がある') : ng('在庫の口が違う', JSON.stringify({ items: items.status, relink: relink.status }));
+  } finally {
+    await owner.query(`delete from sales_documents where party->>'name' = $1`, [PARTY]);
     await owner.query(`delete from sales_orders where party->>'name' = $1`, [PARTY]);
     for (const r of saved) await owner.query(`update tenant_settings set sales_docs = $2, access = $3 where tenant_id = $1`, [r.tenant_id, r.sales_docs ? JSON.stringify(r.sales_docs) : null, r.access ? JSON.stringify(r.access) : null]);
     await owner.end();

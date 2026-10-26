@@ -10,7 +10,7 @@ import { SALES_DOCS_EXTENSION_ID, type AgentDefinition, type AgentStep, type Sal
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const SALES_DOCS_EXTENSION_VERSION = '1.1.0';
+export const SALES_DOCS_EXTENSION_VERSION = '1.2.0';
 
 /** 書類の種類ごとの業務の ID。 */
 export const SALES_DOC_AGENT_IDS: Record<SalesDocKind, string> = {
@@ -18,6 +18,7 @@ export const SALES_DOC_AGENT_IDS: Record<SalesDocKind, string> = {
   delivery: `${SALES_DOCS_EXTENSION_ID}:delivery-note`,
   invoice: `${SALES_DOCS_EXTENSION_ID}:invoice`,
   receipt: `${SALES_DOCS_EXTENSION_ID}:receipt`,
+  acknowledgement: `${SALES_DOCS_EXTENSION_ID}:acknowledgement`,
 };
 
 /** 受注の取り込みの業務の ID。 */
@@ -228,6 +229,48 @@ export const DELIVERY_NOTE_AGENT: AgentDefinition = {
   face: 27,
 };
 
+/** 注文請書の作成（第42.13.5節）。作ったら発行済み。送るときだけ承認を求める。 */
+export const ACKNOWLEDGEMENT_AGENT: AgentDefinition = {
+  schemaVersion: 1,
+  id: SALES_DOC_AGENT_IDS.acknowledgement,
+  version: 1,
+  name: '注文請書の作成',
+  category: 'document',
+  description: '受注から注文請書（受けた注文の内容の写し）を PDF で作ります。送り先を書けば、あなたの確認の後にメールで送ります',
+  locale: 'ja-JP',
+  compartment: null,
+  inputs: inputs('見本商事の受注 S-20261020-001 の注文請書を送って', '株式会社見本商事 御中'),
+  tools: [...CREATE_TOOLS, 'sales.prepare_mail', 'gmail.send'],
+  steps: [
+    {
+      id: 'create', type: 'agent', tools: CREATE_TOOLS, label: '作成', activityLabel: '作成中', onEmpty: 'stop', onError: 'stop',
+      instruction: createInstruction('acknowledgement', [
+        '受注の番号（S-…）か相手の注文番号、取引先の名前が書かれていれば、sales.orders で受注を探し、orderNumber に渡す（品目は渡さない。受注の品目をそのまま写す）。',
+        '受注が見つからなければ、作らずに「受注が見つかりません」と書いて終える。',
+        '「印刷して渡す」のように紙で渡す頼みで、工事・製作・修理などの請負の注文なら、報告に「紙で渡すときは収入印紙が要ることがあります（PDF をメールで送るなら要りません）」と書く。',
+      ]),
+    },
+    mailStep('stop'),
+    { id: 'gate-send', type: 'approval', label: '送る前の確認', approver: 'requester', approverRole: [], present: '送り先・件名・本文と、添える注文請書', onReject: 'stop' },
+    {
+      id: 'send', type: 'agent', tools: ['gmail.send'], label: '送信',
+      instruction: '承認されたとおりの宛先・件名・本文で gmail.send を呼び、attachments に sales.prepare_mail が返した attachments を渡す。',
+    },
+  ],
+  constraints: ['金額を自分で計算しない（ツールが計算する）', '受注に無い品目を足さない', '承認の前に送らない'],
+  limits: { maxSteps: 14, maxTokens: 80_000, timeoutSec: 300 },
+  help: {
+    summary: '受けた注文の内容を相手に確かめてもらう注文請書を、受注から作ります（番号 A-日付-連番）。送り先を書けば、あなたの確認の後にメールで送ります。',
+    examples: [{ title: '受注の注文請書を送る', input: { request: '見本商事の受注の注文請書を送って', sendTo: 'yamada@example.co.jp' } }],
+    notes: [
+      '受注の品目・数・単価・納期・相手の注文番号をそのまま写します',
+      '受注の画面の「注文請書を作る」でも作れます',
+      '紙で渡す注文請書は、請負の内容だと収入印紙が要ることがあります。PDF をメールで送るなら要りません',
+    ],
+  },
+  face: 51,
+};
+
 /** 受注の取り込み（第42.5節）。秘書と業務から。社外には何も出さない。 */
 export const ORDER_INTAKE_AGENT: AgentDefinition = {
   schemaVersion: 1,
@@ -292,7 +335,7 @@ export const ORDER_INTAKE_AGENT: AgentDefinition = {
 };
 
 /** 販売の書類と受注の付属の業務。 */
-export const SALES_DOC_AGENTS: AgentDefinition[] = [PURCHASE_ORDER_AGENT, DELIVERY_NOTE_AGENT, INVOICE_AGENT, RECEIPT_AGENT, ORDER_INTAKE_AGENT];
+export const SALES_DOC_AGENTS: AgentDefinition[] = [PURCHASE_ORDER_AGENT, DELIVERY_NOTE_AGENT, INVOICE_AGENT, RECEIPT_AGENT, ACKNOWLEDGEMENT_AGENT, ORDER_INTAKE_AGENT];
 
 /** 販売の書類と受注を、拡張機能の一覧に並べるための形（第12.13節「公式・内蔵」）。 */
 export const SALES_DOCS_PACKAGE: ExtensionPackage = {
@@ -304,7 +347,7 @@ export const SALES_DOCS_PACKAGE: ExtensionPackage = {
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
     permissions: {
-      tools: ['sales.documents', 'sales.orders', 'sales.create_document', 'sales.revise', 'sales.remember_party', 'sales.prepare_mail', 'sales.issue', 'sales.cancel', 'sales.import_order', 'sales.record_order', 'sales.update_order', 'gmail.send'],
+      tools: ['sales.brief', 'sales.documents', 'sales.orders', 'sales.create_document', 'sales.revise', 'sales.remember_party', 'sales.prepare_mail', 'sales.issue', 'sales.cancel', 'sales.import_order', 'sales.record_order', 'sales.update_order', 'gmail.send'],
       max_risk_level: 'financial',
     },
   },

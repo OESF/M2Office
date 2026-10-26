@@ -23,7 +23,7 @@ import type { RuntimeEnvironment, NodeSecurityNotice, DeliveryView, DataRecipien
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
-  Contract, ContractSettings, SalesDocument, SalesOrder, SalesSuggestions, TaxRateEntry, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
+  Contract, ContractSettings, SalesDocsSettings, SalesDocument, SalesOrder, SalesSuggestions, TaxRateEntry, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
   EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckFormat, SlideDeckKind, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
 } from '@m2office/shared';
@@ -1021,6 +1021,8 @@ export interface ExtensionView {
   webReview?: WebReviewSettings;
   /** 契約の管理の設定（契約書の置き場。第38.7節）。契約の管理のときだけある。 */
   contracts?: ContractSettings;
+  /** 販売の書類と受注（メールに届いた注文書を受注に入れるか。第42.13.1節） */
+  salesDocs?: SalesDocsSettings;
   /** 補助金・助成金の案内の設定（会社の関心と業種。第39.3節）。補助金・助成金の案内のときだけある。 */
   subsidies?: { interest: string; industry: string; profile: SubsidyProfile | null };
   /** 会員とポイントの設定（第40.4節）。会員とポイントのときだけある。 */
@@ -1709,6 +1711,13 @@ export const api = {
     removeOrder: (id: string) => call<{ ok: true }>(`/sales/orders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 取り込んだ元の注文書を開く URL。 */
     orderFileUrl: (id: string) => `/v1/sales/orders/${encodeURIComponent(id)}/file`,
+    /** 受注から注文請書を作る（第42.13.5節）。 */
+    acknowledge: (orderId: string) => call<SalesCreated>(`/sales/orders/${encodeURIComponent(orderId)}/acknowledgement`, { method: 'POST', body: '{}' }),
+    /** 受注の品目の在庫のつながりを直す（外すなら `itemId: null`。第42.13.4節）。 */
+    relinkStock: (orderId: string, index: number, itemId: string | null) =>
+      call<{ order: SalesOrder; documents: SalesDocument[] }>(`/sales/orders/${encodeURIComponent(orderId)}/stock`, { method: 'PATCH', body: JSON.stringify({ index, itemId }) }),
+    /** つなげる在庫の品目（在庫管理を使える人だけ。使えなければ空）。 */
+    stockItems: () => call<{ items: { id: string; name: string; sku: string; unit: string; available: number }[] }>('/sales/stock-items'),
     /** 受注の残りの数で納品書を作る。 */
     deliver: (orderId: string) => call<SalesCreated>(`/sales/orders/${encodeURIComponent(orderId)}/delivery`, { method: 'POST', body: '{}' }),
     documents: (q: { kind?: string; status?: string; party?: string; from?: string; to?: string; min?: string; max?: string; unbilled?: string } = {}) => {
@@ -2799,6 +2808,8 @@ export const api = {
     /** お知らせの作成の設定（Web の出し方・カテゴリー。第35.4節）。 */
     /** 契約の管理の、契約書の置き場をつなぐ・つなぎ直す（第38.7節）。 */
     connectContractStorage: () => call<{ ok: true; folderName: string }>('/admin/extensions/contracts/storage', { method: 'PUT', body: '{}' }),
+    /** 販売の書類と受注の、メールに届いた注文書を受注に入れるか（第42.13.1節）。 */
+    setSalesDocsMailIntake: (mailIntake: boolean) => call<{ ok: true }>('/admin/extensions/sales-docs/settings', { method: 'PUT', body: JSON.stringify({ mailIntake }) }),
     setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; screens: string[] | null }>) =>
       call<{ ok: true }>('/admin/extensions/announcements/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** お知らせを流す画面の選び先（サイネージの画面。`selected` が `null` ならすべて）。 */
