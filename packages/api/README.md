@@ -334,6 +334,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `PATCH` ／ `DELETE /v1/contracts/:id` ／ `GET /v1/contracts/:id/file` | 1 件 ／ 直す（日付や決まりを直すと期限を計算し直す）／ 削除（入れた人と管理者）／ 契約書を開く（置き場をつないだ管理者の許可でドライブから読む） |
 | `PUT /v1/admin/extensions/contracts/storage` | 管理者: 契約書の置き場（Google ドライブのフォルダ）をつなぐ・つなぎ直す |
 | `GET /v1/contracts/by-company?name=` ／ `POST /v1/contracts/:id/review` | 名刺管理の会社と同じ相手の契約（第38.18節）／ 契約書チェックで見直す（ドライブの契約書を本人のファイルに写して契約書チェックを起こす。実行の ID を返す） |
+| `GET /v1/tax-rates` | 消費税の税率の表（読むだけ。運営が直したもの、無ければ同梱の表。仕様書 第15.1.1.1節） |
 | `POST /v1/sales/orders` ／ `GET /v1/sales/suggestions?party=` | 受注を手で入れる（電話などで受けた注文。`party`・`items`・`dueOn` ほか。品名「いつもの」は前の注文から読む。同じ注文は `duplicate: true`。第42.5.1.1節）／ 手で入れるときの候補（取引先と、その取引先の前の品目） |
 | `GET /v1/sales/orders` ／ `POST /v1/sales/orders/import` | 販売の書類と受注（仕様書 第42章）: 受注の一覧（`status`・`q`）／ 注文書（`fileId`）か見積書（`quoteNumber`）から受注にする（AI が読み、計算・見積との違い・読めなかった項目に印。同じ注文は取り込まずに `duplicate: true` で返す） |
 | `GET` ／ `PATCH` ／ `DELETE /v1/sales/orders/:id` ／ `POST /v1/sales/orders/:id/cancel` ／ `GET /v1/sales/orders/:id/file` ／ `POST /v1/sales/orders/:id/delivery` | 受注 1 件とつながった書類 ／ 読み取りを直す ／ 削除（取り込んだ人と管理者。発行した書類がつながっていれば断る）／ 取り消し（`reason`）／ 元の注文書 ／ 残りの数で納品書を作る（すぐ発行） |
@@ -600,6 +601,7 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | GET・POST | `/v1/ops/incidents` | 障害・計画停止の一覧 ／ 起こす（`title`・`impact`（`down`・`degraded`・`maintenance`）・`body`・`tenants`（無ければすべての会社）・`startedAt`）。対象の会社の管理者に知らせる（仕様書 第16.11.3節 G-9） | すべて |
 | POST | `/v1/ops/incidents/:id/update`・`/v1/ops/incidents/:id/close` | 経過を知らせる ／ 終える（復旧・計画停止の終わり。`endedAt` を渡せる） | すべて |
 | GET・PUT | `/v1/ops/settings/operator` | 運営主体の設定（第23.8.14節） | 見る: すべて・変える: 運営管理者 |
+| GET・PUT | `/v1/ops/tax-rates` | 消費税の税率の表（法令の表の 1 つ。第15.1.1.1節）。運営が直していなければ同梱の表と `bundled: true`、全社の下書きの数 `drafts`。PUT は行をまとめて置き換える（直した行と足した行は出典の URL と確認した日が要る。予定を確定にした行は会社の管理者に知らせる） | 見る: すべて・変える: 運営管理者 |
 | GET | `/v1/ops/status-requests` | 停止・緊急停止・再開の申請（扱いの残っているものと直近 30 日。`?tenant=` で会社を絞る） | すべて |
 | POST | `/v1/ops/tenants/:id/requests` | 停止・再開の申請、緊急停止（すぐ止める。会社へ渡す案内の文を返す） | 停止と再開: 運営管理者とサポート・緊急停止: すべて |
 | POST | `/v1/ops/status-requests/:id/decide`・`withdraw`・`confirm` | 承認するか・取り下げ・緊急停止の事後の確認（申請した人は承認と確認ができない） | 運営管理者とサポート |

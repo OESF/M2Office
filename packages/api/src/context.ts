@@ -22,7 +22,7 @@ import {
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
-import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type ReservationSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, fileInputKey } from '@m2office/shared';
+import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +39,8 @@ export interface AppDeps {
   repo: Repository;
   /** 運営主体の設定を読む口（第23.8.14節。内蔵の拡張の提供者の表記）。 */
   opsSide: OpsAppSide;
+  /** 消費税の税率の表（運営がマスター管理画面で直したもの。無ければ同梱の表。仕様書 第15.1.1.1節）。会社は読むだけ */
+  taxRates(): Promise<TaxRateEntry[]>;
   /** 代理アクセスの申請と閲覧のログイン状態（第23.6.1節）。 */
   proxy: ProxyAccessStore;
   llm: LlmProvider;
@@ -607,11 +609,13 @@ export function buildDeps(): AppDeps {
     }),
     access: contractsAccess(repo),
   };
+  // 消費税の税率の表（運営がマスター管理画面で直したもの。第15.1.1.1節）
+  const taxSide = new OpsAppSide(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'tax' }));
   // 販売の書類と受注（内蔵の拡張。仕様書 第42章）。金額は決まった計算。発行は本人の判断（画面の「発行」か、業務の承認の後）
   const salesDocs = {
     service: new SalesDocService({
       store: new PostgresSalesDocStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
-      repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+      repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log, taxTable: () => taxSide.taxRates(),
       ocrFor: async (tenantId) => {
         const llm = await ai.llmFor(tenantId).catch(() => null);
         return llm?.readImage ? async (r) => (await llm.readImage!(r)).text : undefined;
@@ -753,6 +757,7 @@ export function buildDeps(): AppDeps {
   const engine = new RunEngine({
     repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts, salesDocs, subsidies, members, printDesigns, reservations,
     deliveries: { service: deliveries }, slideDecks, slideThemes,
+    taxTable: () => taxSide.taxRates(),
     closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
     hr: { calendar: laborCalendar, access: hrAccess(repo) },
     llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId),
@@ -939,6 +944,7 @@ export function buildDeps(): AppDeps {
     announcements,
     contracts,
     salesDocs,
+    taxRates: () => taxSide.taxRates(),
     reservations,
     subsidies,
     members,

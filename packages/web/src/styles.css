@@ -2169,6 +2169,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .sales-manual .sales-line { align-items: flex-end; }
 .sales-manual .unit-input { max-width: 70px; }
 .sales-manual .num-input { max-width: 110px; }
+/* 法令の表（マスター管理画面。仕様書 第15.1.1.1節） */
+.law-table .nowrap, .law-table .badge, .law-table .btn { white-space: nowrap; }
+.law-table .num-input { max-width: 90px; }
 @media (max-width: 860px) {
   .sales-doc { grid-template-columns: 1fr; }
   .sales-pdf { height: 60vh; }

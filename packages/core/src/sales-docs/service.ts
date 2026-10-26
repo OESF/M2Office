@@ -10,9 +10,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   SALES_DOC_KIND_LABELS, SALES_DOC_NEEDS_ISSUE, SALES_DOC_PREFIX, SALES_DOCS_EXTENSION_ID, canUseAgent,
-  guessTaxCategory, plannedTaxNote, taxCategoryNote, taxCategoryOf, taxRateOn,
+  effectiveTaxTable, guessTaxCategory, plannedTaxNote, taxCategoryNote, taxCategoryOf, taxRateOn,
   type SalesDocKind, type SalesDocsSettings, type SalesDocument, type SalesItem, type SalesOrder, type SalesOrderFlag, type SalesOrderSource,
-  type SalesOrderStatus, type SalesParty, type SalesSuggestions,
+  type SalesOrderStatus, type SalesParty, type SalesSuggestions, type TaxRateEntry,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -41,6 +41,8 @@ export interface SalesDocServiceDeps {
   llmFor(tenantId: string): Promise<LlmProvider | null>;
   /** 画像と文字の無い PDF を読み取る口（無ければ読み取らない） */
   ocrFor?(tenantId: string): Promise<OcrFn | undefined>;
+  /** 消費税の税率の表（運営がマスター管理画面で直したもの。無ければ同梱の表。第15.1.1.1節） */
+  taxTable?(): Promise<TaxRateEntry[]>;
   logger?: Logger;
 }
 
@@ -94,6 +96,8 @@ export interface CreatedDoc {
 /** 書類 1 通の詳しい中身（版とつながり）。 */
 export interface DocDetail {
   doc: SalesDocument;
+  /** まだ確定していない税率の変更の知らせ（食料品の 1% など。第15.1.1節） */
+  taxNotes: string[];
   versions: SalesDocument[];
   order: SalesOrder | null;
   /** 請求書: まとめた納品書。領収書・納品書: 元の請求書 */
@@ -194,8 +198,10 @@ export class SalesDocService {
     const deliveries = d.kind === 'invoice' ? all.filter((x) => d.deliveryIds.includes(x.id)) : [];
     const invoice = d.invoiceId ? all.find((x) => x.id === d.invoiceId) ?? null : null;
     const receipts = d.kind === 'invoice' ? all.filter((x) => x.kind === 'receipt' && x.invoiceId === d.id && x.status !== 'cancelled') : [];
+    const table = await this.table();
+    const taxNotes = [...new Set(d.items.map((i) => plannedTaxNote(taxCategoryOf(i), d.issuedOn, table)).filter((x): x is string => !!x))];
     return {
-      doc: this.view(d, names), versions: versions.map((x) => this.view(x, names)), order,
+      doc: this.view(d, names), taxNotes, versions: versions.map((x) => this.view(x, names)), order,
       deliveries: deliveries.map((x) => this.view(x, names)), invoice: invoice ? this.view(invoice, names) : null,
       receipts: receipts.map((x) => this.view(x, names)),
     };
@@ -224,6 +230,7 @@ export class SalesDocService {
    * @returns 区分を判断したことの言葉（軽減・対象外・迷ったもの）と、まだ確定していない税率の変更の知らせ
    */
   private async classify(who: SalesViewer, partyName: string, items: SalesItem[], day: string, fixed: Set<SalesItem> = new Set()): Promise<{ judged: string[]; planned: string[] }> {
+    const table = await this.table();
     const judged: string[] = [];
     const planned = new Set<string>();
     const needPast = items.some((i) => !i.taxCategory && !fixed.has(i));
@@ -243,11 +250,16 @@ export class SalesDocService {
           if (note) judged.push(note);
         }
       }
-      it.taxRate = taxRateOn(it.taxCategory, day);
-      const p = plannedTaxNote(it.taxCategory, day);
+      it.taxRate = taxRateOn(it.taxCategory, day, table);
+      const p = plannedTaxNote(it.taxCategory, day, table);
       if (p) planned.add(p);
     }
     return { judged, planned: [...planned] };
+  }
+
+  /** 税率の表（運営が直したもの。無ければ同梱の表）。 */
+  private async table(): Promise<TaxRateEntry[]> {
+    return this.deps.taxTable ? this.deps.taxTable().catch(() => effectiveTaxTable(null)) : effectiveTaxTable(null);
   }
 
   /** 単価の無い品目に、同じ取引先の前の書類・受注・見積書の同じ品目の単価を入れる。 */
@@ -512,12 +524,20 @@ export class SalesDocService {
       }
     }
     const today = jstToday();
+    // 発行の日の税率で計算し直す（下書きを作った後に税率が変わったとき。第15.1.1.1節）。納品書・請求書から写した品目は、その日の税率のまま
+    let money: DocPatch = {};
+    if (d.version === 1 && d.issuedOn !== today && d.deliveryIds.length === 0 && !d.invoiceId) {
+      const settings = await this.deps.repo.getTenantSettings(who.tenantId);
+      const items = d.items.map((i) => ({ ...i, taxCategory: taxCategoryOf(i) }));
+      await this.classify(who, d.party.name, items, today);
+      if (items.some((x, k) => x.taxRate !== d.items[k]!.taxRate)) money = { items, ...docTotals(items, settings.company.taxRounding) };
+    }
     let number = d.number;
     for (let attempt = 0; attempt < 5; attempt++) {
       number = d.number ?? await this.nextNumber(who.tenantId, d.kind, today);
-      const issued: StoredDoc = { ...d, number, status: 'issued', issuedOn: d.version > 1 ? d.issuedOn : today };
+      const issued: StoredDoc = { ...d, ...money, number, status: 'issued', issuedOn: d.version > 1 ? d.issuedOn : today };
       try {
-        await store.updateDoc(who.tenantId, d.id, { number, status: 'issued', issuedOn: issued.issuedOn });
+        await store.updateDoc(who.tenantId, d.id, { ...money, number, status: 'issued', issuedOn: issued.issuedOn });
         await this.rewriteFile(who, issued);
         break;
       } catch (err) {

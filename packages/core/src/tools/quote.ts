@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  TAX_CATEGORY_LABELS, guessTaxCategory, plannedTaxNote, taxBreakdown, taxCategoryNote, taxCategoryOf, taxLegend, taxMark, taxRateOn, type TaxCategory,
+  TAX_CATEGORY_LABELS, effectiveTaxTable, guessTaxCategory, plannedTaxNote, taxBreakdown, taxCategoryNote, taxCategoryOf, taxLegend, taxMark, taxRateOn, type TaxCategory,
 } from '@m2office/shared';
 import type { QuoteItem, QuoteRecord } from '../repository/types.js';
 import { renderPdf, renderRuledQuote, type InvoiceRow } from '../files/pdf-render.js';
@@ -136,6 +136,7 @@ export const quoteCreate: Tool = {
     // 税の区分: 渡された区分 → 前の見積の同じ品目 → 品名から推し量る。税率は発行の日の税率（第15.1.1節）
     const judged: string[] = [];
     const planned = new Set<string>();
+    const table = ctx.taxTable ? await ctx.taxTable().catch(() => effectiveTaxTable(null)) : effectiveTaxTable(null);
     for (const it of items) {
       if (!it.taxCategory) {
         const before = past.flatMap((q) => q.items).find((p) => quoteItemKey(p.name) === quoteItemKey(it.name));
@@ -147,8 +148,8 @@ export const quoteCreate: Tool = {
           if (note) judged.push(note);
         }
       }
-      it.taxRate = taxRateOn(it.taxCategory, day);
-      const p = plannedTaxNote(it.taxCategory, day);
+      it.taxRate = taxRateOn(it.taxCategory, day, table);
+      const p = plannedTaxNote(it.taxCategory, day, table);
       if (p) planned.add(p);
     }
     const totals = quoteTotals(items, settings.company.taxRounding);

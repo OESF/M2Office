@@ -23,7 +23,7 @@ import type { RuntimeEnvironment, NodeSecurityNotice, DeliveryView, DataRecipien
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
-  Contract, ContractSettings, SalesDocument, SalesOrder, SalesSuggestions, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
+  Contract, ContractSettings, SalesDocument, SalesOrder, SalesSuggestions, TaxRateEntry, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
   EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckFormat, SlideDeckKind, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
 } from '@m2office/shared';
@@ -130,6 +130,8 @@ export interface SalesCreated {
 /** 書類 1 通の詳しい中身（版とつながり）。 */
 export interface SalesDocDetail {
   doc: SalesDocument;
+  /** まだ確定していない税率の変更の知らせ（運営の税率の表から。第15.1.1.1節） */
+  taxNotes: string[];
   versions: SalesDocument[];
   order: SalesOrder | null;
   deliveries: SalesDocument[];
@@ -1720,6 +1722,8 @@ export const api = {
     issue: (id: string) => call<{ doc: SalesDocument }>(`/sales/documents/${encodeURIComponent(id)}/issue`, { method: 'POST', body: '{}' }),
     cancel: (id: string, reason: string) => call<SalesDocDetail>(`/sales/documents/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
     remove: (id: string) => call<{ ok: true }>(`/sales/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 消費税の税率の表（読むだけ。直すのは運営のマスター管理画面。第15.1.1.1節）。 */
+    taxRates: () => call<{ rows: TaxRateEntry[] }>('/tax-rates'),
     /** PDF を開く URL。 */
     pdfUrl: (id: string, download = false) => `/v1/sales/documents/${encodeURIComponent(id)}/pdf${download ? '?download=1' : ''}`,
   },

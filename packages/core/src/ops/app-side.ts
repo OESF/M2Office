@@ -6,6 +6,7 @@
  */
 
 import type pg from 'pg';
+import { effectiveTaxTable, type TaxRateEntry } from '@m2office/shared';
 import type { OperatorProfile } from './store.js';
 import type { ServiceIncident } from './incidents.js';
 
@@ -19,6 +20,7 @@ const PROFILE_TTL_MS = 5 * 60_000;
  */
 export class OpsAppSide {
   private profile: { at: number; value: OperatorProfile | null } | null = null;
+  private taxes: { at: number; value: TaxRateEntry[] } | null = null;
 
   constructor(private readonly pool: pg.Pool) {}
 
@@ -75,6 +77,24 @@ export class OpsAppSide {
     const { rows } = await this.pool.query('select m2o_tenant_suspend_at($1) as at', [tenantId]);
     const at = rows[0]?.at;
     return at instanceof Date ? at.toISOString() : at ? String(at) : null;
+  }
+
+  /**
+   * 消費税の税率の表（運営が直したもの。無ければ同梱の表。第15.1.1.1節）。1 分覚えておく。読めなければ同梱の表
+   */
+  async taxRates(now = Date.now()): Promise<TaxRateEntry[]> {
+    if (this.taxes && now - this.taxes.at < 60_000) return this.taxes.value;
+    try {
+      const { rows } = await this.pool.query('select * from m2o_tax_rates()');
+      const day = (v: unknown) => (v instanceof Date ? new Date(v.getTime() - v.getTimezoneOffset() * 60_000).toISOString().slice(0, 10) : String(v).slice(0, 10));
+      const value = effectiveTaxTable(rows.map((r) => ({
+        category: r.category, rate: Number(r.rate), from: day(r.from_on), ...(r.to_on ? { to: day(r.to_on) } : {}), planned: r.planned, ...(r.note ? { note: r.note } : {}),
+      })));
+      this.taxes = { at: now, value };
+      return value;
+    } catch {
+      return effectiveTaxTable(null);
+    }
   }
 
   /** 運営主体の設定（法人名が入っていなければ `null`）。5 分覚えておく。 */

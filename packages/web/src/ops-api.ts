@@ -142,6 +142,21 @@ export interface ServerStatusView {
 
 export interface OperatorProfileView { nameJa: string; nameEn: string; address: string; web: string; contact: string }
 
+/** 運営の税率の表の 1 行（仕様書 第15.1.1.1節）。 */
+export interface TaxRateRow {
+  id: string;
+  category: 'standard' | 'food' | 'news' | 'exempt';
+  rate: number;
+  from: string;
+  to?: string;
+  planned?: boolean;
+  note?: string;
+  sourceUrl: string;
+  checkedOn: string | null;
+  updatedBy: string;
+  updatedAt: string;
+}
+
 /** 停止・緊急停止・再開の申請（第23.8.6節）。 */
 export interface StatusRequestRow {
   id: string;
@@ -202,6 +217,9 @@ export const opsApi = {
     call<{ id: string; notified: number }>('/incidents', send('POST', b)),
   updateIncident: (id: string, body: string) => call<{ notified: number }>(`/incidents/${encodeURIComponent(id)}/update`, send('POST', { body })),
   closeIncident: (id: string, body: string, endedAt: string | null) => call<{ notified: number }>(`/incidents/${encodeURIComponent(id)}/close`, send('POST', { body, endedAt })),
+  /** 消費税の税率の表（法令の表の 1 つ。第15.1.1.1節）。`bundled` は運営がまだ直していないこと。`drafts` は全社の書類の下書きの数。 */
+  taxRates: () => call<{ rows: TaxRateRow[]; bundled: boolean; drafts: number }>('/tax-rates'),
+  saveTaxRates: (rows: Partial<TaxRateRow>[]) => call<{ rows: TaxRateRow[]; bundled: boolean; notified: number }>('/tax-rates', send('PUT', { rows })),
   operatorProfile: () => call<{ profile: OperatorProfileView }>('/settings/operator'),
   setOperatorProfile: (p: OperatorProfileView) => call<{ profile: OperatorProfileView }>('/settings/operator', send('PUT', p)),
   statusRequests: (tenantId?: string) => call<{ requests: StatusRequestRow[] }>(`/status-requests${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),

@@ -42,6 +42,36 @@ export const TAX_RATE_TABLE: TaxRateEntry[] = [
 ];
 
 /**
+ * 運営の表（マスター管理画面で直したもの。第15.1.1.1節）があればそれを、無ければ同梱の表を使う。
+ */
+export function effectiveTaxTable(opsRows: TaxRateEntry[] | null | undefined): TaxRateEntry[] {
+  return opsRows && opsRows.length > 0 ? opsRows : TAX_RATE_TABLE;
+}
+
+/** 区分の一覧（並べる順）。 */
+export const TAX_CATEGORIES = Object.keys(TAX_CATEGORY_LABELS) as TaxCategory[];
+
+/**
+ * 運営者が直した税率の表を確かめる（第15.1.1.1節）。
+ *
+ * @returns 問題があればその言葉。無ければ `null`
+ * @remarks 同じ区分の期間は重なってよい（後から始まる行が優先する）。どの区分にも、終わりの無い確定した行が 1 つは要る
+ */
+export function checkTaxTable(rows: TaxRateEntry[]): string | null {
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  for (const r of rows) {
+    if (!TAX_CATEGORIES.includes(r.category)) return `区分が違います（${String(r.category)}）`;
+    if (!Number.isFinite(r.rate) || r.rate < 0 || r.rate > 100) return `${TAX_CATEGORY_LABELS[r.category]}の税率は 0〜100 で入れてください`;
+    if (!DAY.test(r.from) || Number.isNaN(Date.parse(r.from))) return `${TAX_CATEGORY_LABELS[r.category]}の始まりの日が日付ではありません`;
+    if (r.to && (!DAY.test(r.to) || r.to < r.from)) return `${TAX_CATEGORY_LABELS[r.category]}の終わりの日は、始まりの日より後にしてください`;
+  }
+  for (const c of TAX_CATEGORIES) {
+    if (!rows.some((r) => r.category === c && !r.planned && !r.to)) return `${TAX_CATEGORY_LABELS[c]}に、終わりの日の無い確定した税率が要ります`;
+  }
+  return null;
+}
+
+/**
  * その日の区分の税率（確定した行だけを見る。後から始まる行を優先する）。
  *
  * @param day 取引の日（`YYYY-MM-DD`）

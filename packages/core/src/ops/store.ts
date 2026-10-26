@@ -8,7 +8,7 @@
 import type { EvidencePackage, SystemLogDigest, SystemLogFilter, SystemLogLine } from '../log/store.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import type { RuntimeBeat } from '@m2office/shared';
+import type { RuntimeBeat, TaxRateEntry } from '@m2office/shared';
 import { beatFromRow } from '../machine/runtime.js';
 import type { MachineReport, NewTenantInput, OperatorRole } from './rules.js';
 import type { IncidentImpact, ServiceIncident } from './incidents.js';
@@ -84,6 +84,17 @@ export interface OpsMachine {
   createdAt: string;
   lastAt: string | null;
   report: MachineReport | null;
+}
+
+/** 運営の税率の表の 1 行（第15.1.1.1節）。 */
+export interface OpsTaxRate extends TaxRateEntry {
+  id: string;
+  /** 出典（官公庁や国会の発表の URL） */
+  sourceUrl: string;
+  /** 確認した日 */
+  checkedOn: string | null;
+  updatedBy: string;
+  updatedAt: string;
 }
 
 /** 運営主体の設定（第23.8.14節）。 */
@@ -465,6 +476,61 @@ export class OpsStore {
   async serverStatus(): Promise<ServerStatus> {
     const { rows } = await this.pool.query('select ops.server_status() as s');
     return rows[0].s as ServerStatus;
+  }
+
+  /**
+   * 運営の税率の表（第15.1.1.1節）。運営がまだ直していなければ空。
+   */
+  async listTaxRates(): Promise<OpsTaxRate[]> {
+    const { rows } = await this.pool.query('select * from ops.tax_rates order by category, from_on');
+    const day = (v: unknown) => (v instanceof Date ? new Date(v.getTime() - v.getTimezoneOffset() * 60_000).toISOString().slice(0, 10) : v ? String(v).slice(0, 10) : null);
+    return rows.map((r) => ({
+      id: r.id, category: r.category, rate: Number(r.rate), from: day(r.from_on)!, ...(r.to_on ? { to: day(r.to_on)! } : {}), planned: r.planned,
+      ...(r.note ? { note: r.note } : {}), sourceUrl: r.source_url, checkedOn: day(r.checked_on), updatedBy: r.updated_by, updatedAt: iso(r.updated_at)!,
+    }));
+  }
+
+  /**
+   * 運営の税率の表を置き換える（1 つの処理で。行の ID が同じで中身が変わらなければ、直した人と日時はそのまま）。
+   */
+  async saveTaxRates(rows: (TaxRateEntry & { id: string; sourceUrl: string; checkedOn: string | null })[], by: string): Promise<void> {
+    const c = await this.pool.connect();
+    try {
+      await c.query('begin');
+      const { rows: cur } = await c.query('select id, category, rate, from_on::text as f, to_on::text as t, planned, note, source_url, checked_on::text as k from ops.tax_rates');
+      const same = (r: (typeof rows)[number]) => cur.some((x) => x.id === r.id && x.category === r.category && Number(x.rate) === r.rate && x.f === r.from
+        && (x.t ?? null) === (r.to ?? null) && x.planned === !!r.planned && x.note === (r.note ?? '') && x.source_url === r.sourceUrl && (x.k ?? null) === r.checkedOn);
+      await c.query('delete from ops.tax_rates where not (id = any($1::text[]))', [rows.map((r) => r.id)]);
+      for (const r of rows) {
+        if (same(r)) continue;
+        await c.query(
+          `insert into ops.tax_rates (id, category, rate, from_on, to_on, planned, note, source_url, checked_on, updated_by, updated_at)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+           on conflict (id) do update set category = excluded.category, rate = excluded.rate, from_on = excluded.from_on, to_on = excluded.to_on,
+             planned = excluded.planned, note = excluded.note, source_url = excluded.source_url, checked_on = excluded.checked_on,
+             updated_by = excluded.updated_by, updated_at = now()`,
+          [r.id, r.category, r.rate, r.from, r.to ?? null, !!r.planned, r.note ?? '', r.sourceUrl, r.checkedOn, by],
+        );
+      }
+      await c.query('commit');
+    } catch (err) {
+      await c.query('rollback').catch(() => undefined);
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  /** 全社の書類の下書きの数（税率を直す前に見せる。中身は読まない）。 */
+  async salesDraftCount(): Promise<number> {
+    const { rows } = await this.pool.query('select ops.sales_draft_count() as n');
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  /** 税率が確定したことを、販売の書類と受注を使う会社の管理者に知らせる。 @returns 知らせた人の数 */
+  async taxRateNotice(title: string, body: string): Promise<number> {
+    const { rows } = await this.pool.query('select ops.tax_rate_notice($1, $2) as n', [title, body]);
+    return Number(rows[0]?.n ?? 0);
   }
 
   /** 運営主体の設定（入れていなければ空の値）。 */

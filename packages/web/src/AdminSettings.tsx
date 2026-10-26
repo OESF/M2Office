@@ -11,7 +11,7 @@ import { Fragment, useEffect, useState } from 'react';
 import type {
   AutomationPolicy, CompanyInfo, Role, SlideTemplate, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
-import { SLIDE_DESIGNS } from '@m2office/shared';
+import { SLIDE_DESIGNS, TAX_CATEGORY_LABELS, type TaxRateEntry } from '@m2office/shared';
 import { api, describeError, type ConsolidationView, type KnowledgeItemView, type KnowledgeSectionView, type KnowledgeVersionView } from './api.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
@@ -277,6 +277,32 @@ const COMPANY_HELP: Record<string, PageHelp> = {
 };
 
 /**
+ * 消費税の税率の表（読むだけ。仕様書 第15.1.1.1節）。税率は法律で決まるので、直すのは運営のマスター管理画面。
+ */
+function TaxRateTable() {
+  const [rows, setRows] = useState<TaxRateEntry[] | null>(null);
+  useEffect(() => { api.sales.taxRates().then((r) => setRows(r.rows)).catch(() => setRows(null)); }, []);
+  if (!rows) return null;
+  const day = (d: string) => d.replace(/-/g, '/');
+  return (
+    <div className="field">
+      <label>消費税の税率</label>
+      <div className="table-scroll"><table className="table">
+        <thead><tr><th>区分</th><th>税率</th><th>期間</th><th aria-label="状態" /></tr></thead>
+        <tbody>{rows.map((r, i) => (
+          <tr key={i}>
+            <td>{TAX_CATEGORY_LABELS[r.category]}</td>
+            <td>{r.category === 'exempt' ? 'かからない' : `${r.rate}%`}</td>
+            <td className="nowrap">{day(r.from)}〜{r.to ? day(r.to) : ''}</td>
+            <td>{r.planned && <span className="badge warn">予定</span>}</td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+    </div>
+  );
+}
+
+/**
  * 帳票の体裁（仕様書 第15.2.2節、Q-57）。請求書などの PDF に使う。
  *
  * @remarks
@@ -321,6 +347,7 @@ function InvoiceStyleSettings({ initial, onSaved }: {
         placeholder={'例: 振込手数料は貴社にてご負担ください。\nお支払い期限までにお振り込みをお願いいたします。'} />
       <SealSettings style={style} onChange={set} onStored={(v) => { set(v); onSaved(); }} saver={saver} />
       <QuoteStyleSettings quote={style.quote} onChange={(quote) => set({ quote })} saver={saver} />
+      <TaxRateTable />
       <div className="row">
         <SaveButton run={async () => {
           await api.admin.saveSettings('invoice', style);

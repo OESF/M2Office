@@ -103,3 +103,37 @@ test('まとめた請求書は、納品書ごとの納品の日の税率をそ�
   assert.ok(!('error' in inv));
   assert.deepEqual(inv.doc.taxLines.map((x) => [x.rate, x.base, x.tax]), [[8, 3000, 240], [1, 3000, 30]]);
 });
+
+test('運営の表: 無ければ同梱の表。確かめは区分・税率・日付と、区分ごとに終わりの無い確定した行を求める', async () => {
+  const { effectiveTaxTable, checkTaxTable } = await import('@m2office/shared');
+  assert.equal(effectiveTaxTable([]), TAX_RATE_TABLE);
+  assert.equal(effectiveTaxTable(null), TAX_RATE_TABLE);
+  assert.equal(checkTaxTable(TAX_RATE_TABLE), null);
+  assert.match(checkTaxTable(TAX_RATE_TABLE.filter((e) => e.category !== 'news')) ?? '', /軽減（新聞）に、終わりの日の無い確定した税率/);
+  assert.match(checkTaxTable([...TAX_RATE_TABLE, { category: 'food', rate: 120, from: '2030-01-01' }]) ?? '', /0〜100/);
+  assert.match(checkTaxTable([...TAX_RATE_TABLE, { category: 'food', rate: 5, from: '2030-01-01', to: '2029-01-01' }]) ?? '', /終わりの日/);
+});
+
+test('運営が予定を確定にした表で計算し、下書きは発行の日の税率で計算し直す（第15.1.1.1節）', async () => {
+  const { service, who, store } = setup();
+  let table = TAX_RATE_TABLE;
+  service.deps.taxTable = async () => table;
+  const r = await service.createDocument(who, { kind: 'invoice', party: { name: '株式会社見本商事' }, items: [{ name: '食パン', code: '', quantity: 10, unit: '斤', unitPrice: 300, taxRate: 10, taxCategory: 'food' }] }, null);
+  assert.ok(!('error' in r));
+  assert.equal(r.doc.items[0]!.taxRate, 8);
+  // 下書きを 2027-04-01 より前に作ったことにし、運営が 1% を確定したあと、その期間に発行する
+  await store.updateDoc('t1', r.doc.id, { issuedOn: '2027-03-30' });
+  table = TAX_RATE_TABLE.map((e) => ({ ...e, planned: false }));
+  const { taxRateOn: rateOn } = await import('@m2office/shared');
+  const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  const issued = await service.issue(who, r.doc.id);
+  assert.ok(!('error' in issued));
+  // 発行の日（今日）の税率で計算し直す（今日が 1% の期間でなければ 8% のまま）
+  assert.equal(issued.items[0]!.taxRate, rateOn('food', today, table));
+  // 書類の詳細は、運営の表の予定の知らせを返す
+  table = TAX_RATE_TABLE;
+  const later = await service.createDocument(who, { kind: 'delivery', party: { name: '株式会社見本商事' }, items: [{ name: '食パン', code: '', quantity: 1, unit: '斤', unitPrice: 300, taxRate: 10, taxCategory: 'food' }] }, null);
+  assert.ok(!('error' in later));
+  await store.updateDoc('t1', later.doc.id, { issuedOn: '2027-05-01' });
+  assert.ok((await service.get(who, later.doc.id))!.taxNotes.some((n) => n.includes('1% になる予定')));
+});

@@ -23,6 +23,9 @@ function fakeStore() {
   const audits: string[] = [];
   const reports: MachineReport[] = [];
   let n = 0;
+  // 運営の税率の表（第15.1.1.1節）。はじめは空（同梱の表を出す）
+  let taxRows: { id: string; category: string; rate: number; from: string; to?: string; planned?: boolean; sourceUrl: string; checkedOn: string | null; updatedBy: string; updatedAt: string }[] = [];
+  const notices: string[] = [];
   const store = {
     listOperators: async () => ops,
     findOperatorByEmail: async (e: string) => ops.find((o) => o.email === e) ?? null,
@@ -52,8 +55,12 @@ function fakeStore() {
     requestStatus: async (_t: string, kind: string) => { audits.push(`store:${kind}`); return 'req-1'; },
     listStatusRequests: async () => [{ id: 'req-1', tenantId: 't-acme', tenantName: 'アクメ', kind: 'lock', reasonCode: 'abuse', reason: 'x', state: 'done', effectiveAt: null }],
     receiveReport: async (token: string, r: MachineReport) => { if (token !== 'machine-key') return null; reports.push(r); return 'm-1'; },
+    listTaxRates: async () => taxRows,
+    saveTaxRates: async (rows: typeof taxRows) => { taxRows = rows.map((r) => ({ ...r, updatedBy: 'op', updatedAt: '' })); },
+    salesDraftCount: async () => 3,
+    taxRateNotice: async (title: string) => { notices.push(title); return 2; },
   } as unknown as OpsStore;
-  return { store, created, audits, reports, sessions, passkeys, codes };
+  return { store, created, audits, reports, sessions, passkeys, codes, notices, taxRows: () => taxRows };
 }
 
 const config = { login: null, googleDomain: null, devLogin: true, cookieSecure: false, sessionTtlHours: 12 };
@@ -143,6 +150,33 @@ test('会社の詳細と CSV は開いたことを残す。運営主体の設定
   assert.equal((await put(admin, { nameJa: '運営', web: 'https://ops.example' })).status, 200);
   const mon = await login(app, 'mon@ops.example');
   assert.equal((await put(mon, { nameJa: 'x' })).status, 403);
+});
+
+test('消費税の税率の表: はじめは同梱の表。直す・確定には出典が要り、監視は直せない。予定を確定したら会社の管理者に知らせる（第15.1.1.1節）', async () => {
+  const { store, audits, notices, taxRows } = fakeStore();
+  const app = opsApp({ store, config, log });
+  const admin = await login(app, 'admin@ops.example');
+  const got = await app.request('/v1/ops/tax-rates', { headers: { ...OPS, cookie: admin.cookie } });
+  const first = await got.json() as { rows: { id: string; category: string; rate: number; from: string; to?: string; planned?: boolean; sourceUrl: string; checkedOn: string | null }[]; bundled: boolean; drafts: number };
+  assert.equal(first.bundled, true);
+  assert.equal(first.drafts, 3);
+  assert.ok(first.rows.some((r) => r.category === 'food' && r.rate === 1 && r.planned));
+  const put = (who: { cookie: string; csrfToken: string }, rows: unknown) => app.request('/v1/ops/tax-rates', {
+    method: 'PUT', headers: { ...OPS, cookie: who.cookie, 'x-csrf-token': who.csrfToken, 'content-type': 'application/json' }, body: JSON.stringify({ rows }),
+  });
+  const confirmed = first.rows.map((r) => (r.planned ? { ...r, planned: false } : r));
+  assert.equal((await put(admin, confirmed)).status, 400, '出典が無ければ確定できない');
+  const withSource = first.rows.map((r) => (r.planned ? { ...r, planned: false, sourceUrl: 'https://www.mof.go.jp/', checkedOn: '2026-12-15' } : r));
+  const mon = await login(app, 'mon@ops.example');
+  assert.equal((await put(mon, withSource)).status, 403);
+  const ok = await put(admin, withSource);
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json() as { notified: number }).notified, 2);
+  assert.ok(notices.some((t) => t.includes('食料品の消費税率が 1% に確定しました')));
+  assert.ok(audits.includes('law.tax_rates'));
+  assert.ok(taxRows().some((r) => r.category === 'food' && r.rate === 1 && !r.planned));
+  // 区分の確定した行を消すと、確かめで断る
+  assert.equal((await put(admin, withSource.filter((r) => r.category !== 'news'))).status, 400);
 });
 
 test('停止と再開: 監視は緊急停止だけ。理由の種類を確かめ、緊急停止は会社へ渡す案内の文を返す', async () => {

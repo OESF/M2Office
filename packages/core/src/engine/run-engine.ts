@@ -19,7 +19,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Job, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, type ReservationSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type SubsidySettings, type MemberSettings, type PrintDesignSettings, type ReservationSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -247,6 +247,8 @@ export interface RunEngineDeps {
   };
   /** その日がお知らせで出した休業の期間に入るか（予定の候補で休業日を避ける。第35.7節）。 */
   closedOn?(tenantId: string, day: string): Promise<boolean>;
+  /** 消費税の税率の表（運営が直したもの。第15.1.1.1節）。ツールに渡す */
+  taxTable?(): Promise<TaxRateEntry[]>;
   /** Webの分析（内蔵の拡張。仕様書 第34章）。ツールに渡す。 */
   webReview?: {
     service: WebReviewService;
@@ -1100,6 +1102,7 @@ export class RunEngine {
       compartment: def.compartment, repo, connector, files, research,
       // お知らせで出した休業の期間（予定の候補で休業日を避ける。第35.7節）
       ...(this.deps.closedOn ? { closedOn: (day: string) => this.deps.closedOn!(run.tenantId, day) } : {}),
+      ...(this.deps.taxTable ? { taxTable: this.deps.taxTable } : {}),
       approvalsAhead, isGoogleTool: (name) => !!registry.get(name)?.google,
       // 画像から文字を読む手段。推論が持っていなければ渡さない（第9.4.1節、Q-56）
       ...(llm?.readImage ? { ocr: async (r) => (await llm.readImage!(r)).text } : {}),

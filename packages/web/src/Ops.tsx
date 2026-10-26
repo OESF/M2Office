@@ -11,7 +11,7 @@ import { copyText } from './clipboard.js';
 import { SystemLogs, type LogSource } from './SystemLogs.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import {
-  opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
+  opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
   type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
@@ -29,7 +29,7 @@ const ACTION_LABEL: Record<string, string> = {
   'machine.add': '機械を登録した', 'machine.remove': '機械を削除した', 'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
   'passkey.add': 'パスキーを登録した', 'passkey.verify': 'パスキーで確かめた', 'passkey.delete': 'パスキーを削除した',
   'operator.enroll_code': '登録の合言葉を出した', 'operator.reset_passkeys': 'パスキーを削除してやり直させた',
-  'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた',
+  'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた', 'law.tax_rates': '消費税の税率の表を変えた',
   'tenant.suspend_request': '停止を申請した', 'tenant.lock_request': '緊急停止した', 'tenant.resume_request': '再開を申請した',
   'tenant.status_approve': '申請を承認した', 'tenant.status_reject': '申請を承認しなかった', 'tenant.status_withdraw': '申請を取り下げた', 'tenant.lock_confirm': '緊急停止を確認した',
   'tenant.suspend_requested': '停止の申請', 'tenant.suspend_scheduled': '停止の予告', 'tenant.suspend': '停止した', 'tenant.lock': '緊急停止した',
@@ -131,7 +131,7 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'requests' | 'server' | 'incidents' | 'logs' | 'machines' | 'operators' | 'audit' | 'settings';
+type OpsPage = 'tenants' | 'requests' | 'server' | 'incidents' | 'logs' | 'machines' | 'operators' | 'audit' | 'law' | 'settings';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
   { id: 'requests', label: '停止と再開', icon: 'approvals' },
@@ -141,6 +141,7 @@ const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'machines', label: 'ローカルの形の機械', icon: 'dashboard' },
   { id: 'operators', label: '運営者', icon: 'users' },
   { id: 'audit', label: '操作履歴', icon: 'audit' },
+  { id: 'law', label: '法令の表', icon: 'doc' },
   { id: 'settings', label: '設定', icon: 'settings' },
 ];
 
@@ -189,6 +190,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           {page === 'incidents' && <Incidents />}
           {page === 'logs' && <OpsLogs me={me} />}
           {page === 'settings' && <Settings me={me} />}
+          {page === 'law' && <LawTables me={me} />}
           {page === 'machines' && <Machines me={me} />}
           {page === 'operators' && <Operators me={me} />}
           {page === 'audit' && <Audit />}
@@ -733,6 +735,74 @@ function Incidents() {
           )}
         </div>
       ))}
+    </>
+  );
+}
+
+/** 区分の呼び方（仕様書 第15.1.1節）。 */
+const TAX_LABELS: Record<TaxRateRow['category'], string> = { standard: '標準', food: '軽減（飲食料品）', news: '軽減（新聞）', exempt: '対象外' };
+
+/**
+ * 法令の表（仕様書 第23.8.13節）。いまは消費税の税率の表（第15.1.1.1節）。全社に効く。
+ * 予定の確定・税率と日付の直し・行の追加・取り下げ。直した行と足した行には出典の URL と確認した日が要る。
+ */
+function LawTables({ me }: { me: OpsMe }) {
+  const [rows, setRows] = useState<TaxRateRow[] | null>(null);
+  const [bundled, setBundled] = useState(false);
+  const [drafts, setDrafts] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const edit = me.can['settings.manage'];
+  const load = () => opsApi.taxRates().then((r) => { setRows(r.rows); setBundled(r.bundled); setDrafts(r.drafts); }).catch((e) => setError(errText(e, '読み込めませんでした')));
+  useEffect(() => { void load(); }, []);
+  const set = (i: number, patch: Partial<TaxRateRow>) => setRows((cur) => cur && cur.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  const today = new Date().toISOString().slice(0, 10);
+  const save = () => {
+    if (!rows) return;
+    const changes = rows.map((r) => `${TAX_LABELS[r.category]} ${r.rate}%（${r.from}〜${r.to ?? ''}）${r.planned ? '予定' : '確定'}`).join('\n');
+    if (!window.confirm(`この表で保存します（全社に効きます）。\n\n${changes}\n\nいまの書類の下書き ${drafts} 件は、発行するときにこの表の税率で計算し直します。発行した書類は変わりません。`)) return;
+    setError(null); setSaved(null);
+    opsApi.saveTaxRates(rows).then((r) => { setRows(r.rows); setBundled(r.bundled); setSaved(r.notified ? `保存しました（${r.notified} 人の管理者に知らせました）` : '保存しました'); })
+      .catch((e) => setError(errText(e, '保存できませんでした')));
+  };
+  return (
+    <>
+      <h2>法令の表</h2>
+      {error && <p className="error">{error}</p>}
+      {rows && (
+        <div className="card">
+          <h3>消費税の税率</h3>
+          {bundled && <p className="small muted">M2Office に同梱した表です。保存すると運営の表になります。</p>}
+          <div className="table-scroll"><table className="table law-table">
+            <thead><tr><th>区分</th><th>税率（%）</th><th>始まり</th><th>終わり</th><th>状態</th><th>出典の URL</th><th>確認した日</th><th aria-label="操作" /></tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.id || `new-${i}`}>
+                  <td><select value={r.category} disabled={!edit} onChange={(e) => set(i, { category: e.target.value as TaxRateRow['category'] })}>
+                    {(Object.keys(TAX_LABELS) as TaxRateRow['category'][]).map((c) => <option key={c} value={c}>{TAX_LABELS[c]}</option>)}
+                  </select></td>
+                  <td><input type="number" min={0} max={100} step="0.01" className="num-input" value={r.rate} disabled={!edit} onChange={(e) => set(i, { rate: Number(e.target.value) })} /></td>
+                  <td><input type="date" value={r.from} disabled={!edit} onChange={(e) => set(i, { from: e.target.value })} /></td>
+                  <td><input type="date" value={r.to ?? ''} disabled={!edit} onChange={(e) => set(i, e.target.value ? { to: e.target.value } : { to: undefined })} /></td>
+                  <td className="nowrap">{r.planned
+                    ? <><span className="badge warn">予定</span>{edit && <> <button className="btn small" onClick={() => set(i, { planned: false, checkedOn: r.checkedOn ?? today })}>確定する</button></>}</>
+                    : <span className="badge ok">確定</span>}</td>
+                  <td><input value={r.sourceUrl} disabled={!edit} placeholder="https://" onChange={(e) => set(i, { sourceUrl: e.target.value })} /></td>
+                  <td><input type="date" value={r.checkedOn ?? ''} disabled={!edit} onChange={(e) => set(i, { checkedOn: e.target.value || null })} /></td>
+                  <td>{edit && <button className="btn ghost small" onClick={() => setRows(rows.filter((_, k) => k !== i))}>{r.planned ? '取り下げる' : '削除'}</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+          {edit && (
+            <div className="row wrap">
+              <button className="btn ghost small" onClick={() => setRows([...rows, { id: '', category: 'food', rate: 0, from: today, planned: true, sourceUrl: '', checkedOn: today, updatedBy: '', updatedAt: '' }])}>行を足す</button>
+              <button className="btn small" onClick={save}>保存</button>
+              {saved && <span className="ok-msg small">{saved}</span>}
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }

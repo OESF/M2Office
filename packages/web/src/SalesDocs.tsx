@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SALES_DOC_KIND_LABELS, SALES_DOC_STATUS_LABELS, SALES_ORDER_STATUS_LABELS, TAX_CATEGORY_LABELS,
-  guessTaxCategory, plannedTaxNote, taxCategoryOf, taxRateLabel,
+  guessTaxCategory, taxCategoryOf, taxRateLabel,
   type TaxCategory, type SalesDocKind, type SalesDocStatus, type SalesDocument, type SalesOrder, type SalesOrderStatus, type SalesSuggestions,
 } from '@m2office/shared';
 import { api, describeError, type SalesDocDetail } from './api.js';
@@ -448,7 +448,7 @@ function DocView({ id, onBack, onOpen, onOpenRun, changeKey }: {
           <p>合計 <strong>{yen(d.total)}</strong></p>
           <p className="small muted">{d.taxLines.map((x) => (x.rate === 0 ? `対象外 ${yen(x.base)}` : `${taxRateLabel(x.rate)} ${yen(x.base)}・消費税 ${yen(x.tax)}`)).join('　')}</p>
           {/* まだ確定していない税率の変更（食料品の 1% など。第15.1.1節） */}
-          {[...new Set(d.items.map((i) => plannedTaxNote(taxCategoryOf(i), d.issuedOn)).filter((x): x is string => !!x))].map((n) => <p key={n} className="small"><span className="badge warn">予定</span> {n}</p>)}
+          {r.taxNotes.map((n) => <p key={n} className="small"><span className="badge warn">予定</span> {n}</p>)}
           <div className="row wrap">
             <a className="btn ghost small" href={api.sales.pdfUrl(d.id, true)}>PDF を保存</a>
             {d.status === 'draft' && latest && (

@@ -245,9 +245,12 @@ const evidence = new EvidenceBuilder({
   machineLogDir: deploymentFromEnv(process.env) === 'onsite' ? process.env['M2O_LOG_DIR']?.trim() || null : null,
 });
 // 販売の書類と受注（第42章）。業務から書類を作り・発行し（承認の後）、注文書を受注にする
+// 消費税の税率の表（運営がマスター管理画面で直したもの。第15.1.1.1節）。ローカルの形でも、その機械の表を読む
+const taxSide = new OpsAppSide(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'tax' }));
+const taxTable = () => taxSide.taxRates();
 const salesDocs = new SalesDocService({
   store: new PostgresSalesDocStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
-  repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log, taxTable,
   ocrFor: async (tenantId) => {
     const llm = await ai.llmFor(tenantId).catch(() => null);
     return llm?.readImage ? async (r) => (await llm.readImage!(r)).text : undefined;
@@ -426,6 +429,7 @@ const engine = new RunEngine({
   webReview: { service: webReview, access: webReviewAccess(repo) },
   contracts: { service: contracts, access: contractsAccess(repo) },
   salesDocs: { service: salesDocs, access: salesDocsAccess(repo) },
+  taxTable,
   subsidies: { service: subsidies, access: subsidiesAccess(repo) },
   members: { service: members, access: membersAccess(repo) },
   printDesigns: { service: printDesigns, access: printDesignsAccess(repo) },

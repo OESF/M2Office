@@ -15,6 +15,7 @@ import { runtimeEnvironment, inferenceText, localLlmFromEnv, deploymentFromEnv,
   type SystemLogLine,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
 } from '@m2office/core';
+import { TAX_CATEGORY_LABELS, TAX_RATE_TABLE, checkTaxTable, type TaxCategory, type TaxRateEntry } from '@m2office/shared';
 import { ChallengeStore, fromB64, realWebAuthn, toB64, type WebAuthnFns } from './passkey.js';
 import { HandoffStore } from '../auth/handoff.js';
 import { OAuthStateStore } from '../auth/oauth-state.js';
@@ -514,6 +515,60 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
       await store.audit(op.id, 'incident.close', 'incident', c.req.param('id'), { notified: n });
       return c.json({ notified: n });
     } catch (err) { return ruleError(c, err); }
+  });
+
+  // 消費税の税率の表（法令の表の 1 つ。第15.1.1.1節・第23.8.13節）。運営が直していなければ同梱の表を出す
+  const taxRows = async () => {
+    const rows = await store.listTaxRates();
+    if (rows.length > 0) return { rows, bundled: false };
+    return {
+      bundled: true,
+      rows: TAX_RATE_TABLE.map((e, i) => ({ ...e, id: `b-${i}`, sourceUrl: '', checkedOn: null, updatedBy: '', updatedAt: '' })),
+    };
+  };
+  app.get('/v1/ops/tax-rates', async (c) => c.json({ ...(await taxRows()), drafts: await store.salesDraftCount().catch(() => 0) }));
+  /**
+   * 税率の表を保存する（行をまとめて置き換える）。直した行と足した行には出典の URL と確認した日が要る。
+   * 予定を確定にした行があれば、販売の書類と受注を使う会社の管理者に知らせる。
+   */
+  app.put('/v1/ops/tax-rates', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    const b = await c.req.json<{ rows?: unknown }>().catch(() => ({} as { rows?: unknown }));
+    if (!Array.isArray(b.rows) || b.rows.length === 0 || b.rows.length > 50) return c.json({ error: '税率の行を渡してください' }, 400);
+    const DAY = /^\d{4}-\d{2}-\d{2}$/;
+    const rows = b.rows.map((x, i) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      const t = (k: string, max: number) => (typeof o[k] === 'string' ? (o[k] as string).trim().slice(0, max) : '');
+      const to = t('to', 10);
+      return {
+        id: /^[A-Za-z0-9_-]{1,40}$/.test(t('id', 40)) ? t('id', 40) : `t-${Date.now().toString(36)}-${i}`,
+        category: t('category', 20) as TaxCategory, rate: Number(o['rate']), from: t('from', 10), ...(to ? { to } : {}), planned: o['planned'] === true,
+        ...(t('note', 200) ? { note: t('note', 200) } : {}), sourceUrl: t('sourceUrl', 500), checkedOn: DAY.test(t('checkedOn', 10)) ? t('checkedOn', 10) : null,
+      };
+    });
+    const problem = checkTaxTable(rows as TaxRateEntry[]);
+    if (problem) return c.json({ error: problem }, 400);
+    // 前の表（運営の表が無ければ同梱の表）と比べ、直した行と足した行には出典と確認した日を求める
+    const before = (await taxRows()).rows;
+    const key = (r: TaxRateEntry) => `${r.category}|${r.rate}|${r.from}|${r.to ?? ''}|${!!r.planned}`;
+    const changed = rows.filter((r) => { const p = before.find((x) => x.id === r.id); return !p || key(p) !== key(r as TaxRateEntry); });
+    const noSource = changed.find((r) => !/^https:\/\//.test(r.sourceUrl) || !r.checkedOn);
+    if (noSource) return c.json({ error: `${TAX_CATEGORY_LABELS[noSource.category]}（${noSource.from}〜）の出典の URL（https://）と確認した日を入れてください` }, 400);
+    const op = c.get('operator');
+    await store.saveTaxRates(rows, op.id);
+    const confirmed = rows.filter((r) => !r.planned && before.some((p) => p.id === r.id && p.planned));
+    const withdrawn = before.filter((p) => p.planned && !rows.some((r) => r.id === p.id));
+    await store.audit(op.id, 'law.tax_rates', 'law', 'tax_rates', {
+      changed: changed.map((r) => ({ category: r.category, rate: r.rate, from: r.from, to: r.to ?? null, planned: r.planned, source: r.sourceUrl })),
+      confirmed: confirmed.length, withdrawn: withdrawn.length,
+    });
+    let notified = 0;
+    for (const r of confirmed) {
+      const span = `${Number(r.from.slice(0, 4))} 年 ${Number(r.from.slice(5, 7))} 月 ${Number(r.from.slice(8, 10))} 日${r.to ? `から ${Number(r.to.slice(0, 4))} 年 ${Number(r.to.slice(5, 7))} 月 ${Number(r.to.slice(8, 10))} 日まで` : 'から'}`;
+      const what = r.category === 'food' ? '食料品' : TAX_CATEGORY_LABELS[r.category];
+      notified += await store.taxRateNotice(`${what}の消費税率が ${r.rate}% に確定しました`, `${span}、${what}の消費税率は ${r.rate}% になります。その日より後の書類は、新しい税率で作ります（発行した書類は変わりません）。`).catch(() => 0);
+    }
+    return c.json({ ...(await taxRows()), notified });
   });
 
   // 運営主体の設定（第23.8.14節）

@@ -290,6 +290,8 @@ app.route('/v1/competitors', competitorsRoute(deps));
 app.route('/v1/announcements', announcementsRoute(deps));
 app.route('/v1/contracts', contractsRoute(deps));
 app.route('/v1/sales', salesDocsRoute(deps));
+// 消費税の税率の表（読むだけ。直すのは運営のマスター管理画面。仕様書 第15.1.1.1節）
+app.get('/v1/tax-rates', async (c) => c.json({ rows: await deps.taxRates() }));
 app.route('/v1/reservations', reservationsRoute(deps));
 app.route('/v1/subsidies', subsidiesRoute(deps));
 app.route('/v1/members', membersRoute(deps));

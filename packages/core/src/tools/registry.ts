@@ -6,7 +6,7 @@
 
 import type { SlideDeckService } from '../slides/decks.js';
 import type { SlideThemeService } from '../slides/themes.js';
-import type { RiskLevel } from '@m2office/shared';
+import type { RiskLevel, TaxRateEntry } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
@@ -42,6 +42,8 @@ export interface ToolContext {
    * お知らせの作成を使っていない環境では無い
    */
   closedOn?(day: string): Promise<boolean>;
+  /** 消費税の税率の表（運営がマスター管理画面で直したもの。無ければ同梱の表。仕様書 第15.1.1.1節）。見積書が使う */
+  taxTable?(): Promise<TaxRateEntry[]>;
   repo: Repository;
   /** メール・予定・タスク・チャットへの接続口。Google を直接呼ばない。 */
   connector: WorkspaceConnector;
