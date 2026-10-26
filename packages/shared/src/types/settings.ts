@@ -16,6 +16,7 @@ import { DEFAULT_INQUIRY_SETTINGS, type InquirySettings } from './inquiries.js';
 import { DEFAULT_COMPETITOR_SETTINGS, type CompetitorSettings } from './competitors.js';
 import { DEFAULT_ANNOUNCEMENT_SETTINGS, type AnnouncementSettings } from './announcements.js';
 import { DEFAULT_CONTRACT_SETTINGS, type ContractSettings } from './contracts.js';
+import { DEFAULT_SALES_DOCS_SETTINGS, type SalesDocsSettings } from './sales-docs.js';
 import { DEFAULT_RESERVATION_SETTINGS, type ReservationSettings } from './reservations.js';
 import { DEFAULT_SUBSIDY_SETTINGS, type SubsidySettings } from './subsidies.js';
 import { DEFAULT_MEMBER_SETTINGS, type MemberSettings } from './members.js';
@@ -311,6 +312,8 @@ export interface TenantSettings {
   webReview: WebReviewSettings;
   /** 契約の管理（内蔵の拡張。第38章） */
   contracts: ContractSettings;
+  /** 販売の書類と受注（内蔵の拡張。第42章） */
+  salesDocs: SalesDocsSettings;
   /** 会議室・社用車・備品の予約（内蔵の拡張。第37章） */
   reservations: ReservationSettings;
   /** 補助金・助成金の案内（内蔵の拡張。第39章） */
@@ -399,6 +402,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   // Webの分析は既定で切り（第34.2節）
   webReview: DEFAULT_WEB_REVIEW_SETTINGS,
   contracts: DEFAULT_CONTRACT_SETTINGS,
+  // 販売の書類と受注は既定で切り（第42.9節）
+  salesDocs: DEFAULT_SALES_DOCS_SETTINGS,
   // 予約は既定で切り（第37.2節）
   reservations: DEFAULT_RESERVATION_SETTINGS,
   // 補助金・助成金の案内は既定で切り（第39.2節）

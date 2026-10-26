@@ -334,6 +334,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `PATCH` ／ `DELETE /v1/contracts/:id` ／ `GET /v1/contracts/:id/file` | 1 件 ／ 直す（日付や決まりを直すと期限を計算し直す）／ 削除（入れた人と管理者）／ 契約書を開く（置き場をつないだ管理者の許可でドライブから読む） |
 | `PUT /v1/admin/extensions/contracts/storage` | 管理者: 契約書の置き場（Google ドライブのフォルダ）をつなぐ・つなぎ直す |
 | `GET /v1/contracts/by-company?name=` ／ `POST /v1/contracts/:id/review` | 名刺管理の会社と同じ相手の契約（第38.18節）／ 契約書チェックで見直す（ドライブの契約書を本人のファイルに写して契約書チェックを起こす。実行の ID を返す） |
+| `POST /v1/sales/orders` ／ `GET /v1/sales/suggestions?party=` | 受注を手で入れる（電話などで受けた注文。`party`・`items`・`dueOn` ほか。品名「いつもの」は前の注文から読む。同じ注文は `duplicate: true`。第42.5.1.1節）／ 手で入れるときの候補（取引先と、その取引先の前の品目） |
+| `GET /v1/sales/orders` ／ `POST /v1/sales/orders/import` | 販売の書類と受注（仕様書 第42章）: 受注の一覧（`status`・`q`）／ 注文書（`fileId`）か見積書（`quoteNumber`）から受注にする（AI が読み、計算・見積との違い・読めなかった項目に印。同じ注文は取り込まずに `duplicate: true` で返す） |
+| `GET` ／ `PATCH` ／ `DELETE /v1/sales/orders/:id` ／ `POST /v1/sales/orders/:id/cancel` ／ `GET /v1/sales/orders/:id/file` ／ `POST /v1/sales/orders/:id/delivery` | 受注 1 件とつながった書類 ／ 読み取りを直す ／ 削除（取り込んだ人と管理者。発行した書類がつながっていれば断る）／ 取り消し（`reason`）／ 元の注文書 ／ 残りの数で納品書を作る（すぐ発行） |
+| `GET /v1/sales/documents` ／ `POST /v1/sales/documents/invoice` | 書類の一覧（`kind`・`status`・`party`・`from`・`to`・`min`・`max`・`unbilled=1`。電子帳簿保存法の検索）／ 納品書（`deliveryIds`）をまとめて請求書の下書きを作る |
+| `GET` ／ `DELETE /v1/sales/documents/:id` ／ `GET /v1/sales/documents/:id/pdf` ／ `POST /v1/sales/documents/:id/issue` ／ `POST /v1/sales/documents/:id/cancel` | 書類 1 通（版・受注・納品書・請求書・領収書のつながり）／ 下書きの削除（作った人と管理者）／ PDF（`download=1` で保存）／ 下書きを発行（本人が押す。番号が付く）／ 取り消し（`reason`。作った人と管理者。請求書ならまとめた納品書を未請求に戻す） |
 | `GET /v1/reservations?from=&to=` ／ `GET /v1/reservations/mine` | 予約（仕様書 第37章）: 期間（15 日まで）の予約と予約できるもの・本人が管理者か ／ 本人のこれからの予約 |
 | `POST /v1/reservations` ／ `PATCH` ／ `DELETE /v1/reservations/:id` ／ `POST /v1/reservations/:id/finish` | 予約する（同じものの時間が重なれば 409 と `conflict`: 使っている人と時間・次に空く時間・同じ種類で空いているほかのもの）／ 変える（本人と管理者）／ 取り消す ／ 早く終わったので終わりをいまにする。予約した人の Google カレンダーの予定も入れる・直す・消す |
 | `GET` ／ `POST /v1/reservations/items` ／ `PATCH /v1/reservations/items/:id` ／ `PUT /v1/reservations/items/order` | 予約できるもの（止めたものも含む）／ 足す（管理者。種類を言わなければ名前から決める）／ 直す・止める（`status`）／ 並べ替え |

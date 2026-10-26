@@ -14,7 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { appPath } from '../app-root.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { BlendMode, PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { BlendMode, PDFDocument, degrees, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { toBundledFontChars } from './font-chars.js';
 
@@ -103,6 +103,8 @@ export interface InvoiceDoc {
   notes?: string[];
   /** 会社の体裁（ロゴ・差出人・振込先・備考の定型文・印の欄）。 */
   style?: InvoiceStyleInput;
+  /** すべてのページに薄く斜めに入れる字（下書きの印。第42.3.1節）。 */
+  stamp?: string;
 }
 
 /** 明細 1 行の金額。指定が無ければ数量×単価。 */
@@ -334,7 +336,26 @@ export async function renderPdf(doc: InvoiceDoc): Promise<Uint8Array> {
     }
   }
 
+  if (doc.stamp) drawStamp(pdf, font, doc.stamp);
   return pdf.save();
+}
+
+/**
+ * すべてのページに、薄く斜めに字を入れる（下書きの印。第42.3.1節）。中身は読めるように薄くする。
+ */
+function drawStamp(pdf: PDFDocument, font: PDFFont, stamp: string): void {
+  const shown = fit(stamp);
+  const size = 96;
+  const w = font.widthOfTextAtSize(shown, size);
+  for (const page of pdf.getPages()) {
+    const { width, height } = page.getSize();
+    // 30 度に傾けて、ページの中央に置く
+    const r = Math.PI / 6;
+    page.drawText(shown, {
+      x: width / 2 - (w / 2) * Math.cos(r), y: height / 2 - (w / 2) * Math.sin(r), size, font,
+      rotate: degrees(30), color: rgb(0.75, 0.75, 0.75), opacity: 0.35,
+    });
+  }
 }
 
 /** 印影の大きさ（21 mm 角。ポイント）。 */
@@ -401,6 +422,10 @@ export interface RuledQuoteDoc {
   notes: string[];
   /** 会社の体裁（ロゴ・差出人・印）。 */
   style?: InvoiceStyleInput;
+  /** 前文の下に大きく出す額（「ご請求金額 ￥110,000-」。第42.4節）。 */
+  headline?: { label: string; value: string };
+  /** すべてのページに薄く斜めに入れる字（下書きの印。第42.3.1節）。 */
+  stamp?: string;
 }
 
 /** 金額の表記（例: `￥1,234`・値引きは `-￥200`）。 */
@@ -500,6 +525,14 @@ export async function renderRuledQuote(doc: RuledQuoteDoc): Promise<Uint8Array> 
   if (doc.greeting) {
     y -= 8;
     text(doc.greeting, left, y);
+  }
+  // 大きく出す額（請求書の「ご請求金額」・領収書の金額）。下線を引いて目立たせる
+  if (doc.headline) {
+    y -= 30;
+    text(doc.headline.label, left, y, { size: 12, bold: true });
+    text(doc.headline.value, left + 110, y, { size: 16, bold: true });
+    line(left, y - 5, left + 300, y - 5, 1, ink);
+    y -= 6;
   }
   y -= 18;
 
@@ -611,6 +644,7 @@ export async function renderRuledQuote(doc: RuledQuoteDoc): Promise<Uint8Array> 
     text(l, left + pad * 2, ny, { size: 8 });
     ny -= 11;
   }
+  if (doc.stamp) drawStamp(pdf, font, doc.stamp);
   return pdf.save();
 }
 

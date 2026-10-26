@@ -18,11 +18,11 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
-import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type ReservationSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, fileInputKey } from '@m2office/shared';
+import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type ReservationSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -226,6 +226,11 @@ export interface AppDeps {
   contracts: {
     service: ContractService;
     access(tenantId: string, userId: string): Promise<ContractSettings | null>;
+  };
+  /** 販売の書類と受注（内蔵の拡張。仕様書 第42章）。書類（注文書・納品書・請求書・領収書）と受注。 */
+  salesDocs: {
+    service: SalesDocService;
+    access(tenantId: string, userId: string): Promise<SalesDocsSettings | null>;
   };
   /** 会議室・社用車・備品の予約（内蔵の拡張。仕様書 第37章）。予約した人の Google カレンダーにも予定を入れる。 */
   reservations: {
@@ -602,6 +607,18 @@ export function buildDeps(): AppDeps {
     }),
     access: contractsAccess(repo),
   };
+  // 販売の書類と受注（内蔵の拡張。仕様書 第42章）。金額は決まった計算。発行は本人の判断（画面の「発行」か、業務の承認の後）
+  const salesDocs = {
+    service: new SalesDocService({
+      store: new PostgresSalesDocStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+      ocrFor: async (tenantId) => {
+        const llm = await ai.llmFor(tenantId).catch(() => null);
+        return llm?.readImage ? async (r) => (await llm.readImage!(r)).text : undefined;
+      },
+    }),
+    access: salesDocsAccess(repo),
+  };
   // 会議室・社用車・備品の予約（内蔵の拡張。仕様書 第37章）。予定は予約した人のカレンダーにいまの権限で入れる
   const reservations = {
     service: new ReservationService({
@@ -734,7 +751,7 @@ export function buildDeps(): AppDeps {
     materials: columnMaterialsFrom({ repo, webReview: webReview.service, competitorStore: competitors.service.store, inquiries: inquiries.service }),
   });
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts, subsidies, members, printDesigns, reservations,
+    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts, salesDocs, subsidies, members, printDesigns, reservations,
     deliveries: { service: deliveries }, slideDecks, slideThemes,
     closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
     hr: { calendar: laborCalendar, access: hrAccess(repo) },
@@ -921,6 +938,7 @@ export function buildDeps(): AppDeps {
     competitors,
     announcements,
     contracts,
+    salesDocs,
     reservations,
     subsidies,
     members,

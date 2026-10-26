@@ -19,7 +19,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Job, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, type ReservationSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, type ReservationSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -50,6 +50,7 @@ import type { InquiryService } from '../inquiries/service.js';
 import type { CompetitorService } from '../competitors/service.js';
 import type { AnnouncementService } from '../announcements/service.js';
 import type { ContractService } from '../contracts/service.js';
+import type { SalesDocService } from '../sales-docs/service.js';
 import type { SubsidyService } from '../subsidies/service.js';
 import type { MemberService } from '../members/service.js';
 import type { DeliveryService } from '../deliveries/service.js';
@@ -207,6 +208,11 @@ export interface RunEngineDeps {
   contracts?: {
     service: ContractService;
     access(tenantId: string, userId: string): Promise<ContractSettings | null>;
+  };
+  /** 販売の書類と受注（内蔵の拡張。仕様書 第42章）。ツールに渡す。 */
+  salesDocs?: {
+    service: SalesDocService;
+    access(tenantId: string, userId: string): Promise<SalesDocsSettings | null>;
   };
   /** 補助金・助成金の案内（内蔵の拡張。仕様書 第39章）。ツールに渡す。 */
   subsidies?: {
@@ -1156,6 +1162,10 @@ export class RunEngine {
       // 契約の管理（第38.8節）
       ...(this.deps.contracts ? {
         contracts: { service: this.deps.contracts.service, access: () => this.deps.contracts!.access(run.tenantId, requestedBy) },
+      } : {}),
+      // 販売の書類と受注（第42.8節）
+      ...(this.deps.salesDocs ? {
+        salesDocs: { service: this.deps.salesDocs.service, access: () => this.deps.salesDocs!.access(run.tenantId, requestedBy) },
       } : {}),
       // 補助金・助成金の案内（第39.8節）
       ...(this.deps.subsidies ? {

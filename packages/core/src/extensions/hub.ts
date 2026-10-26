@@ -26,6 +26,7 @@ import { COMPETITORS_PACKAGE } from '../competitors/agents.js';
 import { ANNOUNCEMENTS_PACKAGE } from '../announcements/agents.js';
 import { WEB_REVIEW_PACKAGE } from '../web-review/agents.js';
 import { CONTRACTS_PACKAGE } from '../contracts/agents.js';
+import { SALES_DOCS_PACKAGE } from '../sales-docs/agents.js';
 import { RESERVATIONS_PACKAGE } from '../reservations/package.js';
 import { SUBSIDIES_PACKAGE } from '../subsidies/agents.js';
 import { MEMBERS_PACKAGE } from '../members/agents.js';
@@ -34,7 +35,7 @@ import { PRINT_DESIGNS_PACKAGE } from '../print-designs/agents.js';
 /**
  * 内蔵の拡張（第12.13節）と、入り切りを持つ会社の設定の区分。導入の手順は無く、この区分の `enabled` だけで決まる。
  *
- * @remarks 名刺管理は既定で入、在庫管理と人事・給与とサイネージとコラムの作成と問い合わせの記録と競合の分析とお知らせの作成と Webの分析と契約の管理と予約と補助金・助成金の案内と会員とポイントは既定で切り（第27.2節・第29.2節・第30.2節・第31.2節・第32.18.1節・第33.2節・第34.2節・第35.2節・第36.2節）
+ * @remarks 名刺管理は既定で入、在庫管理と人事・給与とサイネージとコラムの作成と問い合わせの記録と競合の分析とお知らせの作成と Webの分析と契約の管理と販売の書類と受注と予約と補助金・助成金の案内と会員とポイントは既定で切り（第27.2節・第29.2節・第30.2節・第31.2節・第32.18.1節・第33.2節・第34.2節・第35.2節・第36.2節）
  */
 export const BUILTIN_EXTENSIONS: { pkg: ExtensionPackage; section: BuiltinSection }[] = [
   { pkg: CARDS_PACKAGE, section: 'cards' },
@@ -47,6 +48,7 @@ export const BUILTIN_EXTENSIONS: { pkg: ExtensionPackage; section: BuiltinSectio
   { pkg: ANNOUNCEMENTS_PACKAGE, section: 'announcements' },
   { pkg: WEB_REVIEW_PACKAGE, section: 'webReview' },
   { pkg: CONTRACTS_PACKAGE, section: 'contracts' },
+  { pkg: SALES_DOCS_PACKAGE, section: 'salesDocs' },
   { pkg: RESERVATIONS_PACKAGE, section: 'reservations' },
   { pkg: SUBSIDIES_PACKAGE, section: 'subsidies' },
   { pkg: MEMBERS_PACKAGE, section: 'members' },
@@ -54,7 +56,7 @@ export const BUILTIN_EXTENSIONS: { pkg: ExtensionPackage; section: BuiltinSectio
 ];
 
 /** 内蔵の拡張の入り切りを持つ会社の設定の区分。 */
-export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns' | 'inquiries' | 'competitors' | 'announcements' | 'webReview' | 'contracts' | 'reservations' | 'subsidies' | 'members' | 'printDesigns';
+export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns' | 'inquiries' | 'competitors' | 'announcements' | 'webReview' | 'contracts' | 'salesDocs' | 'reservations' | 'subsidies' | 'members' | 'printDesigns';
 
 /** 内蔵の拡張なら、入り切りを持つ会社の設定の区分を返す。 */
 export function builtinSection(extensionId: string): BuiltinSection | null {

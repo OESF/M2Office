@@ -34,7 +34,7 @@ test('絵の番号が、業務どうしで重なっていない（内蔵の拡�
   }
 });
 
-test('絵の番号が 1〜50 の範囲に収まっている', () => {
+test('絵の番号が 1〜60 の範囲に収まっている', () => {
   for (const a of ALL_BUILTIN) {
     const n = agentFace(a);
     assert.ok(n >= 1 && n <= AGENT_FACE_COUNT, `${a.id} の face ${n} が範囲の外`);

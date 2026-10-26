@@ -11,6 +11,7 @@ import { ANNOUNCEMENTS_EXTENSION_ID } from './announcements.js';
 import { CARDS_EXTENSION_ID } from './cards.js';
 import { COMPETITORS_EXTENSION_ID } from './competitors.js';
 import { CONTRACTS_EXTENSION_ID } from './contracts.js';
+import { SALES_DOCS_EXTENSION_ID } from './sales-docs.js';
 import { HR_EXTENSION_ID } from './hr.js';
 import { INQUIRIES_EXTENSION_ID } from './inquiries.js';
 import { INVENTORY_EXTENSION_ID } from './inventory.js';
@@ -167,10 +168,10 @@ export interface EvalCase {
  * 同梱している業務エージェントの絵の数（仕様書 第6.7.4.3節）。
  *
  * @remarks
- * `packages/web/public/agents/agent01.png`〜`agent50.png` に対応する（第 0.140.1 版で 25 から 50 に増やした）。
+ * `packages/web/public/agents/agent01.png`〜`agent60.png` に対応する（第 0.140.1 版で 25 から 50 に、第 0.458.0 版で 60 に増やした。51〜60 は既存の絵の色違い）。
  * **ここを増やすときは、画像を先に置くこと。** 番号だけ増やすと、絵の出ない業務ができる。
  */
-export const AGENT_FACE_COUNT = 50;
+export const AGENT_FACE_COUNT = 60;
 
 /**
  * エージェント定義の本体。
@@ -331,6 +332,7 @@ export const AGENT_AREAS: readonly AgentArea[] = [
     // 契約書チェックは公式の拡張機能（jp.m2office.legal.contract-review）
     extensions: [CONTRACTS_EXTENSION_ID, 'jp.m2office.legal.contract-review', RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID],
   },
+  { id: 'sales', name: '販売の書類と受注', categories: [], extensions: [SALES_DOCS_EXTENSION_ID] },
   { id: 'inventory', name: '在庫管理', categories: [], extensions: [INVENTORY_EXTENSION_ID] },
   { id: 'hr', name: '人事・給与', categories: [], extensions: [HR_EXTENSION_ID] },
 ];

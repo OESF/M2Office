@@ -9,7 +9,7 @@
 このディレクトリに、次の名前で置いてください。
 
 ```
-agent01.png ～ agent50.png
+agent01.png ～ agent60.png
 ```
 
 置いた画像は `/agents/agent01.png` として配信されます。
@@ -47,6 +47,11 @@ agent01.png ～ agent50.png
 | 23 | 日程調整の招待（`scheduling-confirm`） | 公式のカタログ |
 | 24 | 採用支援（`recruiting`） | 公式のカタログ |
 | 25 | 外部のアプリからの配信（`delivery-send`） | 公式のカタログ |
+| 26 | 注文書の作成（`sales-docs:purchase-order`） | 販売の書類と受注 |
+| 27 | 納品書の作成（`sales-docs:delivery-note`） | 販売の書類と受注 |
+| 28 | 請求書の作成（`sales-docs:invoice`） | 販売の書類と受注 |
+| 29 | 領収書の作成（`sales-docs:receipt`） | 販売の書類と受注 |
+| 30 | 受注の取り込み（`sales-docs:order-intake`） | 販売の書類と受注 |
 | 31 | 名刺の取り込み（`business-cards:import`） | 名刺管理 |
 | 32 | 名刺の修正（`business-cards:update`） | 名刺管理 |
 | 33 | 在庫の記録（`inventory:record`） | 在庫管理 |
@@ -68,7 +73,7 @@ agent01.png ～ agent50.png
 | 49 | Web について聞く（`web-review:ask`） | Webの分析 |
 | 50 | Web の依頼文を送る（`web-review:request`） | Webの分析 |
 
-**未使用: 26〜30**
+**未使用: 51〜60**
 
 ### 業務を足すとき
 
@@ -82,7 +87,7 @@ agent01.png ～ agent50.png
 `face` を書かない定義（会社が後から入れた拡張機能の業務）は、ID から機械的に決めます（`agentFace()`）。
 ダッシュボードに並べるときは、ここで使っている番号と重ならないように、次の空いている番号にずらします（`assignAgentFaces()`）。
 
-51 個目が要るようになったら、画像を足したうえで
+61 個目が要るようになったら、画像を足したうえで
 `packages/shared/src/types/agent.ts` の `AGENT_FACE_COUNT` を増やしてください。
 枚数を増やすと、`face` を書かない業務の絵（ID から決まる番号）が一度だけ入れ替わります。
 

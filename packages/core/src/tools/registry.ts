@@ -21,6 +21,7 @@ import type { CompetitorToolContext } from '../competitors/tools.js';
 import type { AnnouncementToolContext } from '../announcements/tools.js';
 import type { WebReviewToolContext } from '../web-review/tools.js';
 import type { ContractToolContext } from '../contracts/tools.js';
+import type { SalesDocToolContext } from '../sales-docs/tools.js';
 import type { SubsidyToolContext } from '../subsidies/tools.js';
 import type { MemberToolContext } from '../members/tools.js';
 import type { PrintDesignToolContext } from '../print-designs/tools.js';
@@ -130,6 +131,8 @@ export interface ToolContext {
   webReview?: WebReviewToolContext;
   /** 契約の管理（内蔵の拡張。仕様書 第38章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   contracts?: ContractToolContext;
+  /** 販売の書類と受注（内蔵の拡張。仕様書 第42章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
+  salesDocs?: SalesDocToolContext;
   /** 補助金・助成金の案内（内蔵の拡張。仕様書 第39章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   subsidies?: SubsidyToolContext;
   /** 会員とポイント（内蔵の拡張。仕様書 第40章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */

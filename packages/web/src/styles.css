@@ -2153,6 +2153,26 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .contracts-search { margin-left: auto; max-width: 240px; }
 .contracts-table-wrap { overflow-x: auto; }
 .contracts-table .nowrap, .contracts-table .badge { white-space: nowrap; }
+/* 販売の書類と受注（仕様書 第42.5.4節） */
+.sales .segmented { align-self: flex-start; }
+.sales-flags { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.sales-range { display: inline-flex; align-items: center; gap: 4px; }
+.sales-range input[type="date"] { max-width: 150px; }
+.sales-range .num-input { max-width: 110px; }
+.sales-doc { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: calc(12px * var(--space-scale)); align-items: start; }
+.sales-pdf { width: 100%; height: 72vh; min-height: 420px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.sales-side { display: flex; flex-direction: column; gap: 8px; }
+.sales-side p { margin: 0; }
+.sales-ask { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.sales-ask .btn { align-self: flex-start; }
+.sales-links p { margin: 2px 0; }
+.sales-manual .sales-line { align-items: flex-end; }
+.sales-manual .unit-input { max-width: 70px; }
+.sales-manual .num-input { max-width: 110px; }
+@media (max-width: 860px) {
+  .sales-doc { grid-template-columns: 1fr; }
+  .sales-pdf { height: 60vh; }
+}
 .contracts-table td.contracts-party { min-width: 9em; }
 .contracts-detail label, .contracts-manual label { display: flex; flex-direction: column; gap: 4px; }
 .contracts-detail label.check, .contracts-manual label.check { flex-direction: row; align-items: center; }

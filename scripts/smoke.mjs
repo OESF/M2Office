@@ -8557,5 +8557,126 @@ console.log('\n■ 128. 実行の一覧を業務で絞る（社内ナレッジ Q
     : ng('実行の一覧の絞り込みが違う', JSON.stringify({ n: items.length, agents: items.map((x) => x.job?.agentId), bad: bad.status, badBefore: badBefore.status }));
 }
 
+console.log('\n■ 129. 販売の書類と受注（入り切り・はじめは管理者だけ・注文書の取り込みと印・二重の取り込み・納品書・請求書の下書きと発行・取り消し・会社の境界。第42章）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, sales_docs, access from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const PARTY = '株式会社見本商事（smoke）';
+  try {
+    await owner.query(`update tenant_settings set sales_docs = null, access = jsonb_set(coalesce(access, '{"scopes":{}}'::jsonb), '{scopes}', coalesce(access->'scopes', '{}'::jsonb) - 'sales-docs') where tenant_id in ('t-alpha', 't-beta')`);
+    const off = await call('a', '/v1/sales/orders');
+    off.status === 403 ? ok('販売の書類と受注を切っている会社では受注を出さない') : ng(`切っているのに受注が出た（${off.status}）`);
+    const on = await call('a', '/v1/admin/extensions/sales-docs/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const meAdmin = await call('a', '/v1/me');
+    const meMember = await call('a', '/v1/me', {}, 'member');
+    const memberList = await call('a', '/v1/sales/orders', {}, 'member');
+    on.status === 200 && meAdmin.body.salesDocs === true && meMember.body.salesDocs === false && memberList.status === 403
+      ? ok('入れると、はじめは管理者だけが使える（管理者が利用できる人を広げる）') : ng('はじめの利用範囲が違う', JSON.stringify({ on: on.status, admin: meAdmin.body.salesDocs, member: meMember.body.salesDocs, list: memberList.status }));
+
+    const text = [
+      '注文書', '株式会社アルファ商事 御中', PARTY, '注文番号: SMK-129', '注文日: 2026年10月20日', '納期: 2026年11月5日', '支払条件: 月末締め翌月末払い',
+      'ケーブル3m 10 本 1200 12000', 'ルーター 2 台 15000 30000', '合計 46300',
+    ].join('\n');
+    const form = new FormData();
+    // 文字のファイルは CSV で上げる（区切りの「,」を使わない 1 列の行にする）
+    form.append('file', new Blob([text]), '注文書.csv');
+    const up = await (await fetch(`${API}/v1/files`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } })).json();
+    const imp = await call('a', '/v1/sales/orders/import', { method: 'POST', body: JSON.stringify({ fileId: up.id }) });
+    const o = imp.body.order;
+    imp.status === 201 && o?.party?.name === PARTY && o.total === 46200 && o.flags.some((f) => f.kind === 'calc') && /^S-\d{8}-\d{3}$/.test(o.number)
+      ? ok('注文書を受注にし、相手の合計とこちらの計算の違いに印を付ける（46,300 円と 46,200 円）') : ng('取り込みが違う', JSON.stringify(imp.body).slice(0, 400));
+    const dup = await call('a', '/v1/sales/orders/import', { method: 'POST', body: JSON.stringify({ fileId: up.id }) });
+    dup.status === 200 && dup.body.duplicate === true && dup.body.order?.id === o?.id ? ok('同じ注文書は二重に取り込まず、いまの受注を返す') : ng('二重に取り込んだ', JSON.stringify(dup.body).slice(0, 200));
+    if (o) {
+      const dl = await call('a', `/v1/sales/orders/${o.id}/delivery`, { method: 'POST', body: '{}' });
+      const d = dl.body.doc;
+      const unbilled = await call('a', '/v1/sales/documents?unbilled=1');
+      dl.status === 201 && d?.status === 'issued' && /^D-\d{8}-\d{3}$/.test(d.number ?? '') && unbilled.body.items?.some((x) => x.id === d.id)
+        ? ok('受注から納品書を作ると、すぐ発行して番号が付き、未請求に並ぶ') : ng('納品書が違う', JSON.stringify(dl.body).slice(0, 300));
+      const inv = await call('a', '/v1/sales/documents/invoice', { method: 'POST', body: JSON.stringify({ deliveryIds: [d?.id] }) });
+      const i = inv.body.doc;
+      const pdf = await fetch(`${API}/v1/sales/documents/${i?.id}/pdf`, { headers: { 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' } });
+      inv.status === 201 && i?.status === 'draft' && i.number === null && i.total === 46200 && i.dueOn && pdf.status === 200 && pdf.headers.get('content-type') === 'application/pdf'
+        ? ok('納品書をまとめた請求書は下書き（番号なし）で、支払期限を取引先の条件から出し、PDF を開ける') : ng('請求書の下書きが違う', JSON.stringify({ s: inv.status, i, pdf: pdf.status }).slice(0, 300));
+      const issued = await call('a', `/v1/sales/documents/${i?.id}/issue`, { method: 'POST', body: '{}' });
+      const dAfter = await call('a', `/v1/sales/documents/${d?.id}`);
+      const order = await call('a', `/v1/sales/orders/${o.id}`);
+      issued.status === 200 && /^I-\d{8}-\d{3}$/.test(issued.body.doc?.number ?? '') && dAfter.body.doc?.invoiceId === i?.id && order.body.order?.status === 'invoiced'
+        ? ok('発行すると番号が付き、まとめた納品書は請求済み、受注は「請求済み」になる') : ng('発行が違う', JSON.stringify({ issued: issued.body, d: dAfter.body.doc?.invoiceId, o: order.body.order?.status }).slice(0, 300));
+      const again = await call('a', '/v1/sales/documents/invoice', { method: 'POST', body: JSON.stringify({ deliveryIds: [d?.id] }) });
+      const noReason = await call('a', `/v1/sales/documents/${i?.id}/cancel`, { method: 'POST', body: '{}' });
+      const del = await call('a', `/v1/sales/documents/${i?.id}`, { method: 'DELETE' });
+      again.status === 400 && noReason.status === 400 && del.status === 400
+        ? ok('請求済みの納品書は 2 つ目の請求書に入らず、発行した請求書は理由なしに取り消せず、削除もできない') : ng('重ねない・取り消し・削除の決まりが違う', JSON.stringify({ again: again.status, noReason: noReason.status, del: del.status }));
+      const cancel = await call('a', `/v1/sales/documents/${i?.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason: '確かめのため（smoke）' }) });
+      const dBack = await call('a', `/v1/sales/documents/${d?.id}`);
+      cancel.status === 200 && cancel.body.doc?.status === 'cancelled' && dBack.body.doc?.invoiceId === null
+        ? ok('請求書を取り消すと、まとめた納品書は未請求に戻る（請求書は理由と一緒に残る）') : ng('取り消しが違う', JSON.stringify(cancel.body).slice(0, 300));
+
+      await call('b', '/v1/admin/extensions/sales-docs/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+      const other = await call('b', `/v1/sales/orders/${o.id}`);
+      const otherDoc = await call('b', `/v1/sales/documents/${d?.id}/pdf`);
+      const otherList = await call('b', '/v1/sales/documents');
+      other.status === 404 && otherDoc.status === 404 && otherList.status === 200 && !otherList.body.items.some((x) => x.id === d?.id)
+        ? ok('ほかの会社の受注と書類は見えない') : ng('ほかの会社の受注か書類が見えた', JSON.stringify({ o: other.status, pdf: otherDoc.status }));
+    }
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+      let refused = false;
+      try {
+        await app.query(`insert into sales_documents (id, tenant_id, kind, issued_on, created_by) values ('sd-smoke', 't-alpha', 'invoice', '2026-10-26', 'u')`);
+      } catch { refused = true; }
+      await app.query('rollback');
+      refused ? ok('書類は、ほかの会社の行を書けない（行単位の制限）') : ng('ほかの会社の書類を書けた');
+    } finally {
+      await app.end();
+    }
+  } finally {
+    await owner.query(`delete from sales_documents where party->>'name' = $1`, [PARTY]);
+    await owner.query(`delete from sales_orders where party->>'name' = $1`, [PARTY]);
+    await owner.query(`delete from sales_parties where name = $1`, [PARTY]);
+    for (const r of saved) await owner.query(`update tenant_settings set sales_docs = $2, access = $3 where tenant_id = $1`, [r.tenant_id, r.sales_docs ? JSON.stringify(r.sales_docs) : null, r.access ? JSON.stringify(r.access) : null]);
+    await owner.end();
+  }
+}
+
+console.log('\n■ 130. 受注を手で入れる（電話などで受けた注文・いつもの・候補・入っていない項目の印・二重を作らない。第42.5.1.1節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, sales_docs, access from tenant_settings where tenant_id = 't-alpha'`);
+  const PARTY = '株式会社手入れ商店（smoke）';
+  try {
+    await call('a', '/v1/admin/extensions/sales-docs/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const first = await call('a', '/v1/sales/orders', { method: 'POST', body: JSON.stringify({ party: PARTY, dueOn: '2030-11-05', items: [{ name: '特製パン', quantity: 20, unit: '個', unitPrice: 180 }] }) });
+    first.status === 201 && first.body.order?.source === 'manual' && first.body.order.total === 3960 && first.body.order.flags.length === 0
+      ? ok('取引先・品目・納期だけで受注に入れられる（入り口は「手で入れた」）') : ng('手で入れられない', JSON.stringify(first.body).slice(0, 300));
+    const usual = await call('a', '/v1/sales/orders', { method: 'POST', body: JSON.stringify({ party: '手入れ商店（smoke）', items: [{ name: 'いつもの', quantity: 30 }] }) });
+    const u = usual.body.order;
+    usual.status === 201 && u?.party?.name === PARTY && u.items[0]?.name === '特製パン' && u.items[0]?.unitPrice === 180 && u.items[0]?.quantity === 30
+      && u.flags.some((f) => f.kind === 'guess') && u.flags.some((f) => f.text === '納期が入っていません')
+      ? ok('略した取引先を正式な名前に寄せ、「いつもの」を前の注文から読み（読んだことを印にする）、納期が無ければ印を付ける') : ng('「いつもの」の読み方が違う', JSON.stringify(usual.body).slice(0, 400));
+    const dup = await call('a', '/v1/sales/orders', { method: 'POST', body: JSON.stringify({ party: PARTY, dueOn: '2030-11-05', items: [{ name: '特製パン', quantity: 20, unit: '個', unitPrice: 180 }] }) });
+    dup.status === 200 && dup.body.duplicate === true ? ok('同じ日の同じ注文は二重に作らない') : ng(`二重に作った（${dup.status}）`);
+    const sug = await call('a', `/v1/sales/suggestions?party=${encodeURIComponent('手入れ商店')}`);
+    sug.status === 200 && sug.body.parties.includes(PARTY) && sug.body.items[0]?.name === '特製パン' && sug.body.items[0]?.unitPrice === 180
+      ? ok('取引先の候補と、その取引先の前の品目（単位と単価つき）を返す') : ng('候補が違う', JSON.stringify(sug.body).slice(0, 300));
+    const bad = await call('a', '/v1/sales/orders', { method: 'POST', body: JSON.stringify({ party: '', items: [] }) });
+    const otherSug = await call('b', '/v1/sales/suggestions');
+    bad.status === 400 && (otherSug.status === 403 || !(otherSug.body.parties ?? []).includes(PARTY))
+      ? ok('取引先の無い受注は断り、ほかの会社に候補は見えない') : ng('断り方か会社の境界が違う', JSON.stringify({ bad: bad.status, other: otherSug.status }));
+  } finally {
+    await owner.query(`delete from sales_orders where party->>'name' = $1`, [PARTY]);
+    for (const r of saved) await owner.query(`update tenant_settings set sales_docs = $2, access = $3 where tenant_id = $1`, [r.tenant_id, r.sales_docs ? JSON.stringify(r.sales_docs) : null, r.access ? JSON.stringify(r.access) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

@@ -8,8 +8,9 @@
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from 'react';
 import { KnowledgeQa } from './knowledge-qa.js';
+import { SalesDocs } from './SalesDocs.js';
 import { DOCUMENT_AGENT_ID, SHEET_AGENT_ID, SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, swapCategories, togglePinned, type MenuSection,
 } from './menu.js';
@@ -124,6 +125,7 @@ type View =
   | { kind: 'competitors' }
   | { kind: 'announcements'; announcementId: string | null }
   | { kind: 'contracts'; contractId: string | null }
+  | { kind: 'sales'; itemId: string | null }
   | { kind: 'reservations' }
   | { kind: 'subsidies' }
   | { kind: 'members'; memberId: string | null }
@@ -145,6 +147,7 @@ function viewPath(v: View): string {
     case 'inquiries': return routePath({ kind: 'inquiries', inquiryId: v.inquiryId });
     case 'announcements': return routePath({ kind: 'announcements', announcementId: v.announcementId });
     case 'contracts': return routePath({ kind: 'contracts', contractId: v.contractId });
+    case 'sales': return routePath({ kind: 'sales', itemId: v.itemId });
     case 'members': return routePath({ kind: 'members', memberId: v.memberId });
     case 'printDesigns': return routePath({ kind: 'printDesigns', designId: v.designId });
     case 'webReview': return routePath({ kind: 'webReview', month: v.month });
@@ -172,6 +175,7 @@ function viewOf(r: Route): View | null {
     case 'inquiries': return { kind: 'inquiries', inquiryId: r.inquiryId };
     case 'announcements': return { kind: 'announcements', announcementId: r.announcementId };
     case 'contracts': return { kind: 'contracts', contractId: r.contractId };
+    case 'sales': return { kind: 'sales', itemId: r.itemId };
     case 'members': return { kind: 'members', memberId: r.memberId };
     case 'printDesigns': return { kind: 'printDesigns', designId: r.designId };
     case 'webReview': return { kind: 'webReview', month: r.month };
@@ -338,6 +342,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const competitorChangeKey = history.filter((h) => h.job?.agentId?.startsWith('competitors:') && h.run.status === 'completed').map((h) => h.run.id).join(',');
   // 秘書がお知らせを作り終えた・出し終えたら、お知らせの作成の画面を読み直す
   const contractChangeKey = history.filter((h) => h.job?.agentId?.startsWith('contracts:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
+  // 業務が書類や受注を作り終えたら、販売の書類と受注の画面を読み直す
+  const salesChangeKey = history.filter((h) => h.job?.agentId?.startsWith('sales-docs:') && ['completed', 'failed', 'awaiting_approval'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   // 秘書が予約を扱ったら、予約の画面を読み直す（秘書が答えるたび）
   const reservationChangeKey = result?.id ?? '';
   // 秘書が補助金・助成金を調べ終えた・状態を変えたら、補助金・助成金の画面を読み直す
@@ -440,6 +446,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 販促物の作成（仕様書 第41章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.printDesigns ? [{ id: PRINT_DESIGNS_EXTENSION_ID, name: '販促物の作成', description: 'ポップ・チラシ・パンフレット・案内・ポスターを、頼むだけで作る', icon: 'slides' as IconName, agent: null }] : []),
     ...(me.subsidies ? [{ id: SUBSIDIES_EXTENSION_ID, name: '補助金・助成金', description: '会社に合いそうな補助金・助成金を、締め切りと出典と一緒に知らせる', icon: 'research' as IconName, agent: null }] : []),
+    // 販売の書類と受注（仕様書 第42章）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.salesDocs ? [{ id: SALES_DOCS_EXTENSION_ID, name: '受注と販売の書類', description: '注文書を取り込んで受注を整理し、納品書・請求書・領収書・注文書を作る', icon: 'doc' as IconName, agent: null }] : []),
     ...(me.contracts ? [{ id: CONTRACTS_EXTENSION_ID, name: '契約書の管理', description: '結んだ契約を台帳にし、更新と解約の申し出の期限を知らせる', icon: 'doc' as IconName, agent: null }] : []),
     // Webの分析（仕様書 第34.18節）。会社で入れていて利用範囲の人にだけ出す
     ...(me.webReview ? [{ id: WEB_REVIEW_EXTENSION_ID, name: 'Webの分析', description: '会社の Web サイトの数字を月に 1 回、ふつうの言葉で届ける', icon: 'usage' as IconName, agent: null }] : []),
@@ -468,6 +476,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               : m.id === COMPETITORS_EXTENSION_ID ? setView({ kind: 'competitors' })
                 : m.id === ANNOUNCEMENTS_EXTENSION_ID ? setView({ kind: 'announcements', announcementId: null })
                   : m.id === CONTRACTS_EXTENSION_ID ? setView({ kind: 'contracts', contractId: null })
+                  : m.id === SALES_DOCS_EXTENSION_ID ? setView({ kind: 'sales', itemId: null })
                   : m.id === RESERVATIONS_EXTENSION_ID ? setView({ kind: 'reservations' })
                   : m.id === SUBSIDIES_EXTENSION_ID ? setView({ kind: 'subsidies' })
                   : m.id === MEMBERS_EXTENSION_ID ? setView({ kind: 'members', memberId: null })
@@ -476,7 +485,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
-        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === SALES_DOCS_EXTENSION_ID ? view.kind === 'sales' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -822,6 +831,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <Reservations userId={me.user.id} changeKey={reservationChangeKey} />
             </>
           )}
+          {view.kind === 'sales' && (
+            <>
+              <h1>受注と販売の書類 <HelpTip article="start-sales-docs">注文書を取り込んで受注を整理し、納品書・請求書・領収書・注文書を作ります。請求書・領収書・注文書は、あなたが発行するまで下書きです。</HelpTip></h1>
+              <SalesDocs itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'sales', itemId })} onOpenRun={(runId) => setView({ kind: 'run', runId })} changeKey={salesChangeKey} />
+            </>
+          )}
           {view.kind === 'contracts' && (
             <>
               <h1>契約書の管理 <HelpTip article="start-contracts">結んだ契約を台帳にし、自動更新の解約の申し出の期限と、契約の終わりの前に担当へ知らせます。</HelpTip></h1>
@@ -1034,6 +1049,7 @@ const VIEW_LABELS: Record<string, string> = {
   competitors: '競合の分析',
   announcements: 'お知らせの作成',
   contracts: '契約書の管理',
+  sales: '受注と販売の書類',
   reservations: '予約',
   subsidies: '補助金・助成金',
   members: '会員',

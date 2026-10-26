@@ -15,7 +15,7 @@ import {
   fillApprovalCompartments, discardStaleRecordings, discardStaleLiveRecordings, PostgresSystemLogStore, SystemLogSink, attachLogSink, EvidenceBuilder, SYSTEM_LOG_KEEP_DAYS,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
@@ -244,6 +244,15 @@ const evidence = new EvidenceBuilder({
   store: systemLogs, repo, security: securityStore, logger: log,
   machineLogDir: deploymentFromEnv(process.env) === 'onsite' ? process.env['M2O_LOG_DIR']?.trim() || null : null,
 });
+// 販売の書類と受注（第42章）。業務から書類を作り・発行し（承認の後）、注文書を受注にする
+const salesDocs = new SalesDocService({
+  store: new PostgresSalesDocStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  ocrFor: async (tenantId) => {
+    const llm = await ai.llmFor(tenantId).catch(() => null);
+    return llm?.readImage ? async (r) => (await llm.readImage!(r)).text : undefined;
+  },
+});
 // 契約の管理（第38章）。解約の申し出の期限と終わりを見張り、自動更新の契約を次の期間に進める。秘書から台帳に入れる・引く・直す
 const contracts = new ContractService({
   store: new PostgresContractStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
@@ -416,6 +425,7 @@ const engine = new RunEngine({
   announcements: { service: announcements, access: announcementsAccess(repo) },
   webReview: { service: webReview, access: webReviewAccess(repo) },
   contracts: { service: contracts, access: contractsAccess(repo) },
+  salesDocs: { service: salesDocs, access: salesDocsAccess(repo) },
   subsidies: { service: subsidies, access: subsidiesAccess(repo) },
   members: { service: members, access: membersAccess(repo) },
   printDesigns: { service: printDesigns, access: printDesignsAccess(repo) },

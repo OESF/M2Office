@@ -35,6 +35,8 @@ export type Route =
   | { kind: 'announcements'; announcementId: string | null }
   /** 契約の管理（仕様書 第38章）。`contractId` があれば 1 件。 */
   | { kind: 'contracts'; contractId: string | null }
+  /** 販売の書類と受注（仕様書 第42章）。`itemId` があれば受注（`so-…`）か書類（`sd-…`）の 1 件。 */
+  | { kind: 'sales'; itemId: string | null }
   /** 会議室・社用車・備品の予約（仕様書 第37章）。 */
   | { kind: 'reservations' }
   /** 補助金・助成金の案内（仕様書 第39章）。 */
@@ -84,6 +86,7 @@ export function parseRoute(pathname: string): Route {
     case 'competitors': return second === undefined ? { kind: 'competitors' } : { kind: 'unknown' };
     case 'announcements': return second === undefined ? { kind: 'announcements', announcementId: null } : id(second) ? { kind: 'announcements', announcementId: id(second) } : { kind: 'unknown' };
     case 'contracts': return second === undefined ? { kind: 'contracts', contractId: null } : id(second) ? { kind: 'contracts', contractId: id(second) } : { kind: 'unknown' };
+    case 'sales': return second === undefined ? { kind: 'sales', itemId: null } : id(second) ? { kind: 'sales', itemId: id(second) } : { kind: 'unknown' };
     case 'reservations': return second === undefined ? { kind: 'reservations' } : { kind: 'unknown' };
     case 'subsidies': return second === undefined ? { kind: 'subsidies' } : { kind: 'unknown' };
     case 'members': return second === undefined ? { kind: 'members', memberId: null } : id(second) ? { kind: 'members', memberId: id(second) } : { kind: 'unknown' };
@@ -113,6 +116,7 @@ export function routePath(route: Route): string {
     case 'inquiries': return route.inquiryId ? `/inquiries/${enc(route.inquiryId)}` : '/inquiries';
     case 'announcements': return route.announcementId ? `/announcements/${enc(route.announcementId)}` : '/announcements';
     case 'contracts': return route.contractId ? `/contracts/${enc(route.contractId)}` : '/contracts';
+    case 'sales': return route.itemId ? `/sales/${enc(route.itemId)}` : '/sales';
     case 'reservations': return '/reservations';
     case 'subsidies': return '/subsidies';
     case 'members': return route.memberId ? `/members/${enc(route.memberId)}` : '/members';

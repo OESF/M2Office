@@ -185,6 +185,7 @@ export * from './inquiries/index.js';
 export * from './competitors/index.js';
 export * from './announcements/index.js';
 export * from './contracts/index.js';
+export * from './sales-docs/index.js';
 export * from './reservations/index.js';
 export * from './subsidies/index.js';
 export * from './print-designs/index.js';

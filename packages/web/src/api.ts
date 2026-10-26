@@ -23,7 +23,7 @@ import type { RuntimeEnvironment, NodeSecurityNotice, DeliveryView, DataRecipien
   Inquiry, InquiryDetail, InquiryParty, InquiryTask, InquiryReply, InquiryMailSkipped, InquiryMonthStats, InquirySettings, InquiryFaqTopic,
   CompetitorOverview, CompetitorFact, CompetitorReport, CompetitorSettings,
   Announcement, AnnouncementDetail, AnnouncementPreview, AnnouncementRecipient, AnnouncementRecipientsRefined, AnnouncementSettings, AnnouncementTexts,
-  Contract, ContractSettings, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
+  Contract, ContractSettings, SalesDocument, SalesOrder, SalesSuggestions, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
   EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckFormat, SlideDeckKind, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
 } from '@m2office/shared';
@@ -120,6 +120,23 @@ async function fetchBlob(path: string): Promise<Blob | null> {
 }
 
 /** 規程から作った設定の案の 1 項目（仕様書 第30.8.2節）。 */
+/** 作った書類と、示すこと（販売の書類と受注。仕様書 第42章）。 */
+export interface SalesCreated {
+  doc: SalesDocument;
+  warnings: string[];
+  notes: string[];
+}
+
+/** 書類 1 通の詳しい中身（版とつながり）。 */
+export interface SalesDocDetail {
+  doc: SalesDocument;
+  versions: SalesDocument[];
+  order: SalesOrder | null;
+  deliveries: SalesDocument[];
+  invoice: SalesDocument | null;
+  receipts: SalesDocument[];
+}
+
 export interface HrProposalField {
   key: string;
   label: string;
@@ -389,6 +406,8 @@ export interface Me {
   webReview?: boolean;
   /** 契約の管理を使えるか（会社の入り切りと利用範囲。仕様書 第38章）。 */
   contracts?: boolean;
+  /** 販売の書類と受注を使えるか（仕様書 第42章）。 */
+  salesDocs?: boolean;
   /** 予約を使えるか（会社の入り切りと利用範囲。仕様書 第37章）。 */
   reservations?: boolean;
   /** 補助金・助成金の案内を使えるか（会社の入り切りと利用範囲。仕様書 第39章）。 */
@@ -1665,6 +1684,44 @@ export const api = {
     byCompany: (name: string) => call<{ items: Contract[] }>(`/contracts/by-company?${new URLSearchParams({ name })}`),
     /** 契約書チェックで見直す（ドライブの契約書でチェックを始める）。 */
     review: (id: string) => call<{ runId: string }>(`/contracts/${encodeURIComponent(id)}/review`, { method: 'POST', body: '{}' }),
+  },
+  /** 販売の書類と受注（内蔵の拡張。仕様書 第42章）。 */
+  sales: {
+    orders: (q: { status?: string; q?: string } = {}) => {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]);
+      return call<{ items: SalesOrder[] }>(`/sales/orders${p.size ? `?${p}` : ''}`);
+    },
+    order: (id: string) => call<{ order: SalesOrder; documents: SalesDocument[] }>(`/sales/orders/${encodeURIComponent(id)}`),
+    /** 注文書（上げたファイル）か見積書から受注にする。同じ注文があれば `duplicate: true`。 */
+    importOrder: (src: { fileId: string } | { quoteNumber: string }) =>
+      call<{ order: SalesOrder; duplicate: boolean; linked?: boolean }>('/sales/orders/import', { method: 'POST', body: JSON.stringify(src) }),
+    /** 手で入れる（電話などで受けた注文）。同じ注文があれば `duplicate: true`。 */
+    recordOrder: (input: Record<string, unknown>) =>
+      call<{ order: SalesOrder; duplicate: boolean }>('/sales/orders', { method: 'POST', body: JSON.stringify(input) }),
+    /** 手で入れるときの候補（取引先と、その取引先の前の品目）。 */
+    suggestions: (party = '') => call<SalesSuggestions>(`/sales/suggestions${party ? `?${new URLSearchParams({ party })}` : ''}`),
+    updateOrder: (id: string, patch: Record<string, unknown>) =>
+      call<{ order: SalesOrder; documents: SalesDocument[] }>(`/sales/orders/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    cancelOrder: (id: string, reason: string) =>
+      call<{ order: SalesOrder; documents: SalesDocument[] }>(`/sales/orders/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    removeOrder: (id: string) => call<{ ok: true }>(`/sales/orders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 取り込んだ元の注文書を開く URL。 */
+    orderFileUrl: (id: string) => `/v1/sales/orders/${encodeURIComponent(id)}/file`,
+    /** 受注の残りの数で納品書を作る。 */
+    deliver: (orderId: string) => call<SalesCreated>(`/sales/orders/${encodeURIComponent(orderId)}/delivery`, { method: 'POST', body: '{}' }),
+    documents: (q: { kind?: string; status?: string; party?: string; from?: string; to?: string; min?: string; max?: string; unbilled?: string } = {}) => {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]);
+      return call<{ items: SalesDocument[] }>(`/sales/documents${p.size ? `?${p}` : ''}`);
+    },
+    document: (id: string) => call<SalesDocDetail>(`/sales/documents/${encodeURIComponent(id)}`),
+    /** 納品書をまとめて請求書の下書きを作る。 */
+    invoice: (deliveryIds: string[]) => call<SalesCreated>('/sales/documents/invoice', { method: 'POST', body: JSON.stringify({ deliveryIds }) }),
+    /** 下書きを発行する（本人が押す）。 */
+    issue: (id: string) => call<{ doc: SalesDocument }>(`/sales/documents/${encodeURIComponent(id)}/issue`, { method: 'POST', body: '{}' }),
+    cancel: (id: string, reason: string) => call<SalesDocDetail>(`/sales/documents/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    remove: (id: string) => call<{ ok: true }>(`/sales/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** PDF を開く URL。 */
+    pdfUrl: (id: string, download = false) => `/v1/sales/documents/${encodeURIComponent(id)}/pdf${download ? '?download=1' : ''}`,
   },
   /** 会員とポイント（内蔵の拡張。仕様書 第40章）。 */
   members: {

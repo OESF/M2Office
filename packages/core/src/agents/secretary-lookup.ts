@@ -49,7 +49,7 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
   },
   // 読むだけのツールに限る（第10.11.4節）。送信・登録・作成のツールは持たせない。
   // Web の調べものと本人の予定・ToDo は、出張の行程のような依頼に答えるため（第 0.124.0 版、ADR-0033）
-  tools: ['file.read_text', 'file.compare', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read', 'quote.search', 'inventory.market', 'inventory.check_market', 'inventory.orders'],
+  tools: ['file.read_text', 'file.compare', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read', 'quote.search', 'inventory.market', 'inventory.check_market', 'inventory.orders', 'sales.documents', 'sales.orders'],
   knowledge: { collections: ['internal-rules', 'minutes'] },
   steps: [
     {
@@ -69,6 +69,7 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
           + '「相場を調べて」と頼まれたら inventory.check_market で調べる。価格を変えることはしない（値付けは会社が決める）。まだ調べていない品目は、そう答える。'
           + '「〇〇は発注済み？」「届いていない発注は？」は inventory.orders で答える（発注番号・仕入先・届く予定の日・遅れた日数）。'
           + '仕入れの値段の相場（「〇〇の仕入れ値は高い？」「高く仕入れている品目は？」）は kind に purchase を渡す（在庫管理の管理者だけが使える。使えなければ、そう答える）。',
+        '「先月〇〇社に出した請求書は？」「未請求の納品書は？」のように販売の書類を尋ねられたら sales.documents（取引先・日付の範囲・金額・種類・unbilled）で、「納品していない受注は？」「〇〇社の注文の納期は？」は sales.orders で答える（使えるときだけ）。入金済みかは分からない（M2Office は入金を扱わない）と答える。',
         '時刻表・乗り換え・道順・所要時間・天気・ニュース・価格・営業時間など、外の最新の情報が要るときは web.research で調べる。'
           + '検索の言葉は Google に送られるため、社内の情報（顧客名・金額・人の名前）を入れない。',
         '日付の決まった依頼（出張・外出など）では calendar.list でその日の本人の予定を見て、重なりを確かめる。',

@@ -39,6 +39,7 @@ import { inquiriesRoute } from './routes/inquiries.js';
 import { competitorsRoute } from './routes/competitors.js';
 import { announcementsRoute } from './routes/announcements.js';
 import { contractsRoute } from './routes/contracts.js';
+import { salesDocsRoute } from './routes/sales-docs.js';
 import { reservationsRoute } from './routes/reservations.js';
 import { subsidiesRoute } from './routes/subsidies.js';
 import { membersRoute } from './routes/members.js';
@@ -241,6 +242,8 @@ app.get('/v1/me', async (c) => {
     webReview: !!(await deps.webReview.access(ctx.tenant.id, ctx.user.id)),
     // 契約の管理を使えるか（会社の入り切りと利用範囲。仕様書 第38章）
     contracts: !!(await deps.contracts.access(ctx.tenant.id, ctx.user.id)),
+    // 販売の書類と受注を使えるか（会社の入り切りと利用範囲。仕様書 第42章）
+    salesDocs: !!(await deps.salesDocs.access(ctx.tenant.id, ctx.user.id)),
     // 予約を使えるか（会社の入り切りと利用範囲。仕様書 第37章）
     reservations: !!(await deps.reservations.access(ctx.tenant.id, ctx.user.id)),
     // 補助金・助成金の案内を使えるか（会社の入り切りと利用範囲。仕様書 第39章）
@@ -286,6 +289,7 @@ app.route('/v1/inquiries', inquiriesRoute(deps));
 app.route('/v1/competitors', competitorsRoute(deps));
 app.route('/v1/announcements', announcementsRoute(deps));
 app.route('/v1/contracts', contractsRoute(deps));
+app.route('/v1/sales', salesDocsRoute(deps));
 app.route('/v1/reservations', reservationsRoute(deps));
 app.route('/v1/subsidies', subsidiesRoute(deps));
 app.route('/v1/members', membersRoute(deps));

@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { bodyLimit } from 'hono/body-limit';
 import { Hono } from 'hono';
 import { maskClientId,
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import { type BookingSourceRecord,
   bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -1062,6 +1062,14 @@ export function extensionsRoute(deps: AppDeps) {
         await deps.repo.saveTenantSettings(tenant.id, 'contracts', { ...settings.contracts, enabled: body.enabled }, user.id);
         // 入れたら、入れた管理者のドライブに契約書の置き場を作る（まだ無ければ。作れなくても入れる。第38.7節）
         if (body.enabled && !settings.contracts.storage) await deps.contracts.service.connectStorage({ tenantId: tenant.id, userId: user.id }).catch(() => null);
+      }
+      else if (section === 'salesDocs') {
+        await deps.repo.saveTenantSettings(tenant.id, 'salesDocs', { ...settings.salesDocs, enabled: body.enabled }, user.id);
+        // 初めて入れたときは、利用範囲を管理者だけにする（第42.9節。管理者は「利用できる人」で経理・営業などのグループに広げる）
+        if (body.enabled && !settings.access.scopes[SALES_DOCS_EXTENSION_ID]) {
+          const admins = (await deps.repo.listUsers(tenant.id)).filter((u) => u.status === 'active' && u.roles.includes('admin')).map((u) => u.id);
+          await deps.repo.saveTenantSettings(tenant.id, 'access', { ...settings.access, scopes: { ...settings.access.scopes, [SALES_DOCS_EXTENSION_ID]: { users: admins, groups: [] } } }, user.id);
+        }
       }
       else if (section === 'reservations') await deps.repo.saveTenantSettings(tenant.id, 'reservations', { ...settings.reservations, enabled: body.enabled }, user.id);
       else if (section === 'members') await deps.repo.saveTenantSettings(tenant.id, 'members', { ...settings.members, enabled: body.enabled }, user.id);
