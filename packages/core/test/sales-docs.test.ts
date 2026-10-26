@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings } from '@m2office/shared';
 import {
   MemoryFileStore, MemorySalesDocStore, SALES_DOC_TOOLS, SalesDocService, closingCutoff, closingDayFrom, dueDateFrom, readOrderByRule, saveFile, salesToday,
-  type QuoteRecord, type Repository, type ToolContext,
+  type Repository, type ToolContext,
 } from '../src/index.js';
 
 const ORDER = [
@@ -26,7 +26,7 @@ const ORDER = [
   '合計 46,300',
 ].join('\n');
 
-function setup(opts: { quotes?: QuoteRecord[] } = {}) {
+function setup() {
   let settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
     company: { ...DEFAULT_TENANT_SETTINGS.company, legalName: '株式会社アルファ商事', invoiceRegistrationNumber: 'T1234567890123' },
@@ -54,7 +54,6 @@ function setup(opts: { quotes?: QuoteRecord[] } = {}) {
     replaceFileMeta: async (_t: string, id: string, meta: Record<string, unknown>) => { Object.assign(files.find((f) => f['id'] === id) ?? {}, meta); },
     deleteFile: async (_t: string, id: string) => { const i = files.findIndex((f) => f['id'] === id); if (i >= 0) files.splice(i, 1); },
     listApprovalsForFileInput: async () => [],
-    listQuotes: async () => opts.quotes ?? [],
     createArtifact: async (a: { kind: string; title: string }) => { artifacts.push(a); },
   } as unknown as Repository;
   const store = new MemorySalesDocStore();
@@ -100,11 +99,9 @@ test('注文書を決まった言い方で読む（自社を注文した会社�
 });
 
 test('注文書を受注にする: 計算の食い違いと見積との違いに印を付け、同じ注文は二重に取り込まない。支払い条件を覚える', async () => {
-  const quote: QuoteRecord = {
-    id: 'qt-1', tenantId: 't1', number: 'Q-20261001-01', requestedBy: 'u1', runId: null, toName: '株式会社見本商事 御中',
-    items: [{ name: 'ルーター', quantity: 2, unit: '台', unitPrice: 14000, taxRate: 10 }], subtotal: 28000, tax: 2800, total: 30800, validUntil: null, fileId: null, createdAt: '',
-  };
-  const { service, who, upload } = setup({ quotes: [quote] });
+  const { service, who, upload } = setup();
+  const quote = await service.createQuote(who, { to: '株式会社見本商事 御中', items: [{ name: 'ルーター', code: '', quantity: 2, unit: '台', unitPrice: 14000, taxRate: 10 }] }, null);
+  assert.ok(!('error' in quote));
   const r = await service.importOrder(who, await upload(ORDER));
   assert.ok(!('error' in r) && !r.duplicate);
   const o = r.order;
@@ -112,8 +109,9 @@ test('注文書を受注にする: 計算の食い違いと見積との違いに
   assert.equal(o.total, 46200); // 42,000 + 消費税 4,200
   assert.equal(o.status, 'open');
   assert.ok(o.flags.some((f) => f.kind === 'calc' && f.text.includes('46,300')), '相手の合計との食い違い');
-  assert.ok(o.flags.some((f) => f.kind === 'quote' && f.text.includes('Q-20261001-01')), '見積との違い');
-  assert.equal(o.quoteNumber, 'Q-20261001-01');
+  assert.ok(o.flags.some((f) => f.kind === 'quote' && f.text.includes(quote.doc.number!) && f.text.includes('単価')), '見積との違い');
+  assert.equal(o.quoteNumber, quote.doc.number);
+  assert.equal(o.quoteId, quote.doc.id);
   const again = await service.importOrder(who, await upload(ORDER));
   assert.ok(!('error' in again) && again.duplicate && again.order.id === o.id);
   assert.equal((await service.party(who, '見本商事'))?.closingDay, 20);
@@ -317,11 +315,8 @@ test('電話で受けた注文の注文書が後から届いたら、新しく�
 });
 
 test('「いつもの」は受注と納品書だけから読み、見積書だけの品目は数えない', async () => {
-  const quote: QuoteRecord = {
-    id: 'qt-9', tenantId: 't1', number: 'Q-20261001-09', requestedBy: 'u1', runId: null, toName: '株式会社見本商事 御中',
-    items: [{ name: '見積だけの品', quantity: 1, unit: '式', unitPrice: 9999, taxRate: 10 }], subtotal: 9999, tax: 999, total: 10998, validUntil: null, fileId: null, createdAt: '',
-  };
-  const { service, who } = setup({ quotes: [quote, quote, quote] });
+  const { service, who } = setup();
+  for (let i = 0; i < 3; i++) await service.createQuote(who, { to: '株式会社見本商事 御中', items: [{ name: '見積だけの品', code: '', quantity: 1, unit: '式', unitPrice: 9999, taxRate: 10 }] }, null);
   await service.recordOrder(who, { party: '株式会社見本商事', items: [{ name: '特製パン', code: '', quantity: 5, unit: '個', unitPrice: 180, taxRate: 10 }], dueOn: '2026-11-01' }, 'manual');
   const r = await service.recordOrder(who, { party: '見本商事', items: [{ name: 'いつもの', code: '', quantity: 8, unit: '', unitPrice: null, taxRate: 10 }] }, 'manual');
   assert.ok(!('error' in r));

@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  SALES_DOC_KIND_LABELS, SALES_DOC_STATUS_LABELS, SALES_ORDER_STATUS_LABELS, plannedTaxNote, taxCategoryOf, taxRateLabel,
+  SALES_DOC_KIND_LABELS, SALES_DOC_STATUS_LABELS, SALES_ORDER_STATUS_LABELS, SALES_QUOTE_STATE_LABELS, plannedTaxNote, salesQuoteState, taxCategoryOf, taxRateLabel,
   type SalesDocKind, type SalesDocsSettings, type SalesDocument, type SalesOrder, type SalesOrderStatus,
 } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
@@ -59,6 +59,7 @@ export function briefDoc(d: SalesDocument) {
     taxLines: d.taxLines.map((x) => (x.rate === 0 ? `対象外 ${yenText(x.base)}` : `${taxRateLabel(x.rate)} ${yenText(x.base)}・消費税 ${yenText(x.tax)}`)),
     items: d.items.map((i) => `${i.name} ${i.quantity}${i.unit}${i.unitPrice === null ? '（単価なし）' : ` × ${yenText(i.unitPrice)}`}`).slice(0, 20),
     ...(d.kind === 'delivery' ? { billed: !!d.invoiceId } : {}),
+    ...(d.kind === 'quote' ? { validUntil: d.validUntil, state: SALES_QUOTE_STATE_LABELS[salesQuoteState(d, jstDay())], ...(d.outcomeNote ? { lostReason: d.outcomeNote } : {}) } : {}),
     ...(d.notices.length ? { notices: d.notices } : {}),
     ...(d.cancelReason ? { cancelReason: d.cancelReason } : {}),
   };
@@ -71,8 +72,18 @@ export function briefOrder(o: SalesOrder) {
     orderedOn: o.orderedOn, dueOn: o.dueOn, total: o.total, statedTotal: o.statedTotal,
     items: o.items.map((i, k) => `${i.name} ${i.quantity}${i.unit}（納品 ${o.delivered[k] ?? 0}）`).slice(0, 20),
     flags: o.flags.map((f) => f.text),
+    // 受注から先の進み具合（無い段は「—」。第42.14.6節）
+    quote: o.quoteNumber ?? '—',
+    ...(o.progress ? {
+      acknowledgement: o.progress.acknowledged ? '出した' : '—', delivered: `${o.progress.deliveredRate}%`,
+      invoiced: o.progress.invoiced === 'all' ? '請求済み' : o.progress.unbilledDeliveries ? `未請求 ${o.progress.unbilledDeliveries} 枚` : o.progress.invoiced === 'partial' ? '一部' : '—',
+      receipt: o.progress.receipted ? '出した' : '—', next: o.progress.next?.label ?? null,
+    } : {}),
   };
 }
+
+/** 日本時間の今日。 */
+const jstDay = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
 
 /** 番号か ID から書類を引く（番号なら新しい版）。 */
 async function findDoc(service: SalesDocService, ctx: ToolContext, ref: string): Promise<SalesDocument | null> {
@@ -315,8 +326,8 @@ export const salesDocuments: Tool = {
   name: 'sales.documents',
   risk: 'read',
   activityLabel: '販売の書類を探しています',
-  helpText: '作った注文書・納品書・請求書・領収書を、取引先・日付・金額で探します',
-  description: '書類を探す。kind（purchase_order・delivery・invoice・receipt）・party（取引先の名前）・from と to（取引の日 YYYY-MM-DD）・min と max（合計の円）・status（draft・issued・cancelled）・number（番号）・unbilled（true なら未請求の納品書だけ）',
+  helpText: '作った見積書・注文書・納品書・請求書・領収書を、取引先・日付・金額で探します',
+  description: '書類を探す。kind（quote・purchase_order・delivery・invoice・receipt・acknowledgement）・party（取引先の名前）・from と to（取引の日 YYYY-MM-DD）・min と max（合計の円）・status（draft・issued・cancelled）・number（番号）・unbilled（true なら未請求の納品書だけ）',
   args: {
     properties: {
       kind: { type: 'string', description: '書類の種類' }, party: { type: 'string', description: '取引先の名前' },
@@ -392,14 +403,24 @@ export const salesImportOrder: Tool = {
   risk: 'write-internal',
   activityLabel: '注文書を読み込んでいます',
   helpText: '受け取った注文書を読み、受注として整理します。金額の食い違いや見積との違いは印を付けてお知らせします',
-  description: '受け取った注文書を受注にする。fileId に注文書のファイル。見積書から受注にするときは quoteNumber（Q-…）',
-  args: { properties: { fileId: { type: 'string', description: '注文書のファイルの ID' }, quoteNumber: { type: 'string', description: '見積書の番号（Q-…）' } } },
+  description: [
+    '受け取った注文書を受注にする。fileId に注文書のファイル（同じ取引先の見積書があればツールがつなぐ）。',
+    '見積書から受注にするときは quoteNumber（Q-…）。「この前の見積でお願いします」のように番号が分からなければ quoteParty に取引先の名前（いちばん新しい提出済みの見積書から作る）',
+  ].join(''),
+  args: {
+    properties: {
+      fileId: { type: 'string', description: '注文書のファイルの ID' }, quoteNumber: { type: 'string', description: '見積書の番号（Q-…）' },
+      quoteParty: { type: 'string', description: 'この取引先のいちばん新しい提出済みの見積書から受注にする' },
+    },
+  },
   async invoke(args, ctx) {
     const service = await serviceOf(ctx);
     if (!service) return UNAVAILABLE;
     const fileId = str(args['fileId'], 80);
     const quote = str(args['quoteNumber'], 40);
-    const r = fileId ? await service.importOrder(who(ctx), fileId, 'secretary') : quote ? await service.orderFromQuote(who(ctx), quote) : { error: '注文書のファイルを渡してください' };
+    const quoteParty = str(args['quoteParty'], 100);
+    const r = fileId ? await service.importOrder(who(ctx), fileId, 'secretary') : quote ? await service.orderFromQuote(who(ctx), quote)
+      : quoteParty ? await service.orderFromLatestQuote(who(ctx), quoteParty) : { error: '注文書のファイルか見積書を渡してください' };
     if ('error' in r) return { imported: false, reason: r.error };
     return r.duplicate
       ? { imported: false, duplicate: true, linked: !!r.linked, reason: r.linked ? `手で入れた受注 ${r.order.number} に、この注文書をつなぎました` : `同じ注文がもう受注 ${r.order.number} にあります`, order: briefOrder(r.order) }
@@ -457,11 +478,16 @@ export const salesOrders: Tool = {
   risk: 'read',
   activityLabel: '受注を探しています',
   helpText: '受注を、取引先・注文番号・品名・状態で探します',
-  description: '受注を探す。search（取引先・注文番号・受注番号・品名）・status（open=受注・partial=一部納品・delivered=納品済み・invoiced=請求済み・cancelled=取り消し）。notDelivered が true なら、納品が終わっていない受注だけ',
+  description: [
+    '受注を探す。search（取引先・注文番号・受注番号・品名）・status（open=受注・partial=一部納品・delivered=納品済み・invoiced=請求済み・cancelled=取り消し）。',
+    'notDelivered が true なら納品が終わっていない受注だけ、notAcknowledged が true なら注文請書を出していない受注だけ（請書は任意。出していないことを催促しない）。',
+    '結果の next は次にやること（無ければ空）',
+  ].join(''),
   args: {
     properties: {
       search: { type: 'string', description: '取引先・注文番号・品名' }, status: { type: 'string', description: '状態' },
       notDelivered: { type: 'boolean', description: '納品が終わっていない受注だけ' },
+      notAcknowledged: { type: 'boolean', description: '注文請書を出していない受注だけ' },
     },
   },
   async invoke(args, ctx) {
@@ -472,6 +498,7 @@ export const salesOrders: Tool = {
       ...(str(args['search']) ? { search: str(args['search'], 100) } : {}), ...(status in SALES_ORDER_STATUS_LABELS ? { status } : {}), limit: 50,
     });
     if (args['notDelivered'] === true) list = list.filter((o) => o.status === 'open' || o.status === 'partial');
+    if (args['notAcknowledged'] === true) list = list.filter((o) => o.status !== 'cancelled' && !o.progress?.acknowledged);
     return { available: true, path: '/sales', count: list.length, orders: list.slice(0, 20).map(briefOrder) };
   },
 };

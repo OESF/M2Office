@@ -81,7 +81,7 @@
 | `quote.search` | read | — | これまでに作った見積書を、宛先で探します |
 | `recruit.check_text` | read | — | 求人原稿・応募書類の要約・面接の質問に、使ってはならない言葉や抜けている明示事項がないかを確かめます |
 | `sales.brief` | read | — | 朝のブリーフに載せる、発行を待っている請求書の下書きと、納期の近い受注を読みます |
-| `sales.documents` | read | — | 作った注文書・納品書・請求書・領収書を、取引先・日付・金額で探します |
+| `sales.documents` | read | — | 作った見積書・注文書・納品書・請求書・領収書を、取引先・日付・金額で探します |
 | `sales.orders` | read | — | 受注を、取引先・注文番号・品名・状態で探します |
 | `sales.prepare_mail` | read | — | 書類を送るメールの宛先と添えるファイルを確かめます。送るのは承認の後です |
 | `schedule.confirm_prepare` | read | — | 社外の方が返事で選んだ日時と参加者を確かめます |
@@ -112,6 +112,7 @@
 | `gmail.create_draft` | draft | `gmail.compose`（制限付き） | 返信の下書きを作ります。送信はしません |
 | `pdf.render` | draft | — | 請求書などの帳票を PDF として作り、成果物として保存します。社外へは送りません |
 | `quote.create` | draft | — | 見積書を PDF で作り、あなたのドライブにも保存します。社外へは送りません |
+| `quote.revise` | draft | — | 前に出した見積書を、同じ見積番号の新しい版（再見積）にします。前の版は残します。社外へは送りません |
 | `sales.create_document` | draft | — | 注文書・納品書・請求書・領収書を PDF で作ります。注文書・請求書・領収書は下書きで、あなたの確認の後に発行します。社外へは送りません |
 | `sales.revise` | draft | — | 発行した書類を消さずに、同じ番号の訂正版を作ります。注文書・請求書・領収書の訂正版は、あなたの確認の後に発行します |
 | `sheet.render` | draft | — | 表を Excel・CSV として作り、成果物として保存します |
@@ -155,6 +156,7 @@
 | `print.remake` | write-internal | — | 前に作った販促物を元に、日付などを直した新しい物を作ります |
 | `print.revise` | write-internal | — | 作った販促物を、頼みのとおりに直します（新しい版にします） |
 | `print.signage` | write-internal | — | 作った販促物を、サイネージのすべての画面に流します（止めることもできます） |
+| `quote.lost` | write-internal | — | 見積書を失注にし、理由を残します |
 | `sales.cancel` | write-internal | — | 発行した書類を取り消します（記録は残します。相手には何も送りません） |
 | `sales.import_order` | write-internal | — | 受け取った注文書を読み、受注として整理します。金額の食い違いや見積との違いは印を付けてお知らせします |
 | `sales.record_order` | write-internal | — | 電話などで受けた注文を受注に入れます。「いつもの」は前の注文から読み、読んだことを印でお知らせします |
@@ -246,7 +248,7 @@
 | `recruit.check_text` | `kind`（必須）: posting・summary・questions のどれか、`text`（必須）: 点検する文 |
 | `sales.brief` | なし |
 | `sales.documents` | `kind`: 書類の種類、`party`: 取引先の名前、`from`: 取引の日の始め、`to`: 取引の日の終わり、`min`: 合計の下限（円）、`max`: 合計の上限（円）、`status`: draft・issued・cancelled、`number`: 番号、`unbilled`: 未請求の納品書だけ |
-| `sales.orders` | `search`: 取引先・注文番号・品名、`status`: 状態、`notDelivered`: 納品が終わっていない受注だけ |
+| `sales.orders` | `search`: 取引先・注文番号・品名、`status`: 状態、`notDelivered`: 納品が終わっていない受注だけ、`notAcknowledged`: 注文請書を出していない受注だけ |
 | `sales.prepare_mail` | `documentId`: 送る書類の documentId か番号、`sendTo`: 送り先のメールアドレス（無ければ空） |
 | `schedule.confirm_prepare` | `requestId`（必須）: 日程調整の ID |
 | `sheet.read` | `fileId`（必須）: ファイルの ID、`sheet`: シート名（任意）、`maxRows`: 読む行数の上限（既定 500） |
@@ -276,6 +278,7 @@
 | `gmail.create_draft` | `replyTo`: 返信するメールの ID（任意）、`to`: 宛先（返信のときは省略可。元のメールの差出人になる）、`subject`（必須）: 件名、`body`（必須）: 本文 |
 | `pdf.render` | `title`（必須）: 表題（例: 請求書）、`to`: 宛先（例: 株式会社○○ 御中）、`from`: 差出人の各行、`fields`: { label, value } の配列（発行日・番号など）、`rows`（必須）: 明細。{ name, quantity, unitPrice, amount } の配列、`totals`: { label, value } の配列（小計・消費税・合計）。省略すると明細の合計だけ、`notes`: 備考の各行 |
 | `quote.create` | `to`: 宛先（会社名・担当者。例: 株式会社○○ 山田様）、`items`（必須）: 品目。{ name, quantity, unit, unitPrice, taxCategory, group, discount } の配列。group は区分の見出し（任意）、discount は値引きの額（任意。依頼に書かれたものだけ）、`validDays`: 有効期限（発行から何日。既定は会社の見積書の設定）、`paymentTerms`: お支払い条件（任意。無ければ会社の既定）、`terms`: 納期などの条件（任意）、`notes`: 備考（任意） |
+| `quote.revise` | `quote`（必須）: 見積番号（Q-…）か quoteId、`items`: 新しい版の品目（すべて）。{ name, quantity, unit, unitPrice, taxCategory, group, discount }。変えなければ空、`discountTotal`: 見積全体の値引き（円・税抜。任意）、`to`: 宛先を変えるとき、`validDays`: 有効期限（今日から何日。既定は会社の見積書の設定）、`paymentTerms`: お支払い条件を変えるとき、`notes`: 備考を変えるとき |
 | `sales.create_document` | `kind`（必須）: purchase_order・delivery・invoice・receipt・acknowledgement、`documentId`: 直す下書きの書類（documentId か番号）、`to`: 宛先の会社名（個人なら氏名）、`department`: 宛先の部署（任意）、`person`: 宛先の担当者（任意）、`address`: 宛先の住所（任意）、`subject`: 件名（請求書の「〇〇の件」、領収書の但し書き）、`items`: 品目。{ name, code, quantity, unit, unitPrice, taxCategory, discount } の配列。taxCategory は standard・food・news・exempt、`orderNumber`: つなぐ受注の番号（S-…）、`deliveryNumbers`: 請求書にまとめる納品書の番号（D-…）、`collectFor`: 請求書: この取引先の未請求の納品書をまとめる、`invoiceNumber`: 領収書: 元の請求書の番号（I-…）、`amount`: 領収書: 受け取った額（税込。一部の入金のとき）、`dueOn`: 支払期限（請求書）・納期（注文書）。YYYY-MM-DD、`terms`: 支払い条件・納品場所などの条件、`notes`: 備考 |
 | `sales.revise` | `number`（必須）: 訂正する書類の番号（I-… など）か documentId、`to`: 宛先の会社名（個人なら氏名）、`department`: 宛先の部署（任意）、`person`: 宛先の担当者（任意）、`address`: 宛先の住所（任意）、`subject`: 件名、`items`: 品目（すべて置き換える）、`dueOn`: 支払期限・納期（YYYY-MM-DD）、`terms`: 条件、`notes`: 備考 |
 | `sheet.render` | `title`（必須）: 題名、`format`: 形式（xlsx・csv）、`columns`（必須）: 列名、`rows`（必須）: 行の配列（各行は値の配列） |
@@ -320,8 +323,9 @@
 | `print.remake` | `query`（必須）: 前の物の題名の言葉、`instruction`: 直したいこと |
 | `print.revise` | `query`: 物の題名の言葉、`instruction`（必須）: 直したいこと、`photoFileId`: 写真のファイルの ID |
 | `print.signage` | `query`: 物の題名の言葉、`action`: start か stop |
+| `quote.lost` | `quote`（必須）: 見積番号か quoteId、`reason`: 理由（任意） |
 | `sales.cancel` | `number`（必須）: 書類の番号、`reason`（必須）: 取り消しの理由 |
-| `sales.import_order` | `fileId`: 注文書のファイルの ID、`quoteNumber`: 見積書の番号（Q-…） |
+| `sales.import_order` | `fileId`: 注文書のファイルの ID、`quoteNumber`: 見積書の番号（Q-…）、`quoteParty`: この取引先のいちばん新しい提出済みの見積書から受注にする |
 | `sales.record_order` | `party`（必須）: 取引先の名前、`person`: 先方の担当者（任意）、`items`（必須）: 品目 { name, quantity, unit, unitPrice, taxCategory } の配列（taxCategory は standard・food・news・exempt。分からなければ空）、`dueOn`: 納期（YYYY-MM-DD）、`orderedOn`: 注文日（無ければ今日）、`customerRef`: 相手の注文番号（任意）、`deliverTo`: 納品先（任意）、`terms`: 支払い条件（任意）、`notes`: 備考（任意） |
 | `sales.remember_party` | `name`（必須）: 取引先の名前、`paymentTerms`（必須）: 支払い条件 |
 | `sales.update_order` | `number`（必須）: 受注番号か相手の注文番号、`dueOn`: 納期、`orderedOn`: 注文日、`customerRef`: 相手の注文番号、`deliverTo`: 納品先、`terms`: 支払い条件、`items`: 品目（すべて置き換える）、`cancelReason`: 取り消すときの理由 |

@@ -1,5 +1,5 @@
 /**
- * @file 販売の書類と受注（内蔵の拡張）の API。受注の一覧・取り込み・直す・取り消し・削除・納品書を作る、
+ * @file 販売の書類と受注（内蔵の拡張）の API。受注の一覧・取り込み・直す・取り消し・削除・納品書を作る・見積書とのつながりを直す、
  * 書類の一覧（取引先・日付・金額で探す）・1 通・PDF・請求書にまとめる・発行・取り消し・下書きの削除。
  *
  * 会社が販売の書類と受注を切っているときと、利用範囲の外の人には、どの口も使わせない。社外には何も出さない（送るのは業務の承認の後）。
@@ -43,13 +43,17 @@ export function salesDocsRoute(deps: AppDeps) {
 
   // ───────── 受注 ─────────
 
-  /** 受注の一覧（新しい順。`status`、`q`: 取引先・注文番号・品名）。 */
+  /** 受注の一覧（新しい順。`status`、`q`: 取引先・注文番号・品名、`from`・`to`: 注文日の範囲。進み具合つき。第42.14.5節）。 */
   app.get('/orders', async (c) => {
     const st = c.req.query('status');
-    const items = await service.listOrders(who(c), {
+    const from = DATE.test(c.req.query('from') ?? '') ? c.req.query('from')! : '';
+    const to = DATE.test(c.req.query('to') ?? '') ? c.req.query('to')! : '';
+    let items = await service.listOrders(who(c), {
       ...(st && st in SALES_ORDER_STATUS_LABELS ? { status: st as SalesOrderStatus } : {}),
       ...(c.req.query('q') ? { search: c.req.query('q')!.slice(0, 100) } : {}),
+      ...(from || to ? { limit: 2000 } : {}),
     });
+    if (from || to) items = items.filter((o) => (!from || (o.orderedOn ?? '') >= from) && (!to || (o.orderedOn ?? '9999') <= to)).slice(0, 200);
     return c.json({ items });
   });
 
@@ -71,7 +75,7 @@ export function salesDocsRoute(deps: AppDeps) {
   /** 手で入れるときの候補（取引先の名前と、`party` の前の品目。第42.5.1.1節）。 */
   app.get('/suggestions', async (c) => c.json(await service.suggestions(who(c), (c.req.query('party') ?? '').slice(0, 100))));
 
-  /** 注文書を受注にする（`fileId`: 上げた注文書、か `quoteNumber`: 見積書から。第42.5.1節）。同じ注文があれば取り込まずに返す。 */
+  /** 注文書を受注にする（`fileId`: 上げた注文書、か `quoteNumber`: 見積書から。第42.5.1節・第42.14.4節）。同じ注文があれば取り込まずに返す。 */
   app.post('/orders/import', async (c) => {
     const b = await body(c);
     const fileId = typeof b['fileId'] === 'string' && ID.test(b['fileId']) ? b['fileId'] : null;
@@ -124,6 +128,16 @@ export function salesDocsRoute(deps: AppDeps) {
         'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(r.name)}`,
       },
     });
+  });
+
+  /** 受注につなぐ見積書を直す（`quoteId`。外すなら `null`。第42.14.4節）。 */
+  app.patch('/orders/:id/quote', async (c) => {
+    const id = c.req.param('id');
+    const b = await body(c);
+    const quoteId = typeof b['quoteId'] === 'string' && ID.test(b['quoteId']) ? b['quoteId'] : null;
+    const problem = ID.test(id) ? await service.relinkQuote(who(c), id, quoteId) : '受注が見つかりません';
+    if (problem) return c.json({ error: problem }, status(problem));
+    return c.json(await service.getOrder(who(c), id));
   });
 
   /** 受注から注文請書を作る（作ったら発行済み。第42.13.5節）。送るのは業務の承認の後。 */

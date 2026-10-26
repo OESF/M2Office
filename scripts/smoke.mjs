@@ -8713,5 +8713,63 @@ console.log('\n■ 131. 販売の書類と受注の段 2（メールの取り込
   }
 }
 
+console.log('\n■ 132. 見積書の管理（一覧と状態・失注・受注にする・重ねない・受注の進み具合・見積のつなぎ直し・会社の境界。第42.14節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, sales_docs, access from tenant_settings where tenant_id = 't-alpha'`);
+  const PARTY = '株式会社見積商店（smoke）';
+  const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  const later = new Date(Date.now() + 9 * 3_600_000 + 20 * 86_400_000).toISOString().slice(0, 10);
+  const seq = String(Date.now() % 1000).padStart(3, '0');
+  const ids = [`sd-smoke-q1-${seq}`, `sd-smoke-q2-${seq}`];
+  const items = [{ name: '保守（smoke）', code: '', quantity: 12, unit: 'か月', unitPrice: 10000, taxRate: 10, taxCategory: 'standard' }];
+  try {
+    await call('a', '/v1/admin/extensions/sales-docs/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    // 見積書は業務（推論）で作るので、ここでは置き場に 2 通入れる
+    for (const [k, id] of ids.entries()) {
+      await owner.query(
+        `insert into sales_documents (id, tenant_id, kind, number, version, status, party, items, subtotal, tax, total, tax_lines, issued_on, valid_until, created_by)
+         values ($1, 't-alpha', 'quote', $2, 1, 'issued', $3, $4, 120000, 12000, 132000, $5, $6, $7, 'u-a-admin')`,
+        [id, `Q-29990101-${seq}${k}`, JSON.stringify({ name: PARTY, department: '', person: '', address: '', phone: '', email: '' }), JSON.stringify(items),
+          JSON.stringify([{ rate: 10, base: 120000, tax: 12000 }]), today, later]);
+    }
+    const list = await call('a', `/v1/quotes?party=${encodeURIComponent(PARTY)}`, {}, 'member');
+    const admin = await call('a', `/v1/quotes?party=${encodeURIComponent(PARTY)}`);
+    const other = await call('b', `/v1/quotes/${ids[0]}`);
+    list.status === 200 && list.body.items?.length === 2 && admin.body.orders === true && other.status === 404
+      ? ok('見積書の一覧は見積書の作成を使える人が見られ、ほかの会社からは見えない') : ng('見積書の一覧が違う', JSON.stringify({ list: list.status, n: list.body.items?.length, orders: list.body.orders, other: other.status }));
+    const lost = await call('a', `/v1/quotes/${ids[1]}/lost`, { method: 'POST', body: JSON.stringify({ reason: '他社に決まった（smoke）' }) });
+    const lostList = await call('a', `/v1/quotes?state=lost&party=${encodeURIComponent(PARTY)}`);
+    lost.status === 200 && lost.body.doc?.outcome === 'lost' && lostList.body.items?.length === 1
+      ? ok('失注にすると理由を残し、状態で絞れる') : ng('失注が違う', JSON.stringify({ lost: lost.status, outcome: lost.body.doc?.outcome, n: lostList.body.items?.length }));
+    const order = await call('a', `/v1/quotes/${ids[0]}/order`, { method: 'POST', body: '{}' });
+    const again = await call('a', `/v1/quotes/${ids[0]}/order`, { method: 'POST', body: '{}' });
+    const won = await call('a', `/v1/quotes/${ids[0]}`);
+    order.status === 201 && order.body.order?.quoteId === ids[0] && order.body.order?.total === 132000 && again.status === 200 && again.body.duplicate === true
+      && won.body.doc?.outcome === 'won' && won.body.orders?.length === 1
+      ? ok('見積書から受注にすると見積書は受注済みになり、二度目は重ねない') : ng('見積からの受注が違う', JSON.stringify({ order: order.status, again: again.status, won: won.body.doc?.outcome }).slice(0, 300));
+    const orders = await call('a', `/v1/sales/orders?q=${encodeURIComponent(PARTY)}`);
+    const row = (orders.body.items ?? []).find((x) => x.id === order.body.order?.id);
+    row?.progress && row.progress.next?.action === 'delivery' && row.progress.acknowledged === false && row.progress.deliveredRate === 0 && /^Q-29990101-/.test(row.quoteNumber ?? '')
+      ? ok('受注の一覧に見積・請書・納品・請求の進み具合と次の一手が出る') : ng('受注の進み具合が違う', JSON.stringify(row?.progress ?? null));
+    const unlink = await call('a', `/v1/sales/orders/${order.body.order?.id}/quote`, { method: 'PATCH', body: JSON.stringify({ quoteId: null }) });
+    const back = await call('a', `/v1/quotes/${ids[0]}`);
+    unlink.status === 200 && unlink.body.order?.quoteId === null && back.body.doc?.outcome === null
+      ? ok('受注から見積書を外すと、見積書は提出済みに戻る') : ng('見積のつなぎ直しが違う', JSON.stringify({ unlink: unlink.status, outcome: back.body.doc?.outcome }));
+    await call('a', '/v1/admin/extensions/sales-docs/enabled', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+    const noSales = await call('a', `/v1/quotes/${ids[0]}/order`, { method: 'POST', body: '{}' });
+    const stillList = await call('a', `/v1/quotes?party=${encodeURIComponent(PARTY)}`);
+    noSales.status === 403 && stillList.status === 200 && stillList.body.orders === false
+      ? ok('販売の書類と受注を切った会社でも見積書は見られ、受注にはできない') : ng('切った会社の見積書が違う', JSON.stringify({ order: noSales.status, list: stillList.status }));
+  } finally {
+    await owner.query(`delete from sales_documents where party->>'name' = $1`, [PARTY]);
+    await owner.query(`delete from sales_orders where party->>'name' = $1`, [PARTY]);
+    for (const r of saved) await owner.query(`update tenant_settings set sales_docs = $2, access = $3 where tenant_id = $1`, [r.tenant_id, r.sales_docs ? JSON.stringify(r.sales_docs) : null, r.access ? JSON.stringify(r.access) : null]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

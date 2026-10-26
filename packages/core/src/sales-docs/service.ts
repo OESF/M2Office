@@ -1,5 +1,6 @@
 /**
  * @file 販売の書類と受注の処理（仕様書 第42章、ADR-0112）。書類を作る・発行する・訂正する・取り消す・探す、受注を取り込む・直す・取り消す。
+ * 見積書も書類の 1 つとして持ち、再見積（同じ番号の新しい版）・失注・見積からの受注を扱う（第42.14節）。
  *
  * **金額は決まった計算で出す**（推論に計算させない）。注文書・請求書・領収書は下書きで作り、発行は本人の判断で行う
  * （業務では承認の後に `sales.issue`、画面では本人の「発行」。第42.3.1節）。納品書は作ったら発行済みにする。
@@ -9,10 +10,10 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  SALES_DOC_KIND_LABELS, SALES_DOC_NEEDS_ISSUE, SALES_DOC_PREFIX, SALES_DOCS_EXTENSION_ID, canUseAgent,
+  SALES_DOC_KIND_LABELS, SALES_DOC_NEEDS_ISSUE, SALES_DOC_PREFIX, SALES_DOCS_EXTENSION_ID, SALES_QUOTE_DISCOUNT_NAME, canUseAgent, salesQuoteLabel, salesQuoteState,
   effectiveTaxTable, guessTaxCategory, plannedTaxNote, taxCategoryNote, taxCategoryOf, taxRateOn,
   type SalesDocKind, type SalesDocsSettings, type SalesDocument, type SalesItem, type SalesOrder, type SalesOrderFlag, type SalesOrderSource,
-  type SalesOrderStatus, type SalesParty, type SalesStockLink, type SalesSuggestions, type TaxRateEntry,
+  type SalesOrderProgress, type SalesOrderStatus, type SalesParty, type SalesStockLink, type SalesSuggestions, type TaxCategory, type TaxRateEntry,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -20,12 +21,12 @@ import type { FileStore } from '../files/store.js';
 import { fileToText, type OcrFn } from '../files/to-text.js';
 import { saveFile } from '../files/service.js';
 import { loadInvoiceStyle } from '../files/invoice-style.js';
-import { quoteItemKey } from '../tools/quote.js';
+import { QUOTE_VALID_DAYS, quoteItemKey } from '../tools/quote.js';
 import { silentLogger, type Logger } from '../log/logger.js';
-import { closingCutoff, closingDayFrom, docTotals, dueDateFrom, jstToday, yenText } from './calc.js';
+import { addDays, closingCutoff, closingDayFrom, docTotals, dueDateFrom, itemAmount, jstToday, yenText } from './calc.js';
 import { itemsFrom, readOrder } from './extract.js';
 import { docFileName, renderSalesDoc } from './render.js';
-import { partyKey, type DocPatch, type DocQuery, type NewDoc, type OrderQuery, type SalesDocStore, type StoredDoc, type StoredOrder } from './store.js';
+import { partyKey, type DocPatch, type DocQuery, type NewDoc, type OrderQuery, type PartyMemo, type SalesDocStore, type StoredDoc, type StoredOrder } from './store.js';
 
 /** 操作する人。 */
 export interface SalesViewer {
@@ -54,8 +55,8 @@ export interface SalesDocServiceDeps {
 export interface SalesInventory {
   /** その人が在庫管理を使えるか（使えなければ `null`） */
   access(tenantId: string, userId: string): Promise<unknown | null>;
-  /** 品目と使える数 */
-  items(tenantId: string): Promise<{ id: string; name: string; sku: string; unit: string; available: number }[]>;
+  /** 品目と使える数。販売品（`sale`）は販売価格と消費税率も持つ（第42.14.3節。社員価格と仕入価格は渡さない） */
+  items(tenantId: string): Promise<SalesStockItem[]>;
   /** 取り置く（受注の引き当て）。取り置きの ID を返す */
   hold(tenantId: string, userId: string, r: { itemId: string; qty: number; ref: string }): Promise<string>;
   /** 取り置きを外す */
@@ -64,6 +65,23 @@ export interface SalesInventory {
   out(tenantId: string, userId: string, r: { itemId: string; qty: number; reason: string; sourceId: string }): Promise<string | null>;
   /** 出庫を戻す（納品書の取り消し） */
   undo(tenantId: string, userId: string, moveId: string, reason: string, sourceId: string): Promise<void>;
+}
+
+/** 在庫の品目（販売の書類が使う形）。 */
+export interface SalesStockItem {
+  id: string;
+  name: string;
+  sku: string;
+  unit: string;
+  available: number;
+  /** 区分が販売品か */
+  sale?: boolean;
+  /** 販売価格（無ければ `null`） */
+  price?: number | null;
+  /** 販売価格が税込か */
+  priceTaxIncluded?: boolean;
+  /** 消費税率（10 か 8） */
+  taxRate?: number;
 }
 
 /** メールから取り込むもの（第42.13.1節）。 */
@@ -135,6 +153,45 @@ export interface DocDetail {
   deliveries: SalesDocument[];
   invoice: SalesDocument | null;
   receipts: SalesDocument[];
+  /** 見積書: この見積書（どの版でも）に対する受注 */
+  orders: SalesOrder[];
+  /** 見積書: 前の版からの違い（第42.14.2節） */
+  diff: string[];
+}
+
+/** 見積書を作るときに渡すもの（第42.14.1節）。 */
+export interface QuoteInput {
+  /** 宛先（「株式会社見本商事 山田様」のような書き方でもよい） */
+  to?: string;
+  party?: Partial<SalesParty>;
+  items: SalesItem[];
+  /** 有効期限（発行から何日。無ければ会社の見積書の既定） */
+  validDays?: number;
+  /** お支払い条件（無ければ会社の見積書の既定） */
+  paymentTerms?: string;
+  /** 納期などの条件 */
+  terms?: string;
+  notes?: string;
+}
+
+/** 再見積で直すこと（第42.14.2節）。 */
+export interface QuoteRevision {
+  /** 品目を入れ替える（無ければ前の版の品目） */
+  items?: SalesItem[];
+  /** 見積全体の値引き（円。税率ごとに分けて「出精値引き」の行にする。0 なら値引きの行を外す） */
+  discountTotal?: number;
+  to?: string;
+  party?: Partial<SalesParty>;
+  validDays?: number;
+  paymentTerms?: string;
+  terms?: string;
+  notes?: string;
+}
+
+/** 見積書を作った結果。`stock` は在庫の数の知らせ（見積書には載せない。第42.14.3節）。`diff` は前の版からの違い。 */
+export interface CreatedQuote extends CreatedDoc {
+  stock: string[];
+  diff: string[];
 }
 
 /** 受注 1 件の詳しい中身。 */
@@ -231,10 +288,19 @@ export class SalesDocService {
     const receipts = d.kind === 'invoice' ? all.filter((x) => x.kind === 'receipt' && x.invoiceId === d.id && x.status !== 'cancelled') : [];
     const table = await this.table();
     const taxNotes = [...new Set(d.items.map((i) => plannedTaxNote(taxCategoryOf(i), d.issuedOn, table)).filter((x): x is string => !!x))];
+    let orders: SalesOrder[] = [];
+    let diff: string[] = [];
+    if (d.kind === 'quote') {
+      const ids = new Set(versions.map((x) => x.id));
+      const memos = await this.memos(who.tenantId);
+      orders = (await this.deps.store.listOrders(who.tenantId, { limit: 2000 })).filter((o) => o.quoteId && ids.has(o.quoteId)).map((o) => this.orderView(o, all, names, memos));
+      const prev = d.previousId ? all.find((x) => x.id === d.previousId) : undefined;
+      if (prev) diff = quoteDiff(prev, d);
+    }
     return {
       doc: this.view(d, names), taxNotes, versions: versions.map((x) => this.view(x, names)), order,
       deliveries: deliveries.map((x) => this.view(x, names)), invoice: invoice ? this.view(invoice, names) : null,
-      receipts: receipts.map((x) => this.view(x, names)),
+      receipts: receipts.map((x) => this.view(x, names)), orders, diff,
     };
   }
 
@@ -250,7 +316,8 @@ export class SalesDocService {
   private async nextNumber(tenantId: string, kind: SalesDocKind | 'order', day: string): Promise<string> {
     const prefix = prefixOf(kind, day);
     const last = await this.deps.store.lastSeq(tenantId, kind === 'order' ? 'orders' : 'docs', prefix);
-    return `${prefix}${String(last + 1).padStart(3, '0')}`;
+    // 見積書はいままでの見積番号（Q-日付-01）に合わせて 2 桁、ほかは 3 桁
+    return `${prefix}${String(last + 1).padStart(kind === 'quote' ? 2 : 3, '0')}`;
   }
 
   /**
@@ -293,26 +360,59 @@ export class SalesDocService {
     return this.deps.taxTable ? this.deps.taxTable().catch(() => effectiveTaxTable(null)) : effectiveTaxTable(null);
   }
 
-  /** 単価の無い品目に、同じ取引先の前の書類・受注・見積書の同じ品目の単価を入れる。 */
-  private async fillPrices(who: SalesViewer, partyName: string, items: SalesItem[]): Promise<string[]> {
-    if (!items.some((i) => i.unitPrice === null || !i.unit)) return [];
+  /**
+   * 単価の無い品目に単価を入れる。在庫管理の販売品の販売価格（税抜に直したもの）を先に使い、無ければ同じ取引先の前の書類（見積書を含む）・受注の
+   * 同じ品目の単価を使う（第42.14.3節）。値引きの行には入れない。
+   */
+  private async fillPrices(who: SalesViewer, partyName: string, items: SalesItem[], defaultUnit = '個'): Promise<string[]> {
+    const filled = await this.fromStock(who, items);
+    if (!items.some((i) => i.unitPrice === null || !i.unit)) return filled;
     const key = partyKey(partyName);
     const past = (await this.deps.store.listDocs(who.tenantId, { limit: 300 }))
-      .filter((d) => d.status !== 'cancelled' && (!key || partyKey(d.party.name) === key)).flatMap((d) => d.items);
-    const quotes = (await this.deps.repo.listQuotes(who.tenantId, { limit: 100 }))
-      .filter((q) => !key || partyKey(q.toName).includes(key)).flatMap((q) => q.items.map((i) => ({ ...i, code: '' })));
+      .filter((d) => d.status !== 'cancelled' && (!key || partyKey(d.party.name) === key)).flatMap((d) => d.items).filter((i) => !isDiscountLine(i));
     // 受注（注文書から読んだもの・手で入れたもの）の単価も使う
     const orders = (await this.deps.store.listOrders(who.tenantId, { limit: 300 }))
-      .filter((o) => !o.cancelled && (!key || partyKey(o.party.name) === key)).flatMap((o) => o.items);
-    const filled: string[] = [];
+      .filter((o) => !o.cancelled && (!key || partyKey(o.party.name) === key)).flatMap((o) => o.items).filter((i) => !isDiscountLine(i));
     for (const it of items) {
       // 単位が無ければ前の同じ品目の単位、それも無ければ「個」
-      if (!it.unit) it.unit = [...past, ...orders, ...quotes].find((p) => itemKey(p) === itemKey(it) && p.unit)?.unit ?? '個';
+      if (!it.unit) it.unit = [...past, ...orders].find((p) => itemKey(p) === itemKey(it) && p.unit)?.unit ?? defaultUnit;
       if (it.unitPrice !== null) continue;
-      const hit = [...past, ...orders, ...quotes].find((p) => itemKey(p) === itemKey(it) && p.unitPrice !== null);
+      const hit = [...past, ...orders].find((p) => itemKey(p) === itemKey(it) && p.unitPrice !== null);
       if (hit) { it.unitPrice = hit.unitPrice; filled.push(it.name); }
     }
     return filled;
+  }
+
+  /** 在庫管理の販売品（その人が在庫管理を使えるときだけ）。 */
+  private async saleItems(who: SalesViewer): Promise<SalesStockItem[]> {
+    const inv = await this.stockOn(who);
+    return inv ? (await inv.items(who.tenantId).catch(() => [])).filter((x) => x.sale) : [];
+  }
+
+  /**
+   * 品目を在庫の販売品に当てる（品番が同じか、名前が同じ）。当たれば品番・単位・税の区分・単価（書かれていなければ販売価格を税抜にしたもの）を入れる。
+   *
+   * @returns 販売価格を使った品目の名前
+   */
+  private async fromStock(who: SalesViewer, items: SalesItem[], sale?: SalesStockItem[]): Promise<string[]> {
+    const list = sale ?? await this.saleItems(who);
+    if (list.length === 0) return [];
+    const used: string[] = [];
+    for (const it of items) {
+      if (isDiscountLine(it)) continue;
+      const hit = stockMatch(list, it);
+      if (!hit) continue;
+      it.inventoryItemId = hit.id;
+      if (!it.code && hit.sku) it.code = hit.sku;
+      if (!it.unit && hit.unit) it.unit = hit.unit;
+      if (!it.taxCategory && hit.taxRate) it.taxCategory = hit.taxRate === 8 ? 'food' : 'standard';
+      if (it.unitPrice === null && hit.price !== null && hit.price !== undefined) {
+        // 税込の販売価格は税抜に直す（円未満は四捨五入。決まった計算）
+        it.unitPrice = hit.priceTaxIncluded ? Math.round((hit.price * 100) / (100 + (hit.taxRate ?? 10))) : hit.price;
+        used.push(it.name);
+      }
+    }
+    return used;
   }
 
   /**
@@ -363,6 +463,7 @@ export class SalesDocService {
    */
   async createDocument(who: SalesViewer, input: CreateDocInput, runId: string | null): Promise<CreatedDoc | { error: string }> {
     const { store } = this.deps;
+    if (input.kind === 'quote') return { error: '見積書は業務「見積書の作成」で作ります' };
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
     const today = jstToday();
     const warnings: string[] = [];
@@ -514,6 +615,7 @@ export class SalesDocService {
       kind: input.kind, number: null, version: 1, previousId: null, superseded: false, status: issueNow ? 'issued' : 'draft',
       party, subject, items, ...totals, issuedOn: today, dueOn, terms, notes: str(input.notes, 400),
       orderId, invoiceId, deliveryIds, fileId: null, cancelReason: '', notices: [], runId, createdBy: who.userId, stockMoves: [],
+      validUntil: null, outcome: null, outcomeNote: '',
     };
     // 納品書はすぐ番号を付ける（同じ番号が重なれば次の番号で作り直す）
     let id = '';
@@ -594,6 +696,7 @@ export class SalesDocService {
     const { store } = this.deps;
     const cur = await store.getDoc(who.tenantId, id);
     if (!cur) return { error: '書類が見つかりません' };
+    if (cur.kind === 'quote') return this.reviseQuote(who, id, changes, runId);
     if (cur.status === 'draft') return this.createDocument(who, { ...changes, kind: cur.kind, documentId: cur.id }, runId);
     if (cur.status !== 'issued') return { error: '取り消した書類は訂正できません' };
     if (cur.superseded) return { error: 'この版はもう訂正されています。新しい版を直してください' };
@@ -684,27 +787,210 @@ export class SalesDocService {
     return null;
   }
 
+  // ───────── 見積書（第42.14節） ─────────
+
+  /** 見積書の一覧（新しい版だけ。新しい順）。状態は {@link salesQuoteState} で出す。 */
+  async listQuotes(who: SalesViewer, q: Omit<DocQuery, 'kind'> = {}): Promise<SalesDocument[]> {
+    return this.list(who, { ...q, kind: 'quote' });
+  }
+
+  /** その番号の見積書のすべての版（新しい版から）。 */
+  private async quoteVersions(tenantId: string, number: string): Promise<StoredDoc[]> {
+    return (await this.deps.store.listDocs(tenantId, { kind: 'quote', number, withSuperseded: true })).sort((a, b) => b.version - a.version);
+  }
+
+  /** 見積書（ID か番号）の、いちばん新しい版。 */
+  private async latestQuote(tenantId: string, ref: string): Promise<StoredDoc | null> {
+    const r = ref.trim().replace(/（再見積\s*\d+）$/, '');
+    if (!r) return null;
+    const byId = await this.deps.store.getDoc(tenantId, r);
+    const number = byId?.kind === 'quote' ? byId.number : byId ? null : r;
+    if (!number) return null;
+    return (await this.quoteVersions(tenantId, number)).find((x) => !x.superseded) ?? null;
+  }
+
+  /**
+   * 見積書を作る（第42.14.1節）。作ったらすぐ提出できる形にする（番号が付く。見積書は金額を示す書類で、お金の確定ではない）。
+   * 単価の無い品目は、販売品の販売価格・前の書類の単価を使う。在庫が見積の数より少なければ知らせる（見積書には載せない）。
+   *
+   * @param runId 作った実行（業務から）
+   */
+  async createQuote(who: SalesViewer, input: QuoteInput, runId: string | null): Promise<CreatedQuote | { error: string }> {
+    const items = (input.items ?? []).slice(0, 50).map((i) => ({ ...i }));
+    if (items.length === 0) return { error: '品目がありません' };
+    const settings = await this.deps.repo.getTenantSettings(who.tenantId);
+    const party: SalesParty = { ...emptyParty(), ...partyFromTo(input.to ?? ''), ...cleanParty(input.party) };
+    const today = jstToday();
+    const sale = await this.saleItems(who);
+    const notes: string[] = [];
+    const warnings: string[] = [];
+    const fromStock = await this.fromStock(who, items, sale);
+    if (fromStock.length) notes.push(`在庫の販売品の販売価格を使いました: ${fromStock.join('、')}`);
+    // 見積書の単位の既定は「式」（作業や制作の見積が多いため。いままでの見積書と同じ）
+    const filled = (await this.fillPrices(who, party.name, items, '式')).filter((n) => !fromStock.includes(n));
+    if (filled.length) notes.push(`前の見積書・書類の単価を使いました: ${filled.join('、')}`);
+    const missing = items.filter((i) => i.unitPrice === null).map((i) => i.name);
+    if (missing.length) warnings.push(`単価が入っていない品目があります（0 円で作りました）: ${missing.join('、')}`);
+    const tax = await this.classify(who, party.name, items, today);
+    notes.push(...tax.judged);
+    warnings.push(...tax.planned);
+    const qs = settings.invoice.quote;
+    const validDays = Math.min(Math.max(Math.round(input.validDays ?? qs.validDays ?? QUOTE_VALID_DAYS), 1), 365);
+    const extra = [str(input.terms, 120) ? `条件: ${str(input.terms, 120)}` : '', str(input.notes, 400)].filter(Boolean).join('\n');
+    const base: NewDoc = {
+      kind: 'quote', number: null, version: 1, previousId: null, superseded: false, status: 'issued', party, subject: '',
+      items, ...docTotals(items, settings.company.taxRounding), issuedOn: today, dueOn: null,
+      terms: str(input.paymentTerms, 50) || qs.paymentTerms || '', notes: extra, orderId: null, invoiceId: null, deliveryIds: [], fileId: null,
+      cancelReason: '', notices: [], runId, createdBy: who.userId, stockMoves: [], validUntil: addDays(today, validDays), outcome: null, outcomeNote: '',
+    };
+    const doc = await this.saveNumbered(who, base, today);
+    await this.audit(who, 'sales_doc.issue', 'sales_document', doc.id, { kind: 'quote', total: doc.total, number: doc.number });
+    return { doc: this.view(doc, await this.names(who.tenantId)), warnings, notes, stock: shortages(items, sale), diff: [] };
+  }
+
+  /** 番号を付けて残す（同じ番号が重なれば次の番号で作り直す）。 */
+  private async saveNumbered(who: SalesViewer, base: NewDoc, day: string): Promise<StoredDoc> {
+    for (let attempt = 0; ; attempt++) {
+      const number = base.number ?? await this.nextNumber(who.tenantId, base.kind, day);
+      const fileId = await this.renderFile(who, { ...base, number, id: '', createdAt: '', updatedAt: '' });
+      try {
+        const id = await this.deps.store.createDoc(who.tenantId, { ...base, number, fileId });
+        return (await this.deps.store.getDoc(who.tenantId, id))!;
+      } catch (err) {
+        await this.dropFile(who.tenantId, fileId);
+        if (base.number || attempt >= 4) throw err;
+      }
+    }
+  }
+
+  /**
+   * 再見積（第42.14.2節）。同じ見積番号の新しい版を作り、前の版を置き換え済みにする。発行の日と有効期限は今日から数え直す。
+   * 値引きは頼まれた額だけを使う（品目ごとの値引き、または見積全体の値引きを税率ごとの「出精値引き」の行にする）。
+   *
+   * @returns 前の版からの違い（`diff`）を添える
+   */
+  async reviseQuote(who: SalesViewer, ref: string, changes: QuoteRevision, runId: string | null): Promise<CreatedQuote | { error: string }> {
+    const { store } = this.deps;
+    const cur = await this.latestQuote(who.tenantId, ref);
+    if (!cur) return { error: '見積書が見つかりません' };
+    if (cur.status === 'cancelled') return { error: '取り消した見積書は再見積できません' };
+    if (cur.outcome === 'won') return { error: `見積書 ${salesQuoteLabel(cur)} はもう受注済みです（受注を直してください）` };
+    const settings = await this.deps.repo.getTenantSettings(who.tenantId);
+    const today = jstToday();
+    const sale = await this.saleItems(who);
+    const replaced = !!changes.items?.length;
+    let items = (replaced ? changes.items! : cur.items).map((i) => ({ ...i }));
+    const notes: string[] = [];
+    const warnings: string[] = [];
+    const filled = await this.fillPrices(who, cur.party.name, items, '式');
+    if (filled.length) notes.push(`単価を入れました: ${filled.join('、')}`);
+    // 品目を直さなければ、前の版の税の区分のまま今日の税率を当てる
+    const tax = await this.classify(who, cur.party.name, items, today);
+    notes.push(...tax.judged);
+    warnings.push(...tax.planned);
+    if (changes.discountTotal !== undefined) {
+      const lines = discountLines(items.filter((i) => !isDiscountLine(i)), Math.round(changes.discountTotal));
+      if ('error' in lines) return lines;
+      items = [...items.filter((i) => !isDiscountLine(i)), ...lines];
+    }
+    const totals = docTotals(items, settings.company.taxRounding);
+    if (totals.subtotal < 0) return { error: '値引きが見積の金額より大きくなります' };
+    const qs = settings.invoice.quote;
+    const validDays = Math.min(Math.max(Math.round(changes.validDays ?? qs.validDays ?? QUOTE_VALID_DAYS), 1), 365);
+    const party = { ...cur.party, ...partyFromTo(changes.to ?? ''), ...cleanParty(changes.party) };
+    const extra = changes.terms !== undefined || changes.notes !== undefined
+      ? [str(changes.terms, 120) ? `条件: ${str(changes.terms, 120)}` : '', str(changes.notes, 400)].filter(Boolean).join('\n') : cur.notes;
+    const next: NewDoc = {
+      ...cur, party, items, ...totals, issuedOn: today, validUntil: addDays(today, validDays), outcome: null, outcomeNote: '',
+      terms: changes.paymentTerms !== undefined ? str(changes.paymentTerms, 50) : cur.terms, notes: extra,
+      version: cur.version + 1, previousId: cur.id, superseded: false, status: 'issued', fileId: null, cancelReason: '', notices: [], runId, createdBy: who.userId,
+    };
+    const doc = await this.saveNumbered(who, next, today);
+    await store.updateDoc(who.tenantId, cur.id, { superseded: true });
+    await this.audit(who, 'sales_doc.revise', 'sales_document', doc.id, { kind: 'quote', number: cur.number, version: next.version, from: cur.id, total: doc.total });
+    return { doc: this.view(doc, await this.names(who.tenantId)), warnings, notes, stock: shortages(items, sale), diff: quoteDiff(cur, doc) };
+  }
+
+  /**
+   * 失注にする（理由を残す。第42.14.4節）。受注済みの見積書は失注にしない。
+   */
+  async loseQuote(who: SalesViewer, ref: string, reason: string): Promise<string | null> {
+    const q = await this.latestQuote(who.tenantId, ref);
+    if (!q) return '見積書が見つかりません';
+    if (q.status === 'cancelled') return '取り消した見積書です';
+    if (q.outcome === 'won') return 'この見積書は受注済みです（受注を取り消してください）';
+    await this.deps.store.updateDoc(who.tenantId, q.id, { outcome: 'lost', outcomeNote: str(reason, 200) });
+    await this.audit(who, 'sales_doc.lost', 'sales_document', q.id, { number: q.number, version: q.version });
+    return null;
+  }
+
+  /**
+   * 注文書に合う見積書を探す（同じ取引先の、提出済みで有効期限の内の見積書のうち、品目がいちばん合う新しいもの）。
+   */
+  private async matchQuote(tenantId: string, key: string, items: SalesItem[], day: string): Promise<StoredDoc | null> {
+    if (!key || items.length === 0) return null;
+    const quotes = (await this.deps.store.listDocs(tenantId, { kind: 'quote', limit: 500 }))
+      .filter((d) => partyKey(d.party.name) === key && salesQuoteState(d, day) === 'submitted');
+    let best: { q: StoredDoc; score: number } | null = null;
+    for (const q of quotes) {
+      const keys = new Set(q.items.filter((i) => !isDiscountLine(i)).map(itemKey));
+      const score = items.filter((i) => keys.has(itemKey(i))).length;
+      if (score > 0 && (!best || score > best.score)) best = { q, score };
+    }
+    return best?.q ?? null;
+  }
+
   // ───────── 受注 ─────────
 
-  /** 受注に、納品書から求めた状態と納めた数を足す。 */
-  private orderView(o: StoredOrder, docs: StoredDoc[], names: Map<string, string>): SalesOrder {
-    const deliveries = docs.filter((d) => d.kind === 'delivery' && d.orderId === o.id && d.status === 'issued' && !d.superseded);
+  /**
+   * 受注に、納品書から求めた状態と納めた数と、受注から先の進み具合（請書・納品・請求・領収と次の一手。第42.14.6節）を足す。
+   *
+   * @param memos 取引先の覚え（締め日。未請求の納品書を「請求書を作る」と示すのは締めの区切りを過ぎたものだけ）
+   */
+  private orderView(o: StoredOrder, docs: StoredDoc[], names: Map<string, string>, memos: Map<string, PartyMemo> = new Map()): SalesOrder {
+    const live = (d: StoredDoc) => d.status === 'issued' && !d.superseded;
+    const deliveries = docs.filter((d) => d.kind === 'delivery' && d.orderId === o.id && live(d));
     const delivered = o.items.map((it) => deliveries.flatMap((d) => d.items).filter((x) => itemKey(x) === itemKey(it)).reduce((n, x) => n + x.quantity, 0));
-    const invoices = docs.filter((d) => d.kind === 'invoice' && d.status === 'issued' && !d.superseded);
-    const allBilled = deliveries.length > 0 && deliveries.every((d) => d.invoiceId || invoices.some((i) => i.deliveryIds.includes(d.id)));
+    const invoices = docs.filter((d) => d.kind === 'invoice' && live(d));
+    const billedOf = (d: StoredDoc) => !!d.invoiceId || invoices.some((i) => i.deliveryIds.includes(d.id));
+    const allBilled = deliveries.length > 0 && deliveries.every(billedOf);
     const full = o.items.length > 0 && o.items.every((it, k) => (delivered[k] ?? 0) >= it.quantity);
+    // 納品書を通さずに受注から作った請求書も、請求したものとして数える
+    const direct = invoices.filter((i) => i.orderId === o.id && i.deliveryIds.length === 0);
     const status: SalesOrderStatus = o.cancelled ? 'cancelled' : full ? (allBilled ? 'invoiced' : 'delivered') : delivered.some((n) => n > 0) ? 'partial' : 'open';
+    const unbilled = deliveries.filter((d) => !billedOf(d));
+    const myInvoices = new Set([...direct.map((i) => i.id), ...deliveries.map((d) => d.invoiceId).filter((x): x is string => !!x)]);
+    const totalQty = o.items.filter((i) => !isDiscountLine(i)).reduce((n, i) => n + i.quantity, 0);
+    const doneQty = o.items.reduce((n, it, k) => (isDiscountLine(it) ? n : n + Math.min(it.quantity, delivered[k] ?? 0)), 0);
+    const invoiced: SalesOrderProgress['invoiced'] = direct.length > 0 || allBilled ? 'all' : deliveries.some(billedOf) ? 'partial' : 'none';
+    const receipted = docs.some((d) => d.kind === 'receipt' && live(d) && !!d.invoiceId && myInvoices.has(d.invoiceId));
+    const cutoff = closingCutoff(jstToday(), memos.get(partyKey(o.party.name))?.closingDay ?? null);
+    const next: SalesOrderProgress['next'] = o.cancelled ? null
+      : !full && direct.length === 0 ? { label: '納品書を作る', action: 'delivery' }
+        : unbilled.some((d) => d.issuedOn <= cutoff) ? { label: '請求書を作る', action: 'invoice' }
+          : invoiced === 'all' && !receipted ? { label: '入金があれば領収書を作る', action: 'receipt' } : null;
+    const progress: SalesOrderProgress = {
+      acknowledged: docs.some((d) => d.kind === 'acknowledgement' && d.orderId === o.id && live(d)),
+      deliveredRate: totalQty > 0 ? Math.min(100, Math.round((doneQty / totalQty) * 100)) : 0,
+      invoiced, unbilledDeliveries: unbilled.length, receipted, next,
+    };
     const { cancelled: _c, ...rest } = o;
-    return { ...rest, status, delivered, createdByName: names.get(o.createdBy) ?? '' };
+    return { ...rest, status, delivered, progress, createdByName: names.get(o.createdBy) ?? '' };
+  }
+
+  /** 会社の取引先の覚え（締め日。名前を比べる形ごと）。 */
+  private async memos(tenantId: string): Promise<Map<string, PartyMemo>> {
+    const list = await this.deps.store.listParties(tenantId).catch(() => []);
+    return new Map(list.map((p) => [p.key, p]));
   }
 
   /** 受注の一覧（新しい順）。 */
   async listOrders(who: SalesViewer, q: OrderQuery & { status?: SalesOrderStatus } = {}): Promise<SalesOrder[]> {
-    const [orders, docs, names] = await Promise.all([
+    const [orders, docs, names, memos] = await Promise.all([
       this.deps.store.listOrders(who.tenantId, { ...q, limit: q.status ? 2000 : q.limit ?? 200 }),
-      this.deps.store.listDocs(who.tenantId, { withSuperseded: true, limit: 2000 }), this.names(who.tenantId),
+      this.deps.store.listDocs(who.tenantId, { withSuperseded: true, limit: 2000 }), this.names(who.tenantId), this.memos(who.tenantId),
     ]);
-    const all = orders.map((o) => this.orderView(o, docs, names));
+    const all = orders.map((o) => this.orderView(o, docs, names, memos));
     return (q.status ? all.filter((o) => o.status === q.status) : all).slice(0, q.limit ?? 200);
   }
 
@@ -716,8 +1002,11 @@ export class SalesDocService {
     const related = docs.filter((d) => d.orderId === o.id && !d.superseded);
     const invoiceIds = new Set(related.filter((d) => d.kind === 'delivery' && d.invoiceId).map((d) => d.invoiceId!));
     const linked = docs.filter((d) => !d.superseded && (invoiceIds.has(d.id) || (d.kind === 'receipt' && d.invoiceId && invoiceIds.has(d.invoiceId))));
-    const documents = [...new Map([...related, ...linked].map((d) => [d.id, d])).values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return { order: this.orderView(o, docs, names), documents: documents.map((d) => this.view(d, names)) };
+    // つないだ見積書（その番号のいちばん新しい版まで）も並べる
+    const quote = o.quoteId ? docs.find((d) => d.id === o.quoteId) : undefined;
+    const quotes = quote ? docs.filter((d) => d.kind === 'quote' && d.number === quote.number && d.version >= quote.version) : [];
+    const documents = [...new Map([...quotes, ...related, ...linked].map((d) => [d.id, d])).values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return { order: this.orderView(o, docs, names, await this.memos(who.tenantId)), documents: documents.map((d) => this.view(d, names)) };
   }
 
   /** 取り込んだ元の注文書（受注を使える人なら開ける。会社の取引の記録。第42.6節）。 */
@@ -760,6 +1049,8 @@ export class SalesDocService {
   async saveOrder(who: SalesViewer, r: {
     party: SalesParty; customerRef: string; orderedOn: string | null; dueOn: string | null; deliverTo: string; terms: string; notes: string;
     items: SalesItem[]; statedTotal: number | null; unread?: string[]; sourceFileId: string | null; source: SalesOrderSource; quoteNumber: string | null;
+    /** つなぐ見積書（見積書から受注にしたとき。無ければ同じ取引先の見積書を探してつなぐ。第42.14.4節） */
+    quoteId?: string | null;
     /** AI が読んだこと（「いつもの」を前の注文から読んだ、など） */
     guesses?: string[];
     /** 手で入れたときの、入っていない項目 */
@@ -809,18 +1100,10 @@ export class SalesDocService {
     ];
     const money = this.orderMoney(r.items, r.statedTotal, settings.company.taxRounding);
     if (money.calc) flags.push(money.calc);
-    // 見積との違い（同じ取引先の見積書の同じ品目の単価）
-    let quoteNumber = r.quoteNumber;
-    const quotes = key ? (await this.deps.repo.listQuotes(who.tenantId, { limit: 100 })).filter((q) => partyKey(q.toName).includes(key)) : [];
-    for (const it of r.items) {
-      const q = quotes.find((x) => x.items.some((i) => quoteItemKey(i.name) === quoteItemKey(it.name)));
-      const qi = q?.items.find((i) => quoteItemKey(i.name) === quoteItemKey(it.name));
-      if (!q || !qi) continue;
-      quoteNumber = quoteNumber ?? q.number;
-      if (qi.unitPrice !== null && it.unitPrice !== null && qi.unitPrice !== it.unitPrice) {
-        flags.push({ kind: 'quote', text: `${it.name} の単価 ${yenText(it.unitPrice)} が、見積（${q.number}）の ${yenText(qi.unitPrice)} と違います` });
-      }
-    }
+    // 見積書につなぐ（渡されなければ、同じ取引先の提出済みで有効期限の内の見積書から、品目がいちばん合うものを探す）。違いは印にする
+    const quote = r.quoteId ? await store.getDoc(who.tenantId, r.quoteId) : r.source === 'quote' ? null : await this.matchQuote(who.tenantId, key, r.items, r.orderedOn ?? jstToday());
+    const quoteNumber = quote ? salesQuoteLabel(quote) : r.quoteNumber;
+    if (quote && !r.quoteId) flags.push(...quoteFlags(r.items, quote));
     const today = jstToday();
     let id = '';
     for (let attempt = 0; attempt < 5 && !id; attempt++) {
@@ -830,7 +1113,7 @@ export class SalesDocService {
           number, party: r.party, customerRef: r.customerRef, orderedOn: r.orderedOn, dueOn: r.dueOn, deliverTo: r.deliverTo, terms: r.terms, notes: r.notes,
           items: r.items, subtotal: money.subtotal, tax: money.tax, total: money.total, statedTotal: r.statedTotal, cancelled: false, cancelReason: '',
           flags, sourceFileId: r.sourceFileId, source: r.source, quoteNumber, createdBy: who.userId,
-          mailMessageId: r.mailMessageId ?? null, stock: [], dueNotifiedOn: null,
+          mailMessageId: r.mailMessageId ?? null, stock: [], dueNotifiedOn: null, quoteId: quote?.id ?? null,
         });
       } catch (err) {
         if (attempt === 4) throw err;
@@ -839,6 +1122,8 @@ export class SalesDocService {
     // 支払い条件があれば、取引先の覚えにする（締め日と支払い条件。第42.4.2節）
     if (r.terms && r.party.name) await this.rememberParty(who, r.party.name, { paymentTerms: r.terms }, '注文書');
     await this.audit(who, 'sales_order.create', 'sales_order', id, { source: r.source, items: r.items.length, flags: flags.length });
+    // つないだ見積書は「受注済み」にする
+    if (quote && quote.outcome !== 'won') await store.updateDoc(who.tenantId, quote.id, { outcome: 'won', outcomeNote: '' });
     // 在庫管理を使う会社では、品目を在庫の品目につなぎ、取り置く（第42.13.4節）
     await this.linkStock(who, id).catch((err) => this.log.warn('受注を在庫につなげませんでした', { err }));
     const created = await store.getOrder(who.tenantId, id);
@@ -847,10 +1132,8 @@ export class SalesDocService {
 
   /** 前の受注・書類・見積書の取引先の名前（新しい順・重ねない）。 */
   private async knownParties(tenantId: string): Promise<string[]> {
-    const [orders, docs, quotes] = await Promise.all([
-      this.deps.store.listOrders(tenantId, { limit: 500 }), this.deps.store.listDocs(tenantId, { limit: 500 }), this.deps.repo.listQuotes(tenantId, { limit: 200 }),
-    ]);
-    const names = [...orders.map((o) => o.party.name), ...docs.map((d) => d.party.name), ...quotes.map((q) => q.toName.replace(/\s*(御中|様|殿)$/, ''))].filter(Boolean);
+    const [orders, docs] = await Promise.all([this.deps.store.listOrders(tenantId, { limit: 500 }), this.deps.store.listDocs(tenantId, { limit: 500 })]);
+    const names = [...orders.map((o) => o.party.name), ...docs.map((d) => d.party.name)].filter(Boolean);
     const seen = new Set<string>();
     return names.filter((n) => { const k = partyKey(n); if (!k || seen.has(k)) return false; seen.add(k); return true; });
   }
@@ -877,16 +1160,13 @@ export class SalesDocService {
   async suggestions(who: SalesViewer, party = '', opts: { ordered?: boolean } = {}): Promise<SalesSuggestions> {
     const { store } = this.deps;
     const k = party ? partyKey(await this.officialParty(who, party)) : '';
-    const [orders, docs, quotes] = await Promise.all([
-      store.listOrders(who.tenantId, { limit: 500 }), store.listDocs(who.tenantId, { limit: 500 }), this.deps.repo.listQuotes(who.tenantId, { limit: 200 }),
-    ]);
+    const [orders, docs] = await Promise.all([store.listOrders(who.tenantId, { limit: 500 }), store.listDocs(who.tenantId, { limit: 500 })]);
     const mine = (name: string) => !k || partyKey(name) === k;
-    // 新しい順に並べ、品目ごとに回数を数えて、単位と単価はいちばん新しいものを使う
+    // 新しい順に並べ、品目ごとに回数を数えて、単位と単価はいちばん新しいものを使う（値引きの行は数えない）
     const lines: SalesItem[] = [
       ...orders.filter((o) => !o.cancelled && mine(o.party.name)).flatMap((o) => o.items),
       ...docs.filter((d) => d.status !== 'cancelled' && (opts.ordered ? d.kind === 'delivery' : d.kind !== 'purchase_order' && d.kind !== 'receipt') && mine(d.party.name)).flatMap((d) => d.items),
-      ...(opts.ordered ? [] : quotes.filter((q) => mine(q.toName.replace(/\s*(御中|様|殿)$/, ''))).flatMap((q) => q.items.map((i) => ({ ...i, code: '' })))),
-    ];
+    ].filter((i) => !isDiscountLine(i));
     const counted = new Map<string, SalesSuggestions['items'][number]>();
     for (const i of lines) {
       const key = itemKey(i);
@@ -894,9 +1174,17 @@ export class SalesDocService {
       if (cur) { cur.count++; if (cur.unitPrice === null) cur.unitPrice = i.unitPrice; continue; }
       counted.set(key, { name: i.name, code: i.code, unit: i.unit, unitPrice: i.unitPrice, taxCategory: taxCategoryOf(i), count: 1 });
     }
+    // 在庫管理の販売品も候補に出す（販売価格を税抜にしたものと単位つき。第42.14.3節）
+    const sale = opts.ordered ? [] : await this.saleItems(who);
+    for (const x of sale) {
+      const it: SalesItem = { name: x.name, code: x.sku, quantity: 1, unit: '', unitPrice: null, taxRate: 10 };
+      if (counted.has(itemKey(it)) || counted.has(itemKey({ name: x.name, code: '' }))) continue;
+      await this.fromStock(who, [it], [x]);
+      counted.set(itemKey(it), { name: it.name, code: it.code, unit: it.unit, unitPrice: it.unitPrice, taxCategory: taxCategoryOf(it), count: 0 });
+    }
     return {
       parties: (await this.knownParties(who.tenantId)).slice(0, 200),
-      items: [...counted.values()].sort((a, b) => b.count - a.count).slice(0, 100),
+      items: [...counted.values()].sort((a, b) => b.count - a.count).slice(0, 150),
     };
   }
 
@@ -942,15 +1230,60 @@ export class SalesDocService {
     });
   }
 
-  /** 見積書から受注にする（第42.2節）。 */
-  async orderFromQuote(who: SalesViewer, quoteNumber: string): Promise<ImportedOrder> {
-    const q = (await this.deps.repo.listQuotes(who.tenantId, { limit: 200 })).find((x) => x.number === quoteNumber.trim());
-    if (!q) return { error: `見積書 ${quoteNumber} が見つかりません` };
-    const name = q.toName.replace(/\s*(御中|様|殿)$/, '');
+  /**
+   * 見積書から受注にする（第42.14.4節）。その番号のいちばん新しい版の宛先・品目・単価・値引きを写し、見積書を「受注済み」にする。
+   *
+   * @param ref 見積書の ID か番号
+   * @returns その見積書からの受注がもうあれば、作らずにその受注を返す（`duplicate: true`）
+   */
+  async orderFromQuote(who: SalesViewer, ref: string): Promise<ImportedOrder> {
+    const q = await this.latestQuote(who.tenantId, ref);
+    if (!q) return { error: `見積書 ${ref} が見つかりません` };
+    if (q.status === 'cancelled') return { error: `見積書 ${salesQuoteLabel(q)} は取り消されています` };
+    const versions = await this.quoteVersions(who.tenantId, q.number!);
+    const ids = new Set(versions.map((x) => x.id));
+    const already = (await this.deps.store.listOrders(who.tenantId, { limit: 2000 })).find((o) => !o.cancelled && o.quoteId && ids.has(o.quoteId));
+    if (already) return { order: this.orderView(already, await this.deps.store.listDocs(who.tenantId, { withSuperseded: true, limit: 2000 }), await this.names(who.tenantId)), duplicate: true };
     return this.saveOrder(who, {
-      party: { ...emptyParty(), name }, customerRef: '', orderedOn: jstToday(), dueOn: null, deliverTo: '', terms: '', notes: '',
-      items: q.items.map((i) => ({ ...i, code: '' })), statedTotal: null, sourceFileId: null, source: 'quote', quoteNumber: q.number,
+      party: { ...q.party }, customerRef: '', orderedOn: jstToday(), dueOn: null, deliverTo: '', terms: q.terms, notes: '',
+      items: q.items.map((i) => ({ ...i })), statedTotal: null, sourceFileId: null, source: 'quote', quoteNumber: salesQuoteLabel(q), quoteId: q.id,
     });
+  }
+
+  /**
+   * 取引先のいちばん新しい提出済みの見積書から受注にする（「この前の見積でお願いします」と電話で受けたとき。第42.14.4節）。
+   */
+  async orderFromLatestQuote(who: SalesViewer, party: string): Promise<ImportedOrder> {
+    const key = partyKey(await this.officialParty(who, party));
+    if (!key) return { error: '取引先を入れてください' };
+    const today = jstToday();
+    const quotes = (await this.deps.store.listDocs(who.tenantId, { kind: 'quote', limit: 500 }))
+      .filter((d) => partyKey(d.party.name) === key && salesQuoteState(d, today) === 'submitted');
+    const q = quotes[0];
+    if (!q) return { error: `${party} に出した、提出済みで有効期限の内の見積書がありません` };
+    return this.orderFromQuote(who, q.id);
+  }
+
+  /**
+   * 受注につなぐ見積書を直す（外す・ほかの見積書につなぎ直す。第42.14.4節）。外した見積書は、ほかの受注が無ければ提出済みに戻す。
+   */
+  async relinkQuote(who: SalesViewer, orderId: string, quoteRef: string | null): Promise<string | null> {
+    const { store } = this.deps;
+    const o = await store.getOrder(who.tenantId, orderId);
+    if (!o) return '受注が見つかりません';
+    const next = quoteRef ? await this.latestQuote(who.tenantId, quoteRef) : null;
+    if (quoteRef && !next) return '見積書が見つかりません';
+    if (next && next.status === 'cancelled') return '取り消した見積書にはつなげません';
+    if (o.quoteId) {
+      const old = await store.getDoc(who.tenantId, o.quoteId);
+      const others = (await store.listOrders(who.tenantId, { limit: 2000 })).some((x) => x.id !== o.id && !x.cancelled && x.quoteId === o.quoteId);
+      if (old && old.outcome === 'won' && !others && old.id !== next?.id) await store.updateDoc(who.tenantId, old.id, { outcome: null });
+    }
+    const flags = [...o.flags.filter((f) => f.kind !== 'quote'), ...(next ? quoteFlags(o.items, next) : [])];
+    await store.updateOrder(who.tenantId, o.id, { quoteId: next?.id ?? null, quoteNumber: next ? salesQuoteLabel(next) : null, flags });
+    if (next && next.outcome !== 'won') await store.updateDoc(who.tenantId, next.id, { outcome: 'won', outcomeNote: '' });
+    await this.audit(who, 'sales_order.quote', 'sales_order', o.id, { quoteId: next?.id ?? null });
+    return null;
   }
 
   /** 受注を直す（読み取りの直し。金額と計算の印を出し直す）。 */
@@ -1208,4 +1541,104 @@ function partialItems(amount: number, inv: StoredDoc, rounding: 'floor' | 'round
     if (docTotals([item], rounding).total === amount) return { items: [item] };
   }
   return { error: 'この額では、消費税の内訳を決められませんでした' };
+}
+
+/** 見積全体の値引きの行か。 */
+export function isDiscountLine(i: Pick<SalesItem, 'name' | 'unitPrice'>): boolean {
+  return i.name === SALES_QUOTE_DISCOUNT_NAME && (i.unitPrice ?? 0) <= 0;
+}
+
+/**
+ * 見積全体の値引きを、税率ごとの「出精値引き」の行にする（税率ごとの金額の割合で分け、端数は最後の税率に寄せる。決まった計算）。
+ *
+ * @param amount 値引きの額（円。0 なら行を作らない）
+ */
+export function discountLines(items: SalesItem[], amount: number): SalesItem[] | { error: string } {
+  if (amount <= 0) return [];
+  const rates = [...new Set(items.map((i) => i.taxRate))].sort((a, b) => b - a);
+  const base = rates.map((rate) => ({ rate, base: items.filter((i) => i.taxRate === rate).reduce((n, i) => n + itemAmount(i), 0), category: taxCategoryOf(items.find((i) => i.taxRate === rate)!) as TaxCategory }))
+    .filter((x) => x.base > 0);
+  const sum = base.reduce((n, x) => n + x.base, 0);
+  if (amount > sum) return { error: `値引き（${yenText(amount)}）が、見積の金額（税抜 ${yenText(sum)}）より大きいです` };
+  let left = amount;
+  return base.map((x, k) => {
+    const part = k === base.length - 1 ? left : Math.floor((amount * x.base) / sum);
+    left -= part;
+    return { name: SALES_QUOTE_DISCOUNT_NAME, code: '', quantity: 1, unit: '式', unitPrice: -part, taxRate: x.rate, taxCategory: x.category, ...(base.length > 1 ? { group: `${x.rate}% 対象` } : {}) };
+  }).filter((l) => l.unitPrice !== 0);
+}
+
+/**
+ * 再見積の前の版からの違い（第42.14.2節）。合計・品目ごとの単価と数・外した品目・足した品目・値引きを、決まった計算で出す。
+ */
+export function quoteDiff(prev: Pick<SalesDocument, 'items' | 'total'>, next: Pick<SalesDocument, 'items' | 'total'>): string[] {
+  const out: string[] = [];
+  const d = next.total - prev.total;
+  if (d !== 0) out.push(`合計 ${yenText(prev.total)} → ${yenText(next.total)}（${d < 0 ? `${yenText(-d)} の値引き` : `${yenText(d)} 増`}）`);
+  const goods = (items: SalesItem[]) => items.filter((i) => !isDiscountLine(i));
+  const before = goods(prev.items);
+  const after = goods(next.items);
+  for (const b of before) {
+    const a = after.find((x) => itemKey(x) === itemKey(b));
+    if (!a) { out.push(`${b.name} を外しました`); continue; }
+    if (itemAmount(a) !== itemAmount(b)) {
+      if (a.quantity !== b.quantity) out.push(`${b.name} ${b.quantity} ${b.unit} → ${a.quantity} ${a.unit}`);
+      if ((a.unitPrice ?? 0) !== (b.unitPrice ?? 0)) out.push(`${b.name} ${yenText(b.unitPrice ?? 0)} → ${yenText(a.unitPrice ?? 0)}`);
+      if ((a.discount ?? 0) !== (b.discount ?? 0)) out.push(`${b.name} の値引き ${yenText(b.discount ?? 0)} → ${yenText(a.discount ?? 0)}`);
+    }
+  }
+  for (const a of after) if (!before.some((x) => itemKey(x) === itemKey(a))) out.push(`${a.name} を足しました`);
+  const disc = (items: SalesItem[]) => -items.filter(isDiscountLine).reduce((n, i) => n + itemAmount(i), 0);
+  if (disc(prev.items) !== disc(next.items)) out.push(`出精値引き ${yenText(disc(prev.items))} → ${yenText(disc(next.items))}`);
+  return out;
+}
+
+/** 受注と見積書の違いの印（単価・数・見積に無い品目・受注に無い品目。第42.5.2節）。 */
+export function quoteFlags(items: SalesItem[], quote: Pick<SalesDocument, 'items' | 'number' | 'version'>): SalesOrderFlag[] {
+  const label = salesQuoteLabel(quote);
+  const goods = quote.items.filter((i) => !isDiscountLine(i));
+  const flags: SalesOrderFlag[] = [];
+  for (const it of items.filter((i) => !isDiscountLine(i))) {
+    const qi = goods.find((i) => itemKey(i) === itemKey(it));
+    if (!qi) { flags.push({ kind: 'quote', text: `${it.name} は見積（${label}）にありません` }); continue; }
+    if (qi.unitPrice !== null && it.unitPrice !== null && qi.unitPrice !== it.unitPrice) {
+      flags.push({ kind: 'quote', text: `${it.name} の単価 ${yenText(it.unitPrice)} が、見積（${label}）の ${yenText(qi.unitPrice)} と違います` });
+    }
+    if (qi.quantity !== it.quantity) flags.push({ kind: 'quote', text: `${it.name} の数 ${it.quantity} が、見積（${label}）の ${qi.quantity} と違います` });
+  }
+  for (const qi of goods) if (!items.some((i) => itemKey(i) === itemKey(qi))) flags.push({ kind: 'quote', text: `見積（${label}）の ${qi.name} が注文にありません` });
+  return flags;
+}
+
+/** 品目に合う販売品（品番が同じか、名前が同じ。1 つに決まらなければ無し）。 */
+function stockMatch(list: SalesStockItem[], it: Pick<SalesItem, 'name' | 'code' | 'inventoryItemId'>): SalesStockItem | undefined {
+  if (it.inventoryItemId) {
+    const same = list.find((x) => x.id === it.inventoryItemId);
+    if (same) return same;
+  }
+  const code = it.code.normalize('NFKC').toLowerCase();
+  const byCode = code ? list.filter((x) => x.sku && x.sku.normalize('NFKC').toLowerCase() === code) : [];
+  if (byCode.length === 1) return byCode[0];
+  const byName = list.filter((x) => quoteItemKey(x.name) === quoteItemKey(it.name));
+  return byName.length === 1 ? byName[0] : undefined;
+}
+
+/** 在庫の数が見積の数より少ない品目の知らせ（見積書には載せない。第42.14.3節）。 */
+function shortages(items: SalesItem[], sale: SalesStockItem[]): string[] {
+  const out: string[] = [];
+  for (const it of items) {
+    const hit = it.inventoryItemId ? sale.find((x) => x.id === it.inventoryItemId) : undefined;
+    if (hit && hit.available < it.quantity) out.push(`${it.name} の在庫が ${Math.round((it.quantity - hit.available) * 1000) / 1000} ${hit.unit || it.unit}足りません（納期に気をつけてください）`);
+  }
+  return out;
+}
+
+/** 「株式会社見本商事 山田様」のような宛先を、会社と担当に分ける。 */
+export function partyFromTo(to: string): Partial<SalesParty> {
+  const t = to.trim().replace(/\s*御中$/, '').slice(0, 100);
+  if (!t) return {};
+  const m = /^(.+?)[\s　]+([^\s　]+?)\s*(?:様|殿)$/.exec(t);
+  if (m) return { name: m[1]!.trim(), person: m[2]!.trim() };
+  if (/(?:様|殿)$/.test(t) && !/(株式会社|有限会社|合同会社|\(株\)|（株）)/.test(t)) return { person: t.replace(/\s*(?:様|殿)$/, '') };
+  return { name: t.replace(/\s*(?:様|殿)$/, '') };
 }

@@ -16,7 +16,10 @@ import type { SalesInventory } from './service.js';
 export function salesInventoryFrom(service: InventoryService, access: (tenantId: string, userId: string) => Promise<unknown | null>): SalesInventory {
   return {
     access,
-    items: async (tenantId) => (await service.list(tenantId)).map((i) => ({ id: i.id, name: i.name, sku: i.sku, unit: i.unit, available: i.available })),
+    items: async (tenantId) => (await service.list(tenantId)).map((i) => ({
+      id: i.id, name: i.name, sku: i.sku, unit: i.unit, available: i.available,
+      sale: i.kind === 'sale', price: i.price, priceTaxIncluded: i.priceTaxIncluded, taxRate: i.taxRate,
+    })),
     hold: async (tenantId, userId, r) => {
       const id = `rs-${randomUUID()}`;
       await service.store.addReservation(tenantId, {

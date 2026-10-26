@@ -1,14 +1,14 @@
 /**
  * @file 販売の書類と受注の置き場（仕様書 第42.10節）。PostgreSQL（行単位の制限つき）と、テスト用のメモリ。
  *
- * 書類（注文書・納品書・請求書・領収書）・受注・取引先の覚えを持つ。PDF と元の注文書はファイルの置き場に置き、ここには ID だけを持つ。
+ * 書類（見積書・注文書・納品書・請求書・領収書・注文請書）・受注・取引先の覚えを持つ。PDF と元の注文書はファイルの置き場に置き、ここには ID だけを持つ。
  */
 
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { createPool } from '../repository/pool.js';
 import type {
-  SalesDocKind, SalesDocStatus, SalesDocument, SalesItem, SalesOrder, SalesOrderFlag, SalesOrderSource, SalesParty, SalesStockLink, SalesTaxLine,
+  SalesDocKind, SalesDocStatus, SalesDocument, SalesItem, SalesOrder, SalesOrderFlag, SalesOrderSource, SalesParty, SalesQuoteOutcome, SalesStockLink, SalesTaxLine,
 } from '@m2office/shared';
 
 /** 置き場に持つ書類（作った人の名前は持たない。見せるときに引く）。`stockMoves` は納品書で出庫した在庫の記録（第42.13.4節） */
@@ -20,10 +20,11 @@ export type NewDoc = Omit<StoredDoc, 'id' | 'createdAt' | 'updatedAt'>;
 /** 直せる書類の項目。 */
 export type DocPatch = Partial<Pick<StoredDoc,
   'number' | 'status' | 'superseded' | 'party' | 'subject' | 'items' | 'subtotal' | 'tax' | 'total' | 'taxLines' | 'issuedOn' | 'dueOn'
-  | 'terms' | 'notes' | 'orderId' | 'invoiceId' | 'deliveryIds' | 'fileId' | 'cancelReason' | 'notices' | 'runId' | 'stockMoves'>>;
+  | 'terms' | 'notes' | 'orderId' | 'invoiceId' | 'deliveryIds' | 'fileId' | 'cancelReason' | 'notices' | 'runId' | 'stockMoves'
+  | 'validUntil' | 'outcome' | 'outcomeNote'>>;
 
 /** 置き場に持つ受注（状態と納めた数は書類から求める）。`dueNotifiedOn` は納期の見張りで知らせた日（第42.13.3節） */
-export type StoredOrder = Omit<SalesOrder, 'status' | 'delivered' | 'createdByName'> & { cancelled: boolean; dueNotifiedOn: string | null };
+export type StoredOrder = Omit<SalesOrder, 'status' | 'delivered' | 'createdByName' | 'progress'> & { cancelled: boolean; dueNotifiedOn: string | null };
 
 /** 新しく作る受注。 */
 export type NewOrder = Omit<StoredOrder, 'id' | 'createdAt' | 'updatedAt'>;
@@ -31,7 +32,7 @@ export type NewOrder = Omit<StoredOrder, 'id' | 'createdAt' | 'updatedAt'>;
 /** 直せる受注の項目。 */
 export type OrderPatch = Partial<Pick<StoredOrder,
   'party' | 'customerRef' | 'orderedOn' | 'dueOn' | 'deliverTo' | 'terms' | 'notes' | 'items' | 'subtotal' | 'tax' | 'total' | 'statedTotal'
-  | 'cancelled' | 'cancelReason' | 'flags' | 'quoteNumber' | 'sourceFileId' | 'mailMessageId' | 'stock' | 'dueNotifiedOn'>>;
+  | 'cancelled' | 'cancelReason' | 'flags' | 'quoteNumber' | 'quoteId' | 'sourceFileId' | 'mailMessageId' | 'stock' | 'dueNotifiedOn'>>;
 
 /** 書類の絞り込み（第42.6節: 取引の日付・金額・取引先で探せる）。 */
 export interface DocQuery {
@@ -90,6 +91,8 @@ export interface SalesDocStore {
   updateOrder(tenantId: string, id: string, patch: OrderPatch): Promise<void>;
   deleteOrder(tenantId: string, id: string): Promise<void>;
   getParty(tenantId: string, key: string): Promise<PartyMemo | null>;
+  /** 会社の取引先の覚え（締め日を受注の一覧の次の一手に使う） */
+  listParties(tenantId: string): Promise<PartyMemo[]>;
   saveParty(tenantId: string, p: Omit<PartyMemo, 'updatedAt'>): Promise<void>;
   /** メールの見回りの印（見た時刻・その日の取り込みの数）。無ければ `null` */
   getMailCursor(tenantId: string, userId: string): Promise<{ checkedAt: string; day: string | null; dayCount: number } | null>;
@@ -125,22 +128,24 @@ interface DocRow {
   party: unknown; subject: string; items: SalesItem[] | null; subtotal: unknown; tax: unknown; total: unknown; tax_lines: SalesTaxLine[] | null;
   issued_on: unknown; due_on: unknown; terms: string; notes: string; order_id: string | null; invoice_id: string | null; delivery_ids: string[] | null;
   file_id: string | null; cancel_reason: string; notices: string[] | null; run_id: string | null; created_by: string; created_at: unknown; updated_at: unknown;
-  stock_moves: string[] | null;
+  stock_moves: string[] | null; valid_until: unknown; outcome: SalesQuoteOutcome | null; outcome_note: string | null;
 }
 
 const toDoc = (r: DocRow): StoredDoc => ({
   id: r.id, kind: r.kind, number: r.number, version: r.version, previousId: r.previous_id, superseded: r.superseded, status: r.status,
-  party: party(r.party), subject: r.subject, items: r.items ?? [], subtotal: n(r.subtotal), tax: n(r.tax), total: n(r.total), taxLines: r.tax_lines ?? [],
+  party: party(r.party), subject: r.subject, items: r.items ?? [], subtotal: n(r.subtotal), tax: n(r.tax), total: n(r.total),
+  taxLines: r.tax_lines?.length ? r.tax_lines : linesOf(r.items ?? [], n(r.tax)),
   issuedOn: day(r.issued_on) ?? '', dueOn: day(r.due_on), terms: r.terms, notes: r.notes, orderId: r.order_id, invoiceId: r.invoice_id,
   deliveryIds: r.delivery_ids ?? [], fileId: r.file_id, cancelReason: r.cancel_reason, notices: r.notices ?? [], runId: r.run_id,
   createdBy: r.created_by, createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), stockMoves: r.stock_moves ?? [],
+  validUntil: day(r.valid_until), outcome: r.outcome ?? null, outcomeNote: r.outcome_note ?? '',
 });
 
 interface OrderRow {
   id: string; number: string; party: unknown; customer_ref: string; ordered_on: unknown; due_on: unknown; deliver_to: string; terms: string; notes: string;
   items: SalesItem[] | null; subtotal: unknown; tax: unknown; total: unknown; stated_total: unknown; cancelled: boolean; cancel_reason: string;
   flags: SalesOrderFlag[] | null; source_file_id: string | null; source: SalesOrderSource; quote_number: string | null; created_by: string;
-  created_at: unknown; updated_at: unknown; mail_message_id: string | null; stock: SalesStockLink[] | null; due_notified_on: unknown;
+  created_at: unknown; updated_at: unknown; mail_message_id: string | null; stock: SalesStockLink[] | null; due_notified_on: unknown; quote_id: string | null;
 }
 
 const toOrder = (r: OrderRow): StoredOrder => ({
@@ -149,7 +154,28 @@ const toOrder = (r: OrderRow): StoredOrder => ({
   statedTotal: r.stated_total === null || r.stated_total === undefined ? null : n(r.stated_total), cancelled: r.cancelled, cancelReason: r.cancel_reason,
   flags: r.flags ?? [], sourceFileId: r.source_file_id, source: r.source, quoteNumber: r.quote_number, createdBy: r.created_by,
   createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), mailMessageId: r.mail_message_id, stock: r.stock ?? [], dueNotifiedOn: day(r.due_notified_on),
+  quoteId: r.quote_id ?? null,
 });
+
+/**
+ * 税率ごとの内訳を品目から出し直す（移行で写した、いままでの見積書は内訳を持たないため。第42.14.7節）。
+ * 税率が 1 つなら消費税は残した額、いくつもあれば税率ごとに切り捨てる。
+ */
+function linesOf(items: SalesItem[], tax: number): SalesTaxLine[] {
+  if (items.length === 0) return [];
+  const amount = (i: SalesItem) => {
+    const gross = Math.round(i.quantity * (i.unitPrice ?? 0));
+    return gross - Math.min(Math.max(0, Math.round(i.discount ?? 0)), Math.max(0, gross));
+  };
+  const rates = [...new Set(items.map((i) => i.taxRate))].sort((a, b) => (a === 0 ? 1 : b === 0 ? -1 : b - a));
+  const lines = rates.map((rate) => {
+    const base = items.filter((i) => i.taxRate === rate).reduce((s, i) => s + amount(i), 0);
+    return { rate, base, tax: Math.floor((base * rate) / 100) };
+  }).filter((x) => x.base > 0);
+  const taxed = lines.filter((x) => x.rate !== 0);
+  if (taxed.length === 1) taxed[0]!.tax = tax;
+  return lines;
+}
 
 /** 直せる項目と列の対応（利用者の入力を列名に使わない）。jsonb の列は値を JSON にして渡す。 */
 const DOC_COLUMNS: Record<keyof DocPatch, [string, boolean]> = {
@@ -158,13 +184,14 @@ const DOC_COLUMNS: Record<keyof DocPatch, [string, boolean]> = {
   issuedOn: ['issued_on', false], dueOn: ['due_on', false], terms: ['terms', false], notes: ['notes', false], orderId: ['order_id', false],
   invoiceId: ['invoice_id', false], deliveryIds: ['delivery_ids', true], fileId: ['file_id', false], cancelReason: ['cancel_reason', false],
   notices: ['notices', true], runId: ['run_id', false], stockMoves: ['stock_moves', true],
+  validUntil: ['valid_until', false], outcome: ['outcome', false], outcomeNote: ['outcome_note', false],
 };
 const ORDER_COLUMNS: Record<keyof OrderPatch, [string, boolean]> = {
   party: ['party', true], customerRef: ['customer_ref', false], orderedOn: ['ordered_on', false], dueOn: ['due_on', false], deliverTo: ['deliver_to', false],
   terms: ['terms', false], notes: ['notes', false], items: ['items', true], subtotal: ['subtotal', false], tax: ['tax', false], total: ['total', false],
   statedTotal: ['stated_total', false], cancelled: ['cancelled', false], cancelReason: ['cancel_reason', false], flags: ['flags', true],
   quoteNumber: ['quote_number', false], sourceFileId: ['source_file_id', false], mailMessageId: ['mail_message_id', false], stock: ['stock', true],
-  dueNotifiedOn: ['due_notified_on', false],
+  dueNotifiedOn: ['due_notified_on', false], quoteId: ['quote_id', false],
 };
 
 /** 書類の絞り込みをメモリの上で当てる（メモリの置き場とテストのため）。 */
@@ -237,11 +264,13 @@ export class PostgresSalesDocStore implements SalesDocStore {
     const id = `sd-${randomUUID()}`;
     await this.q(tenantId,
       `insert into sales_documents (id, tenant_id, kind, number, version, previous_id, superseded, status, party, subject, items, subtotal, tax, total,
-         tax_lines, issued_on, due_on, terms, notes, order_id, invoice_id, delivery_ids, file_id, cancel_reason, notices, run_id, created_by, stock_moves)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
+         tax_lines, issued_on, due_on, terms, notes, order_id, invoice_id, delivery_ids, file_id, cancel_reason, notices, run_id, created_by, stock_moves,
+         valid_until, outcome, outcome_note)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)`,
       [id, tenantId, d.kind, d.number, d.version, d.previousId, d.superseded, d.status, JSON.stringify(d.party), d.subject, JSON.stringify(d.items),
         d.subtotal, d.tax, d.total, JSON.stringify(d.taxLines), d.issuedOn, d.dueOn, d.terms, d.notes, d.orderId, d.invoiceId,
-        JSON.stringify(d.deliveryIds), d.fileId, d.cancelReason, JSON.stringify(d.notices), d.runId, d.createdBy, JSON.stringify(d.stockMoves ?? [])]);
+        JSON.stringify(d.deliveryIds), d.fileId, d.cancelReason, JSON.stringify(d.notices), d.runId, d.createdBy, JSON.stringify(d.stockMoves ?? []),
+        d.validUntil ?? null, d.outcome ?? null, d.outcomeNote ?? '']);
     return id;
   }
 
@@ -278,11 +307,11 @@ export class PostgresSalesDocStore implements SalesDocStore {
     const id = `so-${randomUUID()}`;
     await this.q(tenantId,
       `insert into sales_orders (id, tenant_id, number, party, customer_ref, ordered_on, due_on, deliver_to, terms, notes, items, subtotal, tax, total,
-         stated_total, cancelled, cancel_reason, flags, source_file_id, source, quote_number, created_by, mail_message_id, stock, due_notified_on)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
+         stated_total, cancelled, cancel_reason, flags, source_file_id, source, quote_number, created_by, mail_message_id, stock, due_notified_on, quote_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
       [id, tenantId, o.number, JSON.stringify(o.party), o.customerRef, o.orderedOn, o.dueOn, o.deliverTo, o.terms, o.notes, JSON.stringify(o.items),
         o.subtotal, o.tax, o.total, o.statedTotal, o.cancelled, o.cancelReason, JSON.stringify(o.flags), o.sourceFileId, o.source, o.quoteNumber, o.createdBy,
-        o.mailMessageId ?? null, JSON.stringify(o.stock ?? []), o.dueNotifiedOn ?? null]);
+        o.mailMessageId ?? null, JSON.stringify(o.stock ?? []), o.dueNotifiedOn ?? null, o.quoteId ?? null]);
     return id;
   }
 
@@ -303,6 +332,12 @@ export class PostgresSalesDocStore implements SalesDocStore {
       tenantId, 'select * from sales_parties where tenant_id = $1 and key = $2', [tenantId, key]);
     const r = rows[0];
     return r ? { key: r.key, name: r.name, honorific: r.honorific, closingDay: r.closing_day, paymentTerms: r.payment_terms, learnedFrom: r.learned_from, updatedAt: iso(r.updated_at) } : null;
+  }
+
+  async listParties(tenantId: string): Promise<PartyMemo[]> {
+    const rows = await this.q<{ key: string; name: string; honorific: string; closing_day: number | null; payment_terms: string; learned_from: string; updated_at: unknown }>(
+      tenantId, 'select * from sales_parties where tenant_id = $1 limit 5000', [tenantId]);
+    return rows.map((r) => ({ key: r.key, name: r.name, honorific: r.honorific, closingDay: r.closing_day, paymentTerms: r.payment_terms, learnedFrom: r.learned_from, updatedAt: iso(r.updated_at) }));
   }
 
   async saveParty(tenantId: string, p: Omit<PartyMemo, 'updatedAt'>): Promise<void> {
@@ -429,6 +464,10 @@ export class MemorySalesDocStore implements SalesDocStore {
 
   async getParty(tenantId: string, key: string): Promise<PartyMemo | null> {
     return this.parties.get(`${tenantId}:${key}`) ?? null;
+  }
+
+  async listParties(tenantId: string): Promise<PartyMemo[]> {
+    return [...this.parties.entries()].filter(([k]) => k.startsWith(`${tenantId}:`)).map(([, v]) => v);
   }
 
   async saveParty(tenantId: string, p: Omit<PartyMemo, 'updatedAt'>): Promise<void> {

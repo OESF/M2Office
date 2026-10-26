@@ -9,6 +9,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from 'react';
 import { KnowledgeQa } from './knowledge-qa.js';
 import { SalesDocs } from './SalesDocs.js';
+import { QUOTE_AGENT_ID, QuoteList } from './quotes.js';
 import { DOCUMENT_AGENT_ID, SHEET_AGENT_ID, SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
 import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
@@ -736,6 +737,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               {view.agent.id === DOCUMENT_AGENT_ID && <SlideDeckList key={`docs-${view.agent.id}`} kind="doc" onOpenRun={(runId) => setView({ kind: 'run', runId })} />}
               {/* 作った表の一覧（第9.5.5.2節「表の作成の扱いとテンプレート」） */}
               {view.agent.id === SHEET_AGENT_ID && <SlideDeckList key={`sheets-${view.agent.id}`} kind="sheet" onOpenRun={(runId) => setView({ kind: 'run', runId })} />}
+              {/* 作った見積書の一覧（第42.14.1節） */}
+              {view.agent.id === QUOTE_AGENT_ID && <QuoteList key="quotes" onOpenRun={(runId) => setView({ kind: 'run', runId })} onOpenSales={(itemId) => setView({ kind: 'sales', itemId })} />}
             </>
           )}
           {view.kind === 'run' && (

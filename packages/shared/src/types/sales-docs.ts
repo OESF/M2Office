@@ -12,21 +12,21 @@ import type { TaxCategory } from './tax.js';
 export const SALES_DOCS_EXTENSION_ID = 'sales-docs';
 
 /** 書類の種類（第42.4節。注文請書は第42.13.5節）。 */
-export type SalesDocKind = 'purchase_order' | 'delivery' | 'invoice' | 'receipt' | 'acknowledgement';
+export type SalesDocKind = 'quote' | 'purchase_order' | 'delivery' | 'invoice' | 'receipt' | 'acknowledgement';
 
 /** 種類の呼び方。 */
 export const SALES_DOC_KIND_LABELS: Record<SalesDocKind, string> = {
-  purchase_order: '注文書', delivery: '納品書', invoice: '請求書', receipt: '領収書', acknowledgement: '注文請書',
+  quote: '見積書', purchase_order: '注文書', delivery: '納品書', invoice: '請求書', receipt: '領収書', acknowledgement: '注文請書',
 };
 
 /** 番号の頭文字（第42.3節。見積書の `Q-` と同じ形）。 */
-export const SALES_DOC_PREFIX: Record<SalesDocKind, string> = { purchase_order: 'O', delivery: 'D', invoice: 'I', receipt: 'R', acknowledgement: 'A' };
+export const SALES_DOC_PREFIX: Record<SalesDocKind, string> = { quote: 'Q', purchase_order: 'O', delivery: 'D', invoice: 'I', receipt: 'R', acknowledgement: 'A' };
 
 /**
  * 発行に本人の承認が要る種類（第42.3.1節）。作ったときは下書きで、承認で発行する。
  * 納品書は作ったら発行済み（見積書と同じ）。
  */
-export const SALES_DOC_NEEDS_ISSUE: Record<SalesDocKind, boolean> = { purchase_order: true, delivery: false, invoice: true, receipt: true, acknowledgement: false };
+export const SALES_DOC_NEEDS_ISSUE: Record<SalesDocKind, boolean> = { quote: false, purchase_order: true, delivery: false, invoice: true, receipt: true, acknowledgement: false };
 
 /** 書類の状態（第42.3.1節・第42.3.2節）。 */
 export type SalesDocStatus = 'draft' | 'issued' | 'cancelled';
@@ -62,6 +62,8 @@ export interface SalesItem {
   taxCategory?: TaxCategory;
   /** 区分の見出し（まとめた請求書の納品書ごとの見出しなど） */
   group?: string;
+  /** 在庫管理の品目とのつながり（販売品。第42.14.3節） */
+  inventoryItemId?: string;
   /** 値引きの額（正の数。依頼に書かれた額だけ） */
   discount?: number;
 }
@@ -73,6 +75,34 @@ export interface SalesTaxLine {
   base: number;
   tax: number;
 }
+
+/** 見積書の結び（第42.14.1節）。 */
+export type SalesQuoteOutcome = 'won' | 'lost';
+
+/** 見積書の状態の呼び方（提出済みは結びが無く有効期限の内、期限切れは結びが無く有効期限を過ぎたもの）。 */
+export const SALES_QUOTE_STATE_LABELS = { submitted: '提出済み', won: '受注済み', lost: '失注', expired: '期限切れ', cancelled: '取り消し' } as const;
+
+/** 見積書の状態（第42.14.1節）。 */
+export type SalesQuoteState = keyof typeof SALES_QUOTE_STATE_LABELS;
+
+/**
+ * 見積書の状態を出す。取り消し・受注済み・失注はそのまま、結びの無いものは有効期限で提出済みか期限切れにする。
+ *
+ * @param today 今日（`YYYY-MM-DD`。日本時間）
+ */
+export function salesQuoteState(d: Pick<SalesDocument, 'status' | 'outcome' | 'validUntil'>, today: string): SalesQuoteState {
+  if (d.status === 'cancelled') return 'cancelled';
+  if (d.outcome) return d.outcome;
+  return d.validUntil && d.validUntil < today ? 'expired' : 'submitted';
+}
+
+/** 見積書の番号と版の呼び方（`Q-20261026-001（再見積 2）`）。 */
+export function salesQuoteLabel(d: Pick<SalesDocument, 'number' | 'version'>): string {
+  return `${d.number ?? ''}${d.version > 1 ? `（再見積 ${d.version}）` : ''}`;
+}
+
+/** 見積書の全体の値引きの行の品名（税率ごとに 1 行。第42.14.2節）。 */
+export const SALES_QUOTE_DISCOUNT_NAME = '出精値引き';
 
 /** 書類 1 通（1 つの版）。日付は `YYYY-MM-DD`。 */
 export interface SalesDocument {
@@ -114,6 +144,12 @@ export interface SalesDocument {
   cancelReason: string;
   /** 知らせ（請求済みの納品書が訂正された、など。第42.4.2節） */
   notices: string[];
+  /** 見積書の有効期限（見積書だけ。第42.14.1節） */
+  validUntil: string | null;
+  /** 見積書の結び（受注済み・失注。見積書だけ。第42.14.1節） */
+  outcome: SalesQuoteOutcome | null;
+  /** 失注の理由 */
+  outcomeNote: string;
   runId: string | null;
   createdBy: string;
   createdByName: string;
@@ -150,6 +186,22 @@ export interface SalesStockLink {
   reservationId: string | null;
   /** つないだときの使える数（取り置く前） */
   availableAtLink: number;
+}
+
+/** 受注から先の進み具合（受注の一覧と流れの帯。第42.14.6節）。 */
+export interface SalesOrderProgress {
+  /** 注文請書を出したか */
+  acknowledged: boolean;
+  /** 納めた数の割合（0〜100） */
+  deliveredRate: number;
+  /** 請求: 無し・一部・すべて */
+  invoiced: 'none' | 'partial' | 'all';
+  /** 未請求の納品書の数 */
+  unbilledDeliveries: number;
+  /** 領収書を出したか */
+  receipted: boolean;
+  /** 次にやること（無ければ `null`） */
+  next: { label: string; action: 'delivery' | 'invoice' | 'receipt' } | null;
 }
 
 /** 受注の入り口（`manual` は受注の画面で手で入れたもの。第42.5.1.1節）。 */
@@ -190,8 +242,12 @@ export interface SalesOrder {
   /** 取り込んだ注文書のファイル */
   sourceFileId: string | null;
   source: SalesOrderSource;
-  /** つないだ見積書の番号 */
+  /** つないだ見積書の番号（版つきの表示。例: `Q-20261026-001（再見積 2）`） */
   quoteNumber: string | null;
+  /** つないだ見積書（書類の ID。第42.14.4節） */
+  quoteId: string | null;
+  /** 受注から先の進み具合（第42.14.5節・第42.14.6節） */
+  progress?: SalesOrderProgress;
   /** 取り込んだメールの ID（メールから入れたとき。第42.13.1節） */
   mailMessageId: string | null;
   /** 在庫の品目とのつながり（第42.13.4節） */

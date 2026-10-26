@@ -137,6 +137,10 @@ export interface SalesDocDetail {
   deliveries: SalesDocument[];
   invoice: SalesDocument | null;
   receipts: SalesDocument[];
+  /** 見積書: この見積書に対する受注 */
+  orders: SalesOrder[];
+  /** 見積書: 前の版からの違い */
+  diff: string[];
 }
 
 export interface HrProposalField {
@@ -1691,7 +1695,7 @@ export const api = {
   },
   /** 販売の書類と受注（内蔵の拡張。仕様書 第42章）。 */
   sales: {
-    orders: (q: { status?: string; q?: string } = {}) => {
+    orders: (q: { status?: string; q?: string; from?: string; to?: string } = {}) => {
       const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]);
       return call<{ items: SalesOrder[] }>(`/sales/orders${p.size ? `?${p}` : ''}`);
     },
@@ -1713,6 +1717,9 @@ export const api = {
     orderFileUrl: (id: string) => `/v1/sales/orders/${encodeURIComponent(id)}/file`,
     /** 受注から注文請書を作る（第42.13.5節）。 */
     acknowledge: (orderId: string) => call<SalesCreated>(`/sales/orders/${encodeURIComponent(orderId)}/acknowledgement`, { method: 'POST', body: '{}' }),
+    /** 受注につなぐ見積書を直す（外すなら `null`。第42.14.4節）。 */
+    relinkQuote: (orderId: string, quoteId: string | null) =>
+      call<{ order: SalesOrder; documents: SalesDocument[] }>(`/sales/orders/${encodeURIComponent(orderId)}/quote`, { method: 'PATCH', body: JSON.stringify({ quoteId }) }),
     /** 受注の品目の在庫のつながりを直す（外すなら `itemId: null`。第42.13.4節）。 */
     relinkStock: (orderId: string, index: number, itemId: string | null) =>
       call<{ order: SalesOrder; documents: SalesDocument[] }>(`/sales/orders/${encodeURIComponent(orderId)}/stock`, { method: 'PATCH', body: JSON.stringify({ index, itemId }) }),
@@ -1735,6 +1742,20 @@ export const api = {
     taxRates: () => call<{ rows: TaxRateEntry[] }>('/tax-rates'),
     /** PDF を開く URL。 */
     pdfUrl: (id: string, download = false) => `/v1/sales/documents/${encodeURIComponent(id)}/pdf${download ? '?download=1' : ''}`,
+  },
+  /** 見積書（仕様書 第42.14節）。作る・再見積は業務「見積書の作成」に頼む。 */
+  quotes: {
+    /** 作った見積書（新しい版だけ）。`orders` は受注にできるか（販売の書類と受注を使えるか）。 */
+    list: (q: { party?: string; state?: string } = {}) => {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]);
+      return call<{ items: SalesDocument[]; orders: boolean }>(`/quotes${p.size ? `?${p}` : ''}`);
+    },
+    get: (id: string) => call<SalesDocDetail>(`/quotes/${encodeURIComponent(id)}`),
+    lost: (id: string, reason: string) => call<SalesDocDetail>(`/quotes/${encodeURIComponent(id)}/lost`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    cancel: (id: string, reason: string) => call<SalesDocDetail>(`/quotes/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    /** 受注にする（同じ見積書からの受注があれば `duplicate: true`）。 */
+    toOrder: (id: string) => call<{ order: SalesOrder; duplicate: boolean }>(`/quotes/${encodeURIComponent(id)}/order`, { method: 'POST', body: '{}' }),
+    pdfUrl: (id: string, download = false) => `/v1/quotes/${encodeURIComponent(id)}/pdf${download ? '?download=1' : ''}`,
   },
   /** 会員とポイント（内蔵の拡張。仕様書 第40章）。 */
   members: {

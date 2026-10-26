@@ -1,6 +1,7 @@
 /**
  * @file 販売の書類と受注の画面（仕様書 第42.5.4節）。「受注」（注文書を置いて取り込む・一覧・1 件の直しと納品書・請求書づくり）と
  * 「書類」（発行した書類の一覧と、取引の日付・金額・取引先での検索・1 通の PDF・発行・送る・直す・取り消し）の 2 つの欄。
+ * 受注の一覧と受注の画面には、見積 → 受注 → 請書 → 納品 → 請求 → 領収 の流れと次の一手を出す（順番は強いない。第42.14.6節）。
  *
  * 金額は API が決まった計算で出したものをそのまま出す。発行は本人が押して行う（番号が付き、書き換えられなくなる。第42.3.1節）。
  * 送る・直すは業務に頼む（送るのは承認の後）。説明の文は常に出さない（原則 u11）。
@@ -9,14 +10,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SALES_DOC_KIND_LABELS, SALES_DOC_STATUS_LABELS, SALES_ORDER_STATUS_LABELS, TAX_CATEGORY_LABELS,
-  guessTaxCategory, taxCategoryOf, taxRateLabel,
+  guessTaxCategory, salesQuoteLabel, taxCategoryOf, taxRateLabel,
   type TaxCategory, type SalesDocKind, type SalesDocStatus, type SalesDocument, type SalesOrder, type SalesOrderStatus, type SalesSuggestions,
 } from '@m2office/shared';
 import { api, describeError, type SalesDocDetail } from './api.js';
 import { BackButton } from './back-button.js';
+import { QuoteState, QuoteView } from './quotes.js';
 
-/** 書類の種類ごとの業務（送る・直すを頼む先）。 */
-const AGENT_OF: Record<SalesDocKind, string> = {
+/** 書類の種類ごとの業務（送る・直すを頼む先。見積書は見積書の部品が頼む）。 */
+const AGENT_OF: Record<Exclude<SalesDocKind, 'quote'>, string> = {
   purchase_order: 'sales-docs:purchase-order', delivery: 'sales-docs:delivery-note', invoice: 'sales-docs:invoice', receipt: 'sales-docs:receipt',
   acknowledgement: 'sales-docs:acknowledgement',
 };
@@ -27,7 +29,7 @@ const dayLabel = (d: string | null) => (d ? d.replace(/-/g, '/') : '—');
 const yen = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
 const ORDER_BADGE: Record<SalesOrderStatus, string> = { open: 'badge', partial: 'badge warn', delivered: 'badge ok', invoiced: 'badge ok', cancelled: 'badge' };
 const DOC_BADGE: Record<SalesDocStatus, string> = { draft: 'badge warn', issued: 'badge ok', cancelled: 'badge' };
-const docNumber = (d: SalesDocument) => (d.number ? `${d.number}${d.version > 1 ? `（訂正版 ${d.version}）` : ''}` : '下書き');
+const docNumber = (d: SalesDocument) => (d.kind === 'quote' ? salesQuoteLabel(d) : d.number ? `${d.number}${d.version > 1 ? `（訂正版 ${d.version}）` : ''}` : '下書き');
 
 type Note = { kind: 'ok' | 'error'; text: string } | null;
 function NoteText({ note }: { note: Note }) {
@@ -36,6 +38,7 @@ function NoteText({ note }: { note: Note }) {
 
 /** 書類の状態の印（納品書は請求済みかも出す）。 */
 function DocStatus({ d }: { d: SalesDocument }) {
+  if (d.kind === 'quote') return <QuoteState d={d} />;
   return (
     <>
       <span className={DOC_BADGE[d.status]}>{SALES_DOC_STATUS_LABELS[d.status]}</span>
@@ -72,6 +75,7 @@ function OrderList({ onOpen, changeKey }: { onOpen: (id: string) => void; change
   const [items, setItems] = useState<SalesOrder[] | null>(null);
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
+  const [range, setRange] = useState({ from: '', to: '' });
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<Note>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,10 +83,10 @@ function OrderList({ onOpen, changeKey }: { onOpen: (id: string) => void; change
   const file = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
-    api.sales.orders({ ...(status ? { status } : {}), ...(q.trim() ? { q: q.trim() } : {}) })
+    api.sales.orders({ ...(status ? { status } : {}), ...(q.trim() ? { q: q.trim() } : {}), ...range })
       .then((r) => { setItems(r.items); setError(null); })
       .catch((e) => setError(describeError(e, '読めませんでした')));
-  }, [status, q]);
+  }, [status, q, range]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -125,12 +129,13 @@ function OrderList({ onOpen, changeKey }: { onOpen: (id: string) => void; change
           {(Object.keys(SALES_ORDER_STATUS_LABELS) as SalesOrderStatus[]).map((s) => <option key={s} value={s}>{SALES_ORDER_STATUS_LABELS[s]}</option>)}
         </select>
         <input className="contracts-search" type="search" value={q} placeholder="取引先・注文番号・品名で探す" aria-label="探す" onChange={(e) => setQ(e.target.value)} />
+        <label className="sales-range">注文日<input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />〜<input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></label>
       </div>
       {error && <p className="error">{error}</p>}
-      {items && items.length === 0 && <p className="muted">{q || status ? '当たる受注はありません。' : 'まだ受注がありません。'}</p>}
+      {items && items.length === 0 && <p className="muted">{q || status || range.from || range.to ? '当たる受注はありません。' : 'まだ受注がありません。'}</p>}
       {items && items.length > 0 && (
         <div className="table-scroll"><table className="table contracts-table">
-          <thead><tr><th>受注番号</th><th>取引先</th><th>注文番号</th><th>注文日</th><th>納期</th><th className="num">合計</th><th>状態</th></tr></thead>
+          <thead><tr><th>受注番号</th><th>取引先</th><th>注文番号</th><th>注文日</th><th>納期</th><th className="num">合計</th><th>状態</th><th>見積</th><th>請書</th><th>納品</th><th>請求</th></tr></thead>
           <tbody>
             {items.map((o) => {
               const late = !!o.dueOn && o.dueOn < today() && (o.status === 'open' || o.status === 'partial');
@@ -143,6 +148,11 @@ function OrderList({ onOpen, changeKey }: { onOpen: (id: string) => void; change
                   <td className="nowrap">{late ? <span className="badge danger">{dayLabel(o.dueOn)}</span> : dayLabel(o.dueOn)}</td>
                   <td className="num nowrap">{yen(o.total)}</td>
                   <td><span className={ORDER_BADGE[o.status]}>{SALES_ORDER_STATUS_LABELS[o.status]}</span></td>
+                  {/* 受注から先の進み具合（無い段は「—」。第42.14.5節） */}
+                  <td className="nowrap small">{o.quoteNumber ?? '—'}</td>
+                  <td className="small">{o.progress?.acknowledged ? '出した' : '—'}</td>
+                  <td className="num small">{o.progress ? `${o.progress.deliveredRate}%` : '—'}</td>
+                  <td className="nowrap small">{billLabel(o)}</td>
                 </tr>
               );
             })}
@@ -153,7 +163,45 @@ function OrderList({ onOpen, changeKey }: { onOpen: (id: string) => void; change
   );
 }
 
-/** 手で入れる品目の 1 行。 */
+/** 請求の進み具合の言葉（請求済み・未請求の納品書の枚数・一部・無し）。 */
+function billLabel(o: SalesOrder): string {
+  const p = o.progress;
+  if (!p) return '—';
+  if (p.invoiced === 'all') return '請求済み';
+  if (p.unbilledDeliveries > 0) return `未請求 ${p.unbilledDeliveries} 枚`;
+  return p.invoiced === 'partial' ? '一部' : '—';
+}
+
+/**
+ * 取引の流れの帯（見積 → 受注 → 請書 → 納品 → 請求 → 領収。第42.14.6節）。済んだ段・残っている段・無い段（「—」）を見分け、押すとその書類を開く。
+ */
+function FlowBand({ o, docs, onOpen }: { o: SalesOrder; docs: SalesDocument[]; onOpen: (id: string) => void }) {
+  const p = o.progress;
+  const live = (k: SalesDocKind) => docs.filter((d) => d.kind === k && d.status === 'issued' && !d.superseded);
+  const quote = docs.filter((d) => d.kind === 'quote').sort((a, b) => b.version - a.version)[0];
+  const ack = live('acknowledgement')[0];
+  const delivery = live('delivery')[0];
+  const invoice = live('invoice')[0];
+  const receipt = live('receipt')[0];
+  const steps: { label: string; value: string; state: 'done' | 'rest' | 'none'; open?: string }[] = [
+    { label: '見積', value: o.quoteNumber ?? '—', state: o.quoteNumber ? 'done' : 'none', ...(quote ? { open: quote.id } : {}) },
+    { label: '受注', value: o.number, state: 'done' },
+    { label: '請書', value: p?.acknowledged ? '出した' : '—', state: p?.acknowledged ? 'done' : 'none', ...(ack ? { open: ack.id } : {}) },
+    { label: '納品', value: `${p?.deliveredRate ?? 0}%`, state: (p?.deliveredRate ?? 0) >= 100 ? 'done' : 'rest', ...(delivery ? { open: delivery.id } : {}) },
+    { label: '請求', value: billLabel(o), state: p?.invoiced === 'all' ? 'done' : p && (p.unbilledDeliveries > 0 || p.invoiced === 'partial') ? 'rest' : 'none', ...(invoice ? { open: invoice.id } : {}) },
+    { label: '領収', value: p?.receipted ? '出した' : '—', state: p?.receipted ? 'done' : 'none', ...(receipt ? { open: receipt.id } : {}) },
+  ];
+  return (
+    <ol className="sales-flow" aria-label="取引の流れ">
+      {steps.map((s) => (
+        <li key={s.label} className={`is-${s.state}`}>
+          {s.open ? <button className="link" onClick={() => onOpen(s.open!)}><span>{s.label}</span> {s.value}</button> : <><span>{s.label}</span> {s.value}</>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /** 手で入れる品目の 1 行。`picked` は区分を人が選び直したか（選び直したら品名で変えない）。 */
 interface ManualLine { name: string; quantity: string; unit: string; unitPrice: string; taxCategory: TaxCategory; picked: boolean }
 const emptyLine = (): ManualLine => ({ name: '', quantity: '1', unit: '', unitPrice: '', taxCategory: 'standard', picked: false });
@@ -250,11 +298,18 @@ function OrderView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () =
   const [busy, setBusy] = useState(false);
   // つなげる在庫の品目（在庫管理を使える人だけ。第42.13.4節）
   const [stockItems, setStockItems] = useState<{ id: string; name: string; unit: string; available: number }[]>([]);
+  // つなげる見積書（同じ取引先のもの。第42.14.4節）
+  const [quotes, setQuotes] = useState<SalesDocument[]>([]);
   const load = useCallback(() => {
     api.sales.order(id).then((x) => { setR(x); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
   }, [id]);
   useEffect(() => { api.sales.stockItems().then((x) => setStockItems(x.items)).catch(() => setStockItems([])); }, []);
   useEffect(load, [load, changeKey]);
+  const partyName = r?.order.party.name ?? '';
+  useEffect(() => {
+    if (!partyName) { setQuotes([]); return; }
+    api.quotes.list({ party: partyName }).then((x) => setQuotes(x.items)).catch(() => setQuotes([]));
+  }, [partyName]);
   if (error) return <div className="contracts"><BackButton label="受注の一覧" onClick={onBack} /><p className="error">{error}</p></div>;
   if (!r) return <div className="contracts"><p className="muted">読み込み中…</p></div>;
   const o = r.order;
@@ -283,6 +338,7 @@ function OrderView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () =
         <NoteText note={note} />
       </div>
       <h2>{o.party.name || '取引先不明'} <span className={ORDER_BADGE[o.status]}>{SALES_ORDER_STATUS_LABELS[o.status]}</span> <span className="small muted">{o.number}</span></h2>
+      <FlowBand o={o} docs={r.documents} onOpen={onOpen} />
       {o.flags.length > 0 && <ul className="sales-flags">{o.flags.map((f, i) => <li key={i}><span className="badge warn">確かめて</span> {f.text}</li>)}</ul>}
       {o.cancelReason && <p className="small muted">取り消しの理由: {o.cancelReason}</p>}
       <div className="card contracts-detail">
@@ -316,16 +372,32 @@ function OrderView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () =
           ))}</tbody>
         </table></div>
         <p>合計 {yen(o.total)}（小計 {yen(o.subtotal)}・消費税 {yen(o.tax)}）{o.statedTotal !== null && o.statedTotal !== o.total && <span className="badge warn">注文書の合計 {yen(o.statedTotal)}</span>}</p>
-        {o.quoteNumber && <p className="small muted">見積書: {o.quoteNumber}</p>}
+        {(o.quoteId || quotes.length > 0) && (
+          <label className="small">見積書
+            <select value={o.quoteId ?? ''} disabled={busy || o.status === 'cancelled'}
+              onChange={(e) => act(api.sales.relinkQuote(o.id, e.target.value || null), e.target.value ? '見積書につなぎました' : '見積書を外しました', '直せませんでした')}>
+              <option value="">つながない</option>
+              {o.quoteId && !quotes.some((x) => x.id === o.quoteId) && <option value={o.quoteId}>{o.quoteNumber}</option>}
+              {/* つなげるのは提出済み・期限切れの見積書と、いまつないでいるもの（新しい 30 通まで） */}
+              {quotes.filter((x) => x.id === o.quoteId || (x.status !== 'cancelled' && !x.outcome)).slice(0, 30)
+                .map((x) => <option key={x.id} value={x.id}>{salesQuoteLabel(x)}（{yen(x.total)}・{dayLabel(x.issuedOn)}）</option>)}
+            </select>
+          </label>
+        )}
       </div>
       <div className="row wrap">
         {o.sourceFileId && <a className="btn ghost small" href={api.sales.orderFileUrl(o.id)} target="_blank" rel="noopener noreferrer">注文書を開く</a>}
         {(o.status === 'open' || o.status === 'partial') && (
-          <button className="btn small" disabled={busy} onClick={() => act(api.sales.deliver(o.id), '納品書を作りました', '納品書を作れませんでした', (x) => onOpen((x as { doc: SalesDocument }).doc.id))}>納品書を作る</button>
+          <button className={o.progress?.next?.action === 'delivery' ? 'btn small' : 'btn ghost small'} disabled={busy} onClick={() => act(api.sales.deliver(o.id), '納品書を作りました', '納品書を作れませんでした', (x) => onOpen((x as { doc: SalesDocument }).doc.id))}>納品書を作る</button>
         )}
         {unbilled.length > 0 && (
-          <button className="btn small" disabled={busy} onClick={() => act(api.sales.invoice(unbilled.map((d) => d.id)), '請求書の下書きを作りました', '請求書を作れませんでした', (x) => onOpen((x as { doc: SalesDocument }).doc.id))}>請求書を作る</button>
+          <button className={o.progress?.next?.action === 'invoice' ? 'btn small' : 'btn ghost small'} disabled={busy} onClick={() => act(api.sales.invoice(unbilled.map((d) => d.id)), '請求書の下書きを作りました', '請求書を作れませんでした', (x) => onOpen((x as { doc: SalesDocument }).doc.id))}>請求書を作る</button>
         )}
+        {/* 請求書を発行したら、入金があれば請求書の画面から領収書を作る（第42.14.6節の次の一手） */}
+        {o.progress?.next?.action === 'receipt' && (() => {
+          const inv = r.documents.find((d) => d.kind === 'invoice' && d.status === 'issued' && !d.superseded);
+          return inv ? <button className="btn ghost small" disabled={busy} onClick={() => onOpen(inv.id)}>{o.progress.next.label}</button> : null;
+        })()}
         {o.status !== 'cancelled' && !r.documents.some((d) => d.kind === 'acknowledgement' && d.status === 'issued') && (
           <button className="btn ghost small" disabled={busy} onClick={() => act(api.sales.acknowledge(o.id), '注文請書を作りました', '注文請書を作れませんでした', (x) => onOpen((x as { doc: SalesDocument }).doc.id))}>注文請書を作る</button>
         )}
@@ -440,9 +512,14 @@ function DocView({ id, onBack, onOpen, onOpenRun, changeKey }: {
   if (error) return <div className="contracts"><BackButton label="書類の一覧" onClick={onBack} /><p className="error">{error}</p></div>;
   if (!r) return <div className="contracts"><p className="muted">読み込み中…</p></div>;
   const d = r.doc;
+  // 見積書は見積書の部品で見せる（再見積・受注にする・失注。第42.14節）
+  if (d.kind === 'quote') {
+    return <QuoteView id={d.id} onBack={onBack} onOpen={(x) => onOpen(x)} onOpenRun={onOpenRun} onOpenSales={(x) => onOpen(x)} backLabel="書類の一覧" changeKey={changeKey} />;
+  }
+  const kind = d.kind;
   const ask = (input: Record<string, unknown>) => {
     setBusy(true);
-    api.createJob(AGENT_OF[d.kind], input).then(({ runId }) => onOpenRun(runId))
+    api.createJob(AGENT_OF[kind], input).then(({ runId }) => onOpenRun(runId))
       .catch((e) => setNote({ kind: 'error', text: describeError(e, '頼めませんでした') })).finally(() => setBusy(false));
   };
   const act = (p: Promise<unknown>, ok: string, fail: string) => {

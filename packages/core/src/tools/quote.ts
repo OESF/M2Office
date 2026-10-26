@@ -3,17 +3,22 @@
  *
  * 金額は推論に計算させず、数量×単価から決まった計算で出す（消費税は税率ごとに 1 回だけ端数を処理する）。
  * 見積書は金額を示す書類で、お金の確定ではない。送るのは承認の後（`gmail.send`）。
+ * 見積書は販売の書類の 1 つとして残す（再見積・失注・見積からの受注。第42.14節）。販売の書類と受注を入れていない会社でも使える。
+ * 販売の書類の処理の無い環境（単体のテストなど）では、いままでの見積書の記録（`quotes`）に残す。
  */
 
 import { randomUUID } from 'node:crypto';
 import {
   TAX_CATEGORY_LABELS, effectiveTaxTable, guessTaxCategory, plannedTaxNote, taxBreakdown, taxCategoryNote, taxCategoryOf, taxLegend, taxMark, taxRateOn, type TaxCategory,
+  SALES_QUOTE_STATE_LABELS, salesQuoteLabel, salesQuoteState, type TenantSettings,
 } from '@m2office/shared';
 import type { QuoteItem, QuoteRecord } from '../repository/types.js';
-import { renderPdf, renderRuledQuote, type InvoiceRow } from '../files/pdf-render.js';
+import { renderPdf, renderRuledQuote, type InvoiceRow, type InvoiceStyleInput } from '../files/pdf-render.js';
 import { loadInvoiceStyle } from '../files/invoice-style.js';
 import { saveFile } from '../files/service.js';
 import type { Tool, ToolContext } from './registry.js';
+import type { CreatedQuote } from '../sales-docs/service.js';
+import { docMarkdown } from '../sales-docs/render.js';
 
 /** 有効期限の既定（日）。会社が見積書の型で決めていればそれを使う（第15.2.3節）。 */
 export const QUOTE_VALID_DAYS = 30;
@@ -93,6 +98,83 @@ function categoryOf(o: Record<string, unknown>): TaxCategory | undefined {
 /** 宛先に敬称が無ければ「御中」を付ける。 */
 const addressee = (to: string) => (!to ? '' : /(御中|様|殿)$/.test(to) ? to : `${to} 御中`);
 
+/** 見積書の備考（条件・備考・税率ごとの内訳・軽減税率の印の説明）。 */
+export function quoteNotes(items: QuoteItem[], byRate: { rate: number; base: number; tax: number }[], extra: string[]): string[] {
+  return [
+    ...extra,
+    byRate.length > 1 || byRate.some((x) => x.rate !== 10) ? taxBreakdown(byRate) : '',
+    taxLegend(items.map((i) => i.taxRate)) ?? '',
+  ].filter(Boolean).slice(0, 6);
+}
+
+/** 見積書の PDF に載せるもの。 */
+export interface QuotePdfInput {
+  /** 番号の欄（再見積なら版を添えたもの） */
+  number: string;
+  issuedOn: string;
+  validUntil: string | null;
+  /** 敬称つきの宛名（無ければ空） */
+  to: string;
+  paymentTerms: string;
+  items: QuoteItem[];
+  totals: { subtotal: number; total: number; byRate: { rate: number; tax: number }[] };
+  notes: string[];
+  /** 薄く入れる印（取り消し） */
+  stamp?: string;
+}
+
+/**
+ * 見積書の PDF を作る（会社の見積書の型・文言・ロゴ・差出人・印影。第15.2.3節）。業務の見積書と、販売の書類の見積書（再見積・取り消し）が使う。
+ *
+ * @param qs 会社の見積書の設定
+ */
+export async function renderQuotePdf(q: QuotePdfInput, style: InvoiceStyleInput, qs: TenantSettings['invoice']['quote']): Promise<Uint8Array> {
+  const fields = [
+    { label: qs.labels.number, value: q.number }, { label: qs.labels.issued, value: q.issuedOn },
+    ...(q.paymentTerms ? [{ label: qs.labels.payment, value: q.paymentTerms }] : []),
+    ...(q.validUntil ? [{ label: qs.labels.validUntil, value: q.validUntil }] : []),
+  ];
+  const sealStyle = { logo: style.logo ?? null, from: style.from ?? [], sealBox: style.sealBox ?? false, seal: style.seal ?? null };
+  if (qs.template === 'simple') {
+    return renderPdf({
+      title: qs.title,
+      style: sealStyle,
+      ...(q.to ? { to: q.to } : {}),
+      from: style.from ?? [],
+      fields,
+      rows: q.items.map((i): InvoiceRow => ({
+        name: `${i.group ? `【${i.group}】` : ''}${i.name}${taxMark(i.taxRate)}（${i.quantity} ${i.unit}）${i.discount ? `（値引き ${yen(i.discount)}）` : ''}`,
+        quantity: i.quantity, unitPrice: i.unitPrice ?? 0, amount: quoteItemAmount(i),
+      })),
+      totals: [
+        { label: '小計', value: yen(q.totals.subtotal) },
+        ...q.totals.byRate.filter((x) => x.rate !== 0).map((x) => ({ label: `消費税（${x.rate}%）`, value: yen(x.tax) })),
+        { label: '合計', value: yen(q.totals.total) },
+      ],
+      notes: [...q.notes, ...(qs.notes ? [qs.notes] : [])],
+      ...(q.stamp ? { stamp: q.stamp } : {}),
+    });
+  }
+  return renderRuledQuote({
+    title: qs.title,
+    ...(q.to ? { to: q.to } : {}),
+    fields,
+    greeting: qs.greeting,
+    rows: q.items.map((i) => ({
+      ...(i.group ? { group: i.group } : {}), name: `${i.name}${taxMark(i.taxRate)}`, quantity: i.quantity, unit: i.unit,
+      unitPrice: i.unitPrice, discount: i.discount ?? 0, amount: quoteItemAmount(i),
+    })),
+    totals: [
+      { label: '小計', value: `￥${q.totals.subtotal.toLocaleString('ja-JP')}` },
+      ...q.totals.byRate.filter((x) => x.rate !== 0).map((x, _k, all) => ({ label: all.length > 1 || x.rate !== 10 ? `消費税（${x.rate}%）` : '消費税', value: `￥${x.tax.toLocaleString('ja-JP')}` })),
+      { label: '合計', value: `￥${q.totals.total.toLocaleString('ja-JP')}` },
+    ],
+    notes: [...(qs.notes ? [qs.notes] : []), ...q.notes],
+    style: sealStyle,
+    ...(q.stamp ? { stamp: q.stamp } : {}),
+  });
+}
+
 /**
  * 見積書を作る（PDF と記録。本人のドライブに Google ドキュメントも作る）。
  *
@@ -120,6 +202,7 @@ export const quoteCreate: Tool = {
   async invoke(args, ctx) {
     const items = itemsOf(args['items']);
     if (items.length === 0) return { created: false, reason: '品目がありません' };
+    if (ctx.salesDocs) return createAsDocument(args, items, ctx);
     const settings = await ctx.repo.getTenantSettings(ctx.tenantId);
 
     // 単価の無い品目は、会社が前に作った見積の同じ品目の単価を使う
@@ -163,53 +246,8 @@ export const quoteCreate: Tool = {
     // 体裁は請求書と同じ会社の差出人・ロゴ・印。振込先と請求書の定型文は見積書に載せない。型と文言は会社の見積書の設定（第15.2.3節）
     const style = await loadInvoiceStyle(ctx);
     const paymentTerms = str(args['paymentTerms'], qs.paymentTerms).slice(0, 50);
-    const notes = [
-      str(args['terms']) ? `条件: ${str(args['terms'])}` : '',
-      str(args['notes']),
-      totals.byRate.length > 1 || totals.byRate.some((x) => x.rate !== 10) ? taxBreakdown(totals.byRate) : '',
-      taxLegend(items.map((i) => i.taxRate)) ?? '',
-    ].filter(Boolean).slice(0, 6);
-    const fields = [
-      { label: qs.labels.number, value: number }, { label: qs.labels.issued, value: day },
-      ...(paymentTerms ? [{ label: qs.labels.payment, value: paymentTerms }] : []),
-      { label: qs.labels.validUntil, value: validUntil },
-    ];
-    const sealStyle = { logo: style.logo ?? null, from: style.from ?? [], sealBox: style.sealBox ?? false, seal: style.seal ?? null };
-    const bytes = qs.template === 'simple'
-      ? await renderPdf({
-        title: qs.title,
-        style: sealStyle,
-        ...(to ? { to: addressee(to) } : {}),
-        from: style.from ?? [],
-        fields,
-        rows: items.map((i): InvoiceRow => ({
-          name: `${i.group ? `【${i.group}】` : ''}${i.name}${taxMark(i.taxRate)}（${i.quantity} ${i.unit}）${i.discount ? `（値引き ${yen(i.discount)}）` : ''}`,
-          quantity: i.quantity, unitPrice: i.unitPrice ?? 0, amount: quoteItemAmount(i),
-        })),
-        totals: [
-          { label: '小計', value: yen(totals.subtotal) },
-          ...totals.byRate.filter((x) => x.rate !== 0).map((x) => ({ label: `消費税（${x.rate}%）`, value: yen(x.tax) })),
-          { label: '合計', value: yen(totals.total) },
-        ],
-        notes: [...notes, ...(qs.notes ? [qs.notes] : [])],
-      })
-      : await renderRuledQuote({
-        title: qs.title,
-        ...(to ? { to: addressee(to) } : {}),
-        fields,
-        greeting: qs.greeting,
-        rows: items.map((i) => ({
-          ...(i.group ? { group: i.group } : {}), name: `${i.name}${taxMark(i.taxRate)}`, quantity: i.quantity, unit: i.unit,
-          unitPrice: i.unitPrice, discount: i.discount ?? 0, amount: quoteItemAmount(i),
-        })),
-        totals: [
-          { label: '小計', value: `￥${totals.subtotal.toLocaleString('ja-JP')}` },
-          ...totals.byRate.filter((x) => x.rate !== 0).map((x, _k, all) => ({ label: all.length > 1 || x.rate !== 10 ? `消費税（${x.rate}%）` : '消費税', value: `￥${x.tax.toLocaleString('ja-JP')}` })),
-          { label: '合計', value: `￥${totals.total.toLocaleString('ja-JP')}` },
-        ],
-        notes: [...(qs.notes ? [qs.notes] : []), ...notes],
-        style: sealStyle,
-      });
+    const notes = quoteNotes(items, totals.byRate, [str(args['terms']) ? `条件: ${str(args['terms'])}` : '', str(args['notes'])]);
+    const bytes = await renderQuotePdf({ number, issuedOn: day, validUntil, to: addressee(to), paymentTerms, items, totals, notes }, style, qs);
     const name = `${qs.title}_${number}${to ? `_${to.replace(/[\\/:*?"<>|\s]+/g, '')}` : ''}.pdf`;
     const file = await saveFile(ctx.repo, ctx.files, { tenantId: ctx.tenantId, ownerUserId: ctx.userId, name, kind: 'pdf', bytes, origin: 'generated', runId: ctx.runId });
 
@@ -275,10 +313,21 @@ export const quoteSearch: Tool = {
   risk: 'read',
   activityLabel: '見積書を探しています',
   helpText: 'これまでに作った見積書を、宛先で探します',
-  description: 'これまでに作った見積書を探す（宛先に言葉を含むもの。空なら新しい順に 20 件）',
+  description: 'これまでに作った見積書を探す（宛先に言葉を含むもの。空なら新しい順に 20 件）。state は 提出済み・受注済み・失注・期限切れ・取り消し',
   args: { properties: { to: { type: 'string', description: '宛先に含まれる言葉（会社名など）' } } },
   async invoke(args, ctx) {
     const today = jstDay(new Date());
+    if (ctx.salesDocs) {
+      const list = await ctx.salesDocs.service.listQuotes({ tenantId: ctx.tenantId, userId: ctx.userId }, { ...(str(args['to']) ? { party: str(args['to']) } : {}), limit: 20 });
+      return {
+        found: list.length,
+        quotes: list.map((d) => ({
+          quoteId: d.id, number: salesQuoteLabel(d), to: addressee(d.party.name || d.party.person), total: d.total, validUntil: d.validUntil, issuedAt: d.issuedOn,
+          state: SALES_QUOTE_STATE_LABELS[salesQuoteState(d, today)], items: d.items.map((i) => `${i.name} ${i.quantity}${i.unit}${i.unitPrice === null ? '' : ` × ${yen(i.unitPrice)}`}`),
+          ...(d.outcomeNote ? { lostReason: d.outcomeNote } : {}),
+        })),
+      };
+    }
     const items = (await ctx.repo.listQuotes(ctx.tenantId, { to: str(args['to']), limit: 20 })).map((q) => ({
       number: q.number, to: q.toName, total: q.total, validUntil: q.validUntil, issuedAt: q.createdAt.slice(0, 10),
       expired: !!q.validUntil && q.validUntil < today, items: q.items.map((i) => i.name),
@@ -302,6 +351,14 @@ export const quotePrepareMail: Tool = {
   async invoke(args, ctx: ToolContext) {
     const to = str(args['sendTo']);
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { available: false, reason: '送り先のメールアドレスが無いので、見積書は送りません（PDF はできています）' };
+    if (ctx.salesDocs) {
+      const d = (await ctx.salesDocs.service.get({ tenantId: ctx.tenantId, userId: ctx.userId }, str(args['quoteId'])))?.doc;
+      if (!d || d.kind !== 'quote' || d.runId !== ctx.runId || !d.fileId) return { available: false, reason: 'この依頼で作った見積書が見つかりません' };
+      return {
+        available: true, to, attachments: [d.fileId], number: salesQuoteLabel(d), toName: addressee(d.party.name || d.party.person), total: d.total, validUntil: d.validUntil,
+        subjectHint: d.version > 1 ? `御見積書（${d.number}・再見積）のご送付` : `御見積書（${d.number}）のご送付`,
+      };
+    }
     const q = (await ctx.repo.listQuotes(ctx.tenantId, { limit: 50 })).find((x) => x.id === str(args['quoteId']) && x.runId === ctx.runId);
     if (!q || !q.fileId) return { available: false, reason: 'この依頼で作った見積書が見つかりません' };
     return {
@@ -311,4 +368,110 @@ export const quotePrepareMail: Tool = {
   },
 };
 
-export const QUOTE_TOOLS: Tool[] = [quoteCreate, quoteSearch, quotePrepareMail];
+/** 見積書を書類として作る（販売の書類の処理がある環境）。 */
+async function createAsDocument(args: Record<string, unknown>, items: QuoteItem[], ctx: ToolContext) {
+  const service = ctx.salesDocs!.service;
+  // 単位の書かれていない品目は空のまま渡す（在庫の販売品・前の見積書の単位を使う。無ければ「式」）
+  const raw = (Array.isArray(args['items']) ? args['items'] : []).map((x) => (x ?? {}) as Record<string, unknown>).filter((o) => str(o['name']));
+  const r = await service.createQuote({ tenantId: ctx.tenantId, userId: ctx.userId }, {
+    to: str(args['to']).slice(0, 80), items: items.map((i, k) => ({ ...i, code: str(raw[k]?.['code']).slice(0, 40), unit: str(raw[k]?.['unit']) ? i.unit : '' })),
+    ...(num(args['validDays']) !== null ? { validDays: num(args['validDays'])! } : {}),
+    ...(str(args['paymentTerms']) ? { paymentTerms: str(args['paymentTerms']) } : {}), terms: str(args['terms']), notes: str(args['notes']),
+  }, ctx.runId);
+  if ('error' in r) return { created: false, reason: r.error };
+  return reportQuote(r, ctx);
+}
+
+/** 作った（再見積した）見積書を成果物とドキュメントに残し、結果の形にする。 */
+async function reportQuote(r: CreatedQuote, ctx: ToolContext) {
+  const d = r.doc;
+  const markdown = docMarkdown(d);
+  const title = `御見積書 ${salesQuoteLabel(d)}`;
+  await ctx.repo.createArtifact({
+    id: randomUUID(), runId: ctx.runId, tenantId: ctx.tenantId, kind: 'quote', title: `${title}${d.party.name ? `（${d.party.name}）` : ''}`,
+    body: [markdown, ...(r.diff.length ? ['', '前の版からの違い:', ...r.diff.map((x) => `- ${x}`)] : [])].join('\n'), fileId: d.fileId, createdAt: new Date().toISOString(),
+  });
+  // 本人のドライブに Google ドキュメントとしても残す（共有しない）。できなくても見積書は作れている
+  let doc: { url: string | null } | { error: string };
+  try {
+    const g = await ctx.connector.docs.create({ tenantId: ctx.tenantId, userId: ctx.userId }, { title: `${title}${d.party.name ? ` ${d.party.name}` : ''}`, body: markdown, folderId: null });
+    doc = { url: g.url };
+  } catch (err) {
+    doc = { error: err instanceof Error ? err.message : 'Google ドキュメントに保存できませんでした' };
+  }
+  const missingPrice = d.items.filter((i) => i.unitPrice === null).map((i) => i.name);
+  const judged = r.notes.filter((n) => !n.startsWith('前の') && !n.startsWith('在庫の') && !n.startsWith('単価を'));
+  const used = r.notes.filter((n) => n.startsWith('前の') || n.startsWith('在庫の') || n.startsWith('単価を'));
+  return {
+    created: true, quoteId: d.id, path: `/sales/${encodeURIComponent(d.id)}`, number: salesQuoteLabel(d), fileId: d.fileId, to: addressee(d.party.name || d.party.person),
+    subtotal: d.subtotal, tax: d.tax, total: d.total, validUntil: d.validUntil,
+    ...(used.length ? { note: used.join('。') } : {}),
+    ...(r.warnings.length ? { warning: r.warnings.join('。'), ...(missingPrice.length ? { missingPrice } : {}) } : {}),
+    ...(judged.length ? { taxNote: judged.join('。') } : {}),
+    ...(r.stock.length ? { stock: r.stock.join('。') } : {}),
+    ...(r.diff.length ? { diff: r.diff } : {}),
+    ...('error' in doc ? { docError: doc.error } : { docUrl: doc.url }),
+  };
+}
+
+/**
+ * 再見積（値引きの交渉など。第42.14.2節）。同じ見積番号の新しい版を作る（前の版は残す）。
+ *
+ * @remarks 危険度 `draft`（社外へは出さない）。値引きは頼まれた額だけ。違いはツールが決まった計算で出す
+ */
+export const quoteRevise: Tool = {
+  name: 'quote.revise',
+  risk: 'draft',
+  activityLabel: '見積書を出し直しています',
+  helpText: '前に出した見積書を、同じ見積番号の新しい版（再見積）にします。前の版は残します。社外へは送りません',
+  description: [
+    '前に出した見積書の再見積をする。quote に見積番号（Q-…）か quoteId（分からなければ quote.search で探す）。',
+    '品目を変えるときは items に**新しい版の品目をすべて**渡す（単価を下げた品目・外した品目を反映したもの。変えない品目もそのまま入れる）。品目を変えなければ items は空。',
+    '「合計から 5 万円値引き」のような見積全体の値引きは discountTotal（円。税抜の額。0 で値引きを外す）。**値引きを自分で決めない**（頼まれた額だけ）。金額はツールが計算する',
+  ].join(''),
+  args: {
+    properties: {
+      quote: { type: 'string', description: '見積番号（Q-…）か quoteId' },
+      items: { type: 'array', description: '新しい版の品目（すべて）。{ name, quantity, unit, unitPrice, taxCategory, group, discount }。変えなければ空' },
+      discountTotal: { type: 'number', description: '見積全体の値引き（円・税抜。任意）' },
+      to: { type: 'string', description: '宛先を変えるとき' },
+      validDays: { type: 'number', description: '有効期限（今日から何日。既定は会社の見積書の設定）' },
+      paymentTerms: { type: 'string', description: 'お支払い条件を変えるとき' },
+      notes: { type: 'string', description: '備考を変えるとき' },
+    },
+    required: ['quote'],
+  },
+  async invoke(args, ctx) {
+    if (!ctx.salesDocs) return { created: false, reason: '再見積はこの環境では使えません' };
+    const items = itemsOf(args['items']);
+    const r = await ctx.salesDocs.service.reviseQuote({ tenantId: ctx.tenantId, userId: ctx.userId }, str(args['quote']), {
+      ...(items.length ? { items: items.map((i) => ({ ...i, code: '' })) } : {}),
+      ...(num(args['discountTotal']) !== null ? { discountTotal: num(args['discountTotal'])! } : {}),
+      ...(str(args['to']) ? { to: str(args['to']) } : {}), ...(num(args['validDays']) !== null ? { validDays: num(args['validDays'])! } : {}),
+      ...(str(args['paymentTerms']) ? { paymentTerms: str(args['paymentTerms']) } : {}), ...(str(args['notes']) ? { notes: str(args['notes']) } : {}),
+    }, ctx.runId);
+    if ('error' in r) return { created: false, reason: r.error };
+    return reportQuote(r, ctx);
+  },
+};
+
+/**
+ * 見積書を失注にする（「見本商事の見積は流れた」。第42.14.4節）。
+ *
+ * @remarks 危険度 `write-internal`（会社の記録だけを書く）
+ */
+export const quoteLost: Tool = {
+  name: 'quote.lost',
+  risk: 'write-internal',
+  activityLabel: '見積書を失注にしています',
+  helpText: '見積書を失注にし、理由を残します',
+  description: '見積書を失注にする。quote に見積番号（Q-…）か quoteId（分からなければ quote.search で探す）、reason に理由（言われたもの。無ければ空）',
+  args: { properties: { quote: { type: 'string', description: '見積番号か quoteId' }, reason: { type: 'string', description: '理由（任意）' } }, required: ['quote'] },
+  async invoke(args, ctx) {
+    if (!ctx.salesDocs) return { done: false, reason: 'この環境では使えません' };
+    const err = await ctx.salesDocs.service.loseQuote({ tenantId: ctx.tenantId, userId: ctx.userId }, str(args['quote']), str(args['reason']));
+    return err ? { done: false, reason: err } : { done: true };
+  },
+};
+
+export const QUOTE_TOOLS: Tool[] = [quoteCreate, quoteSearch, quoteRevise, quoteLost, quotePrepareMail];

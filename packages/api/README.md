@@ -338,7 +338,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/extensions/sales-docs/settings` | 管理者: メールに届いた注文書を受注に入れるか（`mailIntake`。第42.13.1節） |
 | `GET /v1/tax-rates` | 消費税の税率の表（読むだけ。運営が直したもの、無ければ同梱の表。仕様書 第15.1.1.1節） |
 | `POST /v1/sales/orders` ／ `GET /v1/sales/suggestions?party=` | 受注を手で入れる（電話などで受けた注文。`party`・`items`・`dueOn` ほか。品名「いつもの」は前の注文から読む。同じ注文は `duplicate: true`。第42.5.1.1節）／ 手で入れるときの候補（取引先と、その取引先の前の品目） |
-| `GET /v1/sales/orders` ／ `POST /v1/sales/orders/import` | 販売の書類と受注（仕様書 第42章）: 受注の一覧（`status`・`q`）／ 注文書（`fileId`）か見積書（`quoteNumber`）から受注にする（AI が読み、計算・見積との違い・読めなかった項目に印。同じ注文は取り込まずに `duplicate: true` で返す） |
+| `GET /v1/sales/orders` ／ `POST /v1/sales/orders/import` | 販売の書類と受注（仕様書 第42章）: 受注の一覧（`status`・`q`・`from`・`to`（注文日）。進み具合 `progress` と次の一手つき。第42.14.5節）／ 注文書（`fileId`）か見積書（`quoteNumber`）から受注にする（AI が読み、計算・見積との違い・読めなかった項目に印。同じ取引先の見積書を探してつなぐ。同じ注文は取り込まずに `duplicate: true` で返す） |
+| `PATCH /v1/sales/orders/:id/quote` | 受注につなぐ見積書を直す（`quoteId`。外すなら `null`。外した見積書は、ほかの受注が無ければ提出済みに戻す。第42.14.4節） |
+| `GET /v1/quotes` ／ `GET /v1/quotes/:id` ／ `GET /v1/quotes/:id/pdf` | 見積書（仕様書 第42.14節。見積書の作成か販売の書類と受注を使える人）: 一覧（新しい版だけ。`party`・`state`: submitted・won・lost・expired・cancelled。`orders` は受注にできるか）／ 1 通（版・この見積書に対する受注・前の版からの違い）／ PDF |
+| `POST /v1/quotes/:id/lost` ／ `POST /v1/quotes/:id/cancel` ／ `POST /v1/quotes/:id/order` | 失注にする（`reason`。受注済みは断る）／ 取り消し（`reason`。作った人と管理者）／ 受注にする（いちばん新しい版から。販売の書類と受注を使える人だけ。同じ見積書の受注があれば `duplicate: true`）。作る・再見積は業務「見積書の作成」の実行で行う |
 | `GET` ／ `PATCH` ／ `DELETE /v1/sales/orders/:id` ／ `POST /v1/sales/orders/:id/cancel` ／ `GET /v1/sales/orders/:id/file` ／ `POST /v1/sales/orders/:id/delivery` | 受注 1 件とつながった書類 ／ 読み取りを直す ／ 削除（取り込んだ人と管理者。発行した書類がつながっていれば断る）／ 取り消し（`reason`）／ 元の注文書 ／ 残りの数で納品書を作る（すぐ発行） |
 | `GET /v1/sales/documents` ／ `POST /v1/sales/documents/invoice` | 書類の一覧（`kind`・`status`・`party`・`from`・`to`・`min`・`max`・`unbilled=1`。電子帳簿保存法の検索）／ 納品書（`deliveryIds`）をまとめて請求書の下書きを作る |
 | `GET` ／ `DELETE /v1/sales/documents/:id` ／ `GET /v1/sales/documents/:id/pdf` ／ `POST /v1/sales/documents/:id/issue` ／ `POST /v1/sales/documents/:id/cancel` | 書類 1 通（版・受注・納品書・請求書・領収書のつながり）／ 下書きの削除（作った人と管理者）／ PDF（`download=1` で保存）／ 下書きを発行（本人が押す。番号が付く）／ 取り消し（`reason`。作った人と管理者。請求書ならまとめた納品書を未請求に戻す） |
