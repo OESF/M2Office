@@ -3,7 +3,7 @@
 第 13 章で固めた VPS に、M2Office 本体（Node.js・PostgreSQL・Caddy・CrowdSec と置き場所）を入れ、利用者に見せるところまでの手順です。配備する技術者（提携先の技術者を含む）が行います。
 仕組みの考え方は仕様書 第20.4.6節にあります。
 
-**この章の手順は、セットアップの命令（`deploy/vps/setup.sh`）と一緒に書きます。** いまは、入れる前に分かっておくこと（入口の守りの考え方）だけを載せています。
+入れる前に「1. 入口の守りの考え方」を読み、「2. 手順」でセットアップの命令（`deploy/vps/setup.sh`）を走らせます。
 
 ## 1. 入口の守りの考え方
 
@@ -45,6 +45,14 @@ VPS が開ける口は 3 つだけです。
 
 `ops.m2office.online` は、**WireGuard の網から来た通信だけを通します**。網の外から開くと「見つかりません」になります。網に入った運営者にも、これまでどおり Google のログインとパスキーを求めます（第 1 章。二重の守り）。運営者の端末にも WireGuard を入れます（第 13 章の手順 8「人を足す・外す」）。
 
+公開の DNS では、`ops` も VPS の IP のままにします（Caddy が Let's Encrypt の証明書を取るため）。そのため、運営者の端末で **`ops` だけを網の中の VPS（`10.66.0.1`）に向けます**。Mac なら、次の 1 行を `/etc/hosts` に足します（`sudo nano /etc/hosts`）。
+
+```
+10.66.0.1 ops.m2office.online
+```
+
+この行が無いと、運営者の通信がインターネットを通って VPS に届き、網の外とみなされて開けません。
+
 ### 大量の通信の攻撃（DDoS）を受けたとき
 
 回線を埋めるほどの大量の通信は、VPS だけでは防ぎきれません。第 1 弾では、受けたら止まることを受け入れ、**その日のうちに Cloudflare（無料のプラン。カードは要らない）を前に置いて**守ります。
@@ -78,4 +86,72 @@ VPS が開ける口は 3 つだけです。
 
 ## 2. 手順
 
-セットアップの命令（`deploy/vps/setup.sh`）を作るときに書きます。入れるものは第 13 章の「この章でまだ入れないもの」の表のとおりです。Xserver の DNS には、`m2office.online`・`www`・`*.m2office.online` の A の記録（VPS の IP）を作ります。
+第 13 章を終えてから行います（SSH は WireGuard の網から・ufw・自動の更新・スワップ）。命令は VPS の上で、自分の名前の利用者で打ちます。
+
+### 手順 1. Xserver で用意する
+
+| 用意すること | 内容 |
+|---|---|
+| ドメイン | `m2office.online` を Xserver で取る（または移す）。DNS も Xserver で持つ |
+| DNS の記録 | `m2office.online`・`www`・`*`（ワイルドカード）の A の記録を、VPS の IP にする。`ops` も `*` に含まれるので、別に作らなくてよい |
+| パケットフィルター | TCP 80・443 を開ける規則を足す（UDP 51820 は第 13 章で開けてある。SSH の 22 番は開けない） |
+
+DNS が引けるまで、数分から数時間かかることがあります。手元で `dig +short m2office.online` が VPS の IP を返せば引けています。
+
+### 手順 2. リリースのタグを取ってくる
+
+```bash
+sudo mkdir -p /opt/m2office && sudo chown "$USER" /opt/m2office
+```
+
+```bash
+git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git /opt/m2office/app
+```
+
+`<リリースのタグ>` は、運営が知らせた版（`v` で始まる。例 `v0.20.0`）です。
+
+### 手順 3. セットアップの命令を走らせる
+
+```bash
+/opt/m2office/app/deploy/vps/setup.sh
+```
+
+聞かれること:
+
+| 問い | 答え |
+|---|---|
+| 会社のサブドメインの親のドメイン | `m2office.online` |
+| 証明書の連絡先のメールアドレス | 運営の連絡先（Let's Encrypt から期限の知らせが来る） |
+| マスター管理画面に入れる Google Workspace のドメイン | 運営主体の Google Workspace のドメイン |
+| WireGuard の網 | 既定（`10.66.0.0/24`）のまま |
+| WAF の動き | 初めは `DetectionOnly`（記録だけ） |
+| Cloudflare を前に置くか | `no` |
+| Gemini の API の鍵・Google のログインのクライアント | あれば入れる（後で走らせ直して入れてもよい） |
+
+命令が行うこと: ソフトを公式の置き場から入れる（Node.js 24・PostgreSQL 17 と pgvector・Caddy と WAF・CrowdSec）→ 専用の利用者 `m2office` と置き場を作る → 秘密の値を機械の上で作る → 設定のファイル（`/etc/m2office/m2office.env`）を作る → データベースを作る → 本番の組み立てと移行 → systemd で動かす → Caddy と CrowdSec の設定を置く → 80・443 を開ける → 動きを確かめる。初めては 10〜20 分ほどかかります。
+
+最後に「残りの作業」が出ます。何度走らせてもかまいません（秘密の値とデータベースは作り直しません）。
+
+### 手順 4. 確かめる
+
+| # | 確かめること | 命令・操作 | よい結果 |
+|---|---|---|---|
+| 1 | 動いている | `systemctl is-active m2office-api m2office-worker m2office-ops caddy crowdsec` | すべて `active` |
+| 2 | API は機械の中だけ | `sudo ss -tlnp \| grep -E ':310[12]'` | `127.0.0.1:3101` と `127.0.0.1:3102` だけ |
+| 3 | 開いている口 | `sudo ufw status verbose` | `80/tcp`・`443/tcp`・`51820/udp`・`22/tcp on wg0` だけ |
+| 4 | 紹介のページ | 手元のブラウザで `https://m2office.online` | 鍵のマークが出て開ける |
+| 5 | 運営の画面 | WireGuard を入れ、hosts に `10.66.0.1 ops.m2office.online` を足して `https://ops.m2office.online` | ログインの画面が出る。WireGuard を切ると開けない |
+| 6 | 外から機械の中の口に届かない | 手元で `curl -s -o /dev/null -w '%{http_code}' https://m2office.online/internal/tls-allowed?domain=x` | `404` |
+| 7 | CrowdSec が読んでいる | `sudo cscli metrics` | `Acquisition Metrics` に `/var/log/caddy/access.log` が出る |
+
+### 手順 5. 最初の会社を作る
+
+マスター管理画面（`https://ops.m2office.online`）で会社を作ります（第 3 章）。会社のサブドメインを初めて開いたときに、その名前の証明書を取ります（数秒かかります）。
+
+### 手順 6. WAF を止める形にする（1〜2 週間後）
+
+WAF は記録だけで始めます。週に 1 回、記録（`/var/log/caddy/waf-audit.log`）を見て、ふだんの使い方で当たっているものが無いか確かめます。当たっているものがあれば運営に知らせ、外す規則を決めてから、`setup.sh` を走らせ直して「WAF の動き」を `On` にします。
+
+### まだこの章に無いもの
+
+控え（pgBackRest・restic）と、夜の自動の更新は、まだ `setup.sh` に入っていません（仕様書 第20.4.6節の「控え」「更新」。これから足します）。顧客を入れる前に入れます。

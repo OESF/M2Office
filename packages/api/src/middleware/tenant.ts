@@ -302,8 +302,8 @@ export function extractSubdomain(host: string, baseDomain: string = process.env[
 /**
  * 運営が使う名前は払い出さない（仕様書 第20.4.3節）。
  *
- * @remarks `ops` は運営の画面が使う（第23.8.2節、Q-60）。顧客のサブドメインとして通さない。
+ * @remarks `ops` は運営の画面、`signup` は申し込みの口が使う（第23.8.2節・第23.3.1節、Q-60）。顧客のサブドメインとして通さない。
  */
 const RESERVED = new Set([
-  'www', 'api', 'app', 'admin', 'ops', 'mail', 'docs', 'status', 'help', 'localhost',
+  'www', 'api', 'app', 'admin', 'ops', 'signup', 'mail', 'docs', 'status', 'help', 'localhost',
 ]);

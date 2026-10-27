@@ -117,6 +117,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | メソッド・パス | 内容 |
 |---|---|
 | `GET /health` | 生存確認。テナント不要 |
+| `GET /internal/tls-allowed?domain=` | 機械の中（127.0.0.1）からだけ。Caddy の On-Demand TLS が、その名前の証明書を取ってよいかを尋ねる。払い出した会社のサブドメイン（解約したものは除く）と運営の決まった名前（親・`www`・`ops`・`signup`）だけ 200、ほかは 404（仕様書 第20.4.6節） |
 | `GET /v1/security.txt` | 脆弱性の報告の窓口（RFC 9116）。入口が `/.well-known/security.txt` から渡す。テナント不要。設定 `SECURITY_CONTACT` が無ければ 404（仕様書 第16.11.3節 G-11） |
 | `GET /v1/auth/providers` | 使えるログイン手段。認証不要 |
 | `POST /v1/auth/dev-login` | 開発用ログイン。認証不要 |

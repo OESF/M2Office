@@ -5,7 +5,7 @@
  */
 
 /** 運営が使う名前は払い出さない（第20.4.3節）。API の会社の判定と、データベースの `ops.create_tenant` と同じもの。 */
-export const RESERVED_SUBDOMAINS = ['www', 'api', 'app', 'admin', 'ops', 'mail', 'docs', 'status', 'help', 'localhost'] as const;
+export const RESERVED_SUBDOMAINS = ['www', 'api', 'app', 'admin', 'ops', 'signup', 'mail', 'docs', 'status', 'help', 'localhost'] as const;
 
 /** サブドメインの規則（第20.4.3節）。英小文字・数字・ハイフン。先頭と末尾のハイフンは不可。3 文字以上。 */
 const SUBDOMAIN = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;

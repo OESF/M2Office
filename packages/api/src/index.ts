@@ -41,6 +41,8 @@ import { announcementsRoute } from './routes/announcements.js';
 import { contractsRoute } from './routes/contracts.js';
 import { salesDocsRoute } from './routes/sales-docs.js';
 import { quotesRoute } from './routes/quotes.js';
+import { tlsAskRoute } from './routes/tls-ask.js';
+import { listenHost } from './listen.js';
 import { reservationsRoute } from './routes/reservations.js';
 import { subsidiesRoute } from './routes/subsidies.js';
 import { membersRoute } from './routes/members.js';
@@ -131,6 +133,8 @@ app.use('*', async (c, next) => {
 });
 
 app.get('/health', (c) => c.json({ ok: true, service: 'api' }));
+// 証明書を取ってよいかを Caddy に答える口（第20.4.6節。機械の中からだけ）
+app.route('/internal/tls-allowed', tlsAskRoute(deps.repo));
 
 // テナントの解決はすべてに、利用者の確認はログイン以外のすべてに掛ける
 // Google からの戻りは、テナントの判定とログインより前に受ける（state で照合する。仕様書 第14.3.3節）
@@ -322,9 +326,11 @@ app.route('/v1/debug', debugRoute(deps));
 app.route('/v1/onboarding', onboardingRoute(deps));
 
 const port = Number(process.env['API_PORT'] ?? 3101);
-const server = serve({ fetch: app.fetch, port }, (info) => {
+const hostname = listenHost();
+const server = serve({ fetch: app.fetch, port, hostname }, (info) => {
   const models = defaultGeminiModels();
   deps.log.info('待ち受けを開始しました', {
+    host: hostname,
     port: info.port,
     connector: process.env['CONNECTOR_MODE'] ?? 'mock',
     mockTenants: process.env['CONNECTOR_MOCK_TENANTS'] || undefined,

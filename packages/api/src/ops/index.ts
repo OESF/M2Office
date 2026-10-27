@@ -9,6 +9,7 @@ import { serve } from '@hono/node-server';
 import { attachLogSink, createLoggerFromEnv, createPool, installPoolLogger, OpsStore, SystemLogSink } from '@m2office/core';
 import { loadAuthConfig } from '../auth/config.js';
 import { opsApp, type OpsConfig } from './app.js';
+import { listenHost } from '../listen.js';
 
 const log = createLoggerFromEnv('ops');
 installPoolLogger(log.child({ component: 'db' }));
@@ -40,7 +41,8 @@ const store = new OpsStore(createPool(dbUrl, { max: 5, name: 'ops' }));
 attachLogSink(new SystemLogSink(store.query).start().accept);
 const app = opsApp({ store, config, log });
 
-serve({ fetch: app.fetch, port }, (info) => {
-  log.info('運営の API の待ち受けを開始しました', { port: info.port, google: !!config.login, googleDomain: config.googleDomain, devLogin: config.devLogin });
+const hostname = listenHost();
+serve({ fetch: app.fetch, port, hostname }, (info) => {
+  log.info('運営の API の待ち受けを開始しました', { host: hostname, port: info.port, google: !!config.login, googleDomain: config.googleDomain, devLogin: config.devLogin });
   if (config.devLogin) log.warn('開発用ログインが有効です（本番では起動を拒否します）');
 });

@@ -1,0 +1,6 @@
+# CrowdSec が読む M2Office の入口のログ（仕様書 第20.4.6節「入口（Caddy）」）。setup.sh が /etc/crowdsec/acquis.d/m2office.yaml に置く。
+# SSH のログ（journald）は CrowdSec の既定の設定が読む。
+filenames:
+  - {{CADDY_LOG_DIR}}/access.log
+labels:
+  type: caddy

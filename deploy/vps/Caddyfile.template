@@ -1,0 +1,149 @@
+# M2Office クラウドの形の入口（Xserver の VPS。仕様書 第20.4.6節「入口（Caddy）」、ADR-0113）。setup.sh が 雛形の名前 を埋めて /etc/caddy/Caddyfile に置く。
+# 開ける口は 443（HTTPS）と 80（HTTPS への転送と証明書の取得）だけ。API と運営の API は 127.0.0.1 で待ち受け、ここから渡す。
+# 証明書は Let's Encrypt から自動で取る。会社のサブドメインは、初めて開かれたときに API に「取ってよいか」を尋ね、払い出した名前だけ取る（On-Demand TLS）。
+# WAF は Coraza と OWASP の規則（CRS）。はじめは記録だけ（DetectionOnly）。誤って止める道を外してから On にする（WAF_ENGINE を On にして setup.sh を走らせ直す）。
+# 攻撃する相手は CrowdSec が Caddy のログを読んで、機械のファイアウォールで止める（Caddy の中では止めない）。
+# 大量の通信の攻撃を受けて Cloudflare を前に置くときは、CLOUDFLARE_FRONT を yes にして走らせ直す（cloudflare_only の段が Cloudflare 以外を断るようになる）。
+# 運営の画面（ops）は WireGuard の網から来た通信だけを通す。公開の DNS は VPS の IP のまま（証明書を取るため）にし、運営者の端末の hosts で ops を 10.66.0.1 に向ける。
+
+{
+	email {{ACME_EMAIL}}
+	# 会社のサブドメインの証明書を取ってよいかを尋ねる先（機械の中だけ）
+	on_demand_tls {
+		ask http://127.0.0.1:{{API_PORT}}/internal/tls-allowed
+	}
+	order coraza_waf first
+{{CLOUDFLARE_GLOBAL}}
+}
+
+# 画面の安全のための見出し（API は API の側で付ける。公開のページの枠の扱いを分けるため）
+(security_headers) {
+	header Strict-Transport-Security "max-age=31536000"
+	@web not path /v1/*
+	header @web {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+	}
+}
+
+# WAF（Coraza と OWASP の規則）。記録は {{CADDY_LOG_DIR}}/waf-audit.log
+(waf) {
+	coraza_waf {
+		load_owasp_crs
+		directives `
+			Include @coraza.conf-recommended
+			Include @crs-setup.conf.example
+			Include @owasp_crs/*.conf
+			SecRuleEngine {{WAF_ENGINE}}
+			SecAuditEngine RelevantOnly
+			SecAuditLog {{CADDY_LOG_DIR}}/waf-audit.log
+			SecAuditLogFormat JSON
+		`
+	}
+}
+
+# アクセスのログ。道の中の鍵と URL の問い合わせの部分は残さない（ローカルの形と同じ。2026-10-12 の点検）。CrowdSec がこのログを読む
+(access_log) {
+	log {
+		output file {{CADDY_LOG_DIR}}/access.log {
+			roll_keep_for 672h
+		}
+		format filter {
+			request>uri multi_regexp {
+				regexp ^(/v1/(?:hooks/[a-z-]+|member-card|unsubscribe|public/inventory|public/columns))/[^/?]+ ${1}/***
+				regexp \?.*$ ?***
+			}
+		}
+	}
+}
+
+# 更新などで API が止まっている間は、502 の代わりに「ただいま更新中です」を返す
+(maintenance_page) {
+	handle_errors 502 503 504 {
+		header Content-Type "text/plain; charset=utf-8"
+		header Retry-After 120
+		respond "ただいま M2Office を更新しています。数分たってから開き直してください。" 503
+	}
+}
+
+# 外から機械の中の口（/internal/）に届かせない
+(no_internal) {
+	@internal path /internal/*
+	respond @internal 404
+}
+
+{{CLOUDFLARE_SNIPPET}}
+
+# 会社の画面と API（会社のサブドメイン。証明書は初めて開かれたときに取る）
+*.{{BASE_DOMAIN}} {
+	tls {
+		on_demand
+	}
+	import cloudflare_only
+	import security_headers
+	import access_log
+	import no_internal
+	import maintenance_page
+	encode zstd gzip
+	# 大きなファイル（録音・サイネージの動画）に合わせた上限。細かい上限は API が持つ
+	request_body {
+		max_size 210MB
+	}
+	handle /.well-known/security.txt {
+		rewrite * /v1/security.txt
+		reverse_proxy 127.0.0.1:{{API_PORT}}
+	}
+	handle /v1/* {
+		import waf
+		reverse_proxy 127.0.0.1:{{API_PORT}}
+	}
+	handle {
+		root * {{RELEASE_DIR}}/web
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# マスター管理画面（WireGuard の網から来た通信だけ。網の外には 404）
+ops.{{BASE_DOMAIN}} {
+	import security_headers
+	import access_log
+	import no_internal
+	import maintenance_page
+	encode zstd gzip
+	@outside not remote_ip {{WG_NETWORK}}
+	respond @outside 404
+	handle /v1/ops/* {
+		import waf
+		reverse_proxy 127.0.0.1:{{OPS_PORT}}
+	}
+	handle /v1/* {
+		respond 404
+	}
+	handle {
+		root * {{RELEASE_DIR}}/web
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# 紹介のページ（第23.3.1節。いまは静的なページの置き場。申し込みの口は作ってから足す）と、Google からの戻り
+# （Google は戻り先に HTTPS の決まった名前を求めるため、会社ごとの名前ではなく親のドメインで受ける。第16.1.2節）
+{{BASE_DOMAIN}}, www.{{BASE_DOMAIN}} {
+	import cloudflare_only
+	import security_headers
+	import access_log
+	import no_internal
+	encode zstd gzip
+	handle /v1/oauth/* {
+		import waf
+		reverse_proxy 127.0.0.1:{{API_PORT}}
+	}
+	handle {
+		root * {{SITE_DIR}}
+		file_server
+	}
+}

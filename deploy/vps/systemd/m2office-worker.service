@@ -1,0 +1,30 @@
+# M2Office のワーカー（仕様書 第20.4.6節「プロセスと待ち受け先」）。setup.sh が 雛形の名前 を埋めて /etc/systemd/system に置く。
+[Unit]
+Description=M2Office worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+User=m2office
+Group=m2office
+WorkingDirectory={{RELEASE_DIR}}
+EnvironmentFile=/etc/m2office/m2office.env
+ExecStart=/usr/bin/node --max-old-space-size=1024 {{RELEASE_DIR}}/server/worker.js
+Restart=always
+RestartSec=5
+# 守りの設定（書いてよいのはデータとログの置き場だけ）
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths={{DATA_DIR}} {{LOG_DIR}}
+
+[Install]
+WantedBy=multi-user.target

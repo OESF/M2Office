@@ -91,7 +91,7 @@ npm run build:release -- --install
 ```
 
 `dist-release/` に、API とワーカーを 1 つずつのファイルにまとめたもの・画面・実行中に読むファイルを組み立てます（仕様書 第20.4.5節）。
-クラウドのコンテナと、ローカルの形（社内の Mac。仕様書 第8.6.1節）の両方の元になります。ローカルの形は、技術者が GitHub のリリースのタグを取ってきて、対話式の `deploy/onsite/setup.sh` で入れます（手順は [deploy/onsite/README.md](deploy/onsite/README.md)）。M2Medical と同じ機械に入れるときの入口の取り決めは [deploy/front/README.md](deploy/front/README.md)。
+クラウドのコンテナと、ローカルの形（社内の Mac。仕様書 第8.6.1節）の両方の元になります。ローカルの形は、技術者が GitHub のリリースのタグを取ってきて、対話式の `deploy/onsite/setup.sh` で入れます（手順は [deploy/onsite/README.md](deploy/onsite/README.md)）。M2Medical と同じ機械に入れるときの入口の取り決めは [deploy/front/README.md](deploy/front/README.md)。クラウドの形（Xserver の VPS。仕様書 第20.4.6節）は `deploy/vps/setup.sh` で入れます（手順は [deploy/vps/README.md](deploy/vps/README.md)）。
 
 ## 動作確認
 
@@ -192,6 +192,7 @@ docs/            開発規約・リリース規定・設計判断記録
 |---|---|---|
 | `WEB_PORT` | 3100 | 画面の開発サーバー |
 | `API_PORT` | 3101 | API |
+| `M2O_LISTEN_HOST` | 127.0.0.1 | API と運営の API が待ち受けるアドレス。どの配備の形でも機械の中だけにし、外からは Caddy が受ける（仕様書 第20.4.6節）。ほかの機械から直接受けるときだけ変える |
 | `WORKER_PORT` | 3102 | ワーカー（health 用。現時点では未使用） |
 | `DB_PORT` | 3105 | PostgreSQL |
 | `DATABASE_URL` | — | アプリの接続先。**`m2office_app` ロール**（所有者でなく RLS を迂回できない） |
