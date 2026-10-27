@@ -273,6 +273,8 @@ ssh <自分の名前>@10.66.0.1
 sudo ufw delete allow OpenSSH && sudo ufw status verbose
 ```
 
+手順 4 で `22/tcp` として開けた場合は、「存在しない規則」と出ます。そのときは `sudo ufw delete allow 22/tcp` で消します。どちらで消しても、WireGuard の網からの規則（`22/tcp on wg0`）は残ります。
+
 `sudo ufw status verbose` で、受け入れる規則が `51820/udp` と `22/tcp on wg0` の 2 つだけであることを確かめます。
 
 手元の `~/.ssh/config` に次を足すと、`ssh m2office-cloud-1` で入れます。
