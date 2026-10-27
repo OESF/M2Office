@@ -283,7 +283,7 @@ export function requireRole(...roles: string[]) {
 }
 
 /**
- * `a.lvh.me` や `a.m2office.online` から会社のサブドメインを取り出す。
+ * `a.lvh.me` や `a.m2office.net` から会社のサブドメインを取り出す。
  *
  * @param baseDomain 会社のサブドメインの親（`BASE_DOMAIN`。既定は開発の `lvh.me`）。開発の `a.localhost` も受ける
  * @returns **`<サブドメイン>.<親>` の形のときだけ**サブドメイン。`a.attacker.example` のような外のホストは `null`

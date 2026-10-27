@@ -6,7 +6,7 @@
 
 export interface Tenant {
   id: string;
-  /** サブドメイン。`a.m2office.online` の `a` にあたる。 */
+  /** サブドメイン。`a.m2office.net` の `a` にあたる。 */
   subdomain: string;
   name: string;
   /** Google Workspace のドメイン。ログイン時に照合する。 */

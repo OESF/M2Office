@@ -19,7 +19,7 @@ const root = fileURLToPath(new URL('../../..', import.meta.url));
 const setup = join(root, 'deploy/vps/setup.sh');
 
 const ANSWERS = {
-  BASE_DOMAIN: 'm2office.online', ACME_EMAIL: 'ops@example.jp', OPS_GOOGLE_DOMAIN: 'example.jp', WG_NETWORK: '10.66.0.0/24', WAF_ENGINE: 'DetectionOnly',
+  BASE_DOMAIN: 'm2office.net', ACME_EMAIL: 'ops@example.jp', OPS_GOOGLE_DOMAIN: 'example.jp', WG_NETWORK: '10.66.0.0/24', WAF_ENGINE: 'DetectionOnly',
   GEMINI_API_KEY: '', GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', SECRET_KEY: 'k'.repeat(64),
   DB_OWNER_PASSWORD: 'owner-pass', DB_APP_PASSWORD: 'app-pass', DB_OPS_PASSWORD: 'ops-pass',
   RELEASE_DIR: '/opt/m2office/app/dist-release', DATA_DIR: '/var/lib/m2office', LOG_DIR: '/var/log/m2office', CADDY_LOG_DIR: '/var/log/caddy',
@@ -50,7 +50,7 @@ test('雛形がすべて埋まり、API は機械の中だけで待ち受ける�
     assert.match(env, /^M2O_LISTEN_HOST=127\.0\.0\.1$/m);
     assert.match(env, /^M2O_DEPLOYMENT=cloud$/m);
     assert.match(env, /^OPS_DATABASE_URL=postgres:\/\/m2office_ops:ops-pass@127\.0\.0\.1:5432\/m2office$/m);
-    assert.match(env, /^GOOGLE_LOGIN_REDIRECT_URI=https:\/\/m2office\.online\/v1\/oauth\/google\/login-callback$/m);
+    assert.match(env, /^GOOGLE_LOGIN_REDIRECT_URI=https:\/\/m2office\.net\/v1\/oauth\/google\/login-callback$/m);
     const api = readFileSync(join(out, 'systemd/m2office-api.service'), 'utf8');
     assert.match(api, /--max-old-space-size=768 \/opt\/m2office\/app\/dist-release\/server\/api\.js/);
     assert.match(api, /^ProtectSystem=strict$/m);
@@ -60,8 +60,8 @@ test('雛形がすべて埋まり、API は機械の中だけで待ち受ける�
 test('入口: 会社のサブドメインは API に尋ねてから証明書を取り、運営の画面は WireGuard の網に限る', () => {
   const file = readFileSync(join(render('no'), 'Caddyfile'), 'utf8');
   assert.match(file, /ask http:\/\/127\.0\.0\.1:3101\/internal\/tls-allowed/);
-  assert.match(file, /\*\.m2office\.online \{\n\ttls \{\n\t\ton_demand/);
-  assert.match(file, /ops\.m2office\.online \{[\s\S]*?@outside not remote_ip 10\.66\.0\.0\/24\n\trespond @outside 404/);
+  assert.match(file, /\*\.m2office\.net \{\n\ttls \{\n\t\ton_demand/);
+  assert.match(file, /ops\.m2office\.net \{[\s\S]*?@outside not remote_ip 10\.66\.0\.0\/24\n\trespond @outside 404/);
   assert.match(file, /respond @internal 404/);
   assert.match(file, /SecRuleEngine DetectionOnly/);
   assert.ok(!file.includes('client_ip_headers'), 'Cloudflare を前に置かないときは、見出しから利用者のアドレスを取らない');

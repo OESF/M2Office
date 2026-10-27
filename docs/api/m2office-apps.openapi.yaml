@@ -49,7 +49,7 @@ servers:
     description: 会社の M2Office の名前（クラウドは会社のサブドメイン、ローカルの形は社内の名前）。鍵の会社と合わなければ 404
     variables:
       host:
-        default: example.m2office.online
+        default: example.m2office.net
 security:
   - appKey: []
 tags:
@@ -744,7 +744,7 @@ paths:
                 amount: { type: integer, minimum: 1, description: purchase のときの金額（ポイントに換算するだけで残さない） }
                 rewardId: { type: string, description: reward のときの特典 }
                 undoEventId: { type: string, description: undo のときの、取り消す通知の eventId }
-            example: { eventId: pos-20261010-0031, card: 'https://example.m2office.online/v1/member-card/Ab3dEf…', action: purchase, amount: 3300 }
+            example: { eventId: pos-20261010-0031, card: 'https://example.m2office.net/v1/member-card/Ab3dEf…', action: purchase, amount: 3300 }
       responses:
         '200':
           description: ポイントの残りとランクと今回の増減（同じ eventId なら前と同じ答え）

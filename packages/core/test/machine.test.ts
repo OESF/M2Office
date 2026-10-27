@@ -52,7 +52,7 @@ test('設定: 控えは置き場があるときだけ。入口の名前は APP_B
   assert.equal(b?.dir, '/Volumes/Backup/M2Office');
   assert.equal(b?.pgBin, '/Library/M2Office/app/runtime/postgres/bin');
   assert.equal(machineConfigFromEnv({ APP_BASE_URL: 'https://office.example.jp' }, '1.0.0').host, 'office.example.jp');
-  assert.equal(machineConfigFromEnv({ APP_BASE_URL: 'https://{tenant}.m2office.online' }, '1.0.0').host, null);
+  assert.equal(machineConfigFromEnv({ APP_BASE_URL: 'https://{tenant}.m2office.net' }, '1.0.0').host, null);
   assert.deepEqual(machineConfigFromEnv({ LOCAL_LLM_URL: 'http://127.0.0.1:11434/v1', LOCAL_LLM_MODEL: 'gemma3' }, '1').localLlm, { url: 'http://127.0.0.1:11434/v1', model: 'gemma3' });
 });
 

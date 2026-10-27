@@ -28,7 +28,7 @@ VPS が開ける口は 3 つだけです。
 | 特徴 | 内容 |
 |---|---|
 | HTTPS が自動 | **Let's Encrypt** の証明書を自動で取り、期限（90 日）の 30 日前から自動で更新する。証明書の契約も費用も要らない |
-| 会社のサブドメインの証明書 | 会社のサブドメイン（`<会社>.m2office.online`）は、**初めて開かれたときに、その名前の証明書を取る**（On-Demand TLS）。取る前に M2Office に「払い出した会社か」を尋ね、払い出した名前だけ取る。でたらめな名前で証明書を取らせ、Let's Encrypt の回数の上限を使い切らせる攻撃を防ぐため |
+| 会社のサブドメインの証明書 | 会社のサブドメイン（`<会社>.m2office.net`）は、**初めて開かれたときに、その名前の証明書を取る**（On-Demand TLS）。取る前に M2Office に「払い出した会社か」を尋ね、払い出した名前だけ取る。でたらめな名前で証明書を取らせ、Let's Encrypt の回数の上限を使い切らせる攻撃を防ぐため |
 | 安全な既定 | TLS 1.2 以上・HSTS・HTTP から HTTPS への転送が最初から効く |
 | 止めているあいだ | 更新などで M2Office が止まっている間は、「ただいま更新中です」のページを返す |
 
@@ -43,12 +43,12 @@ VPS が開ける口は 3 つだけです。
 
 ### 運営の画面（マスター管理画面）
 
-`ops.m2office.online` は、**WireGuard の網から来た通信だけを通します**。網の外から開くと「見つかりません」になります。網に入った運営者にも、これまでどおり Google のログインとパスキーを求めます（第 1 章。二重の守り）。運営者の端末にも WireGuard を入れます（第 13 章の手順 8「人を足す・外す」）。
+`ops.m2office.net` は、**WireGuard の網から来た通信だけを通します**。網の外から開くと「見つかりません」になります。網に入った運営者にも、これまでどおり Google のログインとパスキーを求めます（第 1 章。二重の守り）。運営者の端末にも WireGuard を入れます（第 13 章の手順 8「人を足す・外す」）。
 
 公開の DNS では、`ops` も VPS の IP のままにします（Caddy が Let's Encrypt の証明書を取るため）。そのため、運営者の端末で **`ops` だけを網の中の VPS（`10.66.0.1`）に向けます**。Mac なら、次の 1 行を `/etc/hosts` に足します（`sudo nano /etc/hosts`）。
 
 ```
-10.66.0.1 ops.m2office.online
+10.66.0.1 ops.m2office.net
 ```
 
 この行が無いと、運営者の通信がインターネットを通って VPS に届き、網の外とみなされて開けません。
@@ -92,11 +92,11 @@ VPS が開ける口は 3 つだけです。
 
 | 用意すること | 内容 |
 |---|---|
-| ドメイン | `m2office.online` を Xserver で取る（または移す）。DNS も Xserver で持つ |
-| DNS の記録 | `m2office.online`・`www`・`*`（ワイルドカード）の A の記録を、VPS の IP にする。`ops` も `*` に含まれるので、別に作らなくてよい |
+| ドメイン | `m2office.net` を Xserver で取る（または移す）。DNS も Xserver で持つ |
+| DNS の記録 | `m2office.net`・`www`・`*`（ワイルドカード）の A の記録を、VPS の IP にする。`ops` も `*` に含まれるので、別に作らなくてよい |
 | パケットフィルター | TCP 80・443 を開ける規則を足す（UDP 51820 は第 13 章で開けてある。SSH の 22 番は開けない） |
 
-DNS が引けるまで、数分から数時間かかることがあります。手元で `dig +short m2office.online` が VPS の IP を返せば引けています。
+DNS が引けるまで、数分から数時間かかることがあります。手元で `dig +short m2office.net` が VPS の IP を返せば引けています。
 
 ### 手順 2. リリースのタグを取ってくる
 
@@ -120,7 +120,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 
 | 問い | 答え |
 |---|---|
-| 会社のサブドメインの親のドメイン | `m2office.online` |
+| 会社のサブドメインの親のドメイン | `m2office.net` |
 | 証明書の連絡先のメールアドレス | 運営の連絡先（Let's Encrypt から期限の知らせが来る） |
 | マスター管理画面に入れる Google Workspace のドメイン | 運営主体の Google Workspace のドメイン |
 | WireGuard の網 | 既定（`10.66.0.0/24`）のまま |
@@ -139,14 +139,14 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | 1 | 動いている | `systemctl is-active m2office-api m2office-worker m2office-ops caddy crowdsec` | すべて `active` |
 | 2 | API は機械の中だけ | `sudo ss -tlnp \| grep -E ':310[12]'` | `127.0.0.1:3101` と `127.0.0.1:3102` だけ |
 | 3 | 開いている口 | `sudo ufw status verbose` | `80/tcp`・`443/tcp`・`51820/udp`・`22/tcp on wg0` だけ |
-| 4 | 紹介のページ | 手元のブラウザで `https://m2office.online` | 鍵のマークが出て開ける |
-| 5 | 運営の画面 | WireGuard を入れ、hosts に `10.66.0.1 ops.m2office.online` を足して `https://ops.m2office.online` | ログインの画面が出る。WireGuard を切ると開けない |
-| 6 | 外から機械の中の口に届かない | 手元で `curl -s -o /dev/null -w '%{http_code}' https://m2office.online/internal/tls-allowed?domain=x` | `404` |
+| 4 | 紹介のページ | 手元のブラウザで `https://m2office.net` | 鍵のマークが出て開ける |
+| 5 | 運営の画面 | WireGuard を入れ、hosts に `10.66.0.1 ops.m2office.net` を足して `https://ops.m2office.net` | ログインの画面が出る。WireGuard を切ると開けない |
+| 6 | 外から機械の中の口に届かない | 手元で `curl -s -o /dev/null -w '%{http_code}' https://m2office.net/internal/tls-allowed?domain=x` | `404` |
 | 7 | CrowdSec が読んでいる | `sudo cscli metrics` | `Acquisition Metrics` に `/var/log/caddy/access.log` が出る |
 
 ### 手順 5. 最初の会社を作る
 
-マスター管理画面（`https://ops.m2office.online`）で会社を作ります（第 3 章）。会社のサブドメインを初めて開いたときに、その名前の証明書を取ります（数秒かかります）。
+マスター管理画面（`https://ops.m2office.net`）で会社を作ります（第 3 章）。会社のサブドメインを初めて開いたときに、その名前の証明書を取ります（数秒かかります）。
 
 ### 手順 6. WAF を止める形にする（1〜2 週間後）
 

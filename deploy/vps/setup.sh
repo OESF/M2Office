@@ -121,7 +121,7 @@ sudo mkdir -p "$ETC_DIR" && sudo chmod 750 "$ETC_DIR"
 # shellcheck disable=SC1090
 sudo test -f "$CONF" && eval "$(sudo cat "$CONF")"
 say '答えてください（[ ] の中が既定です）'
-ask BASE_DOMAIN '会社のサブドメインの親のドメイン' "${BASE_DOMAIN:-m2office.online}"
+ask BASE_DOMAIN '会社のサブドメインの親のドメイン' "${BASE_DOMAIN:-m2office.net}"
 ask ACME_EMAIL '証明書（Let'"'"'s Encrypt）の連絡先のメールアドレス' "${ACME_EMAIL:-}"
 ask OPS_GOOGLE_DOMAIN 'マスター管理画面に入れる Google Workspace のドメイン' "${OPS_GOOGLE_DOMAIN:-}"
 ask WG_NETWORK 'WireGuard の網（運営の画面を開ける範囲）' "${WG_NETWORK:-$WG_NETWORK_DEFAULT}"

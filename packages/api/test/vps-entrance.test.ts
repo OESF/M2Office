@@ -18,7 +18,7 @@ const tenants: Tenant[] = [
   { id: 't3', subdomain: 'gone', name: '解約', workspaceDomain: null, status: 'cancelled' },
 ];
 const repo = { findTenantBySubdomain: async (s: string) => tenants.find((t) => t.subdomain === s) ?? null };
-const BASE = 'm2office.online';
+const BASE = 'm2office.net';
 
 test('待ち受け先の既定は 127.0.0.1。M2O_LISTEN_HOST で変えられる', () => {
   assert.equal(listenHost({}), '127.0.0.1');
@@ -27,23 +27,23 @@ test('待ち受け先の既定は 127.0.0.1。M2O_LISTEN_HOST で変えられる
 });
 
 test('証明書は、払い出した会社のサブドメインと運営の決まった名前だけに取る', async () => {
-  for (const name of ['m2office.online', 'www.m2office.online', 'ops.m2office.online', 'signup.m2office.online', 'alpha.m2office.online', 'ALPHA.m2office.online.', 'stopped.m2office.online']) {
+  for (const name of ['m2office.net', 'www.m2office.net', 'ops.m2office.net', 'signup.m2office.net', 'alpha.m2office.net', 'ALPHA.m2office.net.', 'stopped.m2office.net']) {
     assert.equal(await tlsAllowed(repo, name, BASE), true, name);
   }
-  for (const name of ['nobody.m2office.online', 'gone.m2office.online', 'a.b.m2office.online', 'alpha.attacker.example', 'm2office.online.attacker.example', '', 'x.m2office.online', '-bad.m2office.online']) {
+  for (const name of ['nobody.m2office.net', 'gone.m2office.net', 'a.b.m2office.net', 'alpha.attacker.example', 'm2office.net.attacker.example', '', 'x.m2office.net', '-bad.m2office.net']) {
     assert.equal(await tlsAllowed(repo, name, BASE), false, name);
   }
-  assert.equal(await tlsAllowed(repo, 'alpha.m2office.online', ''), false, '親のドメインが無ければ取らない');
+  assert.equal(await tlsAllowed(repo, 'alpha.m2office.net', ''), false, '親のドメインが無ければ取らない');
 });
 
 test('証明書の問い合わせの口は、機械の外からの要求を断る', async () => {
   const app = tlsAskRoute(repo, () => BASE);
   // テストの要求には相手のアドレスが無い（機械の外と同じ扱い）
-  const res = await app.request('/?domain=alpha.m2office.online');
+  const res = await app.request('/?domain=alpha.m2office.net');
   assert.equal(res.status, 403);
 });
 
 test('signup は会社のサブドメインとして通さない', () => {
-  assert.equal(extractSubdomain('signup.m2office.online', BASE), null);
-  assert.equal(extractSubdomain('alpha.m2office.online', BASE), 'alpha');
+  assert.equal(extractSubdomain('signup.m2office.net', BASE), null);
+  assert.equal(extractSubdomain('alpha.m2office.net', BASE), 'alpha');
 });

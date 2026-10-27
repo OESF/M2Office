@@ -77,7 +77,7 @@ export function channelsOf(settings: UserSettings): NotificationChannel[] {
 export interface NotificationDeliveryDeps {
   repo: Repository;
   sender: NotificationSender;
-  /** 会社の画面の入口（例: `https://a.m2office.online`）。お知らせごとの画面の道を後ろに足す（仕様書 第6.1.6節）。 */
+  /** 会社の画面の入口（例: `https://a.m2office.net`）。お知らせごとの画面の道を後ろに足す（仕様書 第6.1.6節）。 */
   linkFor(tenant: Tenant): string;
   logger?: Logger;
 }

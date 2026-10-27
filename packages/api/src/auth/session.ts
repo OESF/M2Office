@@ -33,7 +33,7 @@ export function sessionIdOf(token: string): string {
  *
  * @remarks
  * Cookie は `HttpOnly`・`SameSite=Lax` とし、`Domain` 属性を付けない。
- * これにより `a.m2office.online` の Cookie は `b.m2office.online` へ送られない
+ * これにより `a.m2office.net` の Cookie は `b.m2office.net` へ送られない
  * （仕様書 第20.7節「対象範囲」）。
  *
  * ログインは「本人の確認」と「ログイン状態の発行」の 2 段に分けてある。
