@@ -145,6 +145,9 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | 5 | 運営の画面 | WireGuard を入れ、hosts に `10.66.0.1 ops.m2office.net` を足して `https://ops.m2office.net` | ログインの画面が出る。WireGuard を切ると開けない |
 | 6 | 外から機械の中の口に届かない | 手元で `curl -s -o /dev/null -w '%{http_code}' https://m2office.net/internal/tls-allowed?domain=x` | `404` |
 | 7 | CrowdSec が読んでいる | `sudo cscli metrics` | `Acquisition Metrics` に `/var/log/caddy/access.log` が出る |
+| 8 | CrowdSec が止めている | `sudo cscli bouncers list` と `systemctl is-active crowdsec-firewall-bouncer` | `crowdsec-firewall-bouncer` が並び、`active`。無ければ見つけた相手を止められないので、`setup.sh` を走らせ直す |
+
+自分の手元のアドレスが止められて WireGuard でつながらなくなったときは、Xserver の管理画面のコンソールで入り、`sudo cscli decisions delete --ip <手元のアドレス>` で外します。
 
 ### 手順 5. 最初の運営者を作る
 

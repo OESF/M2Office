@@ -184,8 +184,10 @@ if ! command -v cscli >/dev/null; then
   else
     curl -fsSL https://install.crowdsec.net | sudo sh >/dev/null
   fi
-  sudo apt-get install -y -qq crowdsec crowdsec-firewall-bouncer-nftables >/dev/null
+  sudo apt-get install -y -qq crowdsec >/dev/null
 fi
+# 止める役（機械のファイアウォールに入れる）は、本体が動いてから入れる（同時に入れると、本体への登録を飛ばして起動しないことがある）
+dpkg -s crowdsec-firewall-bouncer-nftables >/dev/null 2>&1 || sudo apt-get install -y -qq crowdsec-firewall-bouncer-nftables >/dev/null
 sudo cscli collections install crowdsecurity/caddy >/dev/null 2>&1 || true
 info "CrowdSec: $(cscli version 2>&1 | grep -m1 -i version | awk '{print $NF}')"
 
@@ -274,6 +276,17 @@ sudo systemctl enable caddy >/dev/null 2>&1; sudo systemctl reload-or-restart ca
 sudo install -d -m 755 /etc/crowdsec/acquis.d
 sudo install -m 644 "$work/out/acquis-m2office.yaml" /etc/crowdsec/acquis.d/m2office.yaml
 sudo systemctl restart crowdsec
+# 止める役が本体に登録され、動いていること。無ければ登録し直して起動する（2026-10-29 に実機で、登録が無く一度も動いていなかった）
+BOUNCER=crowdsec-firewall-bouncer
+for _ in $(seq 1 30); do sudo cscli lapi status >/dev/null 2>&1 && break; sleep 1; done
+if ! systemctl is-active --quiet "$BOUNCER" || ! sudo cscli bouncers list -o raw | grep -q "^$BOUNCER"; then
+  sudo cscli bouncers delete "$BOUNCER" >/dev/null 2>&1 || true
+  key=$(sudo cscli bouncers add "$BOUNCER" -o raw)
+  sudo sed -i "s|^api_key:.*|api_key: $key|" "/etc/crowdsec/bouncers/$BOUNCER.yaml"
+  unset key
+  sudo systemctl enable "$BOUNCER" >/dev/null 2>&1
+  sudo systemctl restart "$BOUNCER"
+fi
 # 80・443 を開ける（WireGuard の UDP と、網の中の SSH は第 13 章で開けてある）
 sudo ufw allow 80/tcp >/dev/null && sudo ufw allow 443/tcp >/dev/null
 
@@ -286,6 +299,12 @@ curl -fsS "http://127.0.0.1:$OPS_PORT/health" >/dev/null 2>&1 && info '運営の
 systemctl is-active --quiet m2office-worker && info 'ワーカー: 動いています' || warn 'ワーカーが動いていません（journalctl -u m2office-worker -n 50）'
 systemctl is-active --quiet caddy && info 'Caddy: 動いています' || warn 'Caddy が動いていません（journalctl -u caddy -n 50）'
 systemctl is-active --quiet crowdsec && info 'CrowdSec: 動いています' || warn 'CrowdSec が動いていません（journalctl -u crowdsec -n 50）'
+sleep 3
+if systemctl is-active --quiet "$BOUNCER" && sudo cscli bouncers list -o raw | grep -q "^$BOUNCER"; then
+  info 'CrowdSec の止める役: 動いています（決めた相手を機械のファイアウォールで止める）'
+else
+  warn 'CrowdSec の止める役が動いていません。攻撃する相手を見つけても止められません（journalctl -u crowdsec-firewall-bouncer -n 50）'
+fi
 if ss -tln | grep -E "0\.0\.0\.0:($API_PORT|$OPS_PORT)|\[::\]:($API_PORT|$OPS_PORT)" >/dev/null; then
   warn 'API が機械の外でも待ち受けています（M2O_LISTEN_HOST を確かめてください）'
 else
