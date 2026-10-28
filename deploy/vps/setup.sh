@@ -193,6 +193,8 @@ info "CrowdSec: $(cscli version 2>&1 | grep -m1 -i version | awk '{print $NF}')"
 say '専用の利用者と置き場を用意します'
 id "$SERVICE_USER" >/dev/null 2>&1 || sudo useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 sudo install -d -m 750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/machine" "$LOG_DIR"
+# 設定の置き場は m2office の組にも入れる（移行を m2office で走らせるため。setup.conf は root だけが読める 600 のまま）
+sudo chown root:"$SERVICE_USER" "$ETC_DIR"
 sudo install -d -m 755 -o root -g root "$SITE_DIR"
 sudo install -d -m 750 -o caddy -g caddy "$CADDY_LOG_DIR"
 if [ ! -f "$SITE_DIR/index.html" ]; then
@@ -259,7 +261,7 @@ say '本番の組み立てを作ります（数分かかります）'
 (cd "$REPO_DIR" && npm ci --no-audit --no-fund >/dev/null && npm run build:release -- --install >/dev/null)
 info "組み立てました: $RELEASE_DIR"
 say 'データベースの形を最新にします'
-sudo -u "$SERVICE_USER" node --env-file="$ENV_FILE" "$REPO_DIR/scripts/migrate.mjs" | tail -1
+(cd / && sudo -u "$SERVICE_USER" node --env-file="$ENV_FILE" "$REPO_DIR/scripts/migrate.mjs" | tail -1)
 
 # ---- 9. 動かす ----
 say 'M2Office を動かします'
