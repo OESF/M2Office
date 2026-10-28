@@ -103,6 +103,8 @@ OWNER_PASS=$("$NODE_BIN" -e 'process.stdout.write(decodeURIComponent(new URL(pro
 OWNER_NOPASS=$("$NODE_BIN" -e 'const u = new URL(process.argv[1]); u.password = ""; process.stdout.write(u.toString())' "$OWNER_URL")
 PGPASSWORD="${OWNER_PASS}" "$PG_BIN/pg_dump" -Fc -f "$DUMP" "${OWNER_NOPASS}" || { record failed "$FROM" "$TO" '更新の前の控えを取れませんでした'; log '控えを取れません。入れません'; exit 1; }
 ls -1t "$(dirname "$DUMP")"/*.dump 2>/dev/null | tail -n +4 | xargs rm -f
+# 控えを取る間だけ umask 077 にした。戻さずに組み立てると、サービスの利用者がプログラムを読めなくなる（2026-10-29 にクラウドの形で起きた）
+umask 022
 log "控えを取りました: $DUMP"
 
 daemon() { launchctl "$1" system "/Library/LaunchDaemons/$2.plist" >/dev/null 2>&1 || launchctl "$1" "system/$2" >/dev/null 2>&1 || true; }

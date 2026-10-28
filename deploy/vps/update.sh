@@ -68,7 +68,8 @@ else
   log '注意: 署名を確かめずに入れます（--allow-unsigned）'
 fi
 
-# 更新の前の控え（データベース）。会社の全データなので root だけが読める置き場に取り、直近の 3 回を残す
+# 更新の前の控え（データベース）。会社の全データなので root だけが読める置き場に取り、直近の 3 回を残す。
+# 控えを取る間だけ umask 077 にし、すぐ戻す（戻さずに組み立てると、m2office がプログラムを読めなくなる。2026-10-29 に実機で起きた）
 umask 077
 mkdir -p "$BACKUP_DIR"; chmod 700 "$(dirname "$BACKUP_DIR")" "$BACKUP_DIR"
 DUMP="$BACKUP_DIR/$(date +%Y%m%d-%H%M%S)-$FROM.dump"
@@ -78,12 +79,15 @@ OWNER_PASS=$(node -e 'process.stdout.write(decodeURIComponent(new URL(process.ar
 OWNER_NOPASS=$(node -e 'const u = new URL(process.argv[1]); u.password = ""; process.stdout.write(u.toString())' "$OWNER_URL")
 PGPASSWORD="$OWNER_PASS" "$PG_BIN/pg_dump" -Fc -f "$DUMP" "$OWNER_NOPASS" || { log '更新の前の控えを取れません。入れません'; exit 1; }
 ls -1t "$BACKUP_DIR"/*.dump 2>/dev/null | tail -n +4 | xargs -r rm -f
+umask 022
 log "控えを取りました: $DUMP"
 
 stop_app() { systemctl stop $SERVICES; }
 start_app() { systemctl start $SERVICES; }
+# 切り替えと組み立ては、ほかの利用者（m2office）も読める権限で作り、前に読めなくなったファイルも読めるように戻す
 build() {
-  git_ checkout --quiet --detach "$1" && (cd "$REPO_DIR" && as_owner npm ci --no-audit --no-fund >/dev/null 2>&1 && as_owner npm run build:release -- --install >/dev/null 2>&1)
+  as_owner bash -c 'umask 022 && cd "$1" && git checkout --quiet --detach "$2" && npm ci --no-audit --no-fund >/dev/null 2>&1 && npm run build:release -- --install >/dev/null 2>&1' _ "$REPO_DIR" "$1" \
+    && as_owner chmod -R go+rX "$REPO_DIR"
 }
 migrate() { (cd / && sudo -u "$SERVICE_USER" node --env-file="$ENV_FILE" "$REPO_DIR/scripts/migrate.mjs" >/dev/null); }
 healthy() {

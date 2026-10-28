@@ -106,5 +106,10 @@ test('更新（update.sh）: 文法が通り、控えを取ってから止め、
   assert.ok(body.indexOf('pg_dump') < body.indexOf('\nstop_app\n'), '控えを取る前に止めない');
   assert.match(body, /elif \[ "\$ALLOW_UNSIGNED" = 0 \]; then\n\s+log '署名を確かめる鍵が入っていません/);
   assert.match(body, /healthy \|\| rollback/);
+  // 控えのための umask 077 を、組み立ての前に戻す（戻さないと m2office がプログラムを読めない）
+  const dumpAt = body.indexOf('umask 077');
+  assert.ok(dumpAt > 0 && body.indexOf('umask 022', dumpAt) > dumpAt && body.indexOf('umask 022', dumpAt) < body.indexOf('\nstop_app\n'), 'umask を戻してから止めて組み立てる');
+  assert.match(body, /as_owner bash -c 'umask 022 && cd "\$1" && git checkout/);
+  assert.match(body, /as_owner chmod -R go\+rX "\$REPO_DIR"/);
   assert.match(body, /PGPASSWORD="\$OWNER_PASS" "\$PG_BIN\/pg_dump"/, 'パスワードを命令の引数に出さない');
 });
