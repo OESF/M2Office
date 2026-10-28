@@ -75,6 +75,19 @@
 	}
 }
 
+# 探り（/.env・/.ssh/・*.php・*.sql・/wp-admin/ など、画面の道としてありえない名前）には 404 を返す。画面は無い道に index.html を
+# 返すため、そのままでは探りに 200 が返り、探る側が見つけたと思い込み、CrowdSec も探りを見分けにくい（2026-10-28 に実機で見た）。
+# API（/v1/）と /.well-known/ は対象にしない。ほかの handle より前で import する
+(no_probe) {
+	@probe {
+		not path /v1/* /.well-known/*
+		path_regexp probe (?i)(/\.|\.(php[0-9]?|phtml|aspx?|jsp|cgi|sql|bak|old|orig|swp|env|key|pem|crt|p12|pfx|ya?ml|ini|conf|cfg|log|tar|tgz|gz|zip|7z|rar|bz2|xz|db|sqlite3?|mdb|pwd)$|^/(wp-admin|wp-content|wp-includes|wp-json|cgi-bin|phpmyadmin|_vti_[a-z]+)(/|$))
+	}
+	handle @probe {
+		respond 404
+	}
+}
+
 {{CLOUDFLARE_SNIPPET}}
 
 # 証明書の取り方: 決まった名前（親・www・ops）も、初めて開かれたときに取る。Caddy は、ワイルドカードの名前と重なる名前を
@@ -92,6 +105,7 @@
 	import security_headers
 	import access_log
 	import no_internal
+	import no_probe
 	import maintenance_page
 	encode zstd gzip
 	# 大きなファイル（録音・サイネージの動画）に合わせた上限。細かい上限は API が持つ
@@ -121,6 +135,7 @@ ops.{{BASE_DOMAIN}} {
 	import security_headers
 	import access_log
 	import no_internal
+	import no_probe
 	import maintenance_page
 	encode zstd gzip
 	# 断る段は handle で書き、ほかの handle より前に置く（Caddy は respond より handle を先に動かすため、

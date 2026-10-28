@@ -71,6 +71,12 @@ test('入口: 会社のサブドメインは API に尋ねてから証明書を�
   assert.ok(ops.indexOf('handle @outside') < ops.indexOf('handle /v1/ops/*'), '網の外を断る段は、運営の API の段より前');
   assert.match(file, /handle @internal \{\n\t\trespond 404/);
   assert.ok(!/^\s*respond @/m.test(file), 'respond で断る段を書かない');
+  // 探り（/.env・*.sql・/wp-admin/ など）は index.html を返す前に 404。会社の画面と運営の画面の段で、ほかの handle より前に置く
+  assert.match(file, /\(no_probe\) \{\n\t@probe \{\n\t\tnot path \/v1\/\* \/\.well-known\/\*/);
+  for (const site of ['*.m2office.net {', 'ops.m2office.net {']) {
+    const body = file.slice(file.indexOf(site));
+    assert.ok(body.includes('import no_probe') && body.indexOf('import no_probe') < body.indexOf('\thandle /'), `${site} は探りを先に断る`);
+  }
   assert.match(file, /SecRuleEngine DetectionOnly/);
   assert.ok(!file.includes('client_ip_headers'), 'Cloudflare を前に置かないときは、見出しから利用者のアドレスを取らない');
 });
