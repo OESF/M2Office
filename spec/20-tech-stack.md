@@ -343,7 +343,7 @@ Xserver の VPS（Ubuntu 24.04 LTS）
 | 利用者のアドレス | 相手のアドレスは Caddy がそのまま受け取り、`X-Forwarded-For` に入れて API に渡す。API は 127.0.0.1（Caddy）からの見出しだけを信じる。Caddy は外から来た `X-Forwarded-For` を信じない（`trusted_proxies` を置かない） |
 | 運営の画面 | `ops.m2office.net` は、**WireGuard の網から来た通信だけを通す**（Caddy が相手のアドレスで限る。網の外には 404 を返す）。運営者の端末にも WireGuard を入れる。公開の DNS では `ops` も VPS の IP のまま（Caddy が証明書を取るため）にし、**運営者の端末の hosts で `ops` を網の中の VPS（`10.66.0.1`）に向ける**（そうしないと通信がインターネットを通り、網の外とみなされる）。そのうえで、いまのとおり運営者の Google のログインとパスキーを求める（二重）。Cloudflare Access の代わり |
 | 止めているあいだ | 更新などで API が止まっている間は、Caddy が「ただいま更新中です」の静的なページを返す（502 の代わり） |
-| 紹介のページ | `m2office.net` と `www` も VPS の Caddy が出す（第23.3.1節。置き方は Q-279） |
+| 紹介のページ | `m2office.net` と `www` も VPS の Caddy が出す。**CMS を置かない静的なサイト（Astro）で、AI が直して WireGuard の網から送る**（第 0.475.0 版で案。第23.3.1節、Q-280、ADR-0114） |
 | Google からの戻り | Google はログインと接続の戻り先に HTTPS の決まった名前を求めるため、会社ごとの名前ではなく **親のドメイン（`https://m2office.net/v1/oauth/…`）で受ける**（第16.1.2節）。Caddy は親のドメインの `/v1/oauth/` だけを API に渡す |
 
 ##### 保守の入り口（WireGuard）
