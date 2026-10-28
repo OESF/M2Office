@@ -60,7 +60,11 @@ test('雛形がすべて埋まり、API は機械の中だけで待ち受ける�
 test('入口: 会社のサブドメインは API に尋ねてから証明書を取り、運営の画面は WireGuard の網に限る', () => {
   const file = readFileSync(join(render('no'), 'Caddyfile'), 'utf8');
   assert.match(file, /ask http:\/\/127\.0\.0\.1:3101\/internal\/tls-allowed/);
-  assert.match(file, /\*\.m2office\.net \{\n\ttls \{\n\t\ton_demand/);
+  assert.match(file, /\(on_demand_cert\) \{\n\ttls \{\n\t\ton_demand/);
+  // 決まった名前も初めて開かれたときに取る（ワイルドカードと重なる名前を Caddy が起動のときに取らないため）
+  for (const site of ['*.m2office.net', 'ops.m2office.net', 'm2office.net, www.m2office.net']) {
+    assert.ok(file.includes(`${site} {\n\timport on_demand_cert\n`), `${site} の証明書は初めて開かれたときに取る`);
+  }
   assert.match(file, /ops\.m2office\.net \{[\s\S]*?@outside not remote_ip 10\.66\.0\.0\/24\n\trespond @outside 404/);
   assert.match(file, /respond @internal 404/);
   assert.match(file, /SecRuleEngine DetectionOnly/);

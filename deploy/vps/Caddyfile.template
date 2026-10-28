@@ -75,11 +75,17 @@
 
 {{CLOUDFLARE_SNIPPET}}
 
-# 会社の画面と API（会社のサブドメイン。証明書は初めて開かれたときに取る）
-*.{{BASE_DOMAIN}} {
+# 証明書の取り方: 決まった名前（親・www・ops）も、初めて開かれたときに取る。Caddy は、ワイルドカードの名前と重なる名前を
+# 起動のときに取らないため、決まった名前の段を起動のときに取る形にすると、www と ops の証明書がいつまでも取れない（2026-10-28 に実機で見つけた）
+(on_demand_cert) {
 	tls {
 		on_demand
 	}
+}
+
+# 会社の画面と API（会社のサブドメイン。証明書は初めて開かれたときに取る）
+*.{{BASE_DOMAIN}} {
+	import on_demand_cert
 	import cloudflare_only
 	import security_headers
 	import access_log
@@ -109,6 +115,7 @@
 
 # マスター管理画面（WireGuard の網から来た通信だけ。網の外には 404）
 ops.{{BASE_DOMAIN}} {
+	import on_demand_cert
 	import security_headers
 	import access_log
 	import no_internal
@@ -133,6 +140,7 @@ ops.{{BASE_DOMAIN}} {
 # 紹介のページ（第23.3.1節。いまは静的なページの置き場。申し込みの口は作ってから足す）と、Google からの戻り
 # （Google は戻り先に HTTPS の決まった名前を求めるため、会社ごとの名前ではなく親のドメインで受ける。第16.1.2節）
 {{BASE_DOMAIN}}, www.{{BASE_DOMAIN}} {
+	import on_demand_cert
 	import cloudflare_only
 	import security_headers
 	import access_log
