@@ -167,6 +167,19 @@ cd / && sudo -u m2office node --env-file=/etc/m2office/m2office.env /opt/m2offic
 
 WAF は記録だけで始めます。週に 1 回、記録（`/var/log/caddy/waf-audit.log`）を見て、ふだんの使い方で当たっているものが無いか確かめます。当たっているものがあれば運営に知らせ、外す規則を決めてから、`setup.sh` を走らせ直して「WAF の動き」を `On` にします。
 
+### 手順 8. 更新する
+
+運営が新しい版を知らせたら、VPS の上で入れます。止まるのは数分で、その間は「ただいま M2Office を更新しています」と出ます。
+
+```bash
+sudo /opt/m2office/app/deploy/vps/update.sh --tag <リリースのタグ> --allow-unsigned
+```
+
+- 入れる前に、データベースの控えを `/var/backups/m2office/pre-update/` に取ります（直近の 3 回）。組み立て・移行・動きの確かめのどれかで失敗したら、前の版と控えに戻します
+- `--allow-unsigned` は、タグへの署名を始める v1.0 までの間だけ付けます
+- 最後に「deploy/vps の雛形が変わっています」と出たら、`setup.sh` を走らせ直します（前の答えのまま Enter で進めます）
+- 記録は `/var/log/m2office/update.log` に残ります
+
 ### まだこの章に無いもの
 
-控え（pgBackRest・restic）と、夜の自動の更新は、まだ `setup.sh` に入っていません（仕様書 第20.4.6節の「控え」「更新」。これから足します）。顧客を入れる前に入れます。
+社外の控え（pgBackRest・restic）は、置き場の事業者を運用を始めるときに決めてから足します（仕様書 第20.4.6節「控え」）。顧客を入れる前に入れます。夜の自動の更新は、タグへの署名を始める v1.0 から入れます。

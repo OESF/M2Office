@@ -98,3 +98,13 @@ test('手元に Caddy があれば、埋めた設定を読める（WAF の行を
     execFileSync('caddy', ['adapt', '--config', file, '--adapter', 'caddyfile'], { stdio: 'pipe' });
   }
 });
+
+test('更新（update.sh）: 文法が通り、控えを取ってから止め、署名の無いタグは --allow-unsigned のときだけ入れる', () => {
+  const update = join(root, 'deploy/vps/update.sh');
+  execFileSync('bash', ['-n', update]);
+  const body = readFileSync(update, 'utf8');
+  assert.ok(body.indexOf('pg_dump') < body.indexOf('\nstop_app\n'), '控えを取る前に止めない');
+  assert.match(body, /elif \[ "\$ALLOW_UNSIGNED" = 0 \]; then\n\s+log '署名を確かめる鍵が入っていません/);
+  assert.match(body, /healthy \|\| rollback/);
+  assert.match(body, /PGPASSWORD="\$OWNER_PASS" "\$PG_BIN\/pg_dump"/, 'パスワードを命令の引数に出さない');
+});

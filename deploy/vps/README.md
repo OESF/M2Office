@@ -33,6 +33,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | `m2office.env.template` | 環境変数（`/etc/m2office/m2office.env`。root と `m2office` だけが読める） |
 | `systemd/*.service` | API・ワーカー・運営の API。メモリの上限と守りの設定つき |
 | `crowdsec/acquis-m2office.yaml` | CrowdSec に Caddy のアクセスのログを読ませる設定 |
+| `update.sh` | リリースのタグを入れる更新。控え（`pg_dump`）→ 止める → 切り替えて組み立て直す → 移行 → 動かす → 確かめる。失敗したら前の版と控えに戻す |
 
 雛形の埋め方は、ローカルの形と同じ `deploy/onsite/render.mjs` を使います。機械を変えずに埋めた結果だけを見るときは、次のようにします。
 
@@ -46,10 +47,22 @@ deploy/vps/setup.sh --render-only <出力先> --answers <KEY=値 のファイル
 |---|---|
 | `/opt/m2office/app` | 取ってきたリリースのタグ。組み立ては `dist-release/` |
 | `/etc/m2office/` | 環境変数（`m2office.env`）と答え（`setup.conf`） |
-| `/var/lib/m2office/` | ファイル（`files/`）・機械の様子（`machine/`）・紹介のページ（`site/`） |
-| `/var/log/m2office/` | アプリのログ |
+| `/var/lib/m2office/` | ファイル（`files/`）・機械の様子（`machine/`） |
+| `/var/www/m2office-site/` | 紹介のページ（`m2office.net`・`www`） |
+| `/var/backups/m2office/pre-update/` | 更新の前の控え（直近の 3 回。root だけが読める） |
+| `/var/log/m2office/` | アプリのログと更新の記録（`update.log`） |
 | `/var/log/caddy/` | 入口のアクセスのログと WAF の記録（CrowdSec が読む） |
+
+## 更新する
+
+```bash
+sudo /opt/m2office/app/deploy/vps/update.sh --check
+sudo /opt/m2office/app/deploy/vps/update.sh --tag <リリースのタグ> --allow-unsigned
+```
+
+- タグへの署名を始める v1.0 までは、`--allow-unsigned` を付けて技術者が手で入れる。v1.0 からは `/etc/m2office/allowed_signers` の鍵で署名を確かめ、夜の自動の更新も入れる。
+- 雛形（`deploy/vps/`）が変わった版では、入れた後に `setup.sh` を走らせ直すよう示す。
 
 ## まだ入れていないもの
 
-控え（pgBackRest・restic）と、夜の自動の更新（`update.sh`）は、まだこの雛形にありません。仕様書 第20.4.6節の「控え」「更新」に沿って足します。
+社外の控え（pgBackRest・restic）は、置き場の事業者を運用を始めるときに決めてから足します（仕様書 第20.4.6節「控え」）。夜の自動の更新は v1.0 から入れます。

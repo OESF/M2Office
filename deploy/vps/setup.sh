@@ -318,4 +318,4 @@ info "3. 開けたら https://$BASE_DOMAIN を開いて確かめる。運営者�
 info '4. Google のログインの OAuth クライアントに、戻り先（m2office.env の GOOGLE_LOGIN_REDIRECT_URI と OPS_GOOGLE_REDIRECT_URI）を登録する'
 info "   最初の運営管理者を作る: cd / && sudo -u $SERVICE_USER node --env-file=$ENV_FILE $REPO_DIR/scripts/create-operator.mjs --email <アドレス> --name <名前> --role admin"
 [ "$WAF_ENGINE" = DetectionOnly ] && info '5. WAF は記録だけです。誤りが無いことを確かめたら、WAF の動きを On にして走らせ直す'
-info '控え（pgBackRest・restic）と夜の自動の更新は、まだこの命令では入れません（運営のマニュアル 第 14 章）'
+info '更新は update.sh で入れます。社外の控え（pgBackRest・restic）と夜の自動の更新は、まだ入れません（運営のマニュアル 第 14 章）'
