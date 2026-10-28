@@ -412,7 +412,10 @@ export class OpsStore {
   /** 有効なログイン状態と運営者（無効にした運営者は通さない）。 */
   async findSession(token: string): Promise<{ session: OpsSession; operator: Operator } | null> {
     const { rows } = await this.pool.query(
-      `select s.id as sid, s.csrf_token, s.expires_at as s_expires, s.verified, o.* from ops.sessions s join ops.operators o on o.id = s.operator_id
+      // パスキーの数も読む（画面は、0 なら登録の画面、1 以上なら確かめの画面を出す）
+      `select s.id as sid, s.csrf_token, s.expires_at as s_expires, s.verified, o.*,
+              (select count(*) from ops.passkeys p where p.operator_id = o.id) as passkey_count
+         from ops.sessions s join ops.operators o on o.id = s.operator_id
         where s.id = $1 and s.revoked_at is null and s.expires_at > now() and o.status = 'active'`,
       [sha256(token)],
     );

@@ -289,10 +289,14 @@ test('運営者のパスキーの口: 登録の合言葉は 1 回だけ・パス
     const { token, session } = await store.createSession(op.id, 'google', null, 1);
     assert.equal(session.verified, false);
     assert.equal((await store.findSession(token))?.session.verified, false);
+    assert.equal((await store.findSession(token))?.operator.passkeyCount, 0);
     await store.addPasskey(op.id, { id: `cred-${email}`, publicKey: 'AQID', counter: 0, transports: ['internal'], name: '端末' });
     await store.markSessionVerified(session.id);
     assert.equal((await store.findSession(token))?.session.verified, true);
     assert.equal((await store.findOperator(op.id))?.passkeyCount, 1);
+    // ログインし直したとき、画面が登録ではなく確かめを出すために、ログインの状態からもパスキーの数が読める
+    const again = await store.createSession(op.id, 'google', null, 1);
+    assert.equal((await store.findSession(again.token))?.operator.passkeyCount, 1);
     await store.touchPasskey(`cred-${email}`, 5);
     assert.equal((await store.listPasskeys(op.id))[0]?.counter, 5);
     await store.resetPasskeys(op.id);
