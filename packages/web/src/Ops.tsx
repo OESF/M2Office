@@ -640,6 +640,8 @@ function Server() {
   const rate = (f: number, n: number) => (n ? `${Math.round((f / n) * 1000) / 10}%` : '—');
   const lastWorker = s?.workers[0]?.at ?? null;
   const workerOk = !!lastWorker && Date.now() - Date.parse(lastWorker) < 3 * 60_000;
+  // いま動いているワーカー（3 分以内に知らせのあったもの）。起動し直して止めた前のワーカーの記録は数えない
+  const liveWorkers = (s?.workers ?? []).filter((w) => Date.now() - Date.parse(w.at) < 3 * 60_000);
   const group: Record<string, string> = { ai: 'AI', google: 'Google', mcp: '会社の接続（MCP）' };
   return (
     <>
@@ -652,19 +654,28 @@ function Server() {
           <div className="stats">
             <div className="stat"><span>待ち行列</span><strong>{s.queue.queued}</strong><span>{s.queue.oldestQueuedAt ? `最も古い ${when(s.queue.oldestQueuedAt)}` : '待ちなし'}・動いている {s.queue.running}・承認待ち {s.queue.awaitingApproval}</span></div>
             <div className="stat"><span>実行（1 時間 ／ 今日）</span><strong>{s.runs.hour} ／ {s.runs.today}</strong><span>失敗 {rate(s.runs.hourFailed, s.runs.hour)} ／ {rate(s.runs.todayFailed, s.runs.today)}</span></div>
-            <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '動いています' : '応答がありません'}</span></strong><span>最後の応答 {when(lastWorker)}</span></div>
+            <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '動いています' : '応答がありません'}</span></strong><span>最後の応答 {when(lastWorker)}{liveWorkers.length > 1 ? `・${liveWorkers.length} 台` : ''}</span></div>
             <div className="stat"><span>遅れている定時実行</span><strong>{s.schedulesLate}</strong></div>
             <div className="stat"><span>AI の費用（今日 ／ 今月）</span><strong>{yen(Number(s.ai.today))} ／ {yen(Number(s.ai.month))}</strong><span>前の月の同じ時期 {yen(Number(s.ai.lastMonthSamePeriod))}</span></div>
             <div className="stat"><span>データベース</span><strong>{bytes(Number(s.database.bytes))}</strong><span>接続 {s.database.connections}</span></div>
             <div className="stat"><span>ファイルの置き場</span><strong>{bytes(Number(s.filesBytes))}</strong></div>
           </div>
-          <div className="table-scroll"><table className="table">
-            <thead><tr><th>外部の接続（24 時間）</th><th className="num">成功</th><th className="num">失敗</th><th className="num">失敗の割合</th><th className="num">平均の速さ</th></tr></thead>
+          <h3>外部の接続（24 時間）</h3>
+          {s.targets.length === 0 ? <p className="muted">まだありません</p> : <div className="table-scroll"><table className="table">
+            <thead><tr><th>接続先</th><th className="num">成功</th><th className="num">失敗</th><th className="num">失敗の割合</th><th className="num">平均の速さ</th></tr></thead>
             <tbody>{s.targets.map((t) => (
               <tr key={t.group}><td>{group[t.group] ?? t.group}</td><td className="num">{t.ok}</td><td className="num">{t.fail}</td><td className="num">{rate(t.fail, t.ok + t.fail)}</td><td className="num">{t.avgMs === null ? '—' : `${t.avgMs} ms`}</td></tr>
             ))}</tbody>
-          </table></div>
-          {s.workers.length > 1 && <p className="muted small">ワーカー: {s.workers.map((w) => `${w.id}（${when(w.at)}）`).join('、')}</p>}
+          </table></div>}
+          {liveWorkers.length > 1 && (
+            <>
+              <h3>ワーカー</h3>
+              <div className="table-scroll"><table className="table">
+                <thead><tr><th>名前</th><th>最後の応答</th><th>版</th></tr></thead>
+                <tbody>{liveWorkers.map((w) => <tr key={w.id}><td>{w.id}</td><td>{when(w.at)}</td><td>{w.version ?? '—'}</td></tr>)}</tbody>
+              </table></div>
+            </>
+          )}
         </>
       )}
     </>
