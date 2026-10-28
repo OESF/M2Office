@@ -146,11 +146,21 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | 6 | 外から機械の中の口に届かない | 手元で `curl -s -o /dev/null -w '%{http_code}' https://m2office.net/internal/tls-allowed?domain=x` | `404` |
 | 7 | CrowdSec が読んでいる | `sudo cscli metrics` | `Acquisition Metrics` に `/var/log/caddy/access.log` が出る |
 
-### 手順 5. 最初の会社を作る
+### 手順 5. 最初の運営者を作る
+
+できたばかりのデータベースには、運営者がいません。Google でログインしても「このアカウントは運営者として登録されていません」と出ます。最初の運営管理者だけは、VPS の上で作ります（2 人目からはマスター管理画面で足します）。
+
+```bash
+cd / && sudo -u m2office node --env-file=/etc/m2office/m2office.env /opt/m2office/app/scripts/create-operator.mjs --email <運営管理者の Google のアドレス> --name "<名前>" --role admin
+```
+
+パスキーの登録の合言葉（24 時間・1 回だけ）が出ます。運営の画面で Google でログインしたあと、この合言葉を入れてパスキーを登録します。合言葉は人に見せず、作業の記録にも残しません。
+
+### 手順 6. 最初の会社を作る
 
 マスター管理画面（`https://ops.m2office.net`）で会社を作ります（第 3 章）。会社のサブドメインを初めて開いたときに、その名前の証明書を取ります（数秒かかります）。
 
-### 手順 6. WAF を止める形にする（1〜2 週間後）
+### 手順 7. WAF を止める形にする（1〜2 週間後）
 
 WAF は記録だけで始めます。週に 1 回、記録（`/var/log/caddy/waf-audit.log`）を見て、ふだんの使い方で当たっているものが無いか確かめます。当たっているものがあれば運営に知らせ、外す規則を決めてから、`setup.sh` を走らせ直して「WAF の動き」を `On` にします。
 
