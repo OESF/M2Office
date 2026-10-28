@@ -65,8 +65,12 @@ test('入口: 会社のサブドメインは API に尋ねてから証明書を�
   for (const site of ['*.m2office.net', 'ops.m2office.net', 'm2office.net, www.m2office.net']) {
     assert.ok(file.includes(`${site} {\n\timport on_demand_cert\n`), `${site} の証明書は初めて開かれたときに取る`);
   }
-  assert.match(file, /ops\.m2office\.net \{[\s\S]*?@outside not remote_ip 10\.66\.0\.0\/24\n\trespond @outside 404/);
-  assert.match(file, /respond @internal 404/);
+  // 断る段は handle で書き、ほかの handle より前に置く（Caddy は respond より handle を先に動かすので、respond では素通りする）
+  const ops = file.slice(file.indexOf('ops.m2office.net {'));
+  assert.match(ops, /@outside not remote_ip 10\.66\.0\.0\/24\n\thandle @outside \{\n\t\trespond 404/);
+  assert.ok(ops.indexOf('handle @outside') < ops.indexOf('handle /v1/ops/*'), '網の外を断る段は、運営の API の段より前');
+  assert.match(file, /handle @internal \{\n\t\trespond 404/);
+  assert.ok(!/^\s*respond @/m.test(file), 'respond で断る段を書かない');
   assert.match(file, /SecRuleEngine DetectionOnly/);
   assert.ok(!file.includes('client_ip_headers'), 'Cloudflare を前に置かないときは、見出しから利用者のアドレスを取らない');
 });
@@ -75,7 +79,8 @@ test('Cloudflare を前に置くときだけ、Cloudflare 以外を断り、利�
   const off = readFileSync(join(render('no'), 'Caddyfile'), 'utf8');
   const on = readFileSync(join(render('yes'), 'Caddyfile'), 'utf8');
   assert.match(off, /\(cloudflare_only\) \{\n\tvars cloudflare_front no\n\}/);
-  assert.match(on, /respond @not_cloudflare 403/);
+  assert.match(on, /handle @not_cloudflare \{\n\t\trespond 403/);
+  assert.ok(!/^\s*respond @/m.test(on), 'respond で断る段を書かない');
   assert.match(on, /client_ip_headers CF-Connecting-IP/);
 });
 

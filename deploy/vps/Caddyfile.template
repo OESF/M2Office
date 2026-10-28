@@ -70,7 +70,9 @@
 # 外から機械の中の口（/internal/）に届かせない
 (no_internal) {
 	@internal path /internal/*
-	respond @internal 404
+	handle @internal {
+		respond 404
+	}
 }
 
 {{CLOUDFLARE_SNIPPET}}
@@ -121,8 +123,12 @@ ops.{{BASE_DOMAIN}} {
 	import no_internal
 	import maintenance_page
 	encode zstd gzip
+	# 断る段は handle で書き、ほかの handle より前に置く（Caddy は respond より handle を先に動かすため、
+	# respond で書くと網の外からも開けてしまう。2026-10-28 に実機で見つけた）
 	@outside not remote_ip {{WG_NETWORK}}
-	respond @outside 404
+	handle @outside {
+		respond 404
+	}
 	handle /v1/ops/* {
 		import waf
 		reverse_proxy 127.0.0.1:{{OPS_PORT}}
