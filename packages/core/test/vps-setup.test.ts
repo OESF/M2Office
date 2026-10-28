@@ -23,7 +23,7 @@ const ANSWERS = {
   GEMINI_API_KEY: '', GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', SECRET_KEY: 'k'.repeat(64),
   DB_OWNER_PASSWORD: 'owner-pass', DB_APP_PASSWORD: 'app-pass', DB_OPS_PASSWORD: 'ops-pass',
   RELEASE_DIR: '/opt/m2office/app/dist-release', DATA_DIR: '/var/lib/m2office', LOG_DIR: '/var/log/m2office', CADDY_LOG_DIR: '/var/log/caddy',
-  SITE_DIR: '/var/lib/m2office/site', API_PORT: '3101', OPS_PORT: '3102',
+  SITE_DIR: '/var/www/m2office-site', API_PORT: '3101', OPS_PORT: '3102',
 };
 
 /** 雛形を埋めて、出力先を返す。 */
