@@ -1,5 +1,5 @@
 #!/bin/bash
-# @file クラウドの形のセットアップ（Xserver の VPS・Ubuntu 24.04。仕様書 第20.4.6節、ADR-0113）。技術者が対話で答えて、VPS に M2Office を入れる。
+# @file クラウドの形のセットアップ（Xserver の VPS・Ubuntu 24.04 か 26.04。仕様書 第20.4.6節、ADR-0113）。技術者が対話で答えて、VPS に M2Office を入れる。
 #
 # 前提: 運営のマニュアル 第 13 章（VPS の用意）を終えていること（SSH は WireGuard の網から・ufw・自動の更新・スワップ）。
 #
@@ -13,6 +13,9 @@
 #
 # 試すとき（機械を変えずに、雛形を埋めた結果だけを作る）:
 #   setup.sh --render-only <出力先> --answers <KEY=値 のファイル>
+#
+# 本物の VPS で初めて確かめるとき（リリースのタグでない main などを入れる。顧客を入れる前だけ）:
+#   setup.sh --allow-untagged
 
 set -euo pipefail
 
@@ -108,12 +111,18 @@ fi
 say 'M2Office（クラウドの形）を VPS に入れます'
 [ "$(id -u)" -ne 0 ] || die 'root では走らせないでください。自分の名前の利用者で走らせます（要るところだけ sudo を使います）'
 . /etc/os-release
-[ "${ID:-}" = ubuntu ] && [ "${VERSION_ID:-}" = 24.04 ] || die "Ubuntu 24.04 で走らせてください（いま: ${PRETTY_NAME:-不明}）"
+[ "${ID:-}" = ubuntu ] && { [ "${VERSION_ID:-}" = 24.04 ] || [ "${VERSION_ID:-}" = 26.04 ]; } || die "Ubuntu 24.04 か 26.04 で走らせてください（いま: ${PRETTY_NAME:-不明}）"
 sudo -v || die 'sudo が使えません'
 tag=$(git -C "$REPO_DIR" describe --tags --exact-match 2>/dev/null || true)
-[[ "$tag" == v* ]] || die "リリースのタグ（v で始まる版）を取ってきてください（いま: $(git -C "$REPO_DIR" rev-parse --short HEAD)）"
-info "入れる版: $tag"
-sudo ufw status | grep -q 'Status: active' || die 'ufw が有効ではありません。先に運営のマニュアル 第 13 章を終えてください'
+if [[ "$tag" == v* ]]; then
+  info "入れる版: $tag"
+elif [ "${1:-}" = --allow-untagged ]; then
+  warn "リリースのタグではない版を入れます（$(git -C "$REPO_DIR" rev-parse --short HEAD)）。確かめのためだけに使い、顧客を入れる前にタグに切り替えてください"
+else
+  die "リリースのタグ（v で始まる版）を取ってきてください（いま: $(git -C "$REPO_DIR" rev-parse --short HEAD)）"
+fi
+# 言語の設定が日本語でも同じ表示で確かめる（ufw は「状態: アクティブ」と出すため）
+sudo LC_ALL=C ufw status | grep -q 'Status: active' || die 'ufw が有効ではありません。先に運営のマニュアル 第 13 章を終えてください'
 ip link show wg0 >/dev/null 2>&1 || die 'WireGuard（wg0）がありません。先に運営のマニュアル 第 13 章の手順 8 を終えてください'
 
 # ---- 2. 尋ねる（前の答えを既定にする） ----
@@ -147,7 +156,7 @@ say 'ソフトを入れます（初めては数分かかります）'
 sudo apt-get update -qq
 sudo apt-get install -y -qq ca-certificates curl gnupg openssl git ffmpeg restic pgbackrest debian-keyring debian-archive-keyring apt-transport-https >/dev/null
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" != "$NODE_MAJOR" ]; then
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | sudo -E bash - >/dev/null
+  curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | sudo bash - >/dev/null
   sudo apt-get install -y -qq nodejs >/dev/null
 fi
 info "Node.js: $(node -v)"
@@ -169,7 +178,12 @@ fi
 sudo apt-mark hold caddy >/dev/null
 info "Caddy: $(caddy version | cut -d' ' -f1)（WAF を組み込み）"
 if ! command -v cscli >/dev/null; then
-  curl -fsSL https://install.crowdsec.net | sudo sh >/dev/null
+  # CrowdSec の置き場には 26.04 用がまだ無いので、24.04（noble）用を使う（Go の単体のプログラムなのでそのまま動く）
+  if [ "$VERSION_ID" = 26.04 ]; then
+    curl -fsSL https://install.crowdsec.net | sudo env os=ubuntu dist=noble sh >/dev/null
+  else
+    curl -fsSL https://install.crowdsec.net | sudo sh >/dev/null
+  fi
   sudo apt-get install -y -qq crowdsec crowdsec-firewall-bouncer-nftables >/dev/null
 fi
 sudo cscli collections install crowdsecurity/caddy >/dev/null 2>&1 || true

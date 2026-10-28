@@ -1,6 +1,6 @@
 # クラウドの形の導入（Xserver の VPS）
 
-多くの会社が入るクラウドの形の M2Office を、Xserver の VPS（Ubuntu 24.04）に入れる手順と雛形です（仕様書 第20.4.6節、ADR-0113）。
+多くの会社が入るクラウドの形の M2Office を、Xserver の VPS（Ubuntu 24.04 か 26.04 LTS）に入れる手順と雛形です（仕様書 第20.4.6節、ADR-0113）。
 第 1 弾は **VPS だけで守ります**。入口は Caddy（Let's Encrypt の証明書・Coraza の WAF）、攻撃する相手を止めるのは CrowdSec、保守の SSH と運営の画面は VPS に立てた WireGuard の網からだけ通します。
 大量の通信の攻撃を受けたときは、Cloudflare をあとから前に置きます（`CLOUDFLARE_FRONT=yes`）。
 
