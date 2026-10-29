@@ -1,0 +1,11 @@
+# 国のアドレスの一覧を、週に 1 回（月曜の朝）取り直す（仕様書 第20.4.6節「国で通信を止める」）。止まっていた間の分は、起動の後に行う。
+[Unit]
+Description=M2Office: 国で通信を止める一覧を週に 1 回取り直す
+
+[Timer]
+OnCalendar=Mon *-*-* 05:00:00 Asia/Tokyo
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

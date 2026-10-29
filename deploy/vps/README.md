@@ -33,6 +33,8 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | `m2office.env.template` | 環境変数（`/etc/m2office/m2office.env`。root と `m2office` だけが読める） |
 | `systemd/*.service` | API・ワーカー・運営の API。メモリの上限と守りの設定つき |
 | `crowdsec/acquis-m2office.yaml` | CrowdSec に Caddy のアクセスのログを読ませる設定 |
+| `geo/m2office-geo-update.sh` | 国で通信を止める（既定は中国・ロシア・北朝鮮）。地域インターネットレジストリの一覧から nftables の表 `m2office_geo` を作り、入ってくる通信と出ていく通信を断る。`setup.sh` が `/usr/local/sbin/m2office-geo-update` に入れる |
+| `geo/*.service`・`geo/*.timer` | 起動のときに表を入れる（`m2office-geo`）・週に 1 回一覧を取り直す（`m2office-geo-update`） |
 | `update.sh` | リリースのタグを入れる更新。控え（`pg_dump`）→ 止める → 切り替えて組み立て直す → 移行 → 動かす → 確かめる。失敗したら前の版と控えに戻す |
 
 雛形の埋め方は、ローカルの形と同じ `deploy/onsite/render.mjs` を使います。機械を変えずに埋めた結果だけを見るときは、次のようにします。

@@ -136,6 +136,8 @@ ask OPS_GOOGLE_DOMAIN 'マスター管理画面に入れる Google Workspace の
 ask WG_NETWORK 'WireGuard の網（運営の画面を開ける範囲）' "${WG_NETWORK:-$WG_NETWORK_DEFAULT}"
 ask WAF_ENGINE 'WAF の動き（DetectionOnly: 記録だけ ／ On: 止める）' "${WAF_ENGINE:-DetectionOnly}"
 ask CLOUDFLARE_FRONT 'Cloudflare を前に置くか（大量の通信の攻撃を受けたときだけ yes）' "${CLOUDFLARE_FRONT:-no}"
+ask BLOCK_COUNTRIES '通信を止める国（国の 2 文字をカンマで並べる。止めないなら none）' "${BLOCK_COUNTRIES:-CN,RU,KP}"
+ask GEO_ALLOW '国で止めずに通す相手（アドレスか範囲をカンマで。無ければ空のまま）' "${GEO_ALLOW:-}"
 GEMINI_API_KEY=$(env_value GEMINI_API_KEY)
 ask GEMINI_API_KEY 'Gemini の API の鍵（後でもよい）' "$GEMINI_API_KEY" secret
 GOOGLE_LOGIN_CLIENT_ID=$(env_value GOOGLE_LOGIN_CLIENT_ID)
@@ -151,9 +153,18 @@ IFS=, read -ra ops_domains <<< "$OPS_GOOGLE_DOMAIN"
 for d in "${ops_domains[@]}"; do [[ "$d" =~ ^[a-z0-9.-]+\.[a-z]+$ ]] || die "マスター管理画面に入れるドメインの形が違います: $d"; done
 [ "$WAF_ENGINE" = DetectionOnly ] || [ "$WAF_ENGINE" = On ] || die 'WAF の動きは DetectionOnly か On です'
 [ "$CLOUDFLARE_FRONT" = no ] || [ "$CLOUDFLARE_FRONT" = yes ] || die 'Cloudflare を前に置くかは yes か no です'
+# 国で通信を止める（仕様書 第20.4.6節「国で通信を止める」）。国の 2 文字（ISO 3166）にそろえる
+BLOCK_COUNTRIES=$(printf '%s' "$BLOCK_COUNTRIES" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]' | sed -e 's/^,*//' -e 's/,*$//' -e 's/,,*/,/g')
+[ -n "$BLOCK_COUNTRIES" ] || die '通信を止める国を入れてください（止めないなら none）'
+if [ "$BLOCK_COUNTRIES" != NONE ]; then
+  IFS=, read -ra block_ccs <<< "$BLOCK_COUNTRIES"
+  for c in "${block_ccs[@]}"; do [[ "$c" =~ ^[A-Z]{2}$ ]] || die "国は 2 文字の記号で入れてください（例 CN）: $c"; done
+fi
+GEO_ALLOW=$(printf '%s' "$GEO_ALLOW" | tr -d '[:space:]')
+[[ "$GEO_ALLOW" =~ ^[0-9a-fA-F.:/,-]*$ ]] || die "国で止めずに通す相手は、アドレスか範囲をカンマで並べてください: $GEO_ALLOW"
 # 秘密の値でない答えだけを残す（次の既定）
-printf "BASE_DOMAIN='%s'\nACME_EMAIL='%s'\nOPS_GOOGLE_DOMAIN='%s'\nWG_NETWORK='%s'\nWAF_ENGINE='%s'\nCLOUDFLARE_FRONT='%s'\n" \
-  "$BASE_DOMAIN" "$ACME_EMAIL" "$OPS_GOOGLE_DOMAIN" "$WG_NETWORK" "$WAF_ENGINE" "$CLOUDFLARE_FRONT" | sudo tee "$CONF" >/dev/null
+printf "BASE_DOMAIN='%s'\nACME_EMAIL='%s'\nOPS_GOOGLE_DOMAIN='%s'\nWG_NETWORK='%s'\nWAF_ENGINE='%s'\nCLOUDFLARE_FRONT='%s'\nBLOCK_COUNTRIES='%s'\nGEO_ALLOW='%s'\n" \
+  "$BASE_DOMAIN" "$ACME_EMAIL" "$OPS_GOOGLE_DOMAIN" "$WG_NETWORK" "$WAF_ENGINE" "$CLOUDFLARE_FRONT" "$BLOCK_COUNTRIES" "$GEO_ALLOW" | sudo tee "$CONF" >/dev/null
 sudo chmod 600 "$CONF"
 
 # ---- 3. ソフトを入れる（公式の置き場から。版の大きな数を固定する） ----
@@ -295,6 +306,20 @@ fi
 # 80・443 を開ける（WireGuard の UDP と、網の中の SSH は第 13 章で開けてある）
 sudo ufw allow 80/tcp >/dev/null && sudo ufw allow 443/tcp >/dev/null
 
+# 国で通信を止める（仕様書 第20.4.6節「国で通信を止める」）。nftables の専用の表に入れ、週に 1 回一覧を取り直す
+# nftables.service は有効にしない（/etc/nftables.conf の「全部を消す」で ufw と CrowdSec の表まで消えるため）。表は専用のサービスで入れる
+say '国で通信を止めます'
+command -v nft >/dev/null 2>&1 || sudo apt-get install -y -qq nftables >/dev/null
+printf "BLOCK_COUNTRIES='%s'\nGEO_ALLOW='%s'\n" "$BLOCK_COUNTRIES" "$GEO_ALLOW" | sudo tee "$ETC_DIR/geo.conf" >/dev/null
+sudo chmod 644 "$ETC_DIR/geo.conf"
+sudo install -m 755 "$SCRIPT_DIR/geo/m2office-geo-update.sh" /usr/local/sbin/m2office-geo-update
+for u in m2office-geo.service m2office-geo-update.service m2office-geo-update.timer; do sudo install -m 644 "$SCRIPT_DIR/geo/$u" "/etc/systemd/system/$u"; done
+sudo systemctl daemon-reload
+sudo systemctl enable m2office-geo.service m2office-geo-update.timer >/dev/null 2>&1
+sudo systemctl start m2office-geo-update.timer
+[ "$BLOCK_COUNTRIES" = NONE ] || info '国のアドレスの一覧を取ります（1〜2 分）'
+sudo /usr/local/sbin/m2office-geo-update >/dev/null || warn '国のアドレスの一覧を取れませんでした。前の一覧があれば、それで止め続けます。後で sudo m2office-geo-update で取り直してください'
+
 # ---- 10. 確かめる ----
 say '動きを確かめます'
 ok=0
@@ -309,6 +334,13 @@ if systemctl is-active --quiet "$BOUNCER" && sudo cscli bouncers list -o raw | g
   info 'CrowdSec の止める役: 動いています（決めた相手を機械のファイアウォールで止める）'
 else
   warn 'CrowdSec の止める役が動いていません。攻撃する相手を見つけても止められません（journalctl -u crowdsec-firewall-bouncer -n 50）'
+fi
+if [ "$BLOCK_COUNTRIES" = NONE ]; then
+  info '国で通信を止める: 止めていません（止める国が none）'
+elif sudo nft list table inet m2office_geo >/dev/null 2>&1; then
+  sudo /usr/local/sbin/m2office-geo-update --status | sed 's/^/  国で通信を止める: /'
+else
+  warn '国で通信を止める表が入っていません（sudo m2office-geo-update で入れ、journalctl -u m2office-geo-update で理由を見てください）'
 fi
 if ss -tln | grep -E "0\.0\.0\.0:($API_PORT|$OPS_PORT)|\[::\]:($API_PORT|$OPS_PORT)" >/dev/null; then
   warn 'API が機械の外でも待ち受けています（M2O_LISTEN_HOST を確かめてください）'

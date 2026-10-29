@@ -38,6 +38,7 @@ VPS が開ける口は 3 つだけです。
 |---|---|
 | WAF（Coraza と OWASP の規則） | Caddy に組み込む。SQL の差し込み・スクリプトの差し込みなど、よくある攻撃の型を見つけて止める。**はじめは記録だけの形で動かし**、文書の本文・ファイルの送信・外部のアプリの配信などを誤って止めないことを確かめてから、止める形にする |
 | CrowdSec | Caddy と SSH のログを読み、総当たり・道の探り・WAF に当たった相手を、決めた時間だけ機械のファイアウォールで断る。世界中の利用者が見つけた攻撃元の一覧（無料の範囲）も使う |
+| 国で通信を止める | 中国・ロシア・北朝鮮（既定）との通信を、入ってくるものも出ていくものも、機械のファイアウォール（nftables の表 `m2office_geo`）で断る。国のアドレスは 5 つの地域インターネットレジストリの公開の一覧から作り、週に 1 回（月曜の朝）取り直す。取れない・壊れているときは前の一覧を使い続ける。WireGuard の網と機械の中は見ない |
 | 回数の制限 | Caddy が粗い上限（ログイン・外部のアプリの道）、M2Office が細かい上限を持つ（二重） |
 | 自動の更新 | OS のセキュリティの更新（第 13 章の手順 5）と M2Office の夜の更新で、弱点を早くふさぐ |
 
@@ -65,6 +66,8 @@ VPS が開ける口は 3 つだけです。
 | 気をつけること | 1 回の送信が 100 MB までになる（録音・動画）。Cloudflare が通信の中身を見られるようになるので、会社に知らせる |
 
 手順は「大量の通信の攻撃を受けたとき」の章（これから作る）に書き、年に 1 回、使い捨ての VPS で練習します。
+
+Cloudflare を前に置くと、入ってくる通信は Cloudflare のアドレスからしか来なくなり、VPS では国で止められません。Cloudflare の「セキュリティ › WAF › カスタムルール」（無料の範囲）に、`(ip.src.country in {"CN" "RU" "KP"})` を「ブロック」にする規則を足します。出ていく通信は、いままでどおり VPS で止めます。
 
 ### この形で受け入れること
 
@@ -128,6 +131,8 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | WireGuard の網 | 既定（`10.66.0.0/24`）のまま |
 | WAF の動き | 初めは `DetectionOnly`（記録だけ） |
 | Cloudflare を前に置くか | `no` |
+| 通信を止める国 | 既定（`CN,RU,KP`）のまま。止めないときは `none` |
+| 国で止めずに通す相手 | 空のまま（どうしても通す相手がいるときだけ、アドレスか範囲を入れる） |
 | Gemini の API の鍵・Google のログインのクライアント | あれば入れる（後で走らせ直して入れてもよい） |
 
 命令が行うこと: ソフトを公式の置き場から入れる（Node.js 24・PostgreSQL 17 と pgvector・Caddy と WAF・CrowdSec）→ 専用の利用者 `m2office` と置き場を作る → 秘密の値を機械の上で作る → 設定のファイル（`/etc/m2office/m2office.env`）を作る → データベースを作る → 本番の組み立てと移行 → systemd で動かす → Caddy と CrowdSec の設定を置く → 80・443 を開ける → 動きを確かめる。初めては 10〜20 分ほどかかります。
@@ -146,6 +151,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | 6 | 外から機械の中の口に届かない | 手元で `curl -s -o /dev/null -w '%{http_code}' https://m2office.net/internal/tls-allowed?domain=x` | `404` |
 | 7 | CrowdSec が読んでいる | `sudo cscli metrics` | `Acquisition Metrics` に `/var/log/caddy/access.log` が出る |
 | 8 | CrowdSec が止めている | `sudo cscli bouncers list` と `systemctl is-active crowdsec-firewall-bouncer` | `crowdsec-firewall-bouncer` が並び、`active`。無ければ見つけた相手を止められないので、`setup.sh` を走らせ直す |
+| 9 | 国で通信を止めている | `sudo m2office-geo-update --status` と `systemctl list-timers m2office-geo-update.timer` | 止める国・範囲の数（2 万を超える）・止めた数が出て、次の取り直しの日時が出る。取り直しの記録は `journalctl -u m2office-geo-update` |
 
 自分の手元のアドレスが止められて WireGuard でつながらなくなったときは、Xserver の管理画面のコンソールで入り、`sudo cscli decisions delete --ip <手元のアドレス>` で外します。
 

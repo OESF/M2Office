@@ -127,3 +127,56 @@ test('更新（update.sh）: 文法が通り、控えを取ってから止め、
   assert.match(body, /as_owner chmod -R go\+rX "\$REPO_DIR"/);
   assert.match(body, /PGPASSWORD="\$OWNER_PASS" "\$PG_BIN\/pg_dump"/, 'パスワードを命令の引数に出さない');
 });
+
+test('国で通信を止める: 止める国の範囲だけを取り出し、表を作る。壊れた一覧・半分より少ない一覧は使わない（第20.4.6節「国で通信を止める」）', () => {
+  const geo = join(root, 'deploy/vps/geo/m2office-geo-update.sh');
+  execFileSync('bash', ['-n', geo]);
+  const dir = mkdtempSync(join(tmpdir(), 'm2o-geo-'));
+  const rir = join(dir, 'rir');
+  execFileSync('mkdir', ['-p', rir]);
+  // 割り当ての一覧の見本（数が 2 の累乗でない IPv4・IPv6・ほかの国・予約・要約の行）
+  const lines = [
+    '2|apnic|20261029|5|19830613|20261028|+1000',
+    'apnic|*|ipv4|*|3|summary',
+    'apnic|CN|ipv4|1.0.1.0|256|20110414|allocated|A1',
+    'apnic|CN|ipv4|1.0.8.0|768|20110414|allocated|A2',
+    'apnic|KP|ipv4|175.45.176.0|1024|20100120|assigned|A3',
+    'apnic|JP|ipv4|1.0.16.0|4096|20110412|allocated|A4',
+    'apnic|CN|ipv6|2001:250::|32|20000426|allocated|A5',
+    'apnic|CN|ipv4|1.2.3.0|256|20110414|reserved|A6',
+    'apnic|CN|asn|4134|1|20020501|allocated|A7',
+  ];
+  writeFileSync(join(rir, 'delegated-apnic-extended-latest'), `${lines.join('\n')}\n`);
+  for (const n of ['ripencc', 'arin', 'lacnic', 'afrinic']) writeFileSync(join(rir, `delegated-${n}-extended-latest`), `2|${n}|20261029|1\n${n}|RU|ipv4|5.8.0.0|512|20110101|allocated|R1\n`);
+  const conf = join(dir, 'geo.conf');
+  const run = (countries: string, allow = '', from = rir) => {
+    writeFileSync(conf, `BLOCK_COUNTRIES='${countries}'\nGEO_ALLOW='${allow}'\n`);
+    const out = join(dir, 'geo.nft');
+    const r = execFileSync('bash', [geo, '--from-dir', from, '--render', out], { env: { ...process.env, M2O_GEO_CONF: conf, M2O_GEO_DIR: join(dir, 'state') }, encoding: 'utf8' });
+    return { line: r.trim(), nft: readFileSync(out, 'utf8') };
+  };
+  const { line, nft } = run('cn, ru,kp');
+  assert.equal(line, 'CN,RU,KP 7 1', '小文字と空白をそろえ、IPv4 は 4 つの一覧の RU を含めて 7、IPv6 は 1');
+  assert.match(nft, /1\.0\.8\.0-1\.0\.10\.255/, '768 個（2 の累乗でない）は始まりと終わりの範囲にする');
+  assert.match(nft, /175\.45\.176\.0-175\.45\.179\.255/);
+  assert.match(nft, /2001:250::\/32/);
+  assert.ok(!nft.includes('1.0.16.0') && !nft.includes('1.2.3.0'), 'ほかの国と予約の範囲は入れない');
+  // 入れ替えは 1 回の処理（空の表を足して消してから作る）。機械の中と WireGuard の網は見ない。出ていく通信はすぐ失敗させる
+  assert.ok(nft.startsWith('table inet m2office_geo\ndelete table inet m2office_geo\ntable inet m2office_geo {'));
+  assert.match(nft, /chain input \{\n\s+type filter hook input priority -10; policy accept;\n\s+iif "lo" accept\n\s+iifname "wg0" accept/);
+  assert.match(nft, /ip daddr @block4 counter name "out_blocked" reject with icmpx admin-prohibited/);
+  assert.match(run('CN', '1.0.1.5,2001:250::1').nft, /set allow4 \{[^}]*elements = \{ 1\.0\.1\.5 \}/);
+  assert.equal(run('none').nft, '', 'none なら表を作らない');
+  assert.throws(() => run('CHN'), '国は 2 文字');
+  assert.throws(() => run('CN', 'example.com'), '通す相手はアドレスか範囲');
+  // 同じ国で、範囲が前の半分より少ない一覧は使わない（国を変えたときは比べない）
+  execFileSync('mkdir', ['-p', join(dir, 'state')]);
+  writeFileSync(join(dir, 'state', 'countries'), 'CN\n');
+  writeFileSync(join(dir, 'state', 'count'), '100（IPv4 90・IPv6 10）\n');
+  assert.throws(() => run('CN'), '前 100・今回 3');
+  assert.equal(run('CN,KP').line, 'CN,KP 3 1', '国を変えたときは比べない');
+  writeFileSync(join(dir, 'state', 'count'), '4\n');
+  // 検査の値が合わない一覧は使わない
+  writeFileSync(join(rir, 'delegated-apnic-extended-latest.md5'), 'MD5 (delegated-apnic-extended-latest) = 00000000000000000000000000000000\n');
+  assert.throws(() => run('CN'));
+});

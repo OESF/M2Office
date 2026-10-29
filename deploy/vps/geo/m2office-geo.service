@@ -1,0 +1,16 @@
+# 国で通信を止める表を、起動のときにネットワークより先に入れる（仕様書 第20.4.6節「国で通信を止める」）。
+# 前に作った一覧を入れるだけで、取りに行かない（取り直しは m2office-geo-update.timer）。
+[Unit]
+Description=M2Office: 国で通信を止める表を入れる
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/m2office-geo-update --load
+
+[Install]
+WantedBy=multi-user.target
