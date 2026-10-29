@@ -7,6 +7,7 @@
  * 4. 「？」を段落の中に置いていない（仕様書 第6.10.4.4節）。見出しの無い「？」と、文の途中の「？」を見つける
  * 5. 業務のマニュアル（`docs/manual/<名前>/`）が `manual.json`（title・extension）を持ち、章が `#` の見出しで始まる。記事の `business` がマニュアルの名前か、要点の記事だけの業務を指す（仕様書 第6.10.7.3節）
  * 6. 開発者向けの記事の `api` が、`docs/api/<名前>.openapi.yaml` を指す（仕様書 第6.10.7.4節）
+ * 7. マスター管理画面の「？」（`chapter: '…'`）が、運営者マニュアル（`docs/ops-manual/`）の実在する章を指す（仕様書 第23.8.16節）
  *
  * 業務の記事（`agent-<ID>`）は定義から自動で作るため、公式エージェントの ID と照合する。
  *
@@ -71,6 +72,14 @@ for (const f of readdirSync(webDir).filter((f) => /\.tsx?$/.test(f))) {
   for (const m of text.matchAll(/<p\b[^>]*>[^<]*<HelpTip\b/g)) {
     const line = text.slice(0, m.index).split('\n').length;
     problems.push(`packages/web/src/${f}:${line}: 「？」を段落の中に置いています。題名の説明（PageTitle）へまとめてください（仕様書 第6.10.4.4節）`);
+  }
+}
+// 運営の画面の「？」が指す運営者マニュアルの章（仕様書 第23.8.16節。docs/help ではなく docs/ops-manual）
+const opsChapters = new Set(readdirSync(join(root, 'docs', 'ops-manual')).filter((f) => /^\d{2}-.+\.md$/.test(f)).map((f) => f.replace(/\.md$/, '')));
+for (const f of ['Ops.tsx', 'ops-help.tsx']) {
+  const text = readFileSync(join(webDir, f), 'utf8');
+  for (const m of text.matchAll(/\bchapter: '([^']+)'/g)) {
+    if (!opsChapters.has(m[1])) problems.push(`packages/web/src/${f}: 運営者マニュアルの章 ${m[1]} が見つかりません`);
   }
 }
 // API のチェックリストが指す記事

@@ -16,6 +16,8 @@ import {
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
 import { RuntimeCard } from './runtime-card.js';
+import { OpsHelp, OpsTitle } from './ops-help.js';
+import { useOpenHelp } from './help.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
 const ROLE_LABEL: Record<OperatorRole, string> = { admin: '運営管理者', support: 'サポート', monitor: '監視' };
@@ -131,7 +133,7 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'requests' | 'server' | 'incidents' | 'logs' | 'machines' | 'operators' | 'audit' | 'law' | 'settings';
+type OpsPage = 'tenants' | 'requests' | 'server' | 'incidents' | 'logs' | 'machines' | 'operators' | 'audit' | 'law' | 'settings' | 'help';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
   { id: 'requests', label: '停止と再開', icon: 'approvals' },
@@ -143,6 +145,8 @@ const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'audit', label: '操作履歴', icon: 'audit' },
   { id: 'law', label: '法令の表', icon: 'doc' },
   { id: 'settings', label: '設定', icon: 'settings' },
+  // 運営者のヘルプ（第23.8.16節）。いちばん下
+  { id: 'help', label: 'ヘルプ', icon: 'help' },
 ];
 
 /** 印のある機械の数（左のメニューと会社一覧の要約で知らせる。運営の画面からは社外に送らない）。5 分ごとに読み直す。 */
@@ -160,6 +164,9 @@ function useFlaggedMachines(): number | null {
 /** 運営の画面の枠。 */
 function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
   const [page, setPage] = useState<OpsPage>('tenants');
+  const [helpChapter, setHelpChapter] = useState<string | null>(null);
+  // 画面の「？」の「詳しく見る」で、その画面の章を開く（第23.8.16節）
+  useOpenHelp(useCallback((id: string | null) => { setHelpChapter(id); setPage('help'); }, []));
   const flagged = useFlaggedMachines();
   const [requests, setRequests] = useState<StatusRequestRow[]>([]);
   const loadRequests = useCallback(() => { opsApi.statusRequests().then((r) => setRequests(r.requests)).catch(() => undefined); }, []);
@@ -176,7 +183,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
         <span className="badge">{me.operator.displayName}（{ROLE_LABEL[me.operator.role]}）</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
-      <SideNavLayout extraClass="no-talk" nav={<>{PAGES.map((p) => <NavItem key={p.id} icon={p.icon} label={p.label} hint={p.id === 'machines' && flagged ? `印 ${flagged}` : p.id === 'requests' && todo ? `要対応 ${todo}` : ''} active={page === p.id} onClick={() => setPage(p.id)} />)}</>}>
+      <SideNavLayout extraClass="no-talk" nav={<>{PAGES.map((p) => <NavItem key={p.id} icon={p.icon} label={p.label} hint={p.id === 'machines' && flagged ? `印 ${flagged}` : p.id === 'requests' && todo ? `要対応 ${todo}` : ''} active={page === p.id} onClick={() => { if (p.id === 'help') setHelpChapter(null); setPage(p.id); }} />)}</>}>
         <main className="canvas">
           {unconfirmed.length > 0 && (
             <div className="suspended-banner" role="alert">
@@ -194,6 +201,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           {page === 'machines' && <Machines me={me} />}
           {page === 'operators' && <Operators me={me} />}
           {page === 'audit' && <Audit />}
+          {page === 'help' && <OpsHelp chapter={helpChapter} onChapter={setHelpChapter} />}
         </main>
       </SideNavLayout>
     </div>
@@ -248,7 +256,7 @@ function Tenants({ me, flagged, onMachines, onChanged }: { me: OpsMe; flagged: n
   if (openId) return <TenantDetail id={openId} me={me} onBack={() => { setOpenId(null); load(); }} onChanged={onChanged} />;
   return (
     <>
-      <h2>会社一覧</h2>
+      <OpsTitle title="会社一覧" help={{ chapter: '03-tenants', text: '会社ごとの使われ方と注意の印を見て、会社を作ります。' }} />
       {error && <p className="error">{error}</p>}
       <div className="stats">
         <div className="stat"><span>会社</span><strong>{totals.count}</strong><span>稼働中 {totals.active} ／ 試用 {totals.trial} ／ 停止 {totals.stopped} ／ 解約 {totals.cancelled}</span></div>
@@ -369,7 +377,7 @@ function Machines({ me }: { me: OpsMe }) {
   const ok = (v: boolean | null | undefined) => (v === null || v === undefined ? '—' : v ? '○' : '×');
   return (
     <>
-      <h2>ローカルの形の機械</h2>
+      <OpsTitle title="ローカルの形の機械" help={{ chapter: '08-machines', text: '社内に置いた機械からの稼働の知らせと、その印を見ます。' }} />
       {error && <p className="error">{error}</p>}
       {me.can['machine.manage'] && (
         <div className="field" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -436,7 +444,7 @@ function Operators({ me }: { me: OpsMe }) {
   const run = (p: Promise<unknown>, fallback: string) => { setError(null); p.then(load).catch((e) => setError(errText(e, fallback))); };
   return (
     <>
-      <h2>運営者</h2>
+      <OpsTitle title="運営者" help={{ chapter: '02-operators', text: '運営者を足し、ロールとパスキーを扱います。' }} />
       {error && <p className="error">{error}</p>}
       <MyPasskeys />
       {issued && (
@@ -512,7 +520,7 @@ function OpsLogs({ me }: { me: OpsMe }) {
   }), [tenants, me]);
   return (
     <>
-      <h2>システムログ</h2>
+      <OpsTitle title="システムログ" help={{ chapter: '12-system-logs', text: 'API・ワーカーなどの記録を探し、書き出し、証拠として保全します。' }} />
       {source ? <SystemLogs source={source} /> : <p className="muted">読み込んでいます…</p>}
     </>
   );
@@ -525,7 +533,7 @@ function Audit() {
   useEffect(() => { opsApi.audit().then((r) => setRows(r.entries)).catch((e) => setError(e instanceof OpsApiError ? e.message : '読み込めませんでした')); }, []);
   return (
     <>
-      <h2>操作履歴</h2>
+      <OpsTitle title="操作履歴" help={{ chapter: '09-settings-audit', text: '運営者の操作の記録です。' }} />
       {error && <p className="error">{error}</p>}
       {rows && (
         <div className="table-scroll"><table className="table">
@@ -558,7 +566,7 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
       {error && <p className="error">{error}</p>}
       {d && (
         <>
-          <h2>{d.tenant.name}</h2>
+          <OpsTitle title={d.tenant.name} help={{ chapter: '04-tenant-detail', text: '会社の利用状況・稼働・シート・履歴と、停止や代理アクセスの操作です。' }} />
           <div className="card">
             <h3>概要</h3>
             <dl className="kv">
@@ -645,7 +653,7 @@ function Server() {
   const group: Record<string, string> = { ai: 'AI', google: 'Google', mcp: '会社の接続（MCP）' };
   return (
     <>
-      <h2>稼働状況</h2>
+      <OpsTitle title="稼働状況" help={{ chapter: '07-server', text: 'サーバー全体の動きと、機械の資源を見ます。' }} />
       {/* 動いている環境（第8.6.7.1節）と機械の資源（第23.8.7節）。クラウドの形では運営の機械の情報なので、運営の画面だけに出す。
           データベースとファイルの置き場の量は、機械の資源のディスクの内訳に出す */}
       <RuntimeCard load={opsApi.runtime} loadSamples={opsApi.runtimeSamples} filesBytes={s ? Number(s.filesBytes) : null} />
@@ -701,7 +709,7 @@ function Incidents() {
   };
   return (
     <>
-      <h2>障害の知らせ</h2>
+      <OpsTitle title="障害の知らせ" help={{ chapter: '15-incidents', text: '障害や計画停止を、対象の会社の管理者に知らせます。' }} />
       {error && <p className="error">{error}</p>}
       {notice && <p className="ok">{notice}</p>}
       <div className="card">
@@ -777,7 +785,7 @@ function LawTables({ me }: { me: OpsMe }) {
   };
   return (
     <>
-      <h2>法令の表</h2>
+      <OpsTitle title="法令の表" help={{ chapter: '16-law-tables', text: '全社に効く消費税の税率の表を直します。' }} />
       {error && <p className="error">{error}</p>}
       {rows && (
         <div className="card">
@@ -834,7 +842,7 @@ function Settings({ me }: { me: OpsMe }) {
   );
   return (
     <>
-      <h2>設定</h2>
+      <OpsTitle title="設定" help={{ chapter: '09-settings-audit', text: '運営主体の名前や問い合わせの窓口を決めます。' }} />
       {error && <p className="error">{error}</p>}
       {p && (
         <div className="card">
@@ -964,7 +972,7 @@ function Requests({ me, rows, onChanged }: { me: OpsMe; rows: StatusRequestRow[]
   const [notice, setNotice] = useState<string | null>(null);
   return (
     <>
-      <h2>停止と再開</h2>
+      <OpsTitle title="停止と再開" help={{ chapter: '05-suspension', text: '会社の利用を止める・再開する申請と承認です。' }} />
       {notice && <NoticeToSend text={notice} onClose={() => setNotice(null)} />}
       {rows.length === 0 ? <p className="muted">申請はありません</p> : <RequestTable me={me} rows={rows} onChanged={onChanged} onNotice={setNotice} showTenant />}
     </>

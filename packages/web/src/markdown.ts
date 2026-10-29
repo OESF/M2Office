@@ -33,7 +33,9 @@ export type MdInline =
   | { kind: 'text'; text: string }
   | { kind: 'strong'; text: string }
   | { kind: 'code'; text: string }
-  | { kind: 'link'; text: string; href: string };
+  | { kind: 'link'; text: string; href: string }
+  /** 同じ置き場の Markdown のファイル（`05-suspension.md`）への参照。押して開けるかは、表示する画面が決める（運営者のヘルプの章。仕様書 第23.8.16節） */
+  | { kind: 'ref'; text: string; href: string };
 
 const FENCE = /^\s*```\s*([\w-]*)\s*$/;
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
@@ -166,6 +168,7 @@ export function parseMarkdown(text: string, opts: { lineBreaks?: boolean } = {})
  * @remarks
  * コードの中は書式を解釈しない。リンクは `http(s)://` と `mailto:` だけを押せるようにし、
  * リポジトリの中のファイルへの相対のリンクは、画面からは開けないため文字だけを出す。
+ * ただし同じ置き場の Markdown のファイル（`05-suspension.md`）への参照は `ref` として返す（開けるかは表示する画面が決める）。
  */
 export function parseInline(s: string): MdInline[] {
   const out: MdInline[] = [];
@@ -178,7 +181,8 @@ export function parseInline(s: string): MdInline[] {
     if (m[1] !== undefined) out.push({ kind: 'code', text: m[1] });
     else if (m[2] !== undefined) {
       const href = m[3]!;
-      out.push(/^(https?:\/\/|mailto:)/i.test(href) ? { kind: 'link', text: m[2], href } : { kind: 'text', text: m[2] });
+      out.push(/^(https?:\/\/|mailto:)/i.test(href) ? { kind: 'link', text: m[2], href }
+        : /^[\w-]+\.md$/.test(href) ? { kind: 'ref', text: m[2], href } : { kind: 'text', text: m[2] });
     } else if (m[4] !== undefined) out.push({ kind: 'strong', text: m[4] });
     else {
       // 文の終わりの「.」「,」などは URL に含めない

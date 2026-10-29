@@ -606,6 +606,8 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | GET | `/v1/ops/server` | サーバー全体の稼働状況 | すべて |
 | GET | `/v1/ops/runtime` | 動いている環境（仕様書 第8.6.7.1節。決めた関数 `ops.runtime_beats()` で読む）。データベースの大きさと接続の数・上限も返す | すべて |
 | GET | `/v1/ops/runtime/samples?days=1\|7` | 機械の資源の推移（使っている割合 %。仕様書 第23.8.7節「機械の資源の図」。決めた関数 `ops.runtime_samples()` で読む） | すべて |
+| GET | `/v1/ops/help?q=` | 運営者のヘルプの章の一覧（運営者マニュアル `docs/ops-manual/`。`q` で題と本文を絞り込む。置き場は `OPS_MANUAL_DIR` で変えられる。仕様書 第23.8.16節） | すべて |
+| GET | `/v1/ops/help/:id` | 運営者のヘルプの 1 章（本文は Markdown。「第 N 章」は `NN-名前.md` へのリンク） | すべて |
 | GET・POST | `/v1/ops/incidents` | 障害・計画停止の一覧 ／ 起こす（`title`・`impact`（`down`・`degraded`・`maintenance`）・`body`・`tenants`（無ければすべての会社）・`startedAt`）。対象の会社の管理者に知らせる（仕様書 第16.11.3節 G-9） | すべて |
 | POST | `/v1/ops/incidents/:id/update`・`/v1/ops/incidents/:id/close` | 経過を知らせる ／ 終える（復旧・計画停止の終わり。`endedAt` を渡せる） | すべて |
 | GET・PUT | `/v1/ops/settings/operator` | 運営主体の設定（第23.8.14節） | 見る: すべて・変える: 運営管理者 |

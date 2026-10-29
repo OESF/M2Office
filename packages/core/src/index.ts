@@ -234,6 +234,7 @@ export {
   type OperatorProfile, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsPasskey, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS, OpsAppSide,
   proxyAllowed, ProxyAccessStore, PROXY_HOURS, PROXY_DEFAULT_HOURS, type ProxyScope, type ProxyGrant, type ProxySessionInfo,
   serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport, type OpsIncident,
+  loadOpsManual, searchOpsManual, linkChapters, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry,
 } from './ops/index.js';
 export { scoreEval, CONTRACT_REVIEW_AVOID, CONTRACT_REVIEW_MUST, type EvalScore } from './evals/score.js';
 export * from './net/outbound.js';

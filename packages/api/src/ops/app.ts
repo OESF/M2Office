@@ -11,7 +11,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploymentFromEnv,
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, OPERATOR_ROLES,
   parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
-  OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS,
+  OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual,
   type SystemLogLine,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
 } from '@m2office/core';
@@ -61,6 +61,11 @@ export function tenantLoginUrl(opsOrigin: string, subdomain: string): string {
   u.hostname = u.hostname.replace(/^ops\./, `${subdomain}.`);
   u.pathname = '/';
   return u.toString();
+}
+
+/** 運営者マニュアルの置き場（第23.8.16節）。既定はリポジトリ直下（本番の組み立てでは実行の場所）の `docs/ops-manual`。 */
+function opsManualDir(): string {
+  return process.env['OPS_MANUAL_DIR'] ?? appPath('docs', 'ops-manual');
 }
 
 /** 要求の元（画面のオリジン）。 */
@@ -480,6 +485,18 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
       deployment: deploymentFromEnv(process.env) === 'onsite' ? 'onsite' : 'cloud', debug: process.env['M2O_DEBUG'] === 'true',
       inference: inferenceText(localLlmFromEnv(process.env), 'cloud'), database,
     }));
+  });
+
+  /**
+   * 運営者のヘルプ（第23.8.16節）。運営者マニュアル（`docs/ops-manual/`）の章の一覧。`?q=` で題と本文を絞り込む。
+   *
+   * @remarks 読むだけ。マニュアルは要求のたびに読む（小さいので、直したらすぐ出る）
+   */
+  app.get('/v1/ops/help', (c) => c.json({ chapters: searchOpsManual(loadOpsManual(opsManualDir()), c.req.query('q') ?? '') }));
+  /** 運営者のヘルプの 1 章（本文は Markdown）。 */
+  app.get('/v1/ops/help/:id', (c) => {
+    const chapter = loadOpsManual(opsManualDir()).find((x) => x.id === c.req.param('id'));
+    return chapter ? c.json({ chapter }) : c.json({ error: '見つかりません' }, 404);
   });
 
   /**

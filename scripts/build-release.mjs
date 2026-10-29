@@ -66,6 +66,8 @@ const copy = (from, filter) => { if (existsSync(join(root, from))) cpSync(join(r
 copy('assets/fonts');
 copy('docs/help', (p) => !p.endsWith('.pdf'));
 copy('docs/manual', (p) => !p.endsWith('.pdf'));
+// 運営者のヘルプ（仕様書 第23.8.16節）。運営の API が読む
+copy('docs/ops-manual', (p) => !p.endsWith('.pdf'));
 copy('docs/api', (p) => !p.endsWith('.html') && !p.endsWith('.md'));
 copy('extensions');
 copy('db/migrations');

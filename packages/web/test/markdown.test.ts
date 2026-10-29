@@ -68,6 +68,8 @@ test('行の中のコード・リンク・太字を読み、相対のリンク�
     { kind: 'text', text: '第7章' },
   ]);
   assert.ok(!parseInline('[危ない](javascript:alert(1))').some((n) => n.kind === 'link'), 'http(s) 以外は押せるリンクにしない');
+  // 同じ置き場の Markdown のファイルへの参照は ref（運営者のヘルプの章。開けるかは表示する画面が決める）
+  assert.deepEqual(parseInline('[第 5 章](05-suspension.md)'), [{ kind: 'ref', text: '第 5 章', href: '05-suspension.md' }]);
 });
 
 test('業務の答えの書き方を読む（仕様書 第6.2.2節）', () => {

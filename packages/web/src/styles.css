@@ -2840,3 +2840,6 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   .rc-axis { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .rc-fill { transition: none; } }
+
+/* 運営者のヘルプ（仕様書 第23.8.16節）。会社の画面のヘルプセンターと同じ形で、章を 1 段で並べる */
+.ops-help-list { padding-left: 0; }

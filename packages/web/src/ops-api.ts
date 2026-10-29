@@ -211,6 +211,10 @@ export const opsApi = {
   server: () => call<{ status: ServerStatusView }>('/server'),
   /** 動いている環境（仕様書 第8.6.7.1節。クラウドの形では運営だけが見る）。 */
   runtime: () => call<RuntimeEnvironment>('/runtime'),
+  /** 運営者のヘルプの章の一覧（仕様書 第23.8.16節）。`q` で題と本文を絞り込む。 */
+  help: (q = '') => call<{ chapters: { id: string; title: string }[] }>(`/help${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`),
+  /** 運営者のヘルプの 1 章（本文は Markdown）。 */
+  helpChapter: (id: string) => call<{ chapter: { id: string; title: string; body: string } }>(`/help/${encodeURIComponent(id)}`),
   /** 機械の資源の推移（仕様書 第23.8.7節「機械の資源の図」）。 */
   runtimeSamples: (days: RuntimeSampleDays) => call<{ samples: RuntimeSamplePoint[] }>(`/runtime/samples?days=${days}`),
   /** 障害・計画停止の知らせ（仕様書 第16.11.3節 G-9）。 */

@@ -8,7 +8,7 @@
  */
 
 import {
-  Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode,
+  createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode,
 } from 'react';
 import { parseInline, parseMarkdown, type MdList } from './markdown.js';
 import { api, describeError, type AgentHelpView, type HelpArticleMeta, type HelpScope } from './api.js';
@@ -476,6 +476,19 @@ function MdListView({ list, lineBreaks }: { list: MdList; lineBreaks: boolean })
   return list.kind === 'ol' ? <ol>{items}</ol> : <ul>{items}</ul>;
 }
 
+/**
+ * 本文の中の、同じ置き場の Markdown のファイルへの参照（`05-suspension.md`）を開く口。
+ * 与えた画面（運営者のヘルプ。仕様書 第23.8.16節）でだけ押せるリンクにし、ほかの画面では文字のまま出す。
+ */
+export const MdRefContext = createContext<((href: string) => void) | null>(null);
+
+/** 参照を、開く口があれば押せるリンクに、無ければ文字にする。 */
+function MdRef({ text, href }: { text: string; href: string }) {
+  const open = useContext(MdRefContext);
+  if (!open) return <>{text}</>;
+  return <a className="link" href={href} onClick={(e) => { e.preventDefault(); open(href); }}>{text}</a>;
+}
+
 /** 行の中の書式（コード・リンク・太字）を React の要素にする。HTML としては解釈しない。 */
 function inline(s: string): ReactNode {
   return parseInline(s).map((n, i) => {
@@ -483,6 +496,7 @@ function inline(s: string): ReactNode {
       case 'strong': return <strong key={i}>{n.text}</strong>;
       case 'code': return <code key={i} className="md-code">{n.text}</code>;
       case 'link': return <a key={i} className="link" href={n.href} target="_blank" rel="noreferrer noopener">{n.text}</a>;
+      case 'ref': return <MdRef key={i} text={n.text} href={n.href} />;
       default: return <Fragment key={i}>{n.text}</Fragment>;
     }
   });
