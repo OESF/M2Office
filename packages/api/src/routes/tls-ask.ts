@@ -10,7 +10,7 @@
 
 import { Hono } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
-import type { Repository } from '@m2office/core';
+import { demoSubdomain, type Repository } from '@m2office/core';
 
 /** 運営が使う決まった名前（親のドメインに付ける。空は親そのもの）。 */
 const FIXED = ['', 'www', 'ops', 'signup'];
@@ -22,9 +22,10 @@ const LOCAL = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
  * 名前が証明書を取ってよいものか。
  *
  * @param baseDomain 会社のサブドメインの親（`BASE_DOMAIN`）
+ * @param demo 体験版の入口の名前（`DEMO_SUBDOMAIN`。第23.3.2節）。無ければ体験版の名前では取らない
  * @returns 取ってよければ `true`
  */
-export async function tlsAllowed(repo: Pick<Repository, 'findTenantBySubdomain'>, domain: string, baseDomain: string): Promise<boolean> {
+export async function tlsAllowed(repo: Pick<Repository, 'findTenantBySubdomain'>, domain: string, baseDomain: string, demo: string | null = null): Promise<boolean> {
   const name = domain.trim().toLowerCase().replace(/\.$/, '');
   const base = baseDomain.trim().toLowerCase().replace(/^\.+|\.+$/g, '');
   if (!name || !base) return false;
@@ -32,6 +33,7 @@ export async function tlsAllowed(repo: Pick<Repository, 'findTenantBySubdomain'>
   if (!name.endsWith(`.${base}`)) return false;
   const label = name.slice(0, -(base.length + 1));
   if (!LABEL.test(label) || FIXED.includes(label)) return false;
+  if (demo && label === demo) return true;
   const tenant = await repo.findTenantBySubdomain(label);
   // 解約した会社の名前では取らない（ほかの状態の会社は、止めていても画面で理由を見せるため取る）
   return !!tenant && tenant.status !== 'cancelled';
@@ -40,12 +42,12 @@ export async function tlsAllowed(repo: Pick<Repository, 'findTenantBySubdomain'>
 /**
  * 証明書を取ってよいかを答える口（`GET /internal/tls-allowed?domain=`）。
  */
-export function tlsAskRoute(repo: Pick<Repository, 'findTenantBySubdomain'>, baseDomain: () => string = () => process.env['BASE_DOMAIN'] ?? '') {
+export function tlsAskRoute(repo: Pick<Repository, 'findTenantBySubdomain'>, baseDomain: () => string = () => process.env['BASE_DOMAIN'] ?? '', demo: () => string | null = () => demoSubdomain(process.env)) {
   const app = new Hono();
   app.get('/', async (c) => {
     const remote = (() => { try { return getConnInfo(c).remote.address ?? ''; } catch { return ''; } })();
     if (!LOCAL.has(remote)) return c.body(null, 403);
-    const ok = await tlsAllowed(repo, c.req.query('domain') ?? '', baseDomain()).catch(() => false);
+    const ok = await tlsAllowed(repo, c.req.query('domain') ?? '', baseDomain(), demo()).catch(() => false);
     return c.body(null, ok ? 200 : 404);
   });
   return app;

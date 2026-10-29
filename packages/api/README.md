@@ -117,7 +117,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | メソッド・パス | 内容 |
 |---|---|
 | `GET /health` | 生存確認。テナント不要 |
-| `GET /internal/tls-allowed?domain=` | 機械の中（127.0.0.1）からだけ。Caddy の On-Demand TLS が、その名前の証明書を取ってよいかを尋ねる。払い出した会社のサブドメイン（解約したものは除く）と運営の決まった名前（親・`www`・`ops`・`signup`）だけ 200、ほかは 404（仕様書 第20.4.6節） |
+| `GET /internal/tls-allowed?domain=` | 機械の中（127.0.0.1）からだけ。Caddy の On-Demand TLS が、その名前の証明書を取ってよいかを尋ねる。払い出した会社のサブドメイン（解約したものは除く）と運営の決まった名前（親・`www`・`ops`・`signup`）と、体験版の入口（`DEMO_SUBDOMAIN` を決めたとき）だけ 200、ほかは 404（仕様書 第20.4.6節） |
 | `GET /v1/security.txt` | 脆弱性の報告の窓口（RFC 9116）。入口が `/.well-known/security.txt` から渡す。テナント不要。設定 `SECURITY_CONTACT` が無ければ 404（仕様書 第16.11.3節 G-11） |
 | `GET /v1/auth/providers` | 使えるログイン手段。認証不要 |
 | `POST /v1/auth/dev-login` | 開発用ログイン。認証不要 |
@@ -125,6 +125,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/auth/exchange` | 引換券を、このホストでのログイン状態に換える。券は 1 回限り・2 分 |
 | `GET /v1/oauth/google/login-callback` | Google からの戻り。**運営のホストで受ける**。テナントの判定とログインより前 |
 | `POST /v1/auth/logout` | ログアウト |
+| `POST /v1/demo-login` | 体験版のゲストのログイン（本文 `loginId`・`password`）。体験版の入口の名前のときだけ受け、会社の判定より前に置く。最初のログインで見本の会社のデータを入れる。ID が無い・パスワードが違う・期限切れは同じ 401。ID ごとに 5 回の間違いで 15 分、送り元ごとに 15 分に 20 回まで（仕様書 第23.3.2節） |
+| `POST /v1/me/demo/terms` | 体験版の利用規約への同意（体験用の会社だけ）。様子は `GET /v1/me` の `demo` |
 | `GET /v1/agents` | 本人が使える業務の一覧（`agents`。入力スキーマと、定時実行に登録できるかの `schedulable` を含む）。メニューのピン止めは個人設定（`menu.pinned`。仕様書 第6.1.1節） |
 | `GET /v1/agents/slide-designs` | スライドの作成で選べる会社のテンプレート（名前と説明だけ）と、会社の既定（組み込みのデザインの ID かテンプレートの名前）。組み込みのデザインは画面が持つ（仕様書 第9.4.2節「組み込みのデザイン」） |
 | `GET /v1/slide-decks`・`GET /v1/slide-decks/:id` | 作ったスライドの一覧（本人のもの `mine` と会社で共有されたもの `shared`）と 1 件。構成は出さない（仕様書 第9.4.2節「作ったスライドの扱い」） |
@@ -615,6 +617,10 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | PUT・DELETE | `/v1/ops/settings/ai/key` | 運営の鍵を入れる（Gemini に試して、通ったときだけ暗号化して保存）・削除する | 運営管理者 |
 | POST | `/v1/ops/settings/ai/test` | いま効いている運営の鍵で Gemini に問い合わせる | すべて |
 | PUT | `/v1/ops/settings/ai/limits` | 会社ごとの上限の既定と、運営の鍵の全体の月の上限（円。空なら決めない） | 運営管理者 |
+| GET | `/v1/ops/demos` | 体験の一覧（相手の情報と数だけ）・既定・入口の URL（第23.3.2節） | すべて |
+| POST | `/v1/ops/demos` | 体験を出す（ゲストの ID とパスワードを 1 度だけ返し、相手に送る案内の文を添える） | 運営管理者・サポート |
+| POST | `/v1/ops/demos/:id/extend`・`/password`・`/end` | 期限を延ばす（1 回に 7 日まで）・パスワードを出し直す（ログイン状態も切る）・早く終える（体験用の会社をすぐ消す） | 運営管理者・サポート |
+| PUT | `/v1/ops/settings/demo` | 体験版の日数と AI の上限の既定 | 運営管理者 |
 | GET・PUT | `/v1/ops/tax-rates` | 消費税の税率の表（法令の表の 1 つ。第15.1.1.1節）。運営が直していなければ同梱の表と `bundled: true`、全社の下書きの数 `drafts`。PUT は行をまとめて置き換える（直した行と足した行は出典の URL と確認した日が要る。予定を確定にした行は会社の管理者に知らせる） | 見る: すべて・変える: 運営管理者 |
 | GET | `/v1/ops/status-requests` | 停止・緊急停止・再開の申請（扱いの残っているものと直近 30 日。`?tenant=` で会社を絞る） | すべて |
 | POST | `/v1/ops/tenants/:id/requests` | 停止・再開の申請、緊急停止（すぐ止める。会社へ渡す案内の文を返す） | 停止と再開: 運営管理者とサポート・緊急停止: すべて |

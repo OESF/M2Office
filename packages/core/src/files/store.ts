@@ -37,6 +37,10 @@ export interface FileStore {
    * @param range 読む範囲（`end` を含む）。省略時は全体
    */
   openRead?(tenantId: string, key: string, range?: { start: number; end: number }): Promise<{ stream: ReadableStream<Uint8Array>; size: number } | null>;
+  /**
+   * 会社の中身をすべて消す（体験用の会社を消すとき。仕様書 第23.3.2節「期限」）。無くても例外にしない。
+   */
+  removeTenant(tenantId: string): Promise<void>;
 }
 
 /** 開発用。`<root>/<tenantId>/<key>` に保存する。 */
@@ -88,6 +92,10 @@ export class LocalFileStore implements FileStore {
     return { stream: Readable.toWeb(node) as ReadableStream<Uint8Array>, size };
   }
 
+  async removeTenant(tenantId: string): Promise<void> {
+    await rm(this.dirOf(tenantId), { recursive: true, force: true });
+  }
+
   private dirOf(tenantId: string): string {
     return join(resolve(this.root), safe(tenantId));
   }
@@ -104,6 +112,7 @@ export class MemoryFileStore implements FileStore {
   async put(tenantId: string, key: string, bytes: Uint8Array) { this.data.set(`${tenantId}/${safe(key)}`, bytes); }
   async get(tenantId: string, key: string) { return this.data.get(`${tenantId}/${key}`) ?? null; }
   async remove(tenantId: string, key: string) { this.data.delete(`${tenantId}/${key}`); }
+  async removeTenant(tenantId: string) { for (const k of [...this.data.keys()]) if (k.startsWith(`${tenantId}/`)) this.data.delete(k); }
 }
 
 /** パスの区切りや `..` を含む名前を拒否する。ディレクトリの外へ出させない。 */

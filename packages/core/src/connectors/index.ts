@@ -12,26 +12,32 @@ import { MockWorkspaceConnector } from './mock.js';
 import { GoogleWorkspaceConnector } from './google/index.js';
 
 /**
- * 会社ごとに、見本と本物のどちらかへ振り分ける接続口（ADR-0022。**開発だけ**）。
+ * 会社ごとに、見本と本物のどちらかへ振り分ける接続口（ADR-0022）。
  *
  * @remarks
  * 通しの確認（`npm run smoke`）の会社は決まった見本のデータを前提にしている。
- * 実在の会社を本物につなぎながら、その会社を見本のまま保つために使う。
+ * 実在の会社を本物につなぎながら、その会社を見本のまま保つために使う（`CONNECTOR_MOCK_TENANTS`。**開発だけ**）。
+ * 体験版の体験用の会社（仕様書 第23.3.2節、ADR-0115）は、本番でも必ず見本へ振り分ける。
  * どの操作も、呼び出しの `tenantId` で振り分ける。会社をまたいで混ざることはない（不変則 I-2）。
  */
 export class TenantRoutingConnector implements WorkspaceConnector {
+  private readonly isMock: (tenantId: string) => boolean;
+
+  /** @param mockTenants 見本へ振り分ける会社（ID の集まりか、決める関数） */
   constructor(
-    private readonly mockTenants: ReadonlySet<string>,
+    mockTenants: ReadonlySet<string> | ((tenantId: string) => boolean),
     private readonly mock: WorkspaceConnector,
     private readonly real: WorkspaceConnector,
-  ) {}
+  ) {
+    this.isMock = typeof mockTenants === 'function' ? mockTenants : (t) => mockTenants.has(t);
+  }
 
   sourceFor(tenantId: string): DataSource {
-    return this.mockTenants.has(tenantId) ? 'mock' : this.real.sourceFor(tenantId);
+    return this.isMock(tenantId) ? 'mock' : this.real.sourceFor(tenantId);
   }
 
   private pick(tenantId: string): WorkspaceConnector {
-    return this.mockTenants.has(tenantId) ? this.mock : this.real;
+    return this.isMock(tenantId) ? this.mock : this.real;
   }
 
   // 各サービスの各操作を、第 1 引数（誰の権限か）の会社で振り分ける
@@ -66,6 +72,8 @@ export interface ConnectorDeps {
   mockTenants?: string[];
   /** `NODE_ENV=production` か。見本の会社を指定していたら起動を拒否する。 */
   production?: boolean;
+  /** 本番でも見本へ振り分ける会社か（体験版の体験用の会社。仕様書 第23.3.2節「Google の部分」）。 */
+  alwaysMock?: (tenantId: string) => boolean;
   /**
    * Google の側で許可が外されたと分かったとき（トークンの取り直しの失敗）に呼ぶ後始末（仕様書 第6.5.2.1節 経路 2・3）。
    *
@@ -93,12 +101,13 @@ export function buildConnector(mode: string, deps?: ConnectorDeps): WorkspaceCon
     case 'google': {
       if (!deps) throw new Error('CONNECTOR_MODE=google には、データベースと暗号の箱が要ります');
       const real = new GoogleWorkspaceConnector(deps.repo, deps.box, undefined, undefined, deps.onRevoked);
-      const mockTenants = (deps.mockTenants ?? []).map((t) => t.trim()).filter(Boolean);
-      if (mockTenants.length === 0) return real;
-      if (deps.production) {
+      const mockTenants = new Set((deps.mockTenants ?? []).map((t) => t.trim()).filter(Boolean));
+      if (mockTenants.size > 0 && deps.production) {
         throw new Error('CONNECTOR_MOCK_TENANTS は開発だけの設定です。本番（NODE_ENV=production）では使えません');
       }
-      return new TenantRoutingConnector(new Set(mockTenants), new MockWorkspaceConnector(), real);
+      const always = deps.alwaysMock;
+      if (mockTenants.size === 0 && !always) return real;
+      return new TenantRoutingConnector((t) => mockTenants.has(t) || !!always?.(t), new MockWorkspaceConnector(), real);
     }
     default:
       throw new Error(`CONNECTOR_MODE の値が不正です: ${mode}（mock か google）`);

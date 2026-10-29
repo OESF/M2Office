@@ -535,6 +535,12 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .btn.google { width: 100%; padding: calc(10px * var(--space-scale)); }
 .dev-login { margin-top: calc(24px * var(--space-scale)); border-top: 1px dashed var(--line); padding-top: calc(16px * var(--space-scale)); }
 .dev-login h3 { font-size: calc(13px * var(--font-scale)); margin: 0 0 calc(4px * var(--space-scale)); }
+/* 体験版（仕様書 第23.3.2節）: ゲストのログインの欄・規約・期限の帯 */
+.demo-login .field input { width: 100%; }
+.demo-login .btn.wide { margin-top: calc(8px * var(--space-scale)); }
+.demo-terms ul { margin: 0 0 calc(20px * var(--space-scale)); padding-left: 1.2em; line-height: 1.7; font-size: calc(14px * var(--font-scale)); }
+.demo-terms .small { margin-top: calc(12px * var(--space-scale)); text-align: center; }
+.demo-banner { padding: calc(6px * var(--space-scale)) calc(16px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); background: var(--accent-soft); color: var(--accent); border-bottom: 1px solid var(--line); }
 .btn.wide { display: block; width: 100%; text-align: left; margin-bottom: calc(8px * var(--space-scale)); padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); }
 .btn.wide .sub { display: block; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 .btn.small { padding: calc(3px * var(--space-scale)) calc(10px * var(--space-scale)); font-size: calc(12px * var(--font-scale)); }

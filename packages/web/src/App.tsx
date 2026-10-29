@@ -29,6 +29,7 @@ import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
 import { RecorderDialog } from './Recorder.js';
 import { AgentForm, ApprovalTray, AskBox, Elapsed, FILE_ACCEPT, isRecordingFile, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner, tooLargeMessage } from './components.js';
+import { DemoBanner } from './demo-terms.js';
 import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
 import { Cards } from './Cards.js';
@@ -576,6 +577,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
       <SuspendedBanner status={me.tenant.status} suspendAt={me.tenant.suspendAt} />
+      <DemoBanner demo={me.demo} />
 
       <SideNavLayout
         extraClass={talkOpen ? 'talk-open' : ''}

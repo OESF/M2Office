@@ -48,7 +48,7 @@ export function currentAiUsage(): AiUsageScope | undefined {
 
 /** 上限に当たって、新しい AI の利用を止めたことを伝える。API は 429 にする。 */
 export class AiLimitError extends Error {
-  constructor(message: string, readonly scope: 'company' | 'user' | 'platform') {
+  constructor(message: string, readonly scope: 'company' | 'user' | 'platform' | 'trial') {
     super(message);
     this.name = 'AiLimitError';
   }
@@ -60,6 +60,8 @@ export const AI_LIMIT_COMPANY_MESSAGE = '今月の AI の利用の上限に達�
 export const AI_LIMIT_USER_MESSAGE = 'あなたの今月の AI の利用が、1 人の上限に達しました。管理者にご確認ください';
 /** 運営の鍵の全体の上限に当たったときの文（第23.8.14節「マスター管理画面の設定を広げる」）。 */
 export const AI_LIMIT_PLATFORM_MESSAGE = '運営の側の今月の AI の上限に達したため、AI を使えません。管理者から運営にご連絡ください';
+/** 体験版の期間を通した上限に当たったときの文（第23.3.2節「AI」）。 */
+export const AI_LIMIT_TRIAL_MESSAGE = '体験版の AI の利用の上限に達しました。AI を使わない機能は、期限まで使えます';
 
 /** 1 回の呼び出しの記録。 */
 export interface AiUsageEntry {
@@ -236,6 +238,11 @@ export interface AiUsageMeterDeps {
   platformCap: number | null | (() => number | null);
   /** 運営の鍵の全体の上限。無ければ確かめない。 */
   platform?: PlatformAiCap;
+  /**
+   * 体験版の期間を通した上限（第23.3.2節「AI」）。体験用の会社なら上限（円）と始めた日時を返し、ほかの会社は `null`。
+   * 月の上限ではなく、月をまたいでも戻らない
+   */
+  trial?: (tenantId: string) => Promise<{ capJpy: number; since: Date } | null>;
   /** 知らせを残す（管理者・本人）。 */
   notify(n: Notification): Promise<void>;
   /** 会社の管理者の ID。 */
@@ -256,6 +263,7 @@ const CACHE_MS = 60_000;
 export class AiUsageMeter {
   private readonly cache = new Map<string, { at: number; month: string; total: number; byUser: Map<string, number> }>();
   private readonly sources = new Map<string, { at: number; source: 'platform' | 'tenant' | 'none' }>();
+  private readonly trials = new Map<string, { at: number; info: { capJpy: number; since: Date } | null; total: number }>();
 
   constructor(private readonly deps: AiUsageMeterDeps) {}
 
@@ -306,6 +314,11 @@ export class AiUsageMeter {
     // 運営の鍵の全体の上限（会社の上限より先に見る。会社の上限が無い会社も止める）
     const platformBlocked = await this.platformBlocked(tenantId);
     if (platformBlocked) return { blocked: platformBlocked, monthlyJpy: await this.monthlyLimit(tenantId), usedJpy: (await this.month(tenantId)).total };
+    // 体験版の期間を通した上限（月の上限より先に見る）
+    const trial = await this.trialOf(tenantId);
+    if (trial?.info && trial.total >= trial.info.capJpy) {
+      return { blocked: new AiLimitError(AI_LIMIT_TRIAL_MESSAGE, 'trial'), monthlyJpy: await this.monthlyLimit(tenantId), usedJpy: trial.total };
+    }
     const limit = await this.monthlyLimit(tenantId);
     if (limit === null) return { blocked: null, monthlyJpy: null, usedJpy: 0 };
     const m = await this.month(tenantId);
@@ -337,6 +350,38 @@ export class AiUsageMeter {
     return new AiLimitError(AI_LIMIT_PLATFORM_MESSAGE, 'platform');
   }
 
+  /** 体験版の上限と、始めてからの合計（1 分覚える）。体験用の会社でなければ `null`。 */
+  private async trialOf(tenantId: string): Promise<{ info: { capJpy: number; since: Date } | null; total: number } | null> {
+    if (!this.deps.trial) return null;
+    const now = this.now().getTime();
+    const hit = this.trials.get(tenantId);
+    if (hit && now - hit.at < CACHE_MS) return hit;
+    const info = await this.deps.trial(tenantId);
+    const total = info ? (await this.deps.store.totals(tenantId, info.since)).costJpy : 0;
+    const next = { at: now, info, total };
+    this.trials.set(tenantId, next);
+    return next;
+  }
+
+  /**
+   * 体験版の 8 割・10 割の知らせ（体験の間に 1 度だけ。ゲストに送る）。
+   */
+  private async trialAlerts(tenantId: string): Promise<void> {
+    const t = await this.trialOf(tenantId);
+    if (!t?.info) return;
+    const yen = (v: number) => `${Math.round(v).toLocaleString('ja-JP')} 円`;
+    for (const [level, ratio, title] of [
+      ['trial-100', 1, '体験版の AI の利用が上限に達しました'],
+      ['trial-80', 0.8, '体験版の AI の利用が上限の 8 割を超えました'],
+    ] as const) {
+      if (t.total < t.info.capJpy * ratio) continue;
+      if (!(await this.deps.store.markAlert(tenantId, 'trial', level, ''))) break;
+      const body = `これまで ${yen(t.total)} / 上限 ${yen(t.info.capJpy)}\n\n${level === 'trial-100' ? 'AI を使う機能を止めています。AI を使わない機能は、期限まで使えます。' : '上限に達すると、AI を使う機能が止まります。'}`;
+      for (const admin of await this.deps.admins(tenantId)) await this.deps.notify(this.notice(tenantId, admin, 'usage', title, body));
+      break;
+    }
+  }
+
   /** 止めるべきなら投げる（{@link check} の短い形）。 */
   async assert(tenantId: string, userId?: string | null): Promise<void> {
     const r = await this.check(tenantId, userId);
@@ -359,7 +404,10 @@ export class AiUsageMeter {
         hit.total += e.costJpy;
         if (e.userId) hit.byUser.set(e.userId, (hit.byUser.get(e.userId) ?? 0) + e.costJpy);
       }
+      const trial = this.trials.get(tenantId);
+      if (trial?.info) trial.total += e.costJpy;
       if (e.costJpy > 0) await this.alerts(tenantId, e.userId);
+      if (e.costJpy > 0) await this.trialAlerts(tenantId);
     } catch (err) {
       this.deps.onError?.(err);
     }
@@ -593,6 +641,8 @@ export function aiUsageMeterFromEnv(opts: {
    * マスター管理画面の運営の設定（第23.8.14節）。与えれば、会社ごとの上限の既定をここから読み、運営の鍵の全体の上限も確かめる
    */
   platform?: PlatformAiCap & { tenantCapJpy(): number | null };
+  /** 体験版の期間を通した上限（第23.3.2節「AI」）。体験用の会社だけが返す。 */
+  trial?: AiUsageMeterDeps['trial'];
 }): AiUsageMeter {
   const raw = Number(opts.env['AI_MONTHLY_LIMIT_JPY'] ?? '');
   const { repo, platform } = opts;
@@ -600,6 +650,7 @@ export function aiUsageMeterFromEnv(opts: {
     store: new PostgresAiUsageStore(opts.connectionString),
     platformCap: platform ? () => platform.tenantCapJpy() : Number.isFinite(raw) && raw > 0 ? raw : null,
     ...(platform ? { platform } : {}),
+    ...(opts.trial ? { trial: opts.trial } : {}),
     limits: {
       limits: async (tenantId) => (await repo.getTenantSettings(tenantId)).aiLimits,
       source: async (tenantId) => {

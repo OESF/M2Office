@@ -131,9 +131,10 @@ export class PostgresRepository implements Repository {
   }
 
   async findTenantBySubdomain(subdomain: string): Promise<Tenant | null> {
-    const rows = await this.q<Tenant>(null, 
+    // 体験用の会社（第23.3.2節）は名前からは決まらない。ゲストのログイン状態からだけ決まる
+    const rows = await this.q<Tenant>(null,
       `select id, subdomain, name, workspace_domain as "workspaceDomain", status
-         from tenants where subdomain = $1`,
+         from tenants where subdomain = $1 and kind = 'customer'`,
       [subdomain],
     );
     return rows[0] ?? null;

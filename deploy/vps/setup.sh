@@ -138,6 +138,7 @@ ask WAF_ENGINE 'WAF の動き（DetectionOnly: 記録だけ ／ On: 止める）
 ask CLOUDFLARE_FRONT 'Cloudflare を前に置くか（大量の通信の攻撃を受けたときだけ yes）' "${CLOUDFLARE_FRONT:-no}"
 ask BLOCK_COUNTRIES '通信を止める国（国の 2 文字をカンマで並べる。止めないなら none）' "${BLOCK_COUNTRIES:-CN,RU,KP}"
 ask GEO_ALLOW '国で止めずに通す相手（アドレスか範囲をカンマで。無ければ空のまま）' "${GEO_ALLOW:-}"
+ask DEMO_SUBDOMAIN '体験版の入口の名前（例 demo。使わないなら空のまま）' "${DEMO_SUBDOMAIN:-}"
 GEMINI_API_KEY=$(env_value GEMINI_API_KEY)
 ask GEMINI_API_KEY 'Gemini の API の鍵（後でもよい。マスター管理画面でも入れられる）' "$GEMINI_API_KEY" secret
 GOOGLE_LOGIN_CLIENT_ID=$(env_value GOOGLE_LOGIN_CLIENT_ID)
@@ -162,9 +163,15 @@ if [ "$BLOCK_COUNTRIES" != NONE ]; then
 fi
 GEO_ALLOW=$(printf '%s' "$GEO_ALLOW" | tr -d '[:space:]')
 [[ "$GEO_ALLOW" =~ ^[0-9a-fA-F.:/,-]*$ ]] || die "国で止めずに通す相手は、アドレスか範囲をカンマで並べてください: $GEO_ALLOW"
+# 体験版の入口（仕様書 第23.3.2節）。運営が使う決まった名前とは重ねない。お客様の会社が同じ名前を使っていれば、その会社はこの名前で開けなくなる
+DEMO_SUBDOMAIN=$(printf '%s' "$DEMO_SUBDOMAIN" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+if [ -n "$DEMO_SUBDOMAIN" ]; then
+  [[ "$DEMO_SUBDOMAIN" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || die "体験版の入口の名前の形が違います: $DEMO_SUBDOMAIN"
+  case "$DEMO_SUBDOMAIN" in www|ops|signup|api|app|admin) die "体験版の入口に、運営が使う名前は使えません: $DEMO_SUBDOMAIN" ;; esac
+fi
 # 秘密の値でない答えだけを残す（次の既定）
-printf "BASE_DOMAIN='%s'\nACME_EMAIL='%s'\nOPS_GOOGLE_DOMAIN='%s'\nWG_NETWORK='%s'\nWAF_ENGINE='%s'\nCLOUDFLARE_FRONT='%s'\nBLOCK_COUNTRIES='%s'\nGEO_ALLOW='%s'\n" \
-  "$BASE_DOMAIN" "$ACME_EMAIL" "$OPS_GOOGLE_DOMAIN" "$WG_NETWORK" "$WAF_ENGINE" "$CLOUDFLARE_FRONT" "$BLOCK_COUNTRIES" "$GEO_ALLOW" | sudo tee "$CONF" >/dev/null
+printf "BASE_DOMAIN='%s'\nACME_EMAIL='%s'\nOPS_GOOGLE_DOMAIN='%s'\nWG_NETWORK='%s'\nWAF_ENGINE='%s'\nCLOUDFLARE_FRONT='%s'\nBLOCK_COUNTRIES='%s'\nGEO_ALLOW='%s'\nDEMO_SUBDOMAIN='%s'\n" \
+  "$BASE_DOMAIN" "$ACME_EMAIL" "$OPS_GOOGLE_DOMAIN" "$WG_NETWORK" "$WAF_ENGINE" "$CLOUDFLARE_FRONT" "$BLOCK_COUNTRIES" "$GEO_ALLOW" "$DEMO_SUBDOMAIN" | sudo tee "$CONF" >/dev/null
 sudo chmod 600 "$CONF"
 
 # ---- 3. ソフトを入れる（公式の置き場から。版の大きな数を固定する） ----
@@ -238,6 +245,7 @@ OPS_GOOGLE_DOMAIN=$OPS_GOOGLE_DOMAIN
 WG_NETWORK=$WG_NETWORK
 WAF_ENGINE=$WAF_ENGINE
 CLOUDFLARE_FRONT=$CLOUDFLARE_FRONT
+DEMO_SUBDOMAIN=$DEMO_SUBDOMAIN
 CLOUDFLARE_SNIPPET='$CLOUDFLARE_SNIPPET'
 CLOUDFLARE_GLOBAL='$CLOUDFLARE_GLOBAL'
 GEMINI_API_KEY=$GEMINI_API_KEY

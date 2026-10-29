@@ -92,7 +92,8 @@ export interface Session {
   tenantId: string;
   userId: string;
   csrfToken: string;
-  provider: 'google' | 'dev';
+  /** 確かめた手段。`demo` は体験版のゲストの ID とパスワード（仕様書 第23.3.2節）。 */
+  provider: 'google' | 'dev' | 'demo';
   userAgent: string | null;
   createdAt: string;
   lastSeenAt: string;

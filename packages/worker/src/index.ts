@@ -21,6 +21,7 @@ import {
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, isPublicImageBase, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, WORKER_BEAT_INTERVAL_MS, keepAliveOnTransientErrors,
+  PostgresDemoStore, isDemoTenantId,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { fileURLToPath } from 'node:url';
@@ -57,8 +58,14 @@ let onGrantLost: ((tenantId: string, userId: string, refreshTokenEnc: string) =>
 const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock', {
   repo, box, mockTenants: (process.env['CONNECTOR_MOCK_TENANTS'] ?? '').split(','),
   production: process.env['NODE_ENV'] === 'production',
+  // 体験用の会社の Google の部分は、本番でも見本で動かす（第23.3.2節）
+  alwaysMock: isDemoTenantId,
   onRevoked: async (p, enc) => { await onGrantLost?.(p.tenantId, p.userId, enc); },
 });
+// 見本の会社は外のサイトを読まない。体験用の会社は、Google の部分は見本でも外のサイトは読む（第23.3.2節「外部への接続」）
+const noOutside = (tenantId: string) => connector.sourceFor(tenantId) === 'mock' && !isDemoTenantId(tenantId);
+// 体験版（第23.3.2節）。期限の来た体験の会社を消す
+const demoStore = new PostgresDemoStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 
 // API と同じ置き場を使う。既定はリポジトリ直下の .data/files
 const files = new LocalFileStore(
@@ -102,6 +109,12 @@ const aiMeter = aiUsageMeterFromEnv({
   repo, connectionString: process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', env: process.env,
   onError: (err) => log.warn('AI の利用を記録できませんでした', { err }),
   platform: platformSource,
+  // 体験版の期間を通した上限（第23.3.2節「AI」）
+  trial: async (tenantId) => {
+    if (!isDemoTenantId(tenantId)) return null;
+    const t = await demoStore.trial(tenantId);
+    return t ? { capJpy: t.aiCapJpy, since: new Date(t.startedAt) } : null;
+  },
 });
 setEnqueueAiGuard((tenantId, userId) => aiMeter.assert(tenantId, userId));
 enterAiUsage({ purpose: 'worker' });
@@ -223,7 +236,7 @@ const columns: ColumnService = new ColumnService({
   store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), files,
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
   // 似すぎの確かめで出典のページを読む口（見本の会社では読まない。第32.18.4節）
-  pagesFor: (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? null : new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 1_000)),
+  pagesFor: (tenantId) => (noOutside(tenantId) ? null : new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 1_000)),
   // 読まれたコラムの書き方の傾向（Webの分析。第32.18.5節）。Webの分析は後で作るので、呼ぶときに引く
   tendencyFor: (tenantId: string): Promise<string | null> => webReview.columnTendency(tenantId),
 });
@@ -299,8 +312,8 @@ const subsidies = new SubsidyService({
   store: new PostgresSubsidyStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, logger: log, llmFor: (tenantId) => ai.llmFor(tenantId), 
   // 見本の会社では Web の調べものも使わない（外に読みに行かない）
-  researchFor: async (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? new MockResearchProvider() : ai.researchFor(tenantId)),
-  sourceFor: (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? mockJGrants : jgrants),
+  researchFor: async (tenantId) => (noOutside(tenantId) ? new MockResearchProvider() : ai.researchFor(tenantId)),
+  sourceFor: (tenantId) => (noOutside(tenantId) ? mockJGrants : jgrants),
   employeesOf: async (tenantId) => {
     if (!(await repo.getTenantSettings(tenantId)).hr.enabled) return null;
     const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
@@ -361,7 +374,7 @@ const inquiryWatch = new InquiryWatch({ store: inquiryStore, repo, logger: log }
 const competitorStore = new PostgresCompetitorStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
 const competitors = new CompetitorService({
   store: competitorStore, repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), placesKeyFor: async (tenantId) => (await ai.geminiFor(tenantId)).apiKey,
-  sourceFor: (tenantId) => connector.sourceFor(tenantId), externalAllowed: async (tenantId) => !isLocalPolicy(await ai.policyFor(tenantId)),
+  sourceFor: (tenantId) => (noOutside(tenantId) ? 'mock' : 'google'), externalAllowed: async (tenantId) => !isLocalPolicy(await ai.policyFor(tenantId)),
   userAgent: crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), logger: log,
   // 問い合わせの「どこで知ったか」（競合の名前が出た件数だけをレポートに添える。第36.20節）
   inquirySources: async (tenantId, since) => ((await repo.getTenantSettings(tenantId)).inquiries.enabled
@@ -560,6 +573,9 @@ let lastKnowledgeEmbed = 0;
 /** 期限を過ぎた名刺（ごみ箱に 30 日・読み取れなかったもの 4 週）を消す見回りの間隔。 */
 const CARD_PURGE_INTERVAL_MS = Number(process.env['CARD_PURGE_INTERVAL_MS'] ?? 3_600_000);
 let lastCardPurge = 0;
+/** 期限の来た体験版の会社を消す見回りの間隔（第23.3.2節「期限」。毎時。期限から 24 時間以内に消す）。 */
+const DEMO_PURGE_INTERVAL_MS = 3_600_000;
+let lastDemoPurge = 0;
 /** 不正の兆しの見回りの間隔（第16.8.3節。重さ高は見つけたらすぐ知らせるため 5 分ごと）。 */
 const SECURITY_INTERVAL_MS = Number(process.env['SECURITY_INTERVAL_MS'] ?? 5 * 60_000);
 let lastSecurityCheck = 0;
@@ -1149,6 +1165,18 @@ while (running) {
       if (n > 0) log.info('期限を過ぎた名刺を消しました', { cards: n });
     } catch (err) {
       log.error('名刺の消去の見回りで例外が発生しました', { err });
+    }
+  }
+  if (Date.now() - lastDemoPurge >= DEMO_PURGE_INTERVAL_MS) {
+    lastDemoPurge = Date.now();
+    try {
+      const purged = await demoStore.purgeDue();
+      // 運営者が早く終えた体験は、データベースではもう消えている。ファイルの置き場は、ここでまとめて消す（何度消しても同じ）
+      const recent = await demoStore.deletedSince(new Date(Date.now() - 26 * 3_600_000));
+      for (const t of new Set([...purged, ...recent])) await files.removeTenant(t);
+      if (purged.length > 0) log.info('期限の来た体験版の会社を消しました', { tenants: purged.length });
+    } catch (err) {
+      log.error('体験版の会社の削除の見回りで例外が発生しました', { err });
     }
   }
   if (Date.now() - lastKnowledgeEmbed >= KNOWLEDGE_EMBED_INTERVAL_MS) {

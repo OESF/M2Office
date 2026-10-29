@@ -10,7 +10,7 @@ export {
 export {
   OpsStore, OpsRuleError, sha256,
   type Operator, type OpsSession, type TenantOverview, type OpsMachine, type OpsAuditEntry,
-  type OperatorProfile, type OpsPlatformAiSettings, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsIncident, type OpsPasskey, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS,
+  type OperatorProfile, type OpsPlatformAiSettings, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsIncident, type OpsPasskey, type OpsDemo, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS,
 } from './store.js';
 export { OpsAppSide } from './app-side.js';
 export { loadOpsManual, searchOpsManual, linkChapters, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry } from './manual.js';

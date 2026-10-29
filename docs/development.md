@@ -223,6 +223,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `CONNECTOR_MOCK_TENANTS` | （なし） | **開発だけ。** `google` のとき、見本のまま動かす会社のテナント ID（カンマ区切り）。smoke の会社を見本に保つ（例: `t-alpha,t-beta`）。本番で設定すると起動を拒否する |
 | `OPS_PORT`・`OPS_DATABASE_URL` | 3102・開発の既定 | マスター管理画面の API（別のプロセス）のポートと、運営の専用のロール `m2office_ops` の接続。本番では `OPS_DATABASE_URL` が必須（仕様書 第23.8.15節） |
 | `OPS_GOOGLE_REDIRECT_URI`・`OPS_GOOGLE_DOMAIN`・`OPS_SESSION_TTL_HOURS` | `http://localhost:<OPS_PORT>/v1/ops/auth/callback`・（なし）・12 | 運営者の Google のログインの戻り先（運営の OAuth クライアントに足して登録する）・運営者にできるドメイン・ログイン状態の時間 |
+| `DEMO_SUBDOMAIN` | （なし） | 体験版の入口の名前（`demo` なら `demo.<BASE_DOMAIN>`、開発は `demo.localhost`）。空なら体験版を使わない。API と運営の API が読む（仕様書 第23.3.2節） |
 | `AUTH_DEV_LOGIN` | false | 開発用ログインを許す。`.env.example` では true |
 | `AUTH_DEV_HEADERS` | false | `X-Tenant`・`X-User` ヘッダーでの指定を許す。動作確認用 |
 | `M2O_DEBUG` | false | デバッグモード。画面の上に「Debug mode」を出し、音声・秘書の振り分け・失敗した呼び出しと画面から呼んだ API を記録して見せる（メモリーだけに持つ。仕様書 第20.4.1節） |

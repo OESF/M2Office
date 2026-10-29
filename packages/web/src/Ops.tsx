@@ -18,6 +18,7 @@ import {
 import { BackButton } from './back-button.js';
 import { RuntimeCard } from './runtime-card.js';
 import { OpsHelp, OpsTitle } from './ops-help.js';
+import { DemoDefaultsCard, OpsDemos } from './ops-demos.js';
 import { useOpenHelp } from './help.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
@@ -32,7 +33,7 @@ const ACTION_LABEL: Record<string, string> = {
   'machine.add': '機械を登録した', 'machine.remove': '機械を削除した', 'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
   'passkey.add': 'パスキーを登録した', 'passkey.verify': 'パスキーで確かめた', 'passkey.delete': 'パスキーを削除した',
   'operator.enroll_code': '登録の合言葉を出した', 'operator.reset_passkeys': 'パスキーを削除してやり直させた',
-  'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた', 'settings.ai_key': '運営の鍵を入れた', 'settings.ai_key_rejected': '運営の鍵を入れようとした（試して通らなかった）', 'settings.ai_key_delete': '運営の鍵を削除した', 'settings.ai_test': '運営の鍵を試した', 'settings.ai_limits': 'AI の上限を変えた', 'law.tax_rates': '消費税の税率の表を変えた',
+  'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた', 'settings.ai_key': '運営の鍵を入れた', 'settings.ai_key_rejected': '運営の鍵を入れようとした（試して通らなかった）', 'settings.ai_key_delete': '運営の鍵を削除した', 'settings.ai_test': '運営の鍵を試した', 'settings.ai_limits': 'AI の上限を変えた', 'settings.demo': '体験版の既定を変えた', 'demo.create': '体験を出した', 'demo.extend': '体験を延ばした', 'demo.password': '体験のパスワードを出し直した', 'demo.end': '体験を終えた', 'law.tax_rates': '消費税の税率の表を変えた',
   'tenant.suspend_request': '停止を申請した', 'tenant.lock_request': '緊急停止した', 'tenant.resume_request': '再開を申請した',
   'tenant.status_approve': '申請を承認した', 'tenant.status_reject': '申請を承認しなかった', 'tenant.status_withdraw': '申請を取り下げた', 'tenant.lock_confirm': '緊急停止を確認した',
   'tenant.suspend_requested': '停止の申請', 'tenant.suspend_scheduled': '停止の予告', 'tenant.suspend': '停止した', 'tenant.lock': '緊急停止した',
@@ -134,9 +135,10 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'requests' | 'server' | 'incidents' | 'logs' | 'machines' | 'operators' | 'audit' | 'law' | 'settings' | 'help';
+type OpsPage = 'tenants' | 'demos' | 'requests' | 'server' | 'incidents' | 'logs' | 'machines' | 'operators' | 'audit' | 'law' | 'settings' | 'help';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
+  { id: 'demos', label: '体験', icon: 'sample' },
   { id: 'requests', label: '停止と再開', icon: 'approvals' },
   { id: 'server', label: '稼働状況', icon: 'usage' },
   { id: 'incidents', label: '障害の知らせ', icon: 'notifications' },
@@ -225,6 +227,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
             </div>
           )}
           {page === 'tenants' && <Tenants me={me} flagged={flagged} onMachines={() => setPage('machines')} onChanged={loadRequests} />}
+          {page === 'demos' && <OpsDemos me={me} />}
           {page === 'requests' && <Requests me={me} rows={requests} onChanged={loadRequests} />}
           {page === 'server' && <Server />}
           {page === 'incidents' && <Incidents />}
@@ -862,9 +865,10 @@ function LawTables({ me }: { me: OpsMe }) {
 function Settings({ me }: { me: OpsMe }) {
   return (
     <>
-      <OpsTitle title="設定" help={{ chapter: '09-settings-audit', text: '運営主体・運営の AI の鍵と上限・表示を決めます。' }} />
+      <OpsTitle title="設定" help={{ chapter: '09-settings-audit', text: '運営主体・運営の AI の鍵と上限・体験版の既定・表示を決めます。' }} />
       <OperatorProfileCard me={me} />
       <AiSettingsCard me={me} />
+      <DemoDefaultsCard me={me} />
       <DisplayCard />
     </>
   );

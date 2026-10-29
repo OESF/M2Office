@@ -29,6 +29,7 @@ export function sessionIdOf(token: string): string {
  * @param repo 永続化層
  * @param config 認証の設定
  * @param who ログインした利用者と、確認に使った手段
+ * @param ttlHours ログイン状態の長さ（時間）
  * @returns 作成したログイン状態
  *
  * @remarks
@@ -45,6 +46,8 @@ export async function issueSession(
   repo: Repository,
   config: AuthConfig,
   who: { tenantId: string; userId: string; provider: Session['provider'] },
+  /** ログイン状態の長さ（時間）。省けば設定の長さ（体験版のゲストは短くする。第23.3.2節） */
+  ttlHours: number = config.sessionTtlHours,
 ): Promise<Session> {
   const token = randomBytes(32).toString('base64url');
   const now = new Date();
@@ -57,7 +60,7 @@ export async function issueSession(
     userAgent: c.req.header('user-agent')?.slice(0, 300) ?? null,
     createdAt: now.toISOString(),
     lastSeenAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + config.sessionTtlHours * 3_600_000).toISOString(),
+    expiresAt: new Date(now.getTime() + ttlHours * 3_600_000).toISOString(),
     revokedAt: null,
   };
   await repo.createSession(session);
@@ -66,7 +69,7 @@ export async function issueSession(
     sameSite: 'Lax',
     secure: config.cookieSecure,
     path: '/',
-    maxAge: config.sessionTtlHours * 3600,
+    maxAge: Math.max(60, Math.floor(ttlHours * 3600)),
   });
   return session;
 }

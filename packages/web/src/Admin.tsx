@@ -7,6 +7,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, describeError, type AdminRun, type AdminRunStatus, type AdminSchedule, type AiUsageView, type AuditFilter, type AuditRowView, type Me, type SupportGrant, type RunDetail } from './api.js';
 import { RunView, statusLabel, SuspendedBanner } from './components.js';
+import { DemoBanner } from './demo-terms.js';
 import { MachinePanel } from './Machine.js';
 import {
   AgentSettings, CompanySettings, KnowledgeSettings, UserSettings,
@@ -249,6 +250,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
       <SuspendedBanner status={me.tenant.status} suspendAt={me.tenant.suspendAt} />
+      <DemoBanner demo={me.demo} />
       {/* 運営のサポートの代理アクセス（見るだけ。仕様書 第23.6.1節） */}
       {me.proxy && (
         <div className="suspended-banner" role="status">

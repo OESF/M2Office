@@ -77,6 +77,31 @@ export interface TenantOverview {
   securityHigh24h: number;
 }
 
+/** 体験（第23.3.2節）。相手の情報と数だけ。体験用の会社の中身は持たない。 */
+export interface OpsDemo {
+  id: string;
+  loginId: string;
+  tenantId: string;
+  company: string;
+  contact: string;
+  email: string;
+  aiCapJpy: number;
+  aiUsedJpy: number;
+  filesBytes: number;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  endedAt: string | null;
+  deletedAt: string | null;
+  contactPurgedAt: string | null;
+  termsAcceptedAt: string | null;
+  loginCount: number;
+  lastLoginAt: string | null;
+  lockedUntil: string | null;
+  /** 使える・期限切れ（消す前）・終えた（消した）。 */
+  state: 'active' | 'expired' | 'ended';
+}
+
 /** ローカルの形の機械。 */
 export interface OpsMachine {
   id: string;
@@ -231,7 +256,7 @@ export class OpsRuleError extends Error {
 /** データベースの関数の失敗を、決めた理由に直す（決めた理由でなければそのまま投げる）。 */
 function rethrow(err: unknown): never {
   const msg = err instanceof Error ? err.message : '';
-  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found|reason_required|already_requested|not_stopped|not_pending|same_operator|kind_invalid|time_invalid)$/.test(msg)) throw new OpsRuleError(msg);
+  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found|reason_required|already_requested|not_stopped|not_pending|same_operator|kind_invalid|time_invalid|login_invalid|login_taken|days_invalid|cap_invalid)$/.test(msg)) throw new OpsRuleError(msg);
   throw err;
 }
 
@@ -619,6 +644,60 @@ export class OpsStore {
   async platformAiTotal(since: Date): Promise<number> {
     const { rows } = await this.pool.query('select ops.ai_platform_total($1) as total', [since]);
     return Number(rows[0]?.total ?? 0);
+  }
+
+  /** 体験版の既定（日数と AI の上限。第23.3.2節「既定」）。 */
+  async demoDefaults(): Promise<{ days: number; aiCapJpy: number }> {
+    const { rows } = await this.pool.query('select demo_days, demo_ai_cap_jpy from ops.platform_settings where id = 1');
+    return { days: Number(rows[0]?.demo_days ?? 14), aiCapJpy: Number(rows[0]?.demo_ai_cap_jpy ?? 1000) };
+  }
+
+  async setDemoDefaults(days: number, aiCapJpy: number, by: string): Promise<void> {
+    await this.pool.query('select ops.set_demo_defaults($1, $2, $3)', [days, aiCapJpy, by]).catch(rethrow);
+  }
+
+  /** 体験の一覧（新しい順）。 */
+  async listDemos(): Promise<OpsDemo[]> {
+    const { rows } = await this.pool.query('select * from ops.list_demos()');
+    const now = Date.now();
+    return rows.map((r) => ({
+      id: r.id, loginId: r.login_id, tenantId: r.tenant_id, company: r.company, contact: r.contact, email: r.email,
+      aiCapJpy: Number(r.ai_cap_jpy), aiUsedJpy: Math.round(Number(r.ai_used_jpy) * 100) / 100, filesBytes: Number(r.files_bytes),
+      createdBy: r.created_by, createdAt: iso(r.created_at)!, expiresAt: iso(r.expires_at)!, endedAt: iso(r.ended_at), deletedAt: iso(r.deleted_at),
+      contactPurgedAt: iso(r.contact_purged_at), termsAcceptedAt: iso(r.terms_accepted_at), loginCount: Number(r.login_count),
+      lastLoginAt: iso(r.last_login_at), lockedUntil: iso(r.locked_until),
+      state: r.ended_at || r.deleted_at ? 'ended' : Date.parse(iso(r.expires_at)!) <= now ? 'expired' : 'active',
+    }));
+  }
+
+  /**
+   * 体験を出す（体験用の会社・ゲストの利用者・ゲストの記録を作る）。
+   *
+   * @param passwordHash パスワードの控え（元に戻せない形）
+   * @param companyName 体験用の会社の名前（見本の会社名）
+   * @throws {OpsRuleError} ID が使われている・日数や上限が範囲の外
+   */
+  async createDemo(p: { loginId: string; passwordHash: string; company: string; contact: string; email: string; days: number; aiCapJpy: number; companyName: string }, operatorId: string): Promise<{ id: string; tenantId: string; expiresAt: string }> {
+    const { rows } = await this.pool.query('select * from ops.create_demo($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [p.loginId, p.passwordHash, p.company, p.contact, p.email, p.days, p.aiCapJpy, p.companyName, operatorId]).catch(rethrow);
+    return { id: rows[0].guest_id, tenantId: rows[0].tenant_id, expiresAt: iso(rows[0].expires_at)! };
+  }
+
+  /** 期限を延ばす（1 回に 7 日まで）。新しい期限を返す。 */
+  async extendDemo(id: string, days: number, operatorId: string): Promise<string> {
+    const { rows } = await this.pool.query('select ops.extend_demo($1,$2,$3) as at', [id, days, operatorId]).catch(rethrow);
+    return iso(rows[0].at)!;
+  }
+
+  /** パスワードを出し直す（前のパスワードとログイン状態は使えなくなる）。 */
+  async resetDemoPassword(id: string, passwordHash: string, operatorId: string): Promise<void> {
+    await this.pool.query('select ops.reset_demo_password($1,$2,$3)', [id, passwordHash, operatorId]).catch(rethrow);
+  }
+
+  /** 早く終える（体験用の会社をすぐ消す）。消した会社の ID を返す。 */
+  async endDemo(id: string, operatorId: string): Promise<string> {
+    const { rows } = await this.pool.query('select ops.end_demo($1,$2) as t', [id, operatorId]).catch(rethrow);
+    return String(rows[0].t);
   }
 
   /**

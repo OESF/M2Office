@@ -20,6 +20,7 @@ import {
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
   InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
+  PostgresDemoStore, demoSubdomain, isDemoTenantId, seedDemoCompany, type DemoStore,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
 import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type MemberSettings, type PrintDesignSettings, fileInputKey } from '@m2office/shared';
@@ -288,6 +289,11 @@ export interface AppDeps {
     books: HrBooksExport;
     access(tenantId: string, userId: string): Promise<HrSettings | null>;
   };
+  /**
+   * 体験版（仕様書 第23.3.2節、ADR-0115）。`subdomain` は入口の名前（`DEMO_SUBDOMAIN`）で、無ければ体験版を使わない。
+   * `seed` は体験用の会社に見本の会社のデータを入れる（最初のログインのときに 1 度だけ）
+   */
+  demo: { store: DemoStore; subdomain: string | null; seed(tenantId: string, userId: string): Promise<{ failed: string[] }> };
 }
 
 /**
@@ -330,8 +336,12 @@ export function buildDeps(): AppDeps {
   const connector = buildConnector(process.env['CONNECTOR_MODE'] ?? 'mock', {
     repo, box, mockTenants: (process.env['CONNECTOR_MOCK_TENANTS'] ?? '').split(','),
     production: process.env['NODE_ENV'] === 'production',
+    // 体験用の会社の Google の部分は、本番でも見本で動かす（第23.3.2節）
+    alwaysMock: isDemoTenantId,
     onRevoked: async (p, enc) => { await onGrantLost?.(p.tenantId, p.userId, enc); },
   });
+  // 見本の会社は外のサイトを読まない。体験用の会社は、Google の部分は見本でも外のサイトは読む（三浦さんが決めた。第23.3.2節「外部への接続」）
+  const noOutside = (tenantId: string) => connector.sourceFor(tenantId) === 'mock' && !isDemoTenantId(tenantId);
   const registry = new ToolRegistry();
   for (const tool of BUILTIN_TOOLS) registry.register(tool);
 
@@ -374,10 +384,18 @@ export function buildDeps(): AppDeps {
   const research = platform.research;
   if (devKey) log.warn('M2OFFICE_SECRET_KEY が未設定のため、開発用の固定の鍵で秘密の値を暗号化しています（本番では起動しません）');
   // AI の利用の記録と上限（仕様書 第6.6.2節、ADR-0079）
+  // 体験版（第23.3.2節）。ゲストの表は運営のスキーマにあり、決めた関数だけを呼ぶ
+  const demoStore = new PostgresDemoStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
   const aiMeter = aiUsageMeterFromEnv({
     repo, connectionString: process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', env: process.env,
     onError: (err) => log.warn('AI の利用を記録できませんでした', { err }),
     platform: platformSource,
+    // 体験版の期間を通した上限（第23.3.2節「AI」）
+    trial: async (tenantId) => {
+      if (!isDemoTenantId(tenantId)) return null;
+      const t = await demoStore.trial(tenantId);
+      return t ? { capJpy: t.aiCapJpy, since: new Date(t.startedAt) } : null;
+    },
   });
   setEnqueueAiGuard((tenantId, userId) => aiMeter.assert(tenantId, userId));
   const ai = new TenantAiResolver({
@@ -523,7 +541,7 @@ export function buildDeps(): AppDeps {
       store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), files,
       repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
       // 似すぎの確かめで出典のページを読む口（見本の会社では読まない。第32.18.4節）
-      pagesFor: (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? null : new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 1_000)),
+      pagesFor: (tenantId) => (noOutside(tenantId) ? null : new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 1_000)),
       // 読まれたコラムの書き方の傾向（Webの分析。第32.18.5節）。Webの分析は後で作るので、呼ぶときに引く
       tendencyFor: (tenantId) => webReviewRef.service?.columnTendency(tenantId) ?? Promise.resolve(null),
     }),
@@ -552,7 +570,7 @@ export function buildDeps(): AppDeps {
     service: new CompetitorService({
       store: new PostgresCompetitorStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
       repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), placesKeyFor: async (tenantId) => (await ai.geminiFor(tenantId)).apiKey,
-      sourceFor: (tenantId) => connector.sourceFor(tenantId), externalAllowed: async (tenantId) => !isLocalPolicy(await ai.policyFor(tenantId)),
+      sourceFor: (tenantId) => (noOutside(tenantId) ? 'mock' : 'google'), externalAllowed: async (tenantId) => !isLocalPolicy(await ai.policyFor(tenantId)),
       userAgent: crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), logger: log,
       // 問い合わせの「どこで知ったか」（競合の名前が出た件数だけをレポートに添える。第36.20節）
       inquirySources: async (tenantId, since) => ((await repo.getTenantSettings(tenantId)).inquiries.enabled
@@ -648,8 +666,8 @@ export function buildDeps(): AppDeps {
       store: new PostgresSubsidyStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
       repo, logger: log, llmFor: (tenantId) => ai.llmFor(tenantId), 
       // 見本の会社では Web の調べものも使わない（外に読みに行かない）
-      researchFor: async (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? new MockResearchProvider() : ai.researchFor(tenantId)),
-      sourceFor: (tenantId) => (connector.sourceFor(tenantId) === 'mock' ? mockJGrants : jgrants),
+      researchFor: async (tenantId) => (noOutside(tenantId) ? new MockResearchProvider() : ai.researchFor(tenantId)),
+      sourceFor: (tenantId) => (noOutside(tenantId) ? mockJGrants : jgrants),
       // 人事・給与を使っていれば、在籍している従業員の数（幅にして使う。名前などは渡さない）
       employeesOf: async (tenantId) => {
         if (!(await repo.getTenantSettings(tenantId)).hr.enabled) return null;
@@ -826,7 +844,7 @@ export function buildDeps(): AppDeps {
     },
     // アプリの一覧に入れる公式サイトを、実際に開けるか確かめる（社内のアドレスは開かない。見本の会社では外を読まない。第6.1.1.2節）
     launcherReachable: async (tenantId, url) => {
-      if (connector.sourceFor(tenantId) === 'mock') return false;
+      if (noOutside(tenantId)) return false;
       const page = await new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 0).get(url, 'html').catch(() => null);
       return !!page && page.status < 400;
     },
@@ -933,6 +951,38 @@ export function buildDeps(): AppDeps {
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, apiDocs, apps, appLinks, appKnowledge, security, helpFeedback, knowledgeGaps, systemLogs, helpNotes, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     onsiteTenant: ai.deployment() === 'onsite' ? (process.env['M2O_ONSITE_TENANT']?.trim() || null) : null,
+    demo: {
+      store: demoStore,
+      // ローカルの形では体験版を使わない（クラウドの形の入口だけ）
+      subdomain: ai.deployment() === 'onsite' ? null : demoSubdomain(process.env),
+      seed: (tenantId, userId) => seedDemoCompany({
+        settings: (t) => repo.getTenantSettings(t),
+        saveSettings: (t: string, section: 'company' | 'inventory' | 'salesDocs' | 'onboarding', value: never, by: string) => repo.saveTenantSettings(t, section, value, by),
+        saveRule: async (t, by, r) => {
+          const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+          await repo.saveRuleVersion({
+            id: `k-${createHash('sha256').update(`${t}:${r.title}`).digest('hex').slice(0, 24)}`, tenantId: t, kind: 'rule', title: r.title, body: r.body,
+            source: r.title, compartment: null, updatedAt: new Date().toISOString(), effectiveFrom: today,
+          }, by, today);
+        },
+        importCards: async (t, by, rows) => { await cards.service.importTable({ tenantId: t, userId: by }, rows, 'company'); },
+        createItem: async (t, by, i) => {
+          const r = await inventoryService.createItem(t, by, {
+            name: i.name, sku: i.sku, category: i.category, unit: i.unit, price: i.price, purchasePrice: i.purchasePrice, lowThreshold: i.low,
+          }, i.qty);
+          if ('error' in r) throw new Error(String(r.error));
+        },
+        createQuote: async (t, by, q) => {
+          const who = { tenantId: t, userId: by };
+          const r = await salesDocs.service.createQuote(who, { to: q.to, items: q.items }, null);
+          if ('error' in r) throw new Error(r.error);
+          if (q.order) {
+            const o = await salesDocs.service.orderFromQuote(who, r.doc.id);
+            if ('error' in o) throw new Error(String(o.error));
+          }
+        },
+      }, tenantId, userId),
+    },
     oauth: {
       // Google は http の戻り先を localhost にしか認めないため、開発では localhost の画面の転送を通す（ADR-0007）
       redirectUri: googleRedirect,

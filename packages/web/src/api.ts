@@ -430,6 +430,8 @@ export interface Me {
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
   debug?: boolean;
+  /** 体験版の様子（体験用の会社だけ。仕様書 第23.3.2節）。 */
+  demo?: DemoTrialView | null;
 }
 
 /** 1 日の打刻を直すときの入力（日本時間の HH:MM）。 */
@@ -725,6 +727,17 @@ export interface LoginProviders {
   dev: { enabled: boolean; users: { email: string; displayName: string; roles: string[] }[] };
   /** ローカルの形で機械の管理者を作った機械か（ログイン画面に「機械の管理」を出す。仕様書 第8.6.3節）。 */
   machineAdmin?: boolean;
+  /** 体験版の入口か（ゲストの ID とパスワードの欄を出す。仕様書 第23.3.2節）。 */
+  demo?: boolean;
+}
+
+/** 体験版の様子（`/v1/me` の `demo`。仕様書 第23.3.2節）。 */
+export interface DemoTrialView {
+  expiresAt: string;
+  termsAcceptedAt: string | null;
+  aiCapJpy: number;
+  /** 最初のログインで同意を求める規約。 */
+  terms: string[];
 }
 
 export type ScheduleView = Schedule & { label: string };
@@ -1402,6 +1415,13 @@ export const api = {
     });
     csrfToken = res.csrfToken;
   },
+  /** 体験版のゲストのログイン（仕様書 第23.3.2節）。 */
+  demoLogin: async (loginId: string, password: string) => {
+    const res = await call<{ csrfToken: string }>('/demo-login', { method: 'POST', body: JSON.stringify({ loginId, password }) });
+    csrfToken = res.csrfToken;
+  },
+  /** 体験版の利用規約に同意する。 */
+  acceptDemoTerms: () => call<{ ok: true }>('/me/demo/terms', { method: 'POST' }),
   logout: async () => {
     await call('/auth/logout', { method: 'POST' });
     csrfToken = null;

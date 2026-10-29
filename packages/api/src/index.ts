@@ -15,7 +15,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage, appPath, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS } from '@m2office/core';
 import { buildDeps, companyView, fileStorageDir } from './context.js';
-import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
+import { authenticate, demoRestrictions, resolveTenant, type AppEnv } from './middleware/tenant.js';
+import { demoLoginRoute, demoTermsRoute, demoView } from './demo.js';
 import { attachVoiceRelay } from './voice/relay.js';
 import { onUnexpectedError, requestLogger } from './middleware/logging.js';
 import { agentsRoute } from './routes/agents.js';
@@ -155,6 +156,8 @@ app.route('/v1/unsubscribe', unsubscribeRoute(deps));
 app.route('/v1/machine-admin', machineAdminRoute(deps));
 // 脆弱性の報告の窓口（RFC 9116。第16.11.3節 G-11）。会社の判定より前に受ける
 app.route('/v1/security.txt', securityTxtRoute());
+// 体験版のゲストのログイン（第23.3.2節）。会社はゲストの ID から決まるため、会社の判定より前に置く
+app.route('/v1/demo-login', demoLoginRoute(deps));
 app.use('/v1/*', async (c, next) => (c.req.path.startsWith('/v1/machine-admin/') ? next() : resolveTenant(deps)(c, next)));
 app.route('/v1/auth', authRoute(deps));
 // サイネージの再生のページ（第31.9.1節）。ログインを使わず、画面の鍵で名乗る。会社はアドレスで決まるため、会社の判定の後・ログインの確かめより前に置く
@@ -166,6 +169,8 @@ app.route('/v1/member-card', memberCardRoute(deps));
 app.use('/v1/*', async (c, next) =>
   c.req.path.startsWith('/v1/auth/') || c.req.path.startsWith('/v1/signage-play/') || c.req.path.startsWith('/v1/member-card/') || c.req.path.startsWith('/v1/hr-terminal/')
     ? next() : authenticate(deps)(c, next));
+// 体験用の会社で止める操作（第23.3.2節「ゲストのロール」）
+app.use('/v1/*', demoRestrictions());
 // AI の利用の持ち主と用途（仕様書 第6.6.2節）。この要求の中で呼ぶ AI を、本人と口の名前で記録し、本人の上限で確かめる
 app.use('/v1/*', async (c, next) => {
   const user = c.get('ctx')?.user;
@@ -265,6 +270,8 @@ app.get('/v1/me', async (c) => {
     hrSelf: !!(await deps.hr.attendance.selfEmployee(ctx.tenant.id, ctx.user.id)),
     // デバッグモードか（仕様書 第20.4.1節「デバッグモード」）。画面の上の帯に「Debug mode」を出し、記録を見る入口を出す
     debug: !!deps.debug,
+    // 体験版の様子（期限・規約への同意・AI の上限。第23.3.2節）。体験用の会社でなければ null
+    demo: await demoView(deps, ctx.tenant.id),
   });
 });
 app.route('/v1/me/google', myGoogleRoute(deps));
@@ -273,6 +280,8 @@ app.route('/v1/me/hr', hrSelfRoute(deps));
 // 認証の要る会社の接続（Slack など）の、本人の接続と取り消し（仕様書 第6.5.9節・第12.11.6.3節）
 app.route('/v1/me/connections', myConnectionsRoute(deps, returnTo));
 app.route('/v1/me/canva', myCanvaRoute(deps, returnTo));
+// 体験版の利用規約への同意（第23.3.2節「最初のログイン」）
+app.route('/v1/me/demo', demoTermsRoute(deps));
 app.route('/v1/me', meRoute(deps));
 // 外部のアプリの機能の道（第13.4.1節・第13.4.2節）。画面の道より先に置く（業務の依頼・お知らせ・予約・在庫などは、同じ道をアプリの鍵でも呼ぶ。
 // アプリの鍵でなければ画面の道へ回す）

@@ -12,10 +12,11 @@ import { randomUUID } from 'node:crypto';
 import type { Context, Next } from 'hono';
 import { getCookie } from 'hono/cookie';
 import type { RequestContext, Tenant, User } from '@m2office/shared';
-import { appFunctionFor, proxyAllowed, type Logger, type ProxyScope } from '@m2office/core';
+import { appFunctionFor, demoBlocked, isDemoTenantId, proxyAllowed, DEMO_RESTRICTED_MESSAGE, type Logger, type ProxyScope } from '@m2office/core';
 import type { AppFunctionId } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
-import { readSession } from '../auth/session.js';
+import { clearSessionCookie, readSession, SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
+import { demoProviders, isDemoHost } from '../demo.js';
 
 /** 認証の結果。どの手段で本人を確認したか。 */
 export type AuthInfo =
@@ -68,6 +69,8 @@ export interface AppEnv {
 export function resolveTenant(deps: AppDeps) {
   return async (c: Context<AppEnv>, next: Next) => {
     const host = c.req.header('host') ?? '';
+    // 体験版の入口（第23.3.2節）。会社はサブドメインではなく、ゲストのログイン状態から決める
+    if (isDemoHost(host, deps.demo.subdomain)) return resolveDemoTenant(deps, c, next);
     // ローカルの形（第8.6節）では、アドレスにかかわらず入っている 1 社に決める
     if (deps.ai.deployment() === 'onsite' && !deps.onsiteTenant) {
       return c.json({ error: 'ローカルの形の会社が設定されていません（M2O_ONSITE_TENANT）' }, 500);
@@ -97,6 +100,46 @@ export function resolveTenant(deps: AppDeps) {
       return c.json({ error: SUSPENDED_MESSAGE, suspended: true }, 403);
     }
     c.set('tenant', tenant);
+    await next();
+  };
+}
+
+/**
+ * 体験版の入口で、ゲストのログイン状態から体験用の会社を決める（第23.3.2節「分け方」）。
+ *
+ * @remarks
+ * テナント境界: 会社は、Cookie のハッシュが指すログイン状態の会社で、体験が使える状態（期限の前・終えていない・見本のデータが入った）のときだけ決まる。
+ * 決まらなければログインを求める。Google のログイン・開発用ログインは、この入口では受けない
+ */
+async function resolveDemoTenant(deps: AppDeps, c: Context<AppEnv>, next: Next) {
+  const path = c.req.path;
+  if (path === '/v1/auth/providers') return c.json(demoProviders());
+  if (/^\/v1\/auth\/(google|dev-login|exchange|proxy)/.test(path)) return c.json({ error: '見つかりません' }, 404);
+  const token = getCookie(c, SESSION_COOKIE);
+  const tenantId = token ? await deps.demo.store.sessionTenant(sessionIdOf(token)).catch(() => null) : null;
+  const tenant = tenantId && isDemoTenantId(tenantId) ? await deps.repo.findTenantById(tenantId) : null;
+  if (!tenant || !isOperational(tenant)) {
+    if (path === '/v1/auth/logout') {
+      clearSessionCookie(c);
+      return c.json({ ok: true });
+    }
+    return c.json({ error: 'ログインが必要です', login: true }, 401);
+  }
+  c.set('tenant', tenant);
+  await next();
+}
+
+/**
+ * 体験用の会社で止める操作を断る（第23.3.2節「ゲストのロール」）。利用者を確かめた後に掛ける。
+ *
+ * @remarks 利用者の招待・会社の接続の情報・500 MB を超えるファイルは、データベースの仕掛けでも断る（ここを通らない経路も止まる）
+ */
+export function demoRestrictions() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    const tenant = c.get('ctx')?.tenant;
+    if (tenant && isDemoTenantId(tenant.id) && demoBlocked(c.req.method, c.req.path)) {
+      return c.json({ error: c.req.path.startsWith('/v1/admin/connections') || c.req.path.startsWith('/v1/me/') ? DEMO_RESTRICTED_MESSAGE.connection : DEMO_RESTRICTED_MESSAGE.feature, demo: true }, 403);
+    }
     await next();
   };
 }

@@ -1,7 +1,8 @@
 /**
- * @file ログイン画面。Google ログインと、準備中の間だけ使う開発用ログインを出す。
+ * @file ログイン画面。Google ログインと、準備中の間だけ使う開発用ログインを出す。体験版の入口では、ゲストの ID とパスワードの欄を出す。
  *
  * @see 仕様書 第16.1節 認証
+ * @see 仕様書 第23.3.2節 体験版
  */
 
 import { useEffect, useState } from 'react';
@@ -18,6 +19,8 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [providers, setProviders] = useState<LoginProviders | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [guestId, setGuestId] = useState('');
+  const [guestPassword, setGuestPassword] = useState('');
 
   useEffect(() => {
     api.providers().then(setProviders).catch((err) =>
@@ -58,6 +61,19 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   }
 
+  async function demoLogin() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.demoLogin(guestId.trim(), guestPassword);
+      onLoggedIn();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'ログインできませんでした');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function devLogin(email: string) {
     setBusy(true);
     setError(null);
@@ -77,12 +93,24 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
         <h1>M2Office</h1>
         <p className="lead">{providers?.tenant.name ?? '読み込み中…'}</p>
 
-        <button className="btn google" disabled={!providers?.google.enabled || busy}
-          onClick={() => void googleLogin()}>
-          {busy ? '…' : 'Google アカウントでログイン'}
-        </button>
-        {providers && !providers.google.enabled && (
-          <p className="muted small">{providers.google.reason}</p>
+        {providers?.demo ? (
+          <form className="demo-login" onSubmit={(e) => { e.preventDefault(); void demoLogin(); }}>
+            <div className="field"><label htmlFor="guest-id">ゲストの ID</label>
+              <input id="guest-id" autoComplete="username" autoCapitalize="none" spellCheck={false} value={guestId} onChange={(e) => setGuestId(e.target.value)} placeholder="guest-xxxxxx" /></div>
+            <div className="field"><label htmlFor="guest-password">パスワード</label>
+              <input id="guest-password" type="password" autoComplete="current-password" value={guestPassword} onChange={(e) => setGuestPassword(e.target.value)} /></div>
+            <button className="btn wide" type="submit" disabled={busy || !guestId.trim() || !guestPassword}>{busy ? '…' : 'ログイン'}</button>
+          </form>
+        ) : (
+          <>
+            <button className="btn google" disabled={!providers?.google.enabled || busy}
+              onClick={() => void googleLogin()}>
+              {busy ? '…' : 'Google アカウントでログイン'}
+            </button>
+            {providers && !providers.google.enabled && (
+              <p className="muted small">{providers.google.reason}</p>
+            )}
+          </>
         )}
 
         {providers?.dev.enabled && (

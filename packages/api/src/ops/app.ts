@@ -13,6 +13,7 @@ import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploym
   parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
   OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual,
   checkGeminiText, defaultGeminiModels, jstMonth, type CheckResult, type SecretBox,
+  checkNewDemo, demoSubdomain, demoWelcomeText, hashMachinePassword, newGuestLoginId, newGuestPassword, DEMO_COMPANY_NAME, DEMO_EXTEND_MAX_DAYS, DEMO_MAX_DAYS,
   type SystemLogLine,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
 } from '@m2office/core';
@@ -56,6 +57,8 @@ export interface OpsDeps {
     /** 鍵で Gemini に試しに問い合わせる（省略すると本物）。 */
     check?: (apiKey: string) => Promise<CheckResult>;
   };
+  /** 体験版の入口の名前（第23.3.2節）。省けば `DEMO_SUBDOMAIN`。`null` なら体験を出せない */
+  demoSubdomain?: string | null;
 }
 
 type OpsEnv = { Variables: { operator: Operator; session: OpsSession } };
@@ -245,7 +248,7 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
       operator: op, csrfToken: c.get('session').csrfToken,
       // パスキーで確かめたか。確かめていなければ、登録済みなら確かめ、まだなら登録の合言葉で登録する
       verified: c.get('session').verified, passkeyCount: op.passkeyCount ?? 0,
-      can: Object.fromEntries((['tenant.create', 'tenant.status', 'tenant.suspend', 'tenant.lock', 'machine.manage', 'operator.manage', 'settings.manage', 'evidence.create', 'evidence.delete'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
+      can: Object.fromEntries((['tenant.create', 'tenant.status', 'tenant.suspend', 'tenant.lock', 'machine.manage', 'operator.manage', 'settings.manage', 'evidence.create', 'evidence.delete', 'demo.manage'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
     });
   });
 
@@ -674,6 +677,89 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     await store.setPlatformAiCaps(tenantCap, platformCap, c.get('operator').id);
     await store.audit(c.get('operator').id, 'settings.ai_limits', 'settings', 'ai', { tenantCapJpy: tenantCap, platformCapJpy: platformCap });
     return c.json({ ok: true, tenantCapJpy: tenantCap, platformCapJpy: platformCap });
+  });
+
+  // ---- 体験版（第23.3.2節「マスター管理画面」）。体験用の会社の中身は見ない ----
+  const demoSub = deps.demoSubdomain !== undefined ? deps.demoSubdomain : demoSubdomain(process.env);
+  const demoUrl = (c: Context<OpsEnv>) => (demoSub ? tenantLoginUrl(originOf(c), demoSub) : null);
+  app.get('/v1/ops/demos', async (c) => c.json({
+    demos: await store.listDemos(), defaults: await store.demoDefaults(), url: demoUrl(c), extendMaxDays: DEMO_EXTEND_MAX_DAYS, maxDays: DEMO_MAX_DAYS,
+  }));
+  app.post('/v1/ops/demos', async (c) => {
+    if (!can(c, 'demo.manage')) return denied(c);
+    const url = demoUrl(c);
+    if (!url) return c.json({ error: '体験版の入口が設定されていません（DEMO_SUBDOMAIN）' }, 409);
+    const checked = checkNewDemo(await c.req.json<Record<string, unknown>>().catch(() => ({})), await store.demoDefaults());
+    if (!checked.ok) return c.json({ error: checked.error }, 400);
+    const v = checked.value;
+    const op = c.get('operator');
+    const password = newGuestPassword();
+    const passwordHash = hashMachinePassword(password);
+    // ゲストの ID がたまたま重なったら、引き直す
+    for (let i = 0; i < 3; i++) {
+      const loginId = newGuestLoginId();
+      try {
+        const d = await store.createDemo({ loginId, passwordHash, company: v.company, contact: v.contact, email: v.email, days: v.days, aiCapJpy: v.aiCapJpy, companyName: DEMO_COMPANY_NAME }, op.id);
+        await store.audit(op.id, 'demo.create', 'demo', d.id, { loginId, days: v.days, aiCapJpy: v.aiCapJpy });
+        return c.json({
+          id: d.id, loginId, password, url, expiresAt: d.expiresAt,
+          welcome: demoWelcomeText({ company: v.company, contact: v.contact, url, loginId, password, expiresAt: d.expiresAt }),
+        }, 201);
+      } catch (err) {
+        if (err instanceof OpsRuleError && err.code === 'login_taken') continue;
+        if (err instanceof OpsRuleError) return c.json({ error: tenantErrorText(err.code) }, 400);
+        throw err;
+      }
+    }
+    return c.json({ error: tenantErrorText('login_taken') }, 409);
+  });
+  app.post('/v1/ops/demos/:id/extend', async (c) => {
+    if (!can(c, 'demo.manage')) return denied(c);
+    const { days } = await c.req.json<{ days?: unknown }>().catch(() => ({ days: undefined }));
+    const n = Number(days);
+    if (!Number.isInteger(n) || n < 1 || n > DEMO_EXTEND_MAX_DAYS) return c.json({ error: `延ばす日数は 1〜${DEMO_EXTEND_MAX_DAYS} 日で入れてください` }, 400);
+    try {
+      const expiresAt = await store.extendDemo(c.req.param('id'), n, c.get('operator').id);
+      await store.audit(c.get('operator').id, 'demo.extend', 'demo', c.req.param('id'), { days: n, expiresAt });
+      return c.json({ expiresAt });
+    } catch (err) {
+      if (err instanceof OpsRuleError) return c.json({ error: tenantErrorText(err.code) }, err.code === 'not_found' ? 404 : 400);
+      throw err;
+    }
+  });
+  app.post('/v1/ops/demos/:id/password', async (c) => {
+    if (!can(c, 'demo.manage')) return denied(c);
+    const password = newGuestPassword();
+    try {
+      await store.resetDemoPassword(c.req.param('id'), hashMachinePassword(password), c.get('operator').id);
+      await store.audit(c.get('operator').id, 'demo.password', 'demo', c.req.param('id'));
+      return c.json({ password });
+    } catch (err) {
+      if (err instanceof OpsRuleError) return c.json({ error: tenantErrorText(err.code) }, err.code === 'not_found' ? 404 : 400);
+      throw err;
+    }
+  });
+  app.post('/v1/ops/demos/:id/end', async (c) => {
+    if (!can(c, 'demo.manage')) return denied(c);
+    try {
+      const tenantId = await store.endDemo(c.req.param('id'), c.get('operator').id);
+      await store.audit(c.get('operator').id, 'demo.end', 'demo', c.req.param('id'), { tenantId });
+      return c.json({ ok: true });
+    } catch (err) {
+      if (err instanceof OpsRuleError) return c.json({ error: tenantErrorText(err.code) }, err.code === 'not_found' ? 404 : 400);
+      throw err;
+    }
+  });
+  app.put('/v1/ops/settings/demo', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    const b = await c.req.json<{ days?: unknown; aiCapJpy?: unknown }>().catch(() => ({} as { days?: unknown; aiCapJpy?: unknown }));
+    const days = Number(b.days);
+    const aiCapJpy = Number(b.aiCapJpy);
+    if (!Number.isInteger(days) || days < 1 || days > DEMO_MAX_DAYS) return c.json({ error: `日数は 1〜${DEMO_MAX_DAYS} 日で入れてください` }, 400);
+    if (!Number.isInteger(aiCapJpy) || aiCapJpy < 1 || aiCapJpy > 100_000) return c.json({ error: 'AI の上限は 1〜100,000 円で入れてください' }, 400);
+    await store.setDemoDefaults(days, aiCapJpy, c.get('operator').id);
+    await store.audit(c.get('operator').id, 'settings.demo', 'settings', 'demo', { days, aiCapJpy });
+    return c.json({ days, aiCapJpy });
   });
 
   // 運営主体の設定（第23.8.14節）

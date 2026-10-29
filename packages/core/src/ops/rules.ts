@@ -4,8 +4,11 @@
  * サブドメインの規則・運営者のロールでできること・運営者に許す Google のドメイン・会社を作る入力の確かめ・稼働の知らせの中身の確かめと、機械に付ける印。
  */
 
-/** 運営が使う名前は払い出さない（第20.4.3節）。API の会社の判定と、データベースの `ops.create_tenant` と同じもの。 */
-export const RESERVED_SUBDOMAINS = ['www', 'api', 'app', 'admin', 'ops', 'signup', 'mail', 'docs', 'status', 'help', 'localhost'] as const;
+/**
+ * 運営が使う名前は払い出さない（第20.4.3節）。データベースの `ops.create_tenant` と同じもの。
+ * `demo` は体験版の入口（第23.3.2節）。新しい会社には払い出さない
+ */
+export const RESERVED_SUBDOMAINS = ['www', 'api', 'app', 'admin', 'ops', 'signup', 'demo', 'mail', 'docs', 'status', 'help', 'localhost'] as const;
 
 /** サブドメインの規則（第20.4.3節）。英小文字・数字・ハイフン。先頭と末尾のハイフンは不可。3 文字以上。 */
 const SUBDOMAIN = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
@@ -36,7 +39,7 @@ export function opsDomainAllowed(email: string, domains: readonly string[]): boo
 }
 
 /** 運営者の操作。 */
-export type OpsAction = 'view' | 'incident.manage' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete';
+export type OpsAction = 'view' | 'incident.manage' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete' | 'demo.manage';
 
 /**
  * 運営者のロールで、その操作ができるか。
@@ -44,13 +47,14 @@ export type OpsAction = 'view' | 'incident.manage' | 'tenant.create' | 'tenant.s
  * @remarks 運営管理者はすべて（運営主体の設定を含む）。サポートは見ることと、会社を作る・切り替える・停止と再開の申請と承認まで。
  * 監視は見ることと、緊急停止の発動だけ（緊急停止は運営者なら誰でも発動できる。Q-63）。
  * 証拠保全は急ぐため、緊急停止と同じく運営者なら誰でも始められる。保全したものを消すのは運営管理者だけ（第16.10.5節）。
- * 障害・計画停止の知らせも急ぐため、運営者なら誰でも出せる（第16.11.3節 G-9）
+ * 障害・計画停止の知らせも急ぐため、運営者なら誰でも出せる（第16.11.3節 G-9）。
+ * 体験版を出す・延ばす・出し直す・終えるは、運営管理者とサポート（第23.3.2節「マスター管理画面」）
  */
 export function operatorCan(role: OperatorRole, action: OpsAction): boolean {
   if (role === 'admin') return true;
   // 障害の知らせ（第16.11.3節 G-9）は、見つけた運営者が急いで出せるよう、誰でも出せる
   if (action === 'view' || action === 'tenant.lock' || action === 'evidence.create' || action === 'incident.manage') return true;
-  return role === 'support' && (action === 'tenant.create' || action === 'tenant.status' || action === 'tenant.suspend');
+  return role === 'support' && (action === 'tenant.create' || action === 'tenant.status' || action === 'tenant.suspend' || action === 'demo.manage');
 }
 
 /** 停止の理由の種類（第23.8.6節）。 */
@@ -106,6 +110,10 @@ export function tenantErrorText(code: string): string {
     case 'same_operator': return '申請した人とは別の運営者が行ってください';
     case 'kind_invalid': return '操作の種類が違います';
     case 'time_invalid': return '終わりの時刻は、始まりより後で、いまより前にしてください';
+    case 'login_invalid': return 'ゲストの ID の形が違います';
+    case 'login_taken': return 'このゲストの ID はすでに使われています。もう一度お試しください';
+    case 'days_invalid': return '日数が範囲の外です';
+    case 'cap_invalid': return 'AI の上限は 1 円以上にしてください';
     default: return '処理できませんでした';
   }
 }

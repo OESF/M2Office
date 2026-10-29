@@ -8791,5 +8791,79 @@ console.log('\n■ 132. 見積書の管理（一覧と状態・失注・受注�
   }
 }
 
+console.log('\n■ 133. 体験版（ゲストの表はアプリが読めない・2 人目と接続の情報を断る・会社一覧に出ない・ゲストのログインと会社の決め方・止める操作・終えると消える。第23.3.2節）');
+{
+  const { default: pg } = await import('pg');
+  const { request } = await import('node:http');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+  await owner.connect();
+  await app.connect();
+  const { randomBytes, scryptSync } = await import('node:crypto');
+  // パスワードの控え（core の hashMachinePassword と同じ形）
+  const hashMachinePassword = (pw) => { const salt = randomBytes(16); return `scrypt:16384:8:1:${salt.toString('base64url')}:${scryptSync(pw.normalize('NFKC'), salt, 32, { N: 16384, r: 8, p: 1 }).toString('base64url')}`; };
+  const loginId = `guest-${Math.random().toString(36).slice(2, 8).replace(/[^a-z0-9]/g, 'x').padEnd(6, 'x')}`;
+  const password = 'SmokePassword234';
+  let guest = null;
+  /** 体験版の入口の名前で API を呼ぶ（Host を決めるため http で送る）。 */
+  const demoCall = (path, { method = 'GET', body, cookie, csrf } = {}) => new Promise((resolve, reject) => {
+    const u = new URL(`${API}${path}`);
+    const req = request({ hostname: u.hostname, port: u.port, path: u.pathname, method, headers: {
+      host: `${process.env.DEMO_SUBDOMAIN}.localhost`, 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...(csrf ? { 'x-csrf-token': csrf } : {}),
+    } }, (res) => {
+      let t = '';
+      res.on('data', (d) => { t += d; });
+      res.on('end', () => { let j; try { j = JSON.parse(t); } catch { j = t; } resolve({ status: res.statusCode, body: j, cookie: (res.headers['set-cookie'] ?? [])[0]?.split(';')[0] ?? null }); });
+    });
+    req.on('error', reject);
+    if (body) req.write(JSON.stringify(body));
+    req.end();
+  });
+  try {
+    const { rows } = await owner.query(`select * from ops.create_demo($1, $2, 'スモークの相手', '担当', 'smoke@example.co.jp', 14, 1000, '見本精工株式会社', 'smoke')`, [loginId, hashMachinePassword(password)]);
+    guest = rows[0];
+    const direct = await app.query('select * from ops.demo_guests').then(() => 'read', (e) => e.code);
+    const second = await owner.query(`insert into users (id, tenant_id, email, display_name, roles) values ($1, $2, 'x@demo.invalid', 'x', '{}')`, [`u-smoke-${guest.tenant_id}`, guest.tenant_id]).then(() => 'inserted', (e) => e.message);
+    const cred = await owner.query(`insert into tenant_credentials (tenant_id, kind, secret_enc, meta, updated_by, updated_at) values ($1, 'gemini', 'x', '{}', 'smoke', now())`, [guest.tenant_id]).then(() => 'inserted', (e) => e.message);
+    const listed = (await owner.query('select id from ops.tenant_overview()')).rows.some((r) => r.id === guest.tenant_id);
+    const bySub = (await owner.query(`select count(*)::int as n from tenants where subdomain = $1 and kind = 'customer'`, [`_${guest.tenant_id}`])).rows[0].n;
+    direct !== 'read' && /demo_restricted:users/.test(second) && /demo_restricted:connection/.test(cred) && !listed && bySub === 0
+      ? ok('アプリのロールはゲストの表を読めず、体験用の会社は 2 人目の利用者と接続の情報を断り、会社一覧と名前の引き当てに出ない')
+      : ng('体験用の会社の守りが違う', JSON.stringify({ direct, second, cred, listed, bySub }));
+    if (!process.env.DEMO_SUBDOMAIN) {
+      ok('DEMO_SUBDOMAIN が無いため、ゲストのログインの確かめは飛ばしました');
+    } else {
+      const wrong = await demoCall('/v1/demo-login', { method: 'POST', body: { loginId, password: 'wrong' } });
+      const good = await demoCall('/v1/demo-login', { method: 'POST', body: { loginId, password } });
+      const me = await demoCall('/v1/me', { cookie: good.cookie });
+      const seeded = (await owner.query('select count(*)::int as n from knowledge_items where tenant_id = $1', [guest.tenant_id])).rows[0].n;
+      wrong.status === 401 && good.status === 200 && me.status === 200 && me.body.tenant?.id === guest.tenant_id && me.body.demo?.terms?.length > 0 && seeded >= 3
+        ? ok('ゲストの ID とパスワードでログインでき、ログイン状態から体験用の会社が決まり、最初のログインで見本のデータが入る')
+        : ng('ゲストのログインが違う', JSON.stringify({ wrong: wrong.status, good: good.status, me: me.status, tenant: me.body?.tenant?.id, seeded }).slice(0, 300));
+      const csrf = good.body.csrfToken;
+      const mcp = await demoCall('/v1/admin/connections/mcp', { method: 'POST', body: { name: 'x', url: 'https://example.com/mcp' }, cookie: good.cookie, csrf });
+      const invite = await demoCall('/v1/admin/users', { method: 'POST', body: { email: 'friend@example.co.jp' }, cookie: good.cookie, csrf });
+      const google = await demoCall('/v1/auth/google/start', {});
+      mcp.status === 403 && invite.status === 403 && /体験版/.test(invite.body.error ?? '') && google.status === 404
+        ? ok('体験版では、会社の接続と利用者の招待を断り、入口では Google のログインを受けない')
+        : ng('体験版で止める操作が違う', JSON.stringify({ mcp: mcp.status, invite: invite.status, inviteError: invite.body?.error, google: google.status }));
+      await owner.query('select ops.end_demo($1, $2)', [guest.guest_id, 'smoke']);
+      const after = await demoCall('/v1/me', { cookie: good.cookie });
+      const left = (await owner.query('select count(*)::int as n from tenants where id = $1', [guest.tenant_id])).rows[0].n;
+      after.status === 401 && left === 0
+        ? ok('体験を終えると体験用の会社が消え、ログイン状態も使えなくなる') : ng('体験を終えたあとが違う', JSON.stringify({ after: after.status, left }));
+    }
+  } catch (err) {
+    ng('体験版の確認が途中で止まった', String(err));
+  } finally {
+    if (guest) {
+      await owner.query('select m2o_demo_purge($1)', [guest.tenant_id]).catch(() => undefined);
+      await owner.query('delete from ops.demo_guests where id = $1', [guest.guest_id]).catch(() => undefined);
+    }
+    await app.end();
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

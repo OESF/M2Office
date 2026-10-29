@@ -133,6 +133,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | Cloudflare を前に置くか | `no` |
 | 通信を止める国 | 既定（`CN,RU,KP`）のまま。止めないときは `none` |
 | 国で止めずに通す相手 | 空のまま（どうしても通す相手がいるときだけ、アドレスか範囲を入れる） |
+| 体験版の入口の名前 | 体験版を使うなら `demo`。使わないなら空のまま（第 17 章 6 節） |
 | Gemini の API の鍵・Google のログインのクライアント | あれば入れる（後で走らせ直して入れてもよい）。Gemini の鍵は、マスター管理画面の「設定 › AI」でも入れられる（第 9 章。画面で入れた鍵が優先） |
 
 命令が行うこと: ソフトを公式の置き場から入れる（Node.js 24・PostgreSQL 17 と pgvector・Caddy と WAF・CrowdSec）→ 専用の利用者 `m2office` と置き場を作る → 秘密の値を機械の上で作る → 設定のファイル（`/etc/m2office/m2office.env`）を作る → データベースを作る → 本番の組み立てと移行 → systemd で動かす → Caddy と CrowdSec の設定を置く → 80・443 を開ける → 動きを確かめる。初めては 10〜20 分ほどかかります。

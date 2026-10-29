@@ -23,7 +23,7 @@ const ANSWERS = {
   GEMINI_API_KEY: '', GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', SECRET_KEY: 'k'.repeat(64),
   DB_OWNER_PASSWORD: 'owner-pass', DB_APP_PASSWORD: 'app-pass', DB_OPS_PASSWORD: 'ops-pass',
   RELEASE_DIR: '/opt/m2office/app/dist-release', DATA_DIR: '/var/lib/m2office', LOG_DIR: '/var/log/m2office', CADDY_LOG_DIR: '/var/log/caddy',
-  SITE_DIR: '/var/www/m2office-site', API_PORT: '3101', OPS_PORT: '3102',
+  SITE_DIR: '/var/www/m2office-site', API_PORT: '3101', OPS_PORT: '3102', DEMO_SUBDOMAIN: 'demo',
 };
 
 /** 雛形を埋めて、出力先を返す。 */
@@ -65,6 +65,8 @@ test('雛形がすべて埋まり、API は機械の中だけで待ち受ける�
     assert.match(env, /^GOOGLE_LOGIN_REDIRECT_URI=https:\/\/m2office\.net\/v1\/oauth\/google\/login-callback$/m);
     // 運営者に許すドメインは、提携会社のものもカンマで並べたまま設定に入る（第23.8.9節「提携会社の運営者」）
     assert.match(env, /^OPS_GOOGLE_DOMAIN=example\.jp,partner\.example\.co\.jp$/m);
+    // 体験版の入口の名前（第23.3.2節）
+    assert.match(env, /^DEMO_SUBDOMAIN=demo$/m);
     const api = readFileSync(join(out, 'systemd/m2office-api.service'), 'utf8');
     assert.match(api, /--max-old-space-size=768 \/opt\/m2office\/app\/dist-release\/server\/api\.js/);
     assert.match(api, /^ProtectSystem=strict$/m);

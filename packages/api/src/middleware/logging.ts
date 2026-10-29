@@ -10,7 +10,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Context, Next } from 'hono';
-import { AiLimitError, type Logger } from '@m2office/core';
+import { AiLimitError, DEMO_RESTRICTED_MESSAGE, demoRestrictionOf, type Logger } from '@m2office/core';
 import type { AppEnv } from './tenant.js';
 
 /** 要求の ID として受け付ける形。外から渡された値をそのまま信じず、形を確かめる。 */
@@ -98,6 +98,9 @@ export function onUnexpectedError(log: Logger) {
     }
     // AI の利用の上限に当たった（仕様書 第6.6.2節・第21.2.3節）。想定外のエラーではない
     if (err instanceof AiLimitError) return c.json({ error: err.message, requestId }, 429);
+    // 体験版で止めている操作（データベースの仕掛けが断った。第23.3.2節）。想定外のエラーではない
+    const demo = demoRestrictionOf(err);
+    if (demo) return c.json({ error: DEMO_RESTRICTED_MESSAGE[demo], demo: true, requestId }, 403);
     (c.get('log') ?? log).error('想定外のエラー', { requestId, method: c.req.method, path: logPath(c.req.path), err });
     return c.json({ error: '内部エラーが発生しました。時間をおいて、もう一度お試しください。', requestId }, 500);
   };

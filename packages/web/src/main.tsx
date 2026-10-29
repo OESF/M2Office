@@ -11,6 +11,7 @@ import { App } from './App.js';
 import { Admin } from './Admin.js';
 import { Board } from './Dashboard.js';
 import { Login, takeReturnPath } from './Login.js';
+import { DemoTerms } from './demo-terms.js';
 import { MobileInventory } from './MobileInventory.js';
 import { MobileMembers } from './MobileMembers.js';
 import { MobilePunch } from './MobilePunch.js';
@@ -86,6 +87,8 @@ function Root() {
     setMe(null);
     setState('login');
   };
+  // 体験版は、最初に利用規約に同意してから始める（仕様書 第23.3.2節「最初のログイン」）
+  if (me.demo && !me.demo.termsAcceptedAt) return <DemoTerms demo={me.demo} onAccepted={() => void load()} onLogout={() => void logout()} />;
   // デバッグモードでは、どの画面にも上に「Debug mode」を出し、押すと記録を開く（仕様書 第20.4.1節「デバッグモード」）
   const withDebug = (page: JSX.Element) => (me.debug ? <>{page}<DebugOverlay /></> : page);
   // スマホ用の在庫のページ（仕様書 第29.11.1節）。ワークスペースの枠（左のメニュー・秘書の欄）を出さない

@@ -206,7 +206,7 @@ export { answerReservation, maybeReservation, parseReservation, timesOf, itemIn,
 export * from './chat/group-share.js';
 export {
   AiUsageMeter, AiLimitError, PostgresAiUsageStore, aiUsageMeterFromEnv, withAiUsage, enterAiUsage, currentAiUsage, meterLlm, meterResearch,
-  effectiveMonthlyLimit, jstMonth, purposeGroup, AI_LIMIT_COMPANY_MESSAGE, AI_LIMIT_USER_MESSAGE, AI_LIMIT_PLATFORM_MESSAGE,
+  effectiveMonthlyLimit, jstMonth, purposeGroup, AI_LIMIT_COMPANY_MESSAGE, AI_LIMIT_USER_MESSAGE, AI_LIMIT_PLATFORM_MESSAGE, AI_LIMIT_TRIAL_MESSAGE,
   type AiUsageScope, type AiUsageEntry, type AiUsageTotals, type AiUsageStore, type AiLimitSource, type AiUsageMeterDeps, type PlatformAiCap,
 } from './usage/ai-usage.js';
 export { purposeLabel } from './usage/purpose-labels.js';
@@ -235,10 +235,11 @@ export {
   type OperatorRole, type OpsAction, type NewTenantInput, type MachineReport, type MachineFlag,
   OpsStore, OpsRuleError, sha256 as opsSha256,
   type Operator, type OpsSession, type TenantOverview, type OpsMachine, type OpsAuditEntry,
-  type OperatorProfile, type OpsPlatformAiSettings, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsPasskey, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS, OpsAppSide,
+  type OperatorProfile, type OpsPlatformAiSettings, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsPasskey, type OpsDemo, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS, OpsAppSide,
   proxyAllowed, ProxyAccessStore, PROXY_HOURS, PROXY_DEFAULT_HOURS, type ProxyScope, type ProxyGrant, type ProxySessionInfo,
   serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport, type OpsIncident,
   loadOpsManual, searchOpsManual, linkChapters, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry,
 } from './ops/index.js';
+export * from './demo/index.js';
 export { scoreEval, CONTRACT_REVIEW_AVOID, CONTRACT_REVIEW_MUST, type EvalScore } from './evals/score.js';
 export * from './net/outbound.js';

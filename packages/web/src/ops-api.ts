@@ -48,7 +48,7 @@ export interface OpsMe {
   /** パスキーで確かめたか（第23.8.15節）。確かめるまでは、ほかの操作ができない。 */
   verified: boolean;
   passkeyCount: number;
-  can: Record<'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete', boolean>;
+  can: Record<'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete' | 'demo.manage', boolean>;
 }
 
 export interface TenantRow {
@@ -197,6 +197,24 @@ export interface ProxyGrantRow {
   requestedAt: string; decidedAt: string | null; hours: number | null; expiresAt: string | null; endedAt: string | null; views: number;
 }
 
+/** 体験（第23.3.2節）。相手の情報と数だけ。 */
+export interface DemoRow {
+  id: string; loginId: string; tenantId: string; company: string; contact: string; email: string;
+  aiCapJpy: number; aiUsedJpy: number; filesBytes: number; createdBy: string; createdAt: string; expiresAt: string;
+  endedAt: string | null; deletedAt: string | null; contactPurgedAt: string | null; termsAcceptedAt: string | null;
+  loginCount: number; lastLoginAt: string | null; lockedUntil: string | null;
+  state: 'active' | 'expired' | 'ended';
+}
+
+/** 体験の一覧の答え。`url` は入口（決めていなければ `null`）。 */
+export interface DemoList {
+  demos: DemoRow[];
+  defaults: { days: number; aiCapJpy: number };
+  url: string | null;
+  extendMaxDays: number;
+  maxDays: number;
+}
+
 /** 会社一覧の CSV の書き出しの URL（ログイン状態の Cookie で開く）。 */
 export const TENANTS_CSV_URL = '/v1/ops/tenants.csv';
 
@@ -245,6 +263,14 @@ export const opsApi = {
   deleteAiKey: () => call<{ ok: true }>('/settings/ai/key', send('DELETE')),
   testAiKey: () => call<{ ok: boolean; ms: number; error?: string; source?: 'screen' | 'env' }>('/settings/ai/test', send('POST', {})),
   setAiLimits: (b: { tenantCapJpy: number | null; platformCapJpy: number | null }) => call<{ ok: true }>('/settings/ai/limits', send('PUT', b)),
+  /** 体験版（仕様書 第23.3.2節）。パスワードは出したときに 1 度だけ返る。 */
+  demos: () => call<DemoList>('/demos'),
+  createDemo: (b: { company: string; contact: string; email: string; days: number; aiCapJpy: number }) =>
+    call<{ id: string; loginId: string; password: string; url: string; expiresAt: string; welcome: string }>('/demos', send('POST', b)),
+  extendDemo: (id: string, days: number) => call<{ expiresAt: string }>(`/demos/${encodeURIComponent(id)}/extend`, send('POST', { days })),
+  resetDemoPassword: (id: string) => call<{ password: string }>(`/demos/${encodeURIComponent(id)}/password`, send('POST')),
+  endDemo: (id: string) => call<{ ok: true }>(`/demos/${encodeURIComponent(id)}/end`, send('POST')),
+  setDemoDefaults: (b: { days: number; aiCapJpy: number }) => call<{ days: number; aiCapJpy: number }>('/settings/demo', send('PUT', b)),
   operatorProfile: () => call<{ profile: OperatorProfileView }>('/settings/operator'),
   setOperatorProfile: (p: OperatorProfileView) => call<{ profile: OperatorProfileView }>('/settings/operator', send('PUT', p)),
   statusRequests: (tenantId?: string) => call<{ requests: StatusRequestRow[] }>(`/status-requests${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),
