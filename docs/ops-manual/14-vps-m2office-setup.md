@@ -124,7 +124,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 |---|---|
 | 会社のサブドメインの親のドメイン | `m2office.net` |
 | 証明書の連絡先のメールアドレス | 運営の連絡先（Let's Encrypt から期限の知らせが来る） |
-| マスター管理画面に入れる Google Workspace のドメイン | 運営主体の Google Workspace のドメイン。提携会社の人も運営者にするなら、提携会社のドメインもカンマで並べる（例 `oesf.jp,partner.example.co.jp`。第 2 章「提携会社の人を運営者にする」） |
+| マスター管理画面に入れる Google Workspace のドメイン | 運営主体の Google Workspace のドメイン。提携会社の人も運営者にするなら、提携会社のドメインもカンマで並べる（例 `ops.example.co.jp,partner.example.co.jp`。第 2 章「提携会社の人を運営者にする」） |
 | WireGuard の網 | 既定（`10.66.0.0/24`）のまま |
 | WAF の動き | 初めは `DetectionOnly`（記録だけ） |
 | Cloudflare を前に置くか | `no` |

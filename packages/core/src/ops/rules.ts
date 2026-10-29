@@ -16,7 +16,7 @@ export const OPERATOR_ROLES: readonly OperatorRole[] = ['admin', 'support', 'mon
 
 /**
  * 運営者に許す Google のドメイン（`OPS_GOOGLE_DOMAIN`。第23.8.9節「提携会社の運営者」）を読む。
- * カンマか空白で区切って複数並べられる（運営主体と提携会社。例 `oesf.jp,partner.example.co.jp`）。小文字にそろえ、重ねない。
+ * カンマか空白で区切って複数並べられる（運営主体と提携会社。例 `ops.example.co.jp,partner.example.co.jp`）。小文字にそろえ、重ねない。
  *
  * @returns 許すドメイン。空なら制限しない（開発だけ。クラウドの形の setup.sh は 1 つ以上を求める）
  */
@@ -27,7 +27,7 @@ export function parseOpsDomains(value: string | undefined | null): string[] {
 /**
  * そのメールアドレスが、運営者に許すドメインのものか。許すドメインが空なら、どのアドレスも許す。
  *
- * @remarks サブドメインは別のドメインとして扱う（`oesf.jp` を許しても `x.oesf.jp` は許さない）
+ * @remarks サブドメインは別のドメインとして扱う（`ops.example.co.jp` を許しても `x.ops.example.co.jp` は許さない）
  */
 export function opsDomainAllowed(email: string, domains: readonly string[]): boolean {
   if (domains.length === 0) return true;

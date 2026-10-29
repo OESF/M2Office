@@ -49,8 +49,8 @@ test('運営者に許すドメイン: 空白を除いて小文字にそろえ、
   assert.match(body, /for d in "\$\{ops_domains\[@\]\}"; do \[\[ "\$d" =~/);
   // そろえる処理だけを取り出して、実際に動かす
   const normalize = body.slice(at, body.indexOf('\n', at)).replace(/^OPS_GOOGLE_DOMAIN=\$\(|\)$/g, '');
-  const out = execFileSync('bash', ['-c', `OPS_GOOGLE_DOMAIN=$1; ${normalize}`, '_', ' OESF.jp , Partner.example.co.jp,, '], { encoding: 'utf8' });
-  assert.equal(out, 'oesf.jp,partner.example.co.jp');
+  const out = execFileSync('bash', ['-c', `OPS_GOOGLE_DOMAIN=$1; ${normalize}`, '_', ' OPS.example.co.jp , Partner.example.co.jp,, '], { encoding: 'utf8' });
+  assert.equal(out, 'ops.example.co.jp,partner.example.co.jp');
 });
 
 test('雛形がすべて埋まり、API は機械の中だけで待ち受ける（日本語の言語の設定でも）', () => {

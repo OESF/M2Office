@@ -52,15 +52,15 @@ test('代理アクセスの道: 見るだけ。管理者ページの範囲は知
 });
 
 test('運営者に許すドメイン: カンマか空白で複数並べ、小文字にそろえる。空なら制限しない（第23.8.9節「提携会社の運営者」）', () => {
-  assert.deepEqual(parseOpsDomains(' OESF.jp, partner.example.co.jp ,oesf.jp @other.example'), ['oesf.jp', 'partner.example.co.jp', 'other.example']);
+  assert.deepEqual(parseOpsDomains(' OPS.example, partner.example.co.jp ,ops.example @other.example'), ['ops.example', 'partner.example.co.jp', 'other.example']);
   assert.deepEqual(parseOpsDomains(''), []);
   assert.deepEqual(parseOpsDomains(undefined), []);
-  const domains = parseOpsDomains('oesf.jp,partner.example.co.jp');
-  assert.equal(opsDomainAllowed('miura@oesf.jp', domains), true);
+  const domains = parseOpsDomains('ops.example,partner.example.co.jp');
+  assert.equal(opsDomainAllowed('admin@ops.example', domains), true);
   assert.equal(opsDomainAllowed('someone@Partner.Example.co.jp', domains), true, '大文字と小文字は区別しない');
   assert.equal(opsDomainAllowed('someone@gmail.com', domains), false, '個人の Gmail は許さない');
-  assert.equal(opsDomainAllowed('someone@x.oesf.jp', domains), false, 'サブドメインは別のドメイン');
-  assert.equal(opsDomainAllowed('oesf.jp@evil.example', domains), false, '@ の後ろだけを見る');
+  assert.equal(opsDomainAllowed('someone@x.ops.example', domains), false, 'サブドメインは別のドメイン');
+  assert.equal(opsDomainAllowed('ops.example@evil.example', domains), false, '@ の後ろだけを見る');
   assert.equal(opsDomainAllowed('anyone@anywhere.example', []), true, '空なら制限しない（開発だけ）');
 });
 

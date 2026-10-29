@@ -15,7 +15,7 @@
 | `OPS_DATABASE_URL` | 運営の専用のロールの接続（`postgres://m2office_ops:<合言葉>@…/m2office`）。**本番では必須**。`npm run db:migrate` を走らせるとき、この合言葉でロールにログインできるようにする |
 | `OPS_PORT` | 運営の API のポート（既定 3102） |
 | `OPS_GOOGLE_REDIRECT_URI` | 運営者の Google のログインの戻り先（`https://ops.<本番のドメイン>/v1/ops/auth/callback`）。運営の OAuth クライアント（`GOOGLE_LOGIN_CLIENT_ID`）の承認済みのリダイレクト URI に足す |
-| `OPS_GOOGLE_DOMAIN` | 運営者に許す Google Workspace（か Cloud Identity）のドメイン。入れると、このドメインの人だけを運営者にできる。提携会社の人も運営者にするなら、カンマで並べる（例 `oesf.jp,partner.example.co.jp`）。クラウドの形の `setup.sh` は 1 つ以上を求める |
+| `OPS_GOOGLE_DOMAIN` | 運営者に許す Google Workspace（か Cloud Identity）のドメイン。入れると、このドメインの人だけを運営者にできる。提携会社の人も運営者にするなら、カンマで並べる（例 `ops.example.co.jp,partner.example.co.jp`）。クラウドの形の `setup.sh` は 1 つ以上を求める |
 | `OPS_SESSION_TTL_HOURS` | 運営のログイン状態の時間（既定 12） |
 
 ## 3. 入口と名前
