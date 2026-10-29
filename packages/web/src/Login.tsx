@@ -1,5 +1,6 @@
 /**
- * @file ログイン画面。Google ログインと、準備中の間だけ使う開発用ログインを出す。体験版の入口では、ゲストの ID とパスワードの欄を出す。
+ * @file ログイン画面。Google ログインと、準備中の間だけ使う開発用ログインを出す。体験版の入口では、ゲストの ID とパスワードの欄を出し、
+ * `/start` では自分で申し込む画面を出す。
  *
  * @see 仕様書 第16.1節 認証
  * @see 仕様書 第23.3.2節 体験版
@@ -7,6 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, type LoginProviders } from './api.js';
+import { DemoStart } from './demo-start.js';
 
 /**
  * ログイン画面。
@@ -87,6 +89,9 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   }
 
+  // 体験版を自分で申し込む（仕様書 第23.3.2節「自分で申し込む」）
+  if (providers?.demo && location.pathname === '/start') return <DemoStart terms={providers.demoTerms ?? []} onStarted={onLoggedIn} />;
+
   return (
     <div className="login">
       <div className="card login-card">
@@ -100,6 +105,7 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
             <div className="field"><label htmlFor="guest-password">パスワード</label>
               <input id="guest-password" type="password" autoComplete="current-password" value={guestPassword} onChange={(e) => setGuestPassword(e.target.value)} /></div>
             <button className="btn wide" type="submit" disabled={busy || !guestId.trim() || !guestPassword}>{busy ? '…' : 'ログイン'}</button>
+            <p className="small login-machine"><a href="/start">体験を申し込む</a></p>
           </form>
         ) : (
           <>

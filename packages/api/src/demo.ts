@@ -1,5 +1,6 @@
 /**
- * @file 体験版の入口（`demo.<親のドメイン>`。仕様書 第23.3.2節、ADR-0115）。ゲストの ID とパスワードでのログインと、規約への同意。
+ * @file 体験版の入口（`demo.<親のドメイン>`。仕様書 第23.3.2節、ADR-0115・ADR-0117）。ゲストの ID とパスワードでのログイン、
+ * 自分で申し込む口、規約への同意。
  *
  * 体験版の入口では、会社をサブドメインではなく**ゲストのログイン状態から**決める（会社の判定のミドルウェア）。
  * ログインの口は会社の判定より前に置き、ゲストの ID から体験用の会社を引く。パスワードは scrypt の控えと時間を一定にして比べる。
@@ -9,7 +10,9 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
-  DEMO_SESSION_HOURS, DEMO_TERMS, hashMachinePassword, isDemoTenantId, isGuestLoginId, verifyMachinePassword,
+  DEMO_COMPANY_NAME, DEMO_SESSION_HOURS, DEMO_SIGNUP_REFUSAL, DEMO_TERMS, DEMO_CHALLENGE_TTL_MS, checkDemoSignup, createDemoChallenge,
+  demoSignupRefusalOf, demoSignupSource, hashMachinePassword, isDemoTenantId, isGuestLoginId, newGuestLoginId, newGuestPassword,
+  verifyDemoChallenge, verifyMachinePassword,
 } from '@m2office/core';
 import type { AppDeps } from './context.js';
 import type { AppEnv } from './middleware/tenant.js';
@@ -39,6 +42,7 @@ export function demoProviders(): Record<string, unknown> {
     dev: { enabled: false, users: [] },
     machineAdmin: false,
     demo: true,
+    demoTerms: DEMO_TERMS,
   };
 }
 
@@ -94,22 +98,104 @@ export function demoLoginRoute(deps: AppDeps, throttle = new DemoLoginThrottle()
     const ok = verifyMachinePassword(password, g.passwordHash);
     await deps.demo.store.loginResult(g.guestId, ok);
     if (!ok) return c.json({ error: LOGIN_FAILED }, 401);
-    if (!g.seeded) {
-      if (!(await deps.demo.store.claimSeed(g.tenantId))) {
-        return c.json({ error: '体験の準備をしています。1 分ほど待ってから、もう一度ログインしてください' }, 503);
-      }
-      const r = await deps.demo.seed(g.tenantId, g.userId);
-      if (r.failed.length) deps.log.warn('体験用の会社に見本のデータを入れきれませんでした', { tenantId: g.tenantId, failed: r.failed.join(',') });
-      await deps.demo.store.markSeeded(g.tenantId);
+    const csrfToken = await startGuest(c, deps, g);
+    if (!csrfToken) return c.json({ error: '体験の準備をしています。1 分ほど待ってから、もう一度ログインしてください' }, 503);
+    return c.json({ ok: true, csrfToken });
+  });
+  return app;
+}
+
+/**
+ * ゲストを体験に入れる（最初の 1 回は見本のデータを入れ、ログイン状態を作る）。
+ *
+ * @returns 画面に渡す CSRF の鍵。ほかの要求が見本のデータを入れている最中なら `null`
+ */
+async function startGuest(c: Context<AppEnv>, deps: AppDeps, g: { tenantId: string; userId: string; expiresAt: string; seeded: boolean }): Promise<string | null> {
+  if (!g.seeded) {
+    if (!(await deps.demo.store.claimSeed(g.tenantId))) return null;
+    const r = await deps.demo.seed(g.tenantId, g.userId);
+    if (r.failed.length) deps.log.warn('体験用の会社に見本のデータを入れきれませんでした', { tenantId: g.tenantId, failed: r.failed.join(',') });
+    await deps.demo.store.markSeeded(g.tenantId);
+  }
+  const hours = Math.min(DEMO_SESSION_HOURS, (Date.parse(g.expiresAt) - Date.now()) / 3_600_000);
+  const session = await issueSession(c, deps.repo, deps.auth, { tenantId: g.tenantId, userId: g.userId, provider: 'demo' }, hours);
+  await deps.repo.appendAudit({
+    id: randomUUID(), tenantId: g.tenantId, actorType: 'user', actorId: g.userId,
+    action: 'auth.login', targetType: 'session', targetId: session.id.slice(0, 16),
+    detail: { provider: 'demo' }, occurredAt: new Date().toISOString(),
+  });
+  return session.csrfToken;
+}
+
+/** 使い終えたロボットよけの問題（1 度だけ使えるように、期限まで覚える）。 */
+export class DemoChallengeLedger {
+  private readonly used = new Map<string, number>();
+
+  /** 問題を使う。もう使った問題なら `false`。 */
+  take(challenge: string, now: number = Date.now()): boolean {
+    for (const [k, at] of this.used) if (now - at > DEMO_CHALLENGE_TTL_MS) this.used.delete(k);
+    if (this.used.has(challenge)) return false;
+    this.used.set(challenge, now);
+    return true;
+  }
+}
+
+/**
+ * 自分で申し込む口（`GET /v1/demo-signup/challenge`・`POST /v1/demo-signup`。第23.3.2節「自分で申し込む」）。会社の判定より前に置く。
+ *
+ * @remarks
+ * 危険度: 中（体験用の会社を作る）。作るのはデータベースの決めた関数だけで、同じメールアドレス・同じ送り元・1 日の数・
+ * 体験版全体の月の上限はその中で見る。ここでは入力・ロボットよけ・送り元ごとの回数を確かめる。
+ * ゲストの ID とパスワードは応答で 1 度だけ返し、メールでは送らない（ADR-0117）
+ */
+export function demoSignupRoute(deps: AppDeps, opts: { throttle?: DemoLoginThrottle; ledger?: DemoChallengeLedger } = {}) {
+  const throttle = opts.throttle ?? new DemoLoginThrottle();
+  const ledger = opts.ledger ?? new DemoChallengeLedger();
+  const app = new Hono<AppEnv>();
+  app.get('/challenge', (c) => {
+    if (!isDemoHost(c.req.header('host'), deps.demo.subdomain)) return c.json({ error: '見つかりません' }, 404);
+    c.header('Cache-Control', 'no-store');
+    return c.json(createDemoChallenge(deps.demo.challengeSecret));
+  });
+  app.post('/', async (c) => {
+    if (!isDemoHost(c.req.header('host'), deps.demo.subdomain)) return c.json({ error: '見つかりません' }, 404);
+    const address = clientAddress(c);
+    if (!throttle.allow(address)) return c.json({ error: '試した回数が多すぎます。15 分ほど待ってから、もう一度お試しください' }, 429);
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const checked = checkDemoSignup(b);
+    if (!checked.ok) return c.json({ error: checked.error }, 400);
+    const pow = b['challenge'];
+    if (!verifyDemoChallenge(deps.demo.challengeSecret, pow) || !ledger.take(pow.challenge)) {
+      return c.json({ error: '確かめに失敗しました。画面を開き直して、もう一度お試しください' }, 400);
     }
-    const hours = Math.min(DEMO_SESSION_HOURS, (Date.parse(g.expiresAt) - Date.now()) / 3_600_000);
-    const session = await issueSession(c, deps.repo, deps.auth, { tenantId: g.tenantId, userId: g.userId, provider: 'demo' }, hours);
-    await deps.repo.appendAudit({
-      id: randomUUID(), tenantId: g.tenantId, actorType: 'user', actorId: g.userId,
-      action: 'auth.login', targetType: 'session', targetId: session.id.slice(0, 16),
-      detail: { provider: 'demo' }, occurredAt: new Date().toISOString(),
-    });
-    return c.json({ ok: true, csrfToken: session.csrfToken });
+    const v = checked.value;
+    const password = newGuestPassword();
+    const passwordHash = hashMachinePassword(password);
+    // ゲストの ID がたまたま重なったら、引き直す
+    for (let i = 0; i < 3; i++) {
+      const loginId = newGuestLoginId();
+      let made: Awaited<ReturnType<AppDeps['demo']['store']['selfSignup']>>;
+      try {
+        made = await deps.demo.store.selfSignup({
+          loginId, passwordHash, company: v.company, contact: v.contact, email: v.email, emailKey: v.emailKey,
+          source: demoSignupSource(address), companyName: DEMO_COMPANY_NAME,
+        });
+      } catch (err) {
+        if (err instanceof Error && /login_taken/.test(err.message)) continue;
+        const refusal = demoSignupRefusalOf(err);
+        if (refusal) return c.json({ error: DEMO_SIGNUP_REFUSAL[refusal], code: refusal }, refusal === 'signup_invalid' ? 400 : 409);
+        throw err;
+      }
+      deps.log.info('体験版の申し込みを受け付けました', { tenantId: made.tenantId });
+      // 体験はもう作ったので、見本のデータやログイン状態でつまずいても ID とパスワードは返す（同じメールアドレスでは申し込み直せないため）。
+      // ログイン状態が無ければ、画面はログインの画面に戻り、ID とパスワードで入れる
+      const csrfToken = await startGuest(c, deps, { ...made, seeded: false }).catch((err: unknown) => {
+        deps.log.warn('体験の申し込みの後に、体験を始められませんでした', { tenantId: made.tenantId, error: err instanceof Error ? err.message : String(err) });
+        return null;
+      });
+      return c.json({ loginId, password, expiresAt: made.expiresAt, csrfToken }, 201);
+    }
+    return c.json({ error: 'いまは申し込みを受け付けられませんでした。もう一度お試しください' }, 503);
   });
   return app;
 }

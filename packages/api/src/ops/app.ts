@@ -690,6 +690,7 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
   const demoUrl = (c: Context<OpsEnv>) => (demoSub ? tenantLoginUrl(originOf(c), demoSub) : null);
   app.get('/v1/ops/demos', async (c) => c.json({
     demos: await store.listDemos(), defaults: await store.demoDefaults(), url: demoUrl(c), extendMaxDays: DEMO_EXTEND_MAX_DAYS, maxDays: DEMO_MAX_DAYS,
+    signupUrl: demoSub ? `${tenantLoginUrl(originOf(c), demoSub).replace(/\/$/, '')}/start` : null, aiMonthJpy: await store.demoAiMonthTotal(),
   }));
   app.post('/v1/ops/demos', async (c) => {
     if (!can(c, 'demo.manage')) return denied(c);
@@ -756,16 +757,24 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
       throw err;
     }
   });
+  // 体験版の既定と、自分で申し込む体験の設定（第23.3.2節「既定」「設定」）。自分で申し込む体験の項目は省けば今のまま
   app.put('/v1/ops/settings/demo', async (c) => {
     if (!can(c, 'settings.manage')) return denied(c);
-    const b = await c.req.json<{ days?: unknown; aiCapJpy?: unknown }>().catch(() => ({} as { days?: unknown; aiCapJpy?: unknown }));
-    const days = Number(b.days);
-    const aiCapJpy = Number(b.aiCapJpy);
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const cur = await store.demoDefaults();
+    const days = Number(b['days']);
+    const aiCapJpy = Number(b['aiCapJpy']);
+    const selfSignup = typeof b['selfSignup'] === 'boolean' ? b['selfSignup'] : cur.selfSignup;
+    const dailyLimit = b['dailyLimit'] === undefined ? cur.dailyLimit : Number(b['dailyLimit']);
+    const monthlyAiCapJpy = b['monthlyAiCapJpy'] === undefined ? cur.monthlyAiCapJpy : Number(b['monthlyAiCapJpy']);
     if (!Number.isInteger(days) || days < 1 || days > DEMO_MAX_DAYS) return c.json({ error: `日数は 1〜${DEMO_MAX_DAYS} 日で入れてください` }, 400);
     if (!Number.isInteger(aiCapJpy) || aiCapJpy < 1 || aiCapJpy > 100_000) return c.json({ error: 'AI の上限は 1〜100,000 円で入れてください' }, 400);
+    if (!Number.isInteger(dailyLimit) || dailyLimit < 0 || dailyLimit > 1000) return c.json({ error: '1 日の数は 0〜1,000 件で入れてください' }, 400);
+    if (!Number.isInteger(monthlyAiCapJpy) || monthlyAiCapJpy < 0 || monthlyAiCapJpy > 10_000_000) return c.json({ error: '体験版全体の月の上限は 0〜10,000,000 円で入れてください' }, 400);
     await store.setDemoDefaults(days, aiCapJpy, c.get('operator').id);
-    await store.audit(c.get('operator').id, 'settings.demo', 'settings', 'demo', { days, aiCapJpy });
-    return c.json({ days, aiCapJpy });
+    await store.setDemoSignup(selfSignup, dailyLimit, monthlyAiCapJpy, c.get('operator').id);
+    await store.audit(c.get('operator').id, 'settings.demo', 'settings', 'demo', { days, aiCapJpy, selfSignup, dailyLimit, monthlyAiCapJpy });
+    return c.json({ days, aiCapJpy, selfSignup, dailyLimit, monthlyAiCapJpy });
   });
 
   // 運営主体の設定（第23.8.14節）

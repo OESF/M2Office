@@ -3,12 +3,13 @@
  *
  * 運営者が相手の会社名・担当者名・案内を送るメールアドレスを入れて体験を出すと、ゲストの ID とパスワードを 1 度だけ出す。
  * 運営者は案内の文を写して、自分のメールで送る（M2Office からは送らない）。一覧には相手の情報と数だけを出し、体験用の会社の中身は見ない。
+ * 紹介のページから自分で申し込んだ体験（ADR-0117）も同じ一覧に出し、出し方で見分ける。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { copyText } from './clipboard.js';
 import { OpsTitle } from './ops-help.js';
-import { opsApi, OpsApiError, type DemoList, type DemoRow, type OpsMe } from './ops-api.js';
+import { opsApi, OpsApiError, type DemoDefaults, type DemoList, type DemoRow, type OpsMe } from './ops-api.js';
 
 const errText = (e: unknown, fallback: string) => (e instanceof OpsApiError || e instanceof Error ? e.message : fallback);
 const when = (iso: string | null) => {
@@ -19,6 +20,7 @@ const when = (iso: string | null) => {
 const yen = (n: number) => `${Math.round(n).toLocaleString()} 円`;
 const mb = (b: number) => `${Math.round(b / 1e6)} MB`;
 const STATE_LABEL: Record<DemoRow['state'], string> = { active: '使える', expired: '期限切れ', ended: '終了' };
+const ORIGIN_LABEL: Record<DemoRow['origin'], string> = { ops: '運営が出した', self: '自分で申し込み' };
 
 /** 残りの日数（切り上げ）。 */
 function daysLeft(iso: string): string {
@@ -105,6 +107,11 @@ export function OpsDemos({ me }: { me: OpsMe }) {
       <OpsTitle title="体験" help={{ chapter: '17-demo', text: '導入を考えている会社に、体験版のゲストの ID とパスワードを出します。' }} />
       {error && <p className="error">{error}</p>}
       {list && !list.url && <p className="error">体験版の入口が設定されていません（DEMO_SUBDOMAIN）</p>}
+      {list?.signupUrl && (
+        <p className="small muted">
+          申し込みの画面 <code>{list.signupUrl}</code>{list.defaults.selfSignup ? '' : '（止めています）'}・今月の AI {yen(list.aiMonthJpy)} / {yen(list.defaults.monthlyAiCapJpy)}
+        </p>
+      )}
       {list?.url && manage && !creating && !issued && <p><button className="btn small" onClick={() => setCreating(true)}>体験を出す</button></p>}
       {creating && list && (
         <CreateDemo defaults={list.defaults} maxDays={list.maxDays} onClose={() => setCreating(false)}
@@ -113,11 +120,12 @@ export function OpsDemos({ me }: { me: OpsMe }) {
       {issued && <Issued {...issued} onClose={() => setIssued(null)} />}
       {list && list.demos.length > 0 && (
         <div className="table-scroll"><table className="table ops-table">
-          <thead><tr><th>相手</th><th>ゲストの ID</th><th>状態</th><th>期限</th><th>最後に使った日時</th><th className="num">ログイン</th><th className="num">AI</th><th className="num">置き場</th><th /></tr></thead>
+          <thead><tr><th>相手</th><th>出し方</th><th>ゲストの ID</th><th>状態</th><th>期限</th><th>最後に使った日時</th><th className="num">ログイン</th><th className="num">AI</th><th className="num">置き場</th><th /></tr></thead>
           <tbody>
             {list.demos.map((d) => (
               <tr key={d.id}>
                 <td>{d.contactPurgedAt ? <span className="muted">（相手の情報は削除済み）</span> : <>{d.company}<div className="small muted">{[d.contact, d.email].filter(Boolean).join(' ・ ')}</div></>}</td>
+                <td>{ORIGIN_LABEL[d.origin]}</td>
                 <td><code>{d.loginId}</code></td>
                 <td>{STATE_LABEL[d.state]}{d.lockedUntil && Date.parse(d.lockedUntil) > Date.now() && <span className="badge warn">ログインを止めています</span>}</td>
                 <td>{when(d.expiresAt)}<div className="small muted">{d.state === 'active' ? daysLeft(d.expiresAt) : d.deletedAt ? `削除 ${when(d.deletedAt)}` : ''}</div></td>
@@ -142,19 +150,25 @@ export function OpsDemos({ me }: { me: OpsMe }) {
   );
 }
 
-/** 設定の「体験版」（日数と AI の上限の既定。運営管理者だけが変えられる）。 */
+/** 設定の「体験版」（日数と AI の上限の既定と、自分で申し込む体験の設定。運営管理者だけが変えられる）。 */
 export function DemoDefaultsCard({ me }: { me: OpsMe }) {
-  const [f, setF] = useState<{ days: string; aiCapJpy: string } | null>(null);
+  type Form = { days: string; aiCapJpy: string; selfSignup: boolean; dailyLimit: string; monthlyAiCapJpy: string };
+  const [f, setF] = useState<Form | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const manage = me.can['settings.manage'];
+  const toForm = (d: DemoDefaults): Form => ({
+    days: String(d.days), aiCapJpy: String(d.aiCapJpy), selfSignup: d.selfSignup, dailyLimit: String(d.dailyLimit), monthlyAiCapJpy: String(d.monthlyAiCapJpy),
+  });
   useEffect(() => {
-    opsApi.demos().then((r) => setF({ days: String(r.defaults.days), aiCapJpy: String(r.defaults.aiCapJpy) })).catch((e) => setError(errText(e, '読み込めませんでした')));
+    opsApi.demos().then((r) => setF(toForm(r.defaults))).catch((e) => setError(errText(e, '読み込めませんでした')));
   }, []);
   const save = () => {
     if (!f) return;
     setMsg(null); setError(null);
-    opsApi.setDemoDefaults({ days: Number(f.days), aiCapJpy: Number(f.aiCapJpy) }).then(() => setMsg('保存しました')).catch((e) => setError(errText(e, '保存できませんでした')));
+    opsApi.setDemoDefaults({
+      days: Number(f.days), aiCapJpy: Number(f.aiCapJpy), selfSignup: f.selfSignup, dailyLimit: Number(f.dailyLimit), monthlyAiCapJpy: Number(f.monthlyAiCapJpy),
+    }).then((d) => { setF(toForm(d)); setMsg('保存しました'); }).catch((e) => setError(errText(e, '保存できませんでした')));
   };
   return (
     <div className="card">
@@ -162,6 +176,9 @@ export function DemoDefaultsCard({ me }: { me: OpsMe }) {
       {f && <>
         <div className="field"><label htmlFor="demo-default-days">日数の既定</label><input id="demo-default-days" type="number" min={1} value={f.days} disabled={!manage} onChange={(e) => setF({ ...f, days: e.target.value })} style={{ maxWidth: 120 }} /></div>
         <div className="field"><label htmlFor="demo-default-cap">AI の上限の既定（円・期間を通して）</label><input id="demo-default-cap" type="number" min={1} value={f.aiCapJpy} disabled={!manage} onChange={(e) => setF({ ...f, aiCapJpy: e.target.value })} style={{ maxWidth: 160 }} /></div>
+        <div className="field"><label><input type="checkbox" checked={f.selfSignup} disabled={!manage} onChange={(e) => setF({ ...f, selfSignup: e.target.checked })} /> 紹介のページから自分で申し込める</label></div>
+        <div className="field"><label htmlFor="demo-daily">自分で申し込む体験の 1 日の数</label><input id="demo-daily" type="number" min={0} value={f.dailyLimit} disabled={!manage} onChange={(e) => setF({ ...f, dailyLimit: e.target.value })} style={{ maxWidth: 120 }} /></div>
+        <div className="field"><label htmlFor="demo-monthly">体験版全体の月の AI の上限（円）</label><input id="demo-monthly" type="number" min={0} value={f.monthlyAiCapJpy} disabled={!manage} onChange={(e) => setF({ ...f, monthlyAiCapJpy: e.target.value })} style={{ maxWidth: 160 }} /></div>
         {manage && <button className="btn small" onClick={save}>保存</button>}
       </>}
       {msg && <p className="small">{msg}</p>}

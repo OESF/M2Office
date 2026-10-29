@@ -62,6 +62,8 @@ function Root() {
       // ログインの前に開こうとしていたページ（スマホ用の在庫のページなど）へ戻す（仕様書 第29.11.1節）
       const back = takeReturnPath();
       if (back && location.pathname === '/') history.replaceState(null, '', back);
+      // 体験版の申し込みの画面は、ログインした後は使わない（第23.3.2節「自分で申し込む」）
+      if (got.demo && location.pathname === '/start') history.replaceState(null, '', '/');
       setState('ready');
     } catch (err) {
       if (err instanceof ApiError && err.needsLogin) {

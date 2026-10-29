@@ -115,6 +115,7 @@ export function tenantErrorText(code: string): string {
     case 'login_taken': return 'このゲストの ID はすでに使われています。もう一度お試しください';
     case 'days_invalid': return '日数が範囲の外です';
     case 'cap_invalid': return 'AI の上限は 1 円以上にしてください';
+    case 'daily_invalid': return '1 日の数は 0〜1,000 件で入れてください';
     default: return '処理できませんでした';
   }
 }

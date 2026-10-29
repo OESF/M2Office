@@ -46,6 +46,26 @@ export interface DemoStore {
   purgeDue(): Promise<string[]>;
   /** `since` から後に消した体験の会社（運営者が早く終えたものを含む。ファイルの置き場を消すため）。 */
   deletedSince(since: Date): Promise<string[]>;
+  /**
+   * 自分で申し込んだ体験を作る（既定の日数と上限。規約には同意済み）。歯止めはデータベースの関数の中で見る。
+   *
+   * @param source 送り元（そろえた形）
+   * @throws 断ったときは `signup_…` の理由を含む失敗（`demoSignupRefusalOf` で読む）
+   */
+  selfSignup(p: DemoSelfSignup): Promise<{ guestId: string; tenantId: string; userId: string; expiresAt: string }>;
+}
+
+/** 自分で申し込んだ体験を作る入力。 */
+export interface DemoSelfSignup {
+  loginId: string;
+  passwordHash: string;
+  company: string;
+  contact: string;
+  email: string;
+  emailKey: string;
+  source: string;
+  /** 体験用の会社の名前（見本の会社名）。 */
+  companyName: string;
 }
 
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v == null ? null : String(v));
@@ -104,6 +124,13 @@ export class PostgresDemoStore implements DemoStore {
     const { rows } = await this.pool.query('select m2o_demo_storage_due($1) as t', [since]);
     return rows.map((r) => String(r.t));
   }
+
+  async selfSignup(p: DemoSelfSignup) {
+    const { rows } = await this.pool.query('select * from m2o_demo_self_signup($1,$2,$3,$4,$5,$6,$7,$8)',
+      [p.loginId, p.passwordHash, p.company, p.contact, p.email, p.emailKey, p.source, p.companyName]);
+    const r = rows[0];
+    return { guestId: r.guest_id, tenantId: r.tenant_id, userId: r.user_id, expiresAt: iso(r.expires_at)! };
+  }
 }
 
 /** 記憶上の口（単体テスト用）。 */
@@ -147,4 +174,28 @@ export class MemoryDemoStore implements DemoStore {
     return out;
   }
   async deletedSince() { return [...this.guests.values()].filter((g) => g.deleted).map((g) => g.tenantId); }
+
+  /** 自分で申し込める状態（テストで変える）。 */
+  signup = { open: true, dailyLimit: 20, budgetLeft: true, days: 14 };
+  private readonly usedEmails = new Set<string>();
+  private readonly usedSources = new Set<string>();
+  private selfCount = 0;
+
+  async selfSignup(p: DemoSelfSignup) {
+    if (!this.signup.open) throw new Error('signup_closed');
+    if (this.usedEmails.has(p.emailKey)) throw new Error('signup_email_used');
+    if (this.usedSources.has(p.source)) throw new Error('signup_source_used');
+    if (this.selfCount >= this.signup.dailyLimit) throw new Error('signup_daily_limit');
+    if (!this.signup.budgetLeft) throw new Error('signup_budget');
+    if (this.guests.has(p.loginId)) throw new Error('login_taken');
+    this.usedEmails.add(p.emailKey);
+    this.usedSources.add(p.source);
+    this.selfCount++;
+    const key = p.loginId.slice(6);
+    const g = { loginId: p.loginId, guestId: `dg-${key}`, tenantId: `d-${key}`, userId: `u-${p.loginId}`, passwordHash: p.passwordHash,
+      expiresAt: new Date(Date.now() + this.signup.days * 86_400_000).toISOString(), seeded: false };
+    this.add(g);
+    this.guests.get(p.loginId)!.trial.termsAcceptedAt = new Date().toISOString();
+    return { guestId: g.guestId, tenantId: g.tenantId, userId: g.userId, expiresAt: g.expiresAt };
+  }
 }

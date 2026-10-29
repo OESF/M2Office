@@ -729,6 +729,24 @@ export interface LoginProviders {
   machineAdmin?: boolean;
   /** 体験版の入口か（ゲストの ID とパスワードの欄を出す。仕様書 第23.3.2節）。 */
   demo?: boolean;
+  /** 体験版の利用規約（自分で申し込むときに同意を求める。第23.3.2節「自分で申し込む」）。 */
+  demoTerms?: string[];
+}
+
+/** 体験版のロボットよけの問題（ALTCHA と同じ形。第23.3.2節「ロボットよけ」）。 */
+export interface DemoChallenge {
+  algorithm: 'SHA-256';
+  challenge: string;
+  salt: string;
+  maxnumber: number;
+  signature: string;
+}
+
+/** 自分で申し込んだ体験（ゲストの ID とパスワードは、このときだけ届く）。 */
+export interface DemoSignupResult {
+  loginId: string;
+  password: string;
+  expiresAt: string;
 }
 
 /** 体験版の様子（`/v1/me` の `demo`。仕様書 第23.3.2節）。 */
@@ -1419,6 +1437,14 @@ export const api = {
   demoLogin: async (loginId: string, password: string) => {
     const res = await call<{ csrfToken: string }>('/demo-login', { method: 'POST', body: JSON.stringify({ loginId, password }) });
     csrfToken = res.csrfToken;
+  },
+  /** 体験版のロボットよけの問題をもらう。 */
+  demoChallenge: () => call<DemoChallenge>('/demo-signup/challenge'),
+  /** 体験版を自分で申し込む（その場でログインした状態になる）。 */
+  demoSignup: async (b: { company: string; contact: string; email: string; agree: boolean; challenge: DemoChallenge & { number: number } }) => {
+    const res = await call<DemoSignupResult & { csrfToken: string | null }>('/demo-signup', { method: 'POST', body: JSON.stringify(b) });
+    csrfToken = res.csrfToken;
+    return { loginId: res.loginId, password: res.password, expiresAt: res.expiresAt } as DemoSignupResult;
   },
   /** 体験版の利用規約に同意する。 */
   acceptDemoTerms: () => call<{ ok: true }>('/me/demo/terms', { method: 'POST' }),

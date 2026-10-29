@@ -1,15 +1,17 @@
 /**
  * @file 体験版の入口（仕様書 第23.3.2節、ADR-0115）の確かめ。
  * 入口の名前の判定・証明書・ゲストのログイン（ID とパスワード・間違いの止め・見本のデータを最初に 1 度だけ入れる・ログイン状態の長さ）・
- * ログイン状態からの会社の決め方（Google のログインは受けない・体験用の会社しか決まらない）・止める操作。
+ * ログイン状態からの会社の決め方（Google のログインは受けない・体験用の会社しか決まらない）・止める操作・
+ * 自分で申し込む口（ロボットよけ・1 度だけの問題・入力・断った理由・その場でのログイン。第23.3.2節「自分で申し込む」）。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Session, Tenant } from '@m2office/shared';
 import { hashMachinePassword, MemoryDemoStore } from '@m2office/core';
-import { demoLoginRoute, DemoLoginThrottle, isDemoHost } from '../src/demo.js';
+import { demoLoginRoute, DemoLoginThrottle, demoProviders, demoSignupRoute, isDemoHost } from '../src/demo.js';
 import { tlsAllowed } from '../src/routes/tls-ask.js';
 import { demoRestrictions, resolveTenant, type AppEnv } from '../src/middleware/tenant.js';
 import { sessionIdOf } from '../src/auth/session.js';
@@ -143,4 +145,101 @@ test('入口では、ログイン状態から体験用の会社を決める。Go
   // 期限が過ぎたら、ログイン状態があっても会社は決まらない
   s.store.guests.get('guest-abc234')!.expiresAt = new Date(Date.now() - 1000).toISOString();
   assert.equal((await s.app.request('/v1/whoami', { headers: { ...host, cookie } })).status, 401);
+});
+
+/** 自分で申し込む口の確かめに要るものだけの依存。 */
+function signupSetup() {
+  const store = new MemoryDemoStore();
+  const sessions: Session[] = [];
+  let seeds = 0;
+  const deps = {
+    demo: { store, subdomain: 'demo', challengeSecret: 'test-secret', seed: async () => { seeds++; return { failed: [] }; } },
+    repo: {
+      createSession: async (x: Session) => { sessions.push(x); [...store.guests.values()].find((g) => g.tenantId === x.tenantId)?.sessions.add(x.id); },
+      appendAudit: async () => undefined,
+    },
+    auth: { cookieSecure: false, sessionTtlHours: 168, devHeaders: false },
+    log: { warn: () => undefined, info: () => undefined },
+  } as unknown as AppDeps;
+  const app = new Hono<AppEnv>();
+  app.route('/v1/demo-signup', demoSignupRoute(deps));
+  const challenge = async (host = 'demo.m2office.net') => {
+    const r = await app.request('/v1/demo-signup/challenge', { headers: { host } });
+    if (r.status !== 200) return null;
+    const c = await r.json() as { challenge: string; salt: string; maxnumber: number };
+    for (let n = 0; n <= c.maxnumber; n++) {
+      if (createHash('sha256').update(c.salt + n).digest('hex') === c.challenge) return { ...c, number: n };
+    }
+    throw new Error('解けない');
+  };
+  const signup = (body: Record<string, unknown>, addr = '1.1.1.1', host = 'demo.m2office.net') => app.request('/v1/demo-signup', {
+    method: 'POST', headers: { host, 'content-type': 'application/json', 'x-forwarded-for': addr }, body: JSON.stringify(body),
+  });
+  return { app, deps, store, sessions, challenge, signup, seeds: () => seeds };
+}
+
+const SIGNUP = { company: '見本商事', contact: '山田', email: 'yamada@example.co.jp', agree: true };
+
+test('自分で申し込む: ロボットよけを解くと、その場で体験用の会社ができてログインした状態になる。ID とパスワードは応答で 1 度だけ', async () => {
+  process.env['BASE_DOMAIN'] = BASE;
+  const s = signupSetup();
+  const r = await s.signup({ ...SIGNUP, challenge: await s.challenge() });
+  assert.equal(r.status, 201);
+  const body = await r.json() as { loginId: string; password: string; expiresAt: string; csrfToken: string };
+  assert.match(body.loginId, /^guest-[a-z0-9]{6}$/);
+  assert.match(body.password, /^[A-Za-z2-9]{16}$/);
+  assert.ok(body.csrfToken);
+  assert.match(r.headers.get('set-cookie') ?? '', /m2o_session=.*HttpOnly/);
+  assert.equal(s.seeds(), 1, '見本のデータを入れてから始める');
+  assert.equal(s.sessions[0]!.provider, 'demo');
+  const g = s.store.guests.get(body.loginId)!;
+  assert.ok(g.trial.termsAcceptedAt, '規約には申し込みで同意した');
+  assert.ok(g.seeded);
+});
+
+test('自分で申し込む: ロボットよけの答えが無い・違う・使い回しは断る', async () => {
+  process.env['BASE_DOMAIN'] = BASE;
+  const s = signupSetup();
+  assert.equal((await s.signup(SIGNUP)).status, 400);
+  const c = (await s.challenge())!;
+  assert.equal((await s.signup({ ...SIGNUP, challenge: { ...c, number: c.number + 1 } })).status, 400);
+  assert.equal((await s.signup({ ...SIGNUP, challenge: c })).status, 201);
+  const again = await s.signup({ ...SIGNUP, email: 'other@example.co.jp', challenge: c }, '9.9.9.9');
+  assert.equal(again.status, 400, '同じ問題は 1 度だけ');
+});
+
+test('自分で申し込む: 入力の誤りと、データベースが断った理由を返す。入口でない名前では受けない', async () => {
+  process.env['BASE_DOMAIN'] = BASE;
+  const s = signupSetup();
+  assert.equal((await s.signup({ ...SIGNUP, agree: false, challenge: await s.challenge() })).status, 400);
+  assert.equal((await s.signup({ ...SIGNUP, challenge: await s.challenge() })).status, 201);
+  const used = await s.signup({ ...SIGNUP, email: 'Yamada+2@example.co.jp', challenge: await s.challenge() }, '2.2.2.2');
+  assert.equal(used.status, 409);
+  const u = await used.json() as { error: string; code: string };
+  assert.equal(u.code, 'signup_email_used');
+  assert.match(u.error, /すでに体験版/);
+  const sameSource = await s.signup({ ...SIGNUP, email: 'b@example.co.jp', challenge: await s.challenge() });
+  assert.equal((await sameSource.json() as { code: string }).code, 'signup_source_used');
+  s.store.signup.open = false;
+  const closed = await s.signup({ ...SIGNUP, email: 'c@example.co.jp', challenge: await s.challenge() }, '3.3.3.3');
+  assert.equal((await closed.json() as { code: string }).code, 'signup_closed');
+  assert.equal(await s.challenge('alpha.m2office.net'), null);
+  assert.equal((await s.signup(SIGNUP, '4.4.4.4', 'alpha.m2office.net')).status, 404);
+});
+
+test('自分で申し込む: 見本のデータでつまずいても、作った体験の ID とパスワードは返す', async () => {
+  process.env['BASE_DOMAIN'] = BASE;
+  const s = signupSetup();
+  (s.deps.demo as { seed: () => Promise<never> }).seed = async () => { throw new Error('seed failed'); };
+  const r = await s.signup({ ...SIGNUP, challenge: await s.challenge() });
+  assert.equal(r.status, 201);
+  const body = await r.json() as { loginId: string; password: string; csrfToken: string | null };
+  assert.match(body.loginId, /^guest-/);
+  assert.equal(body.csrfToken, null);
+});
+
+test('体験版の入口のログインの手段に、申し込みで同意を求める規約を付ける', () => {
+  const p = demoProviders() as { demo: boolean; demoTerms: string[] };
+  assert.equal(p.demo, true);
+  assert.ok(p.demoTerms.length >= 4);
 });

@@ -100,6 +100,20 @@ export interface OpsDemo {
   lockedUntil: string | null;
   /** 使える・期限切れ（消す前）・終えた（消した）。 */
   state: 'active' | 'expired' | 'ended';
+  /** 出し方（運営が出した・自分で申し込み）。 */
+  origin: 'ops' | 'self';
+}
+
+/** 体験版の既定と、自分で申し込む体験の設定（第23.3.2節「既定」「設定」）。 */
+export interface OpsDemoDefaults {
+  days: number;
+  aiCapJpy: number;
+  /** 自分で申し込めるか。 */
+  selfSignup: boolean;
+  /** 自分で申し込む体験の 1 日の数。 */
+  dailyLimit: number;
+  /** 体験版全体の月の AI の上限（円）。 */
+  monthlyAiCapJpy: number;
 }
 
 /** ローカルの形の機械。 */
@@ -260,7 +274,7 @@ export class OpsRuleError extends Error {
 /** データベースの関数の失敗を、決めた理由に直す（決めた理由でなければそのまま投げる）。 */
 function rethrow(err: unknown): never {
   const msg = err instanceof Error ? err.message : '';
-  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found|reason_required|already_requested|not_stopped|not_pending|same_operator|solo_note_required|kind_invalid|time_invalid|login_invalid|login_taken|days_invalid|cap_invalid)$/.test(msg)) throw new OpsRuleError(msg);
+  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found|reason_required|already_requested|not_stopped|not_pending|same_operator|solo_note_required|kind_invalid|time_invalid|login_invalid|login_taken|days_invalid|cap_invalid|daily_invalid)$/.test(msg)) throw new OpsRuleError(msg);
   throw err;
 }
 
@@ -650,19 +664,35 @@ export class OpsStore {
     return Number(rows[0]?.total ?? 0);
   }
 
-  /** 体験版の既定（日数と AI の上限。第23.3.2節「既定」）。 */
-  async demoDefaults(): Promise<{ days: number; aiCapJpy: number }> {
-    const { rows } = await this.pool.query('select demo_days, demo_ai_cap_jpy from ops.platform_settings where id = 1');
-    return { days: Number(rows[0]?.demo_days ?? 14), aiCapJpy: Number(rows[0]?.demo_ai_cap_jpy ?? 1000) };
+  /** 体験版の既定（日数と AI の上限）と、自分で申し込む体験の設定（第23.3.2節「既定」「設定」）。 */
+  async demoDefaults(): Promise<OpsDemoDefaults> {
+    const { rows } = await this.pool.query(
+      'select demo_days, demo_ai_cap_jpy, demo_self_signup, demo_daily_limit, demo_monthly_ai_cap_jpy from ops.platform_settings where id = 1');
+    const r = rows[0] ?? {};
+    return {
+      days: Number(r.demo_days ?? 14), aiCapJpy: Number(r.demo_ai_cap_jpy ?? 1000), selfSignup: r.demo_self_signup ?? true,
+      dailyLimit: Number(r.demo_daily_limit ?? 20), monthlyAiCapJpy: Number(r.demo_monthly_ai_cap_jpy ?? 20000),
+    };
   }
 
   async setDemoDefaults(days: number, aiCapJpy: number, by: string): Promise<void> {
     await this.pool.query('select ops.set_demo_defaults($1, $2, $3)', [days, aiCapJpy, by]).catch(rethrow);
   }
 
+  /** 自分で申し込む体験の設定（使うか・1 日の数・体験版全体の月の AI の上限）。 */
+  async setDemoSignup(enabled: boolean, dailyLimit: number, monthlyAiCapJpy: number, by: string): Promise<void> {
+    await this.pool.query('select ops.set_demo_signup($1, $2, $3, $4)', [enabled, dailyLimit, monthlyAiCapJpy, by]).catch(rethrow);
+  }
+
+  /** 体験版全体の、その月（日本時間）の AI の利用（円。消した体験の会社の分を含む）。 */
+  async demoAiMonthTotal(): Promise<number> {
+    const { rows } = await this.pool.query('select ops.demo_ai_month_total() as t');
+    return Math.round(Number(rows[0]?.t ?? 0) * 100) / 100;
+  }
+
   /** 体験の一覧（新しい順）。 */
   async listDemos(): Promise<OpsDemo[]> {
-    const { rows } = await this.pool.query('select * from ops.list_demos()');
+    const { rows } = await this.pool.query('select l.*, g.origin from ops.list_demos() l join ops.demo_guests g on g.id = l.id order by l.created_at desc');
     const now = Date.now();
     return rows.map((r) => ({
       id: r.id, loginId: r.login_id, tenantId: r.tenant_id, company: r.company, contact: r.contact, email: r.email,
@@ -671,6 +701,7 @@ export class OpsStore {
       contactPurgedAt: iso(r.contact_purged_at), termsAcceptedAt: iso(r.terms_accepted_at), loginCount: Number(r.login_count),
       lastLoginAt: iso(r.last_login_at), lockedUntil: iso(r.locked_until),
       state: r.ended_at || r.deleted_at ? 'ended' : Date.parse(iso(r.expires_at)!) <= now ? 'expired' : 'active',
+      origin: r.origin === 'self' ? 'self' : 'ops',
     }));
   }
 

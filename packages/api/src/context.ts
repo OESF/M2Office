@@ -293,7 +293,11 @@ export interface AppDeps {
    * 体験版（仕様書 第23.3.2節、ADR-0115）。`subdomain` は入口の名前（`DEMO_SUBDOMAIN`）で、無ければ体験版を使わない。
    * `seed` は体験用の会社に見本の会社のデータを入れる（最初のログインのときに 1 度だけ）
    */
-  demo: { store: DemoStore; subdomain: string | null; seed(tenantId: string, userId: string): Promise<{ failed: string[] }> };
+  demo: {
+    store: DemoStore; subdomain: string | null; seed(tenantId: string, userId: string): Promise<{ failed: string[] }>;
+    /** 自分で申し込むときのロボットよけの問題に付ける署名の鍵（第23.3.2節「ロボットよけ」）。 */
+    challengeSecret: string;
+  };
 }
 
 /**
@@ -955,6 +959,7 @@ export function buildDeps(): AppDeps {
       store: demoStore,
       // ローカルの形では体験版を使わない（クラウドの形の入口だけ）
       subdomain: ai.deployment() === 'onsite' ? null : demoSubdomain(process.env),
+      challengeSecret: createHash('sha256').update(`demo-challenge|${process.env['M2OFFICE_SECRET_KEY'] ?? 'development-only'}`).digest('hex'),
       seed: (tenantId, userId) => seedDemoCompany({
         settings: (t) => repo.getTenantSettings(t),
         saveSettings: (t: string, section: 'company' | 'inventory' | 'salesDocs' | 'onboarding', value: never, by: string) => repo.saveTenantSettings(t, section, value, by),

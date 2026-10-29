@@ -539,6 +539,13 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .demo-login .field input { width: 100%; }
 .demo-login .btn.wide { margin-top: calc(8px * var(--space-scale)); }
 .demo-terms ul { margin: 0 0 calc(20px * var(--space-scale)); padding-left: 1.2em; line-height: 1.7; font-size: calc(14px * var(--font-scale)); }
+.demo-start .field input { width: 100%; }
+.demo-terms-list { margin: calc(4px * var(--space-scale)) 0 calc(8px * var(--space-scale)); padding-left: 1.2em; line-height: 1.6; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
+.demo-agree { display: flex; gap: 6px; align-items: center; margin-bottom: calc(10px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
+.demo-credentials { display: grid; grid-template-columns: auto 1fr; gap: calc(6px * var(--space-scale)) calc(12px * var(--space-scale)); margin: 0 0 calc(10px * var(--space-scale)); }
+.demo-credentials dt { color: var(--muted); font-size: calc(13px * var(--font-scale)); }
+.demo-credentials dd { margin: 0; word-break: break-all; }
+.demo-credentials code { font-size: calc(15px * var(--font-scale)); user-select: all; }
 .demo-terms .small { margin-top: calc(12px * var(--space-scale)); text-align: center; }
 .demo-banner { padding: calc(6px * var(--space-scale)) calc(16px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); background: var(--accent-soft); color: var(--accent); border-bottom: 1px solid var(--line); }
 .btn.wide { display: block; width: 100%; text-align: left; margin-bottom: calc(8px * var(--space-scale)); padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); }

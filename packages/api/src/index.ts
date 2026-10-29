@@ -16,7 +16,7 @@ import { cors } from 'hono/cors';
 import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage, appPath, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS } from '@m2office/core';
 import { buildDeps, companyView, fileStorageDir } from './context.js';
 import { authenticate, demoRestrictions, resolveTenant, type AppEnv } from './middleware/tenant.js';
-import { demoLoginRoute, demoTermsRoute, demoView } from './demo.js';
+import { demoLoginRoute, demoSignupRoute, demoTermsRoute, demoView } from './demo.js';
 import { attachVoiceRelay } from './voice/relay.js';
 import { onUnexpectedError, requestLogger } from './middleware/logging.js';
 import { agentsRoute } from './routes/agents.js';
@@ -158,6 +158,8 @@ app.route('/v1/machine-admin', machineAdminRoute(deps));
 app.route('/v1/security.txt', securityTxtRoute());
 // 体験版のゲストのログイン（第23.3.2節）。会社はゲストの ID から決まるため、会社の判定より前に置く
 app.route('/v1/demo-login', demoLoginRoute(deps));
+// 体験版を自分で申し込む口（第23.3.2節「自分で申し込む」）。体験用の会社はここで作るため、会社の判定より前に置く
+app.route('/v1/demo-signup', demoSignupRoute(deps));
 app.use('/v1/*', async (c, next) => (c.req.path.startsWith('/v1/machine-admin/') ? next() : resolveTenant(deps)(c, next)));
 app.route('/v1/auth', authRoute(deps));
 // サイネージの再生のページ（第31.9.1節）。ログインを使わず、画面の鍵で名乗る。会社はアドレスで決まるため、会社の判定の後・ログインの確かめより前に置く

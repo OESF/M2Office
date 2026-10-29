@@ -33,7 +33,7 @@ const ACTION_LABEL: Record<string, string> = {
   'machine.add': '機械を登録した', 'machine.remove': '機械を削除した', 'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
   'passkey.add': 'パスキーを登録した', 'passkey.verify': 'パスキーで確かめた', 'passkey.delete': 'パスキーを削除した',
   'operator.enroll_code': '登録の合言葉を出した', 'operator.reset_passkeys': 'パスキーを削除してやり直させた',
-  'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた', 'settings.ai_key': '運営の鍵を入れた', 'settings.ai_key_rejected': '運営の鍵を入れようとした（試して通らなかった）', 'settings.ai_key_delete': '運営の鍵を削除した', 'settings.ai_test': '運営の鍵を試した', 'settings.ai_limits': 'AI の上限を変えた', 'settings.demo': '体験版の既定を変えた', 'demo.create': '体験を出した', 'demo.extend': '体験を延ばした', 'demo.password': '体験のパスワードを出し直した', 'demo.end': '体験を終えた', 'law.tax_rates': '消費税の税率の表を変えた',
+  'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた', 'settings.ai_key': '運営の鍵を入れた', 'settings.ai_key_rejected': '運営の鍵を入れようとした（試して通らなかった）', 'settings.ai_key_delete': '運営の鍵を削除した', 'settings.ai_test': '運営の鍵を試した', 'settings.ai_limits': 'AI の上限を変えた', 'settings.demo': '体験版の既定を変えた', 'demo.create': '体験を出した', 'demo.extend': '体験を延ばした', 'demo.password': '体験のパスワードを出し直した', 'demo.end': '体験を終えた', 'demo.self_signup': '体験を自分で申し込んだ', 'law.tax_rates': '消費税の税率の表を変えた',
   'tenant.suspend_request': '停止を申請した', 'tenant.lock_request': '緊急停止した', 'tenant.resume_request': '再開を申請した',
   'tenant.status_approve': '申請を承認した', 'tenant.status_reject': '申請を承認しなかった', 'tenant.status_withdraw': '申請を取り下げた', 'tenant.lock_confirm': '緊急停止を確認した',
   'tenant.suspend_requested': '停止の申請', 'tenant.suspend_scheduled': '停止の予告', 'tenant.suspend': '停止した', 'tenant.lock': '緊急停止した',

@@ -208,13 +208,25 @@ export interface DemoRow {
   endedAt: string | null; deletedAt: string | null; contactPurgedAt: string | null; termsAcceptedAt: string | null;
   loginCount: number; lastLoginAt: string | null; lockedUntil: string | null;
   state: 'active' | 'expired' | 'ended';
+  /** 出し方（運営が出した・自分で申し込み）。 */
+  origin: 'ops' | 'self';
+}
+
+/** 体験版の既定と、自分で申し込む体験の設定。 */
+export interface DemoDefaults {
+  days: number; aiCapJpy: number;
+  selfSignup: boolean; dailyLimit: number; monthlyAiCapJpy: number;
 }
 
 /** 体験の一覧の答え。`url` は入口（決めていなければ `null`）。 */
 export interface DemoList {
   demos: DemoRow[];
-  defaults: { days: number; aiCapJpy: number };
+  defaults: DemoDefaults;
   url: string | null;
+  /** 自分で申し込む画面（紹介のページのボタンの行き先）。 */
+  signupUrl: string | null;
+  /** 体験版全体の今月の AI の利用（円）。 */
+  aiMonthJpy: number;
   extendMaxDays: number;
   maxDays: number;
 }
@@ -274,7 +286,7 @@ export const opsApi = {
   extendDemo: (id: string, days: number) => call<{ expiresAt: string }>(`/demos/${encodeURIComponent(id)}/extend`, send('POST', { days })),
   resetDemoPassword: (id: string) => call<{ password: string }>(`/demos/${encodeURIComponent(id)}/password`, send('POST')),
   endDemo: (id: string) => call<{ ok: true }>(`/demos/${encodeURIComponent(id)}/end`, send('POST')),
-  setDemoDefaults: (b: { days: number; aiCapJpy: number }) => call<{ days: number; aiCapJpy: number }>('/settings/demo', send('PUT', b)),
+  setDemoDefaults: (b: DemoDefaults) => call<DemoDefaults>('/settings/demo', send('PUT', b)),
   operatorProfile: () => call<{ profile: OperatorProfileView }>('/settings/operator'),
   setOperatorProfile: (p: OperatorProfileView) => call<{ profile: OperatorProfileView }>('/settings/operator', send('PUT', p)),
   statusRequests: (tenantId?: string) => call<{ requests: StatusRequestRow[]; solo: boolean }>(`/status-requests${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),
