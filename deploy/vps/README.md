@@ -28,7 +28,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | ファイル | 中身 |
 |---|---|
 | `setup.sh` | ソフト（Node.js 24・PostgreSQL 17 と pgvector・Caddy と Coraza・CrowdSec）を公式の置き場から入れ、専用の利用者 `m2office`・置き場・秘密の値・データベース・組み立て・移行・systemd・Caddy・CrowdSec を用意して、80・443 を開け、動きを確かめる |
-| `Caddyfile.template` | 入口。会社のサブドメイン（On-Demand TLS。払い出した名前だけ証明書を取る）・運営の画面（WireGuard の網からだけ）・紹介のページと Google からの戻り |
+| `Caddyfile.template` | 入口。会社のサブドメイン（On-Demand TLS。払い出した名前だけ証明書を取る）・運営の画面（WireGuard の網からだけ）・紹介のページ（公開前の確認のあいだは BASIC 認証）と Google からの戻り |
 | `cloudflare-front.caddy` | Cloudflare を前に置いたときに、Cloudflare 以外からの通信を断る段 |
 | `m2office.env.template` | 環境変数（`/etc/m2office/m2office.env`。root と `m2office` だけが読める） |
 | `systemd/*.service` | API・ワーカー・運営の API。メモリの上限と守りの設定つき |

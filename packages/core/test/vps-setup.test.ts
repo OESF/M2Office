@@ -27,13 +27,16 @@ const ANSWERS = {
 };
 
 /** 雛形を埋めて、出力先を返す。 */
-function render(cloudflare: 'yes' | 'no', locale = 'C'): string {
+function render(cloudflare: 'yes' | 'no', locale = 'C', extra: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'm2o-vps-'));
   const answers = join(dir, 'answers');
-  writeFileSync(answers, Object.entries({ ...ANSWERS, CLOUDFLARE_FRONT: cloudflare }).map(([k, v]) => `${k}=${v}`).join('\n'));
+  writeFileSync(answers, Object.entries({ ...ANSWERS, CLOUDFLARE_FRONT: cloudflare, ...extra }).map(([k, v]) => `${k}=${v}`).join('\n'));
   execFileSync(setup, ['--render-only', join(dir, 'out'), '--answers', answers], { env: { ...process.env, LANG: locale, LC_ALL: locale } });
   return join(dir, 'out');
 }
+
+/** 公開前の確認の答え（見本の bcrypt のハッシュ。形だけ合わせたもの）。 */
+const PREVIEW = { SITE_PREVIEW_USER: 'preview', SITE_PREVIEW_HASH: `$2a$14$${'A'.repeat(53)}` };
 
 const caddy = (() => { try { execFileSync('caddy', ['version']); return true; } catch { return false; } })();
 
@@ -106,9 +109,48 @@ test('Cloudflare を前に置くときだけ、Cloudflare 以外を断り、利�
   assert.match(on, /client_ip_headers CF-Connecting-IP/);
 });
 
+test('紹介のページ: 公開前の確認の答えがあるときだけ BASIC 認証を掛け、Google からの戻りには掛けない。無いページは 404.html', () => {
+  const site = (file: string) => file.slice(file.indexOf('m2office.net, www.m2office.net {'));
+  const off = readFileSync(join(render('no'), 'Caddyfile'), 'utf8');
+  assert.ok(!site(off).includes('import site_preview_auth'), '答えが無ければ公開');
+  const on = readFileSync(join(render('no', 'C', PREVIEW), 'Caddyfile'), 'utf8');
+  assert.ok(on.includes(`\t\tpreview ${PREVIEW.SITE_PREVIEW_HASH}\n`), '利用者の名前とハッシュが入る');
+  assert.match(on, /\(site_preview_auth\) \{\n\tbasic_auth bcrypt "M2Office preview" \{[\s\S]*?header X-Robots-Tag "noindex, nofollow"\n\}/);
+  const body = site(on);
+  const files = body.slice(body.indexOf('\thandle {'));
+  assert.ok(files.startsWith('\thandle {\n\t\timport site_preview_auth\n'), '紹介のページのファイルの段だけに掛ける');
+  const oauth = body.slice(body.indexOf('handle /v1/oauth/*'), body.indexOf('\thandle {'));
+  assert.ok(!oauth.includes('site_preview_auth'), 'Google からの戻りには掛けない');
+  // 他の名前の段には掛けない
+  assert.equal(on.split('import site_preview_auth').length, 2);
+  assert.match(body, /handle_errors 404 \{\n\t\trewrite \* \/404\.html\n\t\tfile_server \{\n\t\t\tstatus 404/);
+  assert.match(body, /@assets path \/_astro\/\*\n\t\theader @assets Cache-Control "public, max-age=31536000, immutable"/);
+});
+
+test('setup.sh: 公開前の確認の名前とハッシュは両方か空で、ハッシュは bcrypt の形に限る。「-」で答えを外せる', () => {
+  const body = readFileSync(setup, 'utf8');
+  assert.match(body, /\[ "\$reply" = - \] && reply=''/);
+  assert.match(body, /SITE_PREVIEW_HASH='%s'\\n" \\\n/);
+  const at = body.indexOf('[[ "$SITE_PREVIEW_HASH" =~');
+  const check = body.slice(at, body.indexOf(' || die', at));
+  const ok = (h: string) => { try { execFileSync('bash', ['-c', `SITE_PREVIEW_HASH=$1; ${check}`, '_', h]); return true; } catch { return false; } };
+  assert.ok(ok(PREVIEW.SITE_PREVIEW_HASH));
+  assert.ok(!ok('my-password'), 'パスワードそのものは断る');
+  assert.ok(!ok(`$2a$14$${'A'.repeat(52)}`), '短いハッシュは断る');
+});
+
+test('ログ: アクセスのログは毎日入れ替えて 28 日、前のページの URL の問い合わせも残さない。WAF の記録も 28 日', () => {
+  const file = readFileSync(join(render('no'), 'Caddyfile'), 'utf8');
+  assert.match(file, /roll_interval 24h\n\t\t\troll_keep_for 672h/);
+  assert.match(file, /request>headers>Referer regexp \\\?\.\*\$ \?\*\*\*/);
+  const body = readFileSync(setup, 'utf8');
+  assert.match(body, /waf-audit\.log \{\\n\\tdaily\\n\\trotate 28\\n\\tmaxage 28/);
+  assert.match(body, /\/etc\/logrotate\.d\/m2office-waf/);
+});
+
 test('手元に Caddy があれば、埋めた設定を読める（WAF の行を除く）', { skip: !caddy && 'Caddy が無い' }, () => {
-  for (const cf of ['no', 'yes'] as const) {
-    const out = render(cf);
+  for (const [cf, extra] of [['no', {}], ['yes', {}], ['no', PREVIEW]] as const) {
+    const out = render(cf, 'C', extra);
     const file = join(out, 'Caddyfile.nowaf');
     writeFileSync(file, readFileSync(join(out, 'Caddyfile'), 'utf8').split('\n').filter((l) => !/order coraza_waf first|import waf/.test(l)).join('\n'));
     execFileSync('caddy', ['adapt', '--config', file, '--adapter', 'caddyfile'], { stdio: 'pipe' });

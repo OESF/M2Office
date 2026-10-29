@@ -43,7 +43,7 @@ info() { printf '  %s\n' "$*"; }
 warn() { printf '  \033[33m注意:\033[0m %s\n' "$*"; }
 die() { printf '\n\033[31mエラー:\033[0m %s\n' "$*" >&2; exit 1; }
 
-# 答えを尋ねる。ask 変数名 "問い" 既定 [secret]
+# 答えを尋ねる。ask 変数名 "問い" 既定 [secret]。Enter は既定のまま、「-」は空にする（入れた答えを外すため）
 ask() {
   local name=$1 question=$2 def=${3:-} secret=${4:-} reply
   if [ -n "$secret" ]; then
@@ -55,6 +55,7 @@ ask() {
     IFS= read -r reply
   fi
   [ -z "$reply" ] && reply=$def
+  [ "$reply" = - ] && reply=''
   printf -v "$name" '%s' "$reply"
 }
 
@@ -91,16 +92,30 @@ cloudflare_parts() {
   fi
 }
 
+# 紹介のページの公開前の確認（第23.3.1節）。ハッシュが入っていれば、紹介のページの段で BASIC 認証の段を読み込む
+site_preview_parts() {
+  if [ -n "${SITE_PREVIEW_HASH:-}" ]; then
+    SITE_PREVIEW_IMPORT='\t\timport site_preview_auth'
+  else
+    SITE_PREVIEW_IMPORT=''
+  fi
+}
+
 if [ "${1:-}" = --render-only ]; then
   out=${2:?出力先を指定してください}; [ "${3:-}" = --answers ] || die '--answers <ファイル> を指定してください'
   answers=${4:?答えのファイルを指定してください}
   # 答えのファイルに CLOUDFLARE_FRONT があれば、その値で Cloudflare の段を作る
   CLOUDFLARE_FRONT=$(grep -E '^CLOUDFLARE_FRONT=' "$answers" | cut -d= -f2- || true)
   cloudflare_parts
+  # 公開前の確認の答えが無ければ、空（公開）とみなす
+  SITE_PREVIEW_USER=$(grep -E '^SITE_PREVIEW_USER=' "$answers" | cut -d= -f2- || true)
+  SITE_PREVIEW_HASH=$(grep -E '^SITE_PREVIEW_HASH=' "$answers" | cut -d= -f2- || true)
+  site_preview_parts
   tmp=$(mktemp); cp "$answers" "$tmp"
   # 答えのファイルの終わりに改行が無くても、足す行が前の行につながらないようにする
   printf '\n' >> "$tmp"
   printf "CLOUDFLARE_SNIPPET='%s'\nCLOUDFLARE_GLOBAL='%s'\n" "$CLOUDFLARE_SNIPPET" "$CLOUDFLARE_GLOBAL" >> "$tmp"
+  printf "SITE_PREVIEW_USER=%s\nSITE_PREVIEW_HASH=%s\nSITE_PREVIEW_IMPORT='%s'\n" "$SITE_PREVIEW_USER" "$SITE_PREVIEW_HASH" "$SITE_PREVIEW_IMPORT" >> "$tmp"
   render_all "$tmp" "$out" "$(command -v node)"
   rm -f "$tmp"
   echo "雛形を埋めました: $out"
@@ -137,8 +152,10 @@ ask WG_NETWORK 'WireGuard の網（運営の画面を開ける範囲）' "${WG_N
 ask WAF_ENGINE 'WAF の動き（DetectionOnly: 記録だけ ／ On: 止める）' "${WAF_ENGINE:-DetectionOnly}"
 ask CLOUDFLARE_FRONT 'Cloudflare を前に置くか（大量の通信の攻撃を受けたときだけ yes）' "${CLOUDFLARE_FRONT:-no}"
 ask BLOCK_COUNTRIES '通信を止める国（国の 2 文字をカンマで並べる。止めないなら none）' "${BLOCK_COUNTRIES:-CN,RU,KP}"
-ask GEO_ALLOW '国で止めずに通す相手（アドレスか範囲をカンマで。無ければ空のまま）' "${GEO_ALLOW:-}"
-ask DEMO_SUBDOMAIN '体験版の入口の名前（例 demo。使わないなら空のまま）' "${DEMO_SUBDOMAIN:-}"
+ask GEO_ALLOW '国で止めずに通す相手（アドレスか範囲をカンマで。無ければ空のまま。外すなら -）' "${GEO_ALLOW:-}"
+ask DEMO_SUBDOMAIN '体験版の入口の名前（例 demo。使わないなら空のまま。外すなら -）' "${DEMO_SUBDOMAIN:-}"
+ask SITE_PREVIEW_USER '紹介のページの公開前の確認の利用者の名前（公開しているなら空のまま。外すなら -）' "${SITE_PREVIEW_USER:-}"
+ask SITE_PREVIEW_HASH 'そのパスワードのハッシュ（bcrypt。M2Office-site の scripts/basic-auth-hash.sh で作る。外すなら -）' "${SITE_PREVIEW_HASH:-}"
 GEMINI_API_KEY=$(env_value GEMINI_API_KEY)
 ask GEMINI_API_KEY 'Gemini の API の鍵（後でもよい。マスター管理画面でも入れられる）' "$GEMINI_API_KEY" secret
 GOOGLE_LOGIN_CLIENT_ID=$(env_value GOOGLE_LOGIN_CLIENT_ID)
@@ -169,9 +186,17 @@ if [ -n "$DEMO_SUBDOMAIN" ]; then
   [[ "$DEMO_SUBDOMAIN" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || die "体験版の入口の名前の形が違います: $DEMO_SUBDOMAIN"
   case "$DEMO_SUBDOMAIN" in www|ops|signup|api|app|admin) die "体験版の入口に、運営が使う名前は使えません: $DEMO_SUBDOMAIN" ;; esac
 fi
-# 秘密の値でない答えだけを残す（次の既定）
-printf "BASE_DOMAIN='%s'\nACME_EMAIL='%s'\nOPS_GOOGLE_DOMAIN='%s'\nWG_NETWORK='%s'\nWAF_ENGINE='%s'\nCLOUDFLARE_FRONT='%s'\nBLOCK_COUNTRIES='%s'\nGEO_ALLOW='%s'\nDEMO_SUBDOMAIN='%s'\n" \
-  "$BASE_DOMAIN" "$ACME_EMAIL" "$OPS_GOOGLE_DOMAIN" "$WG_NETWORK" "$WAF_ENGINE" "$CLOUDFLARE_FRONT" "$BLOCK_COUNTRIES" "$GEO_ALLOW" "$DEMO_SUBDOMAIN" | sudo tee "$CONF" >/dev/null
+# 紹介のページの公開前の確認（第23.3.1節）。利用者の名前とハッシュは、両方入れるか、両方空にする（空なら公開）
+SITE_PREVIEW_USER=$(printf '%s' "$SITE_PREVIEW_USER" | tr -d '[:space:]')
+SITE_PREVIEW_HASH=$(printf '%s' "$SITE_PREVIEW_HASH" | tr -d '[:space:]')
+if [ -n "$SITE_PREVIEW_USER" ] || [ -n "$SITE_PREVIEW_HASH" ]; then
+  [ -n "$SITE_PREVIEW_USER" ] && [ -n "$SITE_PREVIEW_HASH" ] || die '公開前の確認の利用者の名前とハッシュは、両方入れてください（公開するなら、両方を - で外します）'
+  [[ "$SITE_PREVIEW_USER" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || die "公開前の確認の利用者の名前は、英数字と . _ - で入れてください: $SITE_PREVIEW_USER"
+  [[ "$SITE_PREVIEW_HASH" =~ ^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$ ]] || die '公開前の確認のハッシュが bcrypt の形ではありません（パスワードそのものではなく、ハッシュを入れます）'
+fi
+# 秘密の値でない答えだけを残す（次の既定。公開前の確認のハッシュはパスワードではないので残す）
+printf "BASE_DOMAIN='%s'\nACME_EMAIL='%s'\nOPS_GOOGLE_DOMAIN='%s'\nWG_NETWORK='%s'\nWAF_ENGINE='%s'\nCLOUDFLARE_FRONT='%s'\nBLOCK_COUNTRIES='%s'\nGEO_ALLOW='%s'\nDEMO_SUBDOMAIN='%s'\nSITE_PREVIEW_USER='%s'\nSITE_PREVIEW_HASH='%s'\n" \
+  "$BASE_DOMAIN" "$ACME_EMAIL" "$OPS_GOOGLE_DOMAIN" "$WG_NETWORK" "$WAF_ENGINE" "$CLOUDFLARE_FRONT" "$BLOCK_COUNTRIES" "$GEO_ALLOW" "$DEMO_SUBDOMAIN" "$SITE_PREVIEW_USER" "$SITE_PREVIEW_HASH" | sudo tee "$CONF" >/dev/null
 sudo chmod 600 "$CONF"
 
 # ---- 3. ソフトを入れる（公式の置き場から。版の大きな数を固定する） ----
@@ -236,6 +261,7 @@ DB_OPS_PASSWORD=$(env_value OPS_DATABASE_URL | sed -E 's#^postgres://[^:]+:([^@]
 say '設定のファイルを作ります'
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 cloudflare_parts
+site_preview_parts
 answers="$work/answers"
 umask 077
 cat > "$answers" <<ANSWERS
@@ -248,6 +274,9 @@ CLOUDFLARE_FRONT=$CLOUDFLARE_FRONT
 DEMO_SUBDOMAIN=$DEMO_SUBDOMAIN
 CLOUDFLARE_SNIPPET='$CLOUDFLARE_SNIPPET'
 CLOUDFLARE_GLOBAL='$CLOUDFLARE_GLOBAL'
+SITE_PREVIEW_USER=$SITE_PREVIEW_USER
+SITE_PREVIEW_HASH=$SITE_PREVIEW_HASH
+SITE_PREVIEW_IMPORT='$SITE_PREVIEW_IMPORT'
 GEMINI_API_KEY=$GEMINI_API_KEY
 GOOGLE_LOGIN_CLIENT_ID=$GOOGLE_LOGIN_CLIENT_ID
 GOOGLE_LOGIN_CLIENT_SECRET=$GOOGLE_LOGIN_CLIENT_SECRET
@@ -297,6 +326,8 @@ for s in m2office-api m2office-worker m2office-ops; do sudo systemctl enable "$s
 sudo install -m 644 "$work/out/Caddyfile" /etc/caddy/Caddyfile
 sudo -u caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || die 'Caddy の設定が通りません（sudo -u caddy caddy validate --config /etc/caddy/Caddyfile で理由を見てください）'
 sudo systemctl enable caddy >/dev/null 2>&1; sudo systemctl reload-or-restart caddy
+# WAF の記録は Caddy の入れ替えの外なので、logrotate で毎日入れ替えて 28 日分を残す（第20.4.6節「ログ」。WAF は開いたまま書くので、写して空にする）
+printf '%s/waf-audit.log {\n\tdaily\n\trotate 28\n\tmaxage 28\n\tcompress\n\tdelaycompress\n\tmissingok\n\tnotifempty\n\tcopytruncate\n\tsu caddy caddy\n}\n' "$CADDY_LOG_DIR" | sudo tee /etc/logrotate.d/m2office-waf >/dev/null
 sudo install -d -m 755 /etc/crowdsec/acquis.d
 sudo install -m 644 "$work/out/acquis-m2office.yaml" /etc/crowdsec/acquis.d/m2office.yaml
 sudo systemctl restart crowdsec
@@ -362,5 +393,6 @@ info '2. Xserver の管理画面のパケットフィルターで、TCP 80・443
 info "3. 開けたら https://$BASE_DOMAIN を開いて確かめる。運営者の端末の hosts に「10.66.0.1 ops.${BASE_DOMAIN}」を足し、WireGuard を入れて https://ops.$BASE_DOMAIN を開く"
 info '4. Google のログインの OAuth クライアントに、戻り先（m2office.env の GOOGLE_LOGIN_REDIRECT_URI と OPS_GOOGLE_REDIRECT_URI）を登録する'
 info "   最初の運営管理者を作る: cd / && sudo -u $SERVICE_USER node --env-file=$ENV_FILE $REPO_DIR/scripts/create-operator.mjs --email <アドレス> --name <名前> --role admin"
+[ -n "$SITE_PREVIEW_HASH" ] && info "紹介のページは公開前の確認の BASIC 認証で守っています（利用者 ${SITE_PREVIEW_USER}）。公開するときは、利用者の名前とハッシュを - で外して走らせ直す"
 [ "$WAF_ENGINE" = DetectionOnly ] && info '5. WAF は記録だけです。誤りが無いことを確かめたら、WAF の動きを On にして走らせ直す'
 info '更新は update.sh で入れます。社外の控え（pgBackRest・restic）と夜の自動の更新は、まだ入れません（運営のマニュアル 第 14 章）'

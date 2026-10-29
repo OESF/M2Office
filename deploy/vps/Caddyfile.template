@@ -44,9 +44,12 @@
 }
 
 # アクセスのログ。道の中の鍵と URL の問い合わせの部分は残さない（ローカルの形と同じ。2026-10-12 の点検）。CrowdSec がこのログを読む
+# 毎日入れ替えて 28 日分を残す（大きさだけで入れ替えると、通信の少ないあいだは 28 日より古い行が今のファイルに残り続ける）。
+# 前のページの URL（Referer）の問い合わせの部分も残さない（紹介のページのプライバシーの方針。2026-10-29）
 (access_log) {
 	log {
 		output file {{CADDY_LOG_DIR}}/access.log {
+			roll_interval 24h
 			roll_keep_for 672h
 		}
 		format filter {
@@ -54,8 +57,18 @@
 				regexp ^(/v1/(?:hooks/[a-z-]+|member-card|unsubscribe|public/inventory|public/columns))/[^/?]+ ${1}/***
 				regexp \?.*$ ?***
 			}
+			request>headers>Referer regexp \?.*$ ?***
 		}
 	}
+}
+
+# 紹介のページの公開前の確認（第23.3.1節）。SITE_PREVIEW_HASH が入っているときだけ、setup.sh が紹介のページの段に import の行を入れる。
+# 401 の応答にも付くよう、検索に出さない見出しもここで付ける
+(site_preview_auth) {
+	basic_auth bcrypt "M2Office preview" {
+		{{SITE_PREVIEW_USER}} {{SITE_PREVIEW_HASH}}
+	}
+	header X-Robots-Tag "noindex, nofollow"
 }
 
 # 更新などで API が止まっている間は、502 の代わりに「ただいま更新中です」を返す
@@ -160,6 +173,7 @@ ops.{{BASE_DOMAIN}} {
 
 # 紹介のページ（第23.3.1節。いまは静的なページの置き場。申し込みの口は作ってから足す）と、Google からの戻り
 # （Google は戻り先に HTTPS の決まった名前を求めるため、会社ごとの名前ではなく親のドメインで受ける。第16.1.2節）
+# 公開前の確認の BASIC 認証は、紹介のページのファイルだけに掛ける。Google からの戻り（/v1/oauth/）は別の handle なので掛からない
 {{BASE_DOMAIN}}, www.{{BASE_DOMAIN}} {
 	import on_demand_cert
 	import cloudflare_only
@@ -167,12 +181,24 @@ ops.{{BASE_DOMAIN}} {
 	import access_log
 	import no_internal
 	encode zstd gzip
+	# handle_errors からも使うため、handle の外に置く
+	root * {{SITE_DIR}}
 	handle /v1/oauth/* {
 		import waf
 		reverse_proxy 127.0.0.1:{{API_PORT}}
 	}
 	handle {
-		root * {{SITE_DIR}}
+{{SITE_PREVIEW_IMPORT}}
+		# 名前に内容のハッシュが付くファイル（Astro が作る）は長くキャッシュさせる
+		@assets path /_astro/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
 		file_server
+	}
+	# 無いページには、サイトが作る 404.html を 404 で返す
+	handle_errors 404 {
+		rewrite * /404.html
+		file_server {
+			status 404
+		}
 	}
 }
