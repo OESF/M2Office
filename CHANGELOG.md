@@ -8,6 +8,19 @@ M2Office のサービス本体の版ごとの変更を、開発者と拡張機�
 
 仕様書・エージェント定義スキーマ・公開 API・拡張機能の版は、サービス本体の版とは独立しています（リリース規定 第2章）。
 
+## v0.25.0 体験版の自分での申し込み（2026-10-30）
+
+### 配備で行うこと
+- `npm run db:migrate`（移行 `174_demo_self_signup.sql`。VPS では `update.sh` が行う）
+- 申し込みを受けるには、体験版の入口の名前（`DEMO_SUBDOMAIN`）を決めておく（`setup.sh` で `demo`。v0.23.0 から）。設定の既定は「受け付ける・1 日 20 件・体験版全体の月の AI の上限 20,000 円」
+- 巻き戻し: v0.24.0 に戻せば動く（移行は毎回はじめから流すため、`m2o_demo_purge` は移行 172 のものに戻る。足した列には既定があり、足した表と関数は前の版から使われない）。消すときは、関数 `m2o_demo_self_signup`・`ops.set_demo_signup`・`ops.demo_ai_month_total` と、表 `ops.demo_signup_secret`・`ops.demo_signup_emails`・`ops.demo_signup_sources`・`ops.demo_ai_months` を消し、`ops.demo_guests.origin` と `ops.platform_settings` の `demo_self_signup`・`demo_daily_limit`・`demo_monthly_ai_cap_jpy` の列を消す
+
+### 追加
+- **体験版を紹介のページから自分で申し込む** — 体験版の入口の `/start` で、会社名・お名前・メールアドレスと規約への同意だけで、その場で体験用の会社を作り、見本のデータを入れてログインした状態で始める。ゲストの ID とパスワードは応答で 1 度だけ返し、メールでは送らない（`GET /v1/demo-signup/challenge`・`POST /v1/demo-signup`、画面 `packages/web/src/demo-start.tsx`。仕様書 第23.3.2節「自分で申し込む」、ADR-0117）
+- **申し込みの歯止めはデータベースの中で見る** — アプリのロールに渡すのは `m2o_demo_self_signup` だけ。同じメールアドレス（そろえた形）は一度だけ、同じ送り元は 24 時間に 1 件、1 日の数、体験版全体の月の AI の上限を、申し込みを 1 件ずつ扱って確かめる。メールアドレスと送り元は、どのロールも読めない秘密を混ぜたハッシュで持つ。消した体験の会社の AI の利用も月の合計に残るよう、`m2o_demo_purge` が月ごとに写す
+- **ロボットよけ** — ALTCHA と同じ計算の方式（`SHA-256(salt + 数)`、署名、10 分で期限切れ、1 度だけ使える）を `packages/core/src/demo/signup.ts` に持つ。外の部品やサービスは使わない。画面は申し込みの画面を開いたときから裏で解く
+- **マスター管理画面** — 「体験」の一覧に出し方（運営が出した・自分で申し込み）と、申し込みの画面の URL・体験版全体の今月の AI の利用を出す。「設定」の「体験版」に、自分で申し込めるか・1 日の数・体験版全体の月の AI の上限（`PUT /v1/ops/settings/demo` の `selfSignup`・`dailyLimit`・`monthlyAiCapJpy`。省けば今のまま）
+
 ## v0.24.0 運営者が 1 人のときの承認（2026-10-29）
 
 ### 配備で行うこと
