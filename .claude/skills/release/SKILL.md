@@ -161,7 +161,7 @@ related: [<関係する記事の id>]
 
 ### 5. README がいまの実態に合っているかを確かめる
 
-`README.md`（リポジトリ直下）と `packages/*/README.md` は、いまの実装を説明するリファレンスである。
+`README.md`（リポジトリ直下。使う人への入口）・`docs/development.md`（開発者ガイド）・`docs/implementation-status.md`（実装状況）と `packages/*/README.md` は、いまの実装を説明するリファレンスである。
 開発規約では変更と同じコミットで README を直す決まりだが、漏れていないかをこのタイミングで点検する。
 
 手順 1 の差分から、次の兆候を探す。
@@ -169,11 +169,11 @@ related: [<関係する記事の id>]
 | 兆候 | 見る README |
 |---|---|
 | API のエンドポイントの追加・変更 | `packages/api/README.md` のエンドポイントの表 |
-| 環境変数の追加・変更 | `README.md` の環境変数の表と `.env.example` |
+| 環境変数の追加・変更 | `docs/development.md`（開発者ガイド）の環境変数の表と `.env.example` |
 | `core` のディレクトリ（`src/*`）の追加 | `packages/core/README.md` の構成 |
 | ワーカーの見回り・定期処理の追加 | `packages/worker/README.md` |
 | 画面のファイルの追加 | `packages/web/README.md` の構成 |
-| 実装状況の変化 | `README.md` の実装状況の表 |
+| 実装状況の変化 | `docs/implementation-status.md` の実装状況の表 |
 | 新しいツール | 開発者マニュアル 第4章（`npm run docs:tools` で作り直す。`npm test` が食い違いを検出する） |
 
 兆候があれば、該当する節を実際に読んでから修正案を作る（想像で書かない）。
