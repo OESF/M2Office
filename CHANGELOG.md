@@ -8,6 +8,18 @@ M2Office のサービス本体の版ごとの変更を、開発者と拡張機�
 
 仕様書・エージェント定義スキーマ・公開 API・拡張機能の版は、サービス本体の版とは独立しています（リリース規定 第2章）。
 
+## v0.24.0 運営者が 1 人のときの承認（2026-10-29）
+
+### 配備で行うこと
+- `npm run db:migrate`（移行 `173_ops_solo_operator.sql`）。`ops.status_requests` に列 `decided_solo_note`・`confirmed_solo_note`、関数 `ops.solo_operator` を足し、`ops.decide_status`・`ops.confirm_lock` に引数（1 人で行う理由）を足して作り直す。列の削除・改名は無い
+- 環境変数・Google の権限の変更は無い。再同意は要らない
+- 運営の API は追加だけ: `POST /v1/ops/status-requests/:id/decide`・`/confirm` の本文に `soloNote`、`GET /v1/ops/status-requests` の答えに `solo`
+- クラウドの形は `sudo /opt/m2office/app/deploy/vps/update.sh --tag v0.24.0 --allow-unsigned`（v0.23.0 をまだ入れていなければ、v0.23.0 の配備で行うこと（`setup.sh` を走らせ直すなど）もあわせて行う）
+- 巻き戻し: `update.sh` が失敗したときは、更新の前の控えに戻るので何もしなくてよい。あとから手で v0.23.0 に戻すときは、先に `drop function ops.decide_status(text, boolean, text, text); drop function ops.confirm_lock(text, text, text);` を流してから v0.23.0 の移行を流す（v0.23.0 の移行は 3 つ・2 つの引数の関数を作り直すため、残すと同じ名前の関数が 2 つになり、呼び出しが失敗する）
+
+### 追加
+- **運営者が 1 人だけのときの 2 人の決まり**（仕様書 第23.8.6節、Q-288、ADR-0116、移行 173） — 停止と再開の承認と緊急停止の事後の確認は、申請した人とは別の運営者が行う決まりだが、運営者が 1 人の時期は行き詰まる（VPS で、緊急停止した会社を確認も再開もできなくなった）。ほかに承認できる運営者（使える状態の運営管理者とサポート）がいないときだけ、申請した本人が 1 人で行う理由を書いて行えるようにした。理由は申請の記録・運営の操作の記録・会社の監査ログに残し、画面の状態の欄に「1 人で」と出す。判定は承認・確認のたびに関数の中で行い、2 人目の運営者を足せば自動で 2 人の決まりに戻る
+
 ## v0.23.0 体験版と運営の広がり（2026-10-29）
 
 ### 配備で行うこと
