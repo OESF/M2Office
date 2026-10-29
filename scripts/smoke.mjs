@@ -8270,6 +8270,19 @@ console.log('\n■ 119. 動いている環境（API とワーカーが知らせ�
     scols.length > 0 && !scols.some((c) => /key|secret|token|tenant|user/.test(c.column_name)) && srows[0].n > 0 && samplesByAdmin.status === 404
       ? ok('機械の資源の標本を API が置き（15 分以内）、表は会社・人・秘密を持たず、クラウドの形では会社の管理者に推移を出さない')
       : ng('機械の資源の標本の扱いが違う', JSON.stringify({ cols: scols.map((c) => c.column_name), recent: srows[0]?.n, admin: samplesByAdmin.status }));
+    // 運営の AI の設定（第23.8.14節）。アプリのロールは運営の表を直接読めず、決めた関数で暗号化した鍵と上限だけを読む
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      const direct = await app.query('select * from ops.platform_settings').then(() => 'read', (e) => e.code);
+      const { rows: fnCols } = await app.query('select * from m2o_platform_ai_settings()');
+      const total = await app.query('select m2o_ai_platform_total(now() - interval \'1 day\') as t');
+      direct !== 'read' && fnCols.length === 1 && Object.keys(fnCols[0]).join() === 'gemini_key_enc,gemini_key_set_at,ai_tenant_cap_jpy,ai_platform_cap_jpy' && total.rows.length === 1
+        ? ok('アプリのロールは運営の表を直接読めず、決めた関数で暗号化した運営の鍵と上限・全社の合計だけを読む')
+        : ng('運営の AI の設定の読み方が違う', JSON.stringify({ direct, cols: Object.keys(fnCols[0] ?? {}) }));
+    } finally {
+      await app.end();
+    }
   } catch (err) {
     ng('動いている環境の確認が途中で止まった', String(err));
   } finally {

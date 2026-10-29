@@ -10,8 +10,9 @@ import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
 import { copyText } from './clipboard.js';
 import { SystemLogs, type LogSource } from './SystemLogs.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
+import { useTheme, type ThemeChoice } from './theme.js';
 import {
-  opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
+  opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type OpsAiSettingsView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
   type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
@@ -31,7 +32,7 @@ const ACTION_LABEL: Record<string, string> = {
   'machine.add': '機械を登録した', 'machine.remove': '機械を削除した', 'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
   'passkey.add': 'パスキーを登録した', 'passkey.verify': 'パスキーで確かめた', 'passkey.delete': 'パスキーを削除した',
   'operator.enroll_code': '登録の合言葉を出した', 'operator.reset_passkeys': 'パスキーを削除してやり直させた',
-  'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた', 'law.tax_rates': '消費税の税率の表を変えた',
+  'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた', 'settings.ai_key': '運営の鍵を入れた', 'settings.ai_key_rejected': '運営の鍵を入れようとした（試して通らなかった）', 'settings.ai_key_delete': '運営の鍵を削除した', 'settings.ai_test': '運営の鍵を試した', 'settings.ai_limits': 'AI の上限を変えた', 'law.tax_rates': '消費税の税率の表を変えた',
   'tenant.suspend_request': '停止を申請した', 'tenant.lock_request': '緊急停止した', 'tenant.resume_request': '再開を申請した',
   'tenant.status_approve': '申請を承認した', 'tenant.status_reject': '申請を承認しなかった', 'tenant.status_withdraw': '申請を取り下げた', 'tenant.lock_confirm': '緊急停止を確認した',
   'tenant.suspend_requested': '停止の申請', 'tenant.suspend_scheduled': '停止の予告', 'tenant.suspend': '停止した', 'tenant.lock': '緊急停止した',
@@ -161,6 +162,31 @@ function useFlaggedMachines(): number | null {
   return n;
 }
 
+/**
+ * 運営の鍵の全体の上限に近いか（第23.8.14節）。8 割と 10 割で、どの画面の上にも印を出す。5 分ごとに読み直す。
+ *
+ * @returns 出す文。上限を決めていない・8 割に届かないときは `null`
+ */
+function usePlatformAiAlert(): string | null {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    const load = () => {
+      opsApi.aiSettings().then((s) => {
+        const cap = s.platformCapJpy;
+        const used = s.month.usedJpy;
+        const yen = (v: number) => `${v.toLocaleString('ja-JP')} 円`;
+        setText(!cap || used < cap * 0.8 ? null : used >= cap
+          ? `運営の鍵の今月の AI の費用が全体の上限に達し、運営の鍵を使う会社の AI を止めています（${yen(used)} ／ ${yen(cap)}）`
+          : `運営の鍵の今月の AI の費用が全体の上限の 8 割を超えました（${yen(used)} ／ ${yen(cap)}）`);
+      }).catch(() => setText(null));
+    };
+    load();
+    const t = window.setInterval(load, 300_000);
+    return () => clearInterval(t);
+  }, []);
+  return text;
+}
+
 /** 運営の画面の枠。 */
 function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
   const [page, setPage] = useState<OpsPage>('tenants');
@@ -168,6 +194,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
   // 画面の「？」の「詳しく見る」で、その画面の章を開く（第23.8.16節）
   useOpenHelp(useCallback((id: string | null) => { setHelpChapter(id); setPage('help'); }, []));
   const flagged = useFlaggedMachines();
+  const aiAlert = usePlatformAiAlert();
   const [requests, setRequests] = useState<StatusRequestRow[]>([]);
   const loadRequests = useCallback(() => { opsApi.statusRequests().then((r) => setRequests(r.requests)).catch(() => undefined); }, []);
   useEffect(() => { loadRequests(); const t = window.setInterval(loadRequests, 60_000); return () => clearInterval(t); }, [loadRequests]);
@@ -189,6 +216,12 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
             <div className="suspended-banner" role="alert">
               <strong>確認待ちの緊急停止: {unconfirmed.map((r) => `${r.tenantName ?? r.tenantId}（${when(r.requestedAt)}）`).join('、')}</strong>
               {' '}<button className="link-btn" onClick={() => setPage('requests')}>確かめる</button>
+            </div>
+          )}
+          {aiAlert && (
+            <div className="suspended-banner" role="alert">
+              <strong>{aiAlert}</strong>
+              {' '}<button className="link-btn" onClick={() => setPage('settings')}>設定を開く</button>
             </div>
           )}
           {page === 'tenants' && <Tenants me={me} flagged={flagged} onMachines={() => setPage('machines')} onChanged={loadRequests} />}
@@ -825,8 +858,20 @@ function LawTables({ me }: { me: OpsMe }) {
   );
 }
 
-/** 運営主体の設定（法人名・所在地・Web・問い合わせの窓口）。運営管理者だけが変えられる。 */
+/** 設定（仕様書 第23.8.14節）。運営主体・運営の AI・表示。変えられるのは運営管理者だけ（表示は自分の端末のもの）。 */
 function Settings({ me }: { me: OpsMe }) {
+  return (
+    <>
+      <OpsTitle title="設定" help={{ chapter: '09-settings-audit', text: '運営主体・運営の AI の鍵と上限・表示を決めます。' }} />
+      <OperatorProfileCard me={me} />
+      <AiSettingsCard me={me} />
+      <DisplayCard />
+    </>
+  );
+}
+
+/** 運営主体（法人名・所在地・Web・問い合わせの窓口）。 */
+function OperatorProfileCard({ me }: { me: OpsMe }) {
   const [p, setP] = useState<OperatorProfileView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -841,12 +886,11 @@ function Settings({ me }: { me: OpsMe }) {
     <div className="field"><label>{label}</label><input value={p?.[k] ?? ''} disabled={!edit} onChange={(e) => p && setP({ ...p, [k]: e.target.value })} /></div>
   );
   return (
-    <>
-      <OpsTitle title="設定" help={{ chapter: '09-settings-audit', text: '運営主体の名前や問い合わせの窓口を決めます。' }} />
+    <div className="card">
+      <h3>運営主体</h3>
       {error && <p className="error">{error}</p>}
       {p && (
-        <div className="card">
-          <h3>運営主体</h3>
+        <>
           {field('nameJa', '法人名')}
           {field('nameEn', '法人名（英語）')}
           {field('address', '所在地')}
@@ -854,9 +898,110 @@ function Settings({ me }: { me: OpsMe }) {
           {field('contact', '問い合わせの窓口')}
           {edit && <button className="btn small" onClick={save}>保存</button>}
           {saved && <p className="ok-msg small">保存しました</p>}
-        </div>
+        </>
       )}
-    </>
+    </div>
+  );
+}
+
+/**
+ * 運営の AI（仕様書 第23.8.14節「マスター管理画面の設定を広げる」）。運営の鍵は書くだけで、画面には末尾の 4 文字しか出さない。
+ * 保存の前に Gemini に試し、通らなければ保存しない。会社ごとの上限の既定と、運営の鍵の全体の月の上限。
+ */
+function AiSettingsCard({ me }: { me: OpsMe }) {
+  const [s, setS] = useState<OpsAiSettingsView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [key, setKey] = useState('');
+  const [caps, setCaps] = useState({ tenant: '', platform: '' });
+  const edit = me.can['settings.manage'];
+  const load = useCallback(() => {
+    opsApi.aiSettings().then((r) => { setS(r); setCaps({ tenant: r.tenantCapJpy?.toString() ?? '', platform: r.platformCapJpy?.toString() ?? '' }); })
+      .catch((e) => setError(errText(e, '読み込めませんでした')));
+  }, []);
+  useEffect(load, [load]);
+  const run = async (fn: () => Promise<string>, fallback: string) => {
+    setBusy(true); setError(null); setNotice(null);
+    try { setNotice(await fn()); load(); } catch (e) { setError(errText(e, fallback)); } finally { setBusy(false); }
+  };
+  const yenText = (v: number | null) => (v === null ? '—' : `${v.toLocaleString('ja-JP')} 円`);
+  const keyText = !s ? '' : s.key.source === 'screen'
+    ? `画面で入れた鍵（末尾 ${s.key.tail ?? '—'}・${when(s.key.setAt)}・${s.key.setBy ?? '—'}）`
+    : s.key.source === 'env' ? `配備の設定の鍵（末尾 ${s.key.tail ?? '—'}）` : '入っていません';
+  const used = s?.month.usedJpy ?? 0;
+  const pct = s?.platformCapJpy ? Math.round((used / s.platformCapJpy) * 100) : null;
+  return (
+    <div className="card">
+      <h3>AI</h3>
+      {error && <p className="error">{error}</p>}
+      {notice && <p className="ok-msg small">{notice}</p>}
+      {s && (
+        <>
+          <dl className="kv">
+            <dt>運営の鍵（Gemini）</dt>
+            <dd>{s.key.source === 'none' ? <span className="badge warn">{keyText}</span> : keyText}</dd>
+            <dt>今月の運営の鍵の費用（{s.month.month}）</dt>
+            <dd>{yenText(used)}{s.platformCapJpy ? ` ／ 全体の上限 ${yenText(s.platformCapJpy)}（${pct}%）` : ''}
+              {pct !== null && pct >= 100 ? <span className="badge danger">上限に達しています</span> : pct !== null && pct >= 80 ? <span className="badge warn">8 割を超えました</span> : null}</dd>
+          </dl>
+          <div className="row wrap">
+            <button className="btn ghost small" disabled={busy || s.key.source === 'none'} onClick={() => void run(async () => {
+              const r = await opsApi.testAiKey();
+              if (!r.ok) throw new OpsApiError(r.error ?? 'つながりませんでした', 0);
+              return `つながりました（${r.ms} ms）`;
+            }, 'つながりませんでした')}>つながるか試す</button>
+            {edit && s.key.source === 'screen' && (
+              <button className="btn danger small" disabled={busy} onClick={() => {
+                if (!confirm('画面で入れた運営の鍵を削除しますか？（配備の設定の鍵があれば、それに戻ります）')) return;
+                void run(async () => { await opsApi.deleteAiKey(); return '削除しました'; }, '削除できませんでした');
+              }}>画面の鍵を削除</button>
+            )}
+          </div>
+          {edit && (
+            <>
+              <div className="field">
+                <label>{s.key.source === 'screen' ? '新しい鍵に入れ替える' : '鍵を入れる'}</label>
+                <div className="row">
+                  <input type="password" aria-label="運営の鍵" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} style={{ flex: 1 }} />
+                  <button className="btn small" disabled={busy || !key.trim()} onClick={() => void run(async () => {
+                    const r = await opsApi.setAiKey(key.trim()); setKey('');
+                    return `試して通ったので保存しました（${r.ms} ms）。1 分以内にすべての処理で替わります`;
+                  }, '保存できませんでした')}>試して保存</button>
+                </div>
+              </div>
+              <div className="field">
+                <label>会社ごとの月の上限の既定（円）</label>
+                <input type="number" aria-label="会社ごとの月の上限の既定（円）" min={1} step={1} className="num-input" value={caps.tenant} placeholder={s.envTenantCapJpy ? `配備の設定 ${s.envTenantCapJpy}` : '上限なし'}
+                  onChange={(e) => setCaps({ ...caps, tenant: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>運営の鍵の全体の月の上限（円）</label>
+                <input type="number" aria-label="運営の鍵の全体の月の上限（円）" min={1} step={1} className="num-input" value={caps.platform} placeholder="上限なし" onChange={(e) => setCaps({ ...caps, platform: e.target.value })} />
+              </div>
+              <button className="btn small" disabled={busy} onClick={() => void run(async () => {
+                await opsApi.setAiLimits({ tenantCapJpy: caps.tenant.trim() ? Number(caps.tenant) : null, platformCapJpy: caps.platform.trim() ? Number(caps.platform) : null });
+                return '保存しました';
+              }, '保存できませんでした')}>上限を保存</button>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 表示（システムの設定・ライト・ダーク）。運営者ごと・端末ごとに覚える（会社の画面と同じ覚え方）。 */
+function DisplayCard() {
+  const { choice, set } = useTheme();
+  const options: { id: ThemeChoice; label: string }[] = [{ id: 'system', label: 'システムの設定に合わせる' }, { id: 'light', label: 'ライト' }, { id: 'dark', label: 'ダーク' }];
+  return (
+    <div className="card">
+      <h3>表示</h3>
+      <div className="seg" role="group" aria-label="表示">
+        {options.map((o) => <button key={o.id} type="button" className={choice === o.id ? 'on' : ''} onClick={() => set(o.id)}>{o.label}</button>)}
+      </div>
+    </div>
   );
 }
 

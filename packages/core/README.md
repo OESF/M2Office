@@ -196,6 +196,7 @@ test/            単体テスト（DB を使わない）
 **推論（Gemini）が使えない会社では、秘書も業務も動かしません**（仕様書 第20.2.4節、ADR-0030）。
 `platformAi()`（`secrets/tenant-ai.ts`）が運営の設定から、会社の鍵が無いときの推論を決めます。運営の鍵があれば Gemini、
 `LLM_PROVIDER=stub` なら自動テスト用のスタブ、どちらでもなければ `UnconfiguredLlmProvider`（`name: 'unconfigured'`）です。
+`PlatformAiSource`（`secrets/platform-ai.ts`）は、マスター管理画面で入れた運営の鍵と上限を 1 分ごとに読み直し、画面に鍵があればそれを、無ければ配備の設定の鍵を使います（仕様書 第23.8.14節）。推論と調べものは、いまの提供者に中継する代わりを渡すので、鍵を入れ替えても起動し直さずに替わります。
 秘書（`Secretary.respond`）・実行エンジン（`RunEngine.advance`）・業務の受け付け（API）・音声（`TenantAiResolver.voiceFor`）は、
 `aiAvailable()` で見分けて推論を呼ばずに断り、`AI_NOT_CONFIGURED_MESSAGE` を返します。見本の応答で動いたように見せません。
 

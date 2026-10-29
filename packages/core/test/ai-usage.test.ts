@@ -143,3 +143,51 @@ test('包み: 呼び出しごとに用途と人と費用を残す。上限なら
   assert.equal(last.local, true);
   assert.equal(last.costJpy, 0);
 });
+
+test('運営の鍵の全体の上限: 運営の鍵の会社だけを止め、管理者に月に 1 度知らせる。記録に運営の鍵の印を付ける（第23.8.14節）', async () => {
+  let total = 900;
+  const added: number[] = [];
+  const platform = { platformCapJpy: () => 1000, platformTotal: async () => total, addPlatformUsage: (v: number) => { added.push(v); } };
+  const make = (source: 'platform' | 'tenant') => {
+    const mem = memoryStore();
+    const sent: Notification[] = [];
+    const meter = new AiUsageMeter({
+      store: mem.store, platformCap: () => null, platform, now: mem.now,
+      limits: { limits: async () => ({ monthlyJpy: null, perUserShare: 0.4 }), source: async () => source },
+      notify: async (n) => { sent.push(n); }, admins: async () => ['admin1'],
+    });
+    return { ...mem, meter, sent };
+  };
+  const p = make('platform');
+  assert.equal((await p.meter.check('t1', 'u1')).blocked, null, '上限の手前は止めない');
+  await p.meter.record('t1', entry('u1', 30));
+  assert.equal(p.rows[0]?.platformKey, true, '運営の鍵で使った印');
+  assert.deepEqual(added, [30], '覚えている全体の合計に足す');
+  total = 1000;
+  const blocked = (await p.meter.check('t1', 'u1')).blocked;
+  assert.equal(blocked?.scope, 'platform');
+  await p.meter.check('t1', null);
+  assert.equal(p.sent.filter((n) => n.title.includes('運営の側')).length, 1, '管理者に月に 1 度だけ知らせる');
+  // 自社の鍵の会社は止めず、印も付けない
+  const t = make('tenant');
+  assert.equal((await t.meter.check('t2', 'u1')).blocked, null);
+  await t.meter.record('t2', entry('u1', 5));
+  assert.equal(t.rows[0]?.platformKey, false);
+  // ローカル AI は運営の鍵に数えない
+  await p.meter.record('t1', { ...entry('u1', 0), local: true });
+  assert.equal(p.rows[1]?.platformKey, false);
+});
+
+test('会社ごとの上限の既定: マスター管理画面で変えると、その場で効く（関数で渡す）', async () => {
+  let cap: number | null = 3000;
+  const mem = memoryStore();
+  const meter = new AiUsageMeter({
+    store: mem.store, platformCap: () => cap, now: mem.now,
+    limits: { limits: async () => ({ monthlyJpy: null, perUserShare: 0.4 }), source: async () => 'platform' },
+    notify: async () => undefined, admins: async () => [],
+  });
+  assert.equal(await meter.monthlyLimit('t1'), 3000);
+  cap = 5000;
+  assert.equal(await meter.monthlyLimit('t1'), 5000);
+  assert.equal(meter.platformCap(), 5000);
+});

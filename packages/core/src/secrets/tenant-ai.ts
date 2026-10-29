@@ -63,6 +63,11 @@ export interface TenantAiResolverDeps {
   fallbackResearch: ResearchProvider;
   /** 運営の鍵。無ければ `null`。 */
   platformKey: string | null;
+  /**
+   * いまの運営の鍵（マスター管理画面で入れ替えられる。第23.8.14節）。与えれば `platformKey` より優先する。
+   * `fallbackLlm`・`fallbackResearch` も、同じ出どころの代わり（`PlatformAiSource`）を渡す
+   */
+  platformKeyOf?: () => string | null;
   /** 既定のモデル。 */
   defaults: GeminiModels;
   /** OpenAI 互換の窓口。 */
@@ -119,7 +124,12 @@ export class TenantAiResolver {
 
   /** 運営の鍵があるか（「運営一括」を選んだときに推論できるか）。 */
   hasPlatformKey(): boolean {
-    return !!this.deps.platformKey;
+    return !!this.platformKey();
+  }
+
+  /** いまの運営の鍵。 */
+  private platformKey(): string | null {
+    return this.deps.platformKeyOf ? this.deps.platformKeyOf() : this.deps.platformKey;
   }
 
   /** 会社が使う Gemini の鍵とモデル。 */
@@ -130,7 +140,8 @@ export class TenantAiResolver {
     if (meta.mode === 'byok' && cred?.secretEnc) {
       return { source: 'tenant', apiKey: this.deps.box.decrypt(cred.secretEnc), models };
     }
-    return { source: this.deps.platformKey ? 'platform' : 'none', apiKey: this.deps.platformKey, models };
+    const platformKey = this.platformKey();
+    return { source: platformKey ? 'platform' : 'none', apiKey: platformKey, models };
   }
 
   /** 配備の形。 */

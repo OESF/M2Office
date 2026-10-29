@@ -327,3 +327,51 @@ test('提携会社の運営者: Google の画面で絞るのは許すドメイ�
   assert.equal(await start(['ops.example', 'partner.example.co.jp']), null);
   assert.equal(await start([]), null);
 });
+
+test('運営の AI の設定: 鍵は試して通ったときだけ暗号化して保存し、値は返さない。変えられるのは運営管理者だけ（第23.8.14節）', async () => {
+  const { store, audits } = fakeStore();
+  const saved: { enc: string | null; tail: string | null; tenantCap: number | null; platformCap: number | null } = { enc: null, tail: null, tenantCap: null, platformCap: null };
+  Object.assign(store, {
+    platformAiSettings: async () => ({ keySet: !!saved.enc, keyTail: saved.tail, keySetAt: saved.enc ? '2026-10-29T00:00:00Z' : null, keySetBy: saved.enc ? 'admin@ops.example' : null, tenantCapJpy: saved.tenantCap, platformCapJpy: saved.platformCap }),
+    platformAiTotal: async () => 1234.4,
+    platformAiKeyEnc: async () => saved.enc,
+    setPlatformAiKey: async (enc: string | null, tail: string | null) => { saved.enc = enc; saved.tail = tail; },
+    setPlatformAiCaps: async (t: number | null, p: number | null) => { saved.tenantCap = t; saved.platformCap = p; },
+    audit: async (_o: string, action: string) => { audits.push(action); },
+  });
+  const checked: string[] = [];
+  const platformAi = {
+    box: { encrypt: (v: string) => `enc:${v}`, decrypt: (v: string) => v.replace(/^enc:/, '') },
+    env: { key: 'AIzaEnvKey000000000000wxyz', tenantCapJpy: 3000 },
+    check: async (k: string) => { checked.push(k); return k.endsWith('GOOD') ? { ok: true as const, ms: 12 } : { ok: false as const, ms: 5, error: 'API key not valid' }; },
+  };
+  const app = opsApp({ store, config, log, platformAi });
+  const admin = await login(app, 'admin@ops.example');
+  const mon = await login(app, 'mon@ops.example');
+  const call = (who: { cookie: string; csrfToken: string }, method: string, path: string, body?: unknown) => app.request(`/v1/ops/settings/ai${path}`, {
+    method, headers: { ...OPS, cookie: who.cookie, 'x-csrf-token': who.csrfToken, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  let view = await (await call(admin, 'GET', '')).json() as { key: { source: string; tail: string }; month: { usedJpy: number }; envTenantCapJpy: number };
+  assert.deepEqual([view.key.source, view.key.tail, view.month.usedJpy, view.envTenantCapJpy], ['env', 'wxyz', 1234, 3000], '画面に無ければ配備の設定の鍵の末尾だけ');
+  assert.equal((await call(mon, 'PUT', '/key', { apiKey: 'AIzaScreenKey00000000GOOD' })).status, 403, '監視は変えられない');
+  const bad = await call(admin, 'PUT', '/key', { apiKey: 'AIzaScreenKey000000000BAD' });
+  assert.equal(bad.status, 400);
+  assert.equal(saved.enc, null, '試して通らなければ保存しない');
+  assert.equal((await call(admin, 'PUT', '/key', { apiKey: 'short' })).status, 400, '形の違う鍵は試さずに断る');
+  assert.equal((await call(admin, 'PUT', '/key', { apiKey: 'AIzaScreenKey00000000GOOD' })).status, 200);
+  assert.equal(saved.enc, 'enc:AIzaScreenKey00000000GOOD', '暗号化して保存する');
+  const text = await (await call(admin, 'GET', '')).text();
+  assert.ok(!text.includes('AIzaScreenKey') && !text.includes('AIzaEnvKey'), '鍵の値は返さない');
+  view = JSON.parse(text);
+  assert.deepEqual([view.key.source, view.key.tail], ['screen', 'GOOD']);
+  // いま効いている鍵で試す（運営者なら誰でも）
+  const tested = await (await call(mon, 'POST', '/test')).json() as { ok: boolean; source: string };
+  assert.deepEqual([tested.ok, tested.source, checked.at(-1)], [true, 'screen', 'AIzaScreenKey00000000GOOD']);
+  // 上限
+  assert.equal((await call(admin, 'PUT', '/limits', { tenantCapJpy: 5000, platformCapJpy: -1 })).status, 400);
+  assert.equal((await call(admin, 'PUT', '/limits', { tenantCapJpy: 5000, platformCapJpy: '' })).status, 200);
+  assert.deepEqual([saved.tenantCap, saved.platformCap], [5000, null]);
+  assert.equal((await call(admin, 'DELETE', '/key')).status, 200);
+  assert.equal(saved.enc, null);
+  for (const a of ['settings.ai_key_rejected', 'settings.ai_key', 'settings.ai_test', 'settings.ai_limits', 'settings.ai_key_delete']) assert.ok(audits.includes(a), `${a} を記録する`);
+});

@@ -6,7 +6,7 @@
  */
 
 import { serve } from '@hono/node-server';
-import { attachLogSink, createLoggerFromEnv, createPool, installPoolLogger, OpsStore, parseOpsDomains, SystemLogSink } from '@m2office/core';
+import { attachLogSink, createLoggerFromEnv, createPool, envTenantCapJpy, installPoolLogger, OpsStore, parseOpsDomains, secretBoxFromEnv, SystemLogSink } from '@m2office/core';
 import { loadAuthConfig } from '../auth/config.js';
 import { opsApp, type OpsConfig } from './app.js';
 import { listenHost } from '../listen.js';
@@ -39,7 +39,9 @@ const config: OpsConfig = {
 const store = new OpsStore(createPool(dbUrl, { max: 5, name: 'ops' }));
 // 運営のプロセスのシステムログも、データベースに書く（仕様書 第16.10.1節）
 attachLogSink(new SystemLogSink(store.query).start().accept);
-const app = opsApp({ store, config, log });
+// 運営の AI の設定（第23.8.14節）。鍵はアプリと同じ暗号の鍵で暗号化する。本番で暗号の鍵が無ければ起動しない（secretBoxFromEnv）
+const { box } = secretBoxFromEnv(env);
+const app = opsApp({ store, config, log, platformAi: { box, env: { key: env['GEMINI_API_KEY']?.trim() || null, tenantCapJpy: envTenantCapJpy(env) } } });
 
 const hostname = listenHost();
 serve({ fetch: app.fetch, port, hostname }, (info) => {

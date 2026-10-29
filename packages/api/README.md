@@ -611,6 +611,10 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | GET・POST | `/v1/ops/incidents` | 障害・計画停止の一覧 ／ 起こす（`title`・`impact`（`down`・`degraded`・`maintenance`）・`body`・`tenants`（無ければすべての会社）・`startedAt`）。対象の会社の管理者に知らせる（仕様書 第16.11.3節 G-9） | すべて |
 | POST | `/v1/ops/incidents/:id/update`・`/v1/ops/incidents/:id/close` | 経過を知らせる ／ 終える（復旧・計画停止の終わり。`endedAt` を渡せる） | すべて |
 | GET・PUT | `/v1/ops/settings/operator` | 運営主体の設定（第23.8.14節） | 見る: すべて・変える: 運営管理者 |
+| GET | `/v1/ops/settings/ai` | 運営の AI の設定（いま効いている鍵の出どころと末尾 4 文字・入れた日時と人・上限・今月の運営の鍵の費用）。鍵の値は返さない（第23.8.14節） | すべて |
+| PUT・DELETE | `/v1/ops/settings/ai/key` | 運営の鍵を入れる（Gemini に試して、通ったときだけ暗号化して保存）・削除する | 運営管理者 |
+| POST | `/v1/ops/settings/ai/test` | いま効いている運営の鍵で Gemini に問い合わせる | すべて |
+| PUT | `/v1/ops/settings/ai/limits` | 会社ごとの上限の既定と、運営の鍵の全体の月の上限（円。空なら決めない） | 運営管理者 |
 | GET・PUT | `/v1/ops/tax-rates` | 消費税の税率の表（法令の表の 1 つ。第15.1.1.1節）。運営が直していなければ同梱の表と `bundled: true`、全社の下書きの数 `drafts`。PUT は行をまとめて置き換える（直した行と足した行は出典の URL と確認した日が要る。予定を確定にした行は会社の管理者に知らせる） | 見る: すべて・変える: 運営管理者 |
 | GET | `/v1/ops/status-requests` | 停止・緊急停止・再開の申請（扱いの残っているものと直近 30 日。`?tenant=` で会社を絞る） | すべて |
 | POST | `/v1/ops/tenants/:id/requests` | 停止・再開の申請、緊急停止（すぐ止める。会社へ渡す案内の文を返す） | 停止と再開: 運営管理者とサポート・緊急停止: すべて |

@@ -140,6 +140,19 @@ export interface ServerStatusView {
   ai: { today: number; month: number; lastMonthSamePeriod: number };
 }
 
+/** 運営の AI の設定（鍵の値は持たない）。 */
+export interface OpsAiSettingsView {
+  /** いま効いている鍵: 画面で入れたもの・配備の設定のもの・無し。`tail` は末尾 4 文字。 */
+  key: { source: 'screen' | 'env' | 'none'; tail: string | null; setAt: string | null; setBy: string | null };
+  /** 会社ごとの上限の既定（円）。画面で決めていなければ `null`（配備の設定の `envTenantCapJpy` が効く）。 */
+  tenantCapJpy: number | null;
+  /** 運営の鍵の全体の月の上限（円）。 */
+  platformCapJpy: number | null;
+  envTenantCapJpy: number | null;
+  /** 運営の鍵での全社の今月の推定費用。 */
+  month: { month: string; usedJpy: number };
+}
+
 export interface OperatorProfileView { nameJa: string; nameEn: string; address: string; web: string; contact: string }
 
 /** 運営の税率の表の 1 行（仕様書 第15.1.1.1節）。 */
@@ -226,6 +239,12 @@ export const opsApi = {
   /** 消費税の税率の表（法令の表の 1 つ。第15.1.1.1節）。`bundled` は運営がまだ直していないこと。`drafts` は全社の書類の下書きの数。 */
   taxRates: () => call<{ rows: TaxRateRow[]; bundled: boolean; drafts: number }>('/tax-rates'),
   saveTaxRates: (rows: Partial<TaxRateRow>[]) => call<{ rows: TaxRateRow[]; bundled: boolean; notified: number }>('/tax-rates', send('PUT', { rows })),
+  /** 運営の AI の設定（仕様書 第23.8.14節「マスター管理画面の設定を広げる」）。鍵の値は返らない。 */
+  aiSettings: () => call<OpsAiSettingsView>('/settings/ai'),
+  setAiKey: (apiKey: string) => call<{ ok: true; ms: number }>('/settings/ai/key', send('PUT', { apiKey })),
+  deleteAiKey: () => call<{ ok: true }>('/settings/ai/key', send('DELETE')),
+  testAiKey: () => call<{ ok: boolean; ms: number; error?: string; source?: 'screen' | 'env' }>('/settings/ai/test', send('POST', {})),
+  setAiLimits: (b: { tenantCapJpy: number | null; platformCapJpy: number | null }) => call<{ ok: true }>('/settings/ai/limits', send('PUT', b)),
   operatorProfile: () => call<{ profile: OperatorProfileView }>('/settings/operator'),
   setOperatorProfile: (p: OperatorProfileView) => call<{ profile: OperatorProfileView }>('/settings/operator', send('PUT', p)),
   statusRequests: (tenantId?: string) => call<{ requests: StatusRequestRow[] }>(`/status-requests${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),

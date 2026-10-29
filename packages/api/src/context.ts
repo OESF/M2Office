@@ -10,7 +10,7 @@
 
 import { createHash } from 'node:crypto';
 import {
-  assertDatabaseConfigured, InventoryMarketService, PostgresMarketStore, competitorPriceFacts, type CompetitorPriceFact,
+  assertDatabaseConfigured, PlatformAiSource, PostgresPlatformAiSettingsReader, envTenantCapJpy, InventoryMarketService, PostgresMarketStore, competitorPriceFacts, type CompetitorPriceFact,
   HelpFeedback, PostgresHelpFeedbackStore, PostgresHelpNoteStore, noteText, type HelpNoteStore,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
@@ -339,7 +339,13 @@ export function buildDeps(): AppDeps {
   const connections = new ConnectionCredentials({ repo, box });
   const hub = buildHub(repo, registry, log, connections);
   // 別のモデルへ退避したことはアプリのログに残す（仕様書 第20.2.5節）
-  const platform = buildAi(hub, log);
+  // 運営の鍵と運営の上限は、マスター管理画面の設定を 1 分ごとに読み直す（第23.8.14節）。画面に無ければ配備の設定
+  const platformBase = buildAi(hub, log);
+  const platformSource = new PlatformAiSource({
+    reader: new PostgresPlatformAiSettingsReader(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+    box, base: platformBase, envTenantCapJpy: envTenantCapJpy(process.env), models: defaultGeminiModels(), logger: log,
+  }).start();
+  const platform = { ...platformBase, llm: platformSource.llm, research: platformSource.research };
   const llm = platform.llm;
   const tenantView = (tenantId: string) => hub.forTenant(tenantId);
   /** その人の利用範囲の判定を作る。会社の設定と、その人の所属するグループを読む。 */
@@ -371,11 +377,12 @@ export function buildDeps(): AppDeps {
   const aiMeter = aiUsageMeterFromEnv({
     repo, connectionString: process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', env: process.env,
     onError: (err) => log.warn('AI の利用を記録できませんでした', { err }),
+    platform: platformSource,
   });
   setEnqueueAiGuard((tenantId, userId) => aiMeter.assert(tenantId, userId));
   const ai = new TenantAiResolver({
     repo, box, fallbackLlm: llm, fallbackResearch: research, meter: aiMeter,
-    platformKey: platform.platformKey, testMode: platform.testMode,
+    platformKey: platform.platformKey, platformKeyOf: () => platformSource.key(), testMode: platform.testMode,
     defaults: defaultGeminiModels(),
     baseUrl: platform.baseUrl,
     logger: log,

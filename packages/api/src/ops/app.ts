@@ -12,6 +12,7 @@ import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploym
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, opsDomainAllowed, OPERATOR_ROLES,
   parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
   OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual,
+  checkGeminiText, defaultGeminiModels, jstMonth, type CheckResult, type SecretBox,
   type SystemLogLine,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
 } from '@m2office/core';
@@ -45,6 +46,16 @@ export interface OpsDeps {
   log: Logger;
   /** パスキーの手続き（省略すると本物。テストで差し替える）。 */
   webauthn?: WebAuthnFns;
+  /**
+   * 運営の AI の設定に要るもの（第23.8.14節「マスター管理画面の設定を広げる」）。無ければ AI の設定の口は 503 を返す。
+   * 暗号の箱はアプリと同じ鍵（`M2OFFICE_SECRET_KEY`）。`env` は配備の設定の運営の鍵と上限の既定（画面に無いときに使われるもの）
+   */
+  platformAi?: {
+    box: Pick<SecretBox, 'encrypt' | 'decrypt'>;
+    env: { key: string | null; tenantCapJpy: number | null };
+    /** 鍵で Gemini に試しに問い合わせる（省略すると本物）。 */
+    check?: (apiKey: string) => Promise<CheckResult>;
+  };
 }
 
 type OpsEnv = { Variables: { operator: Operator; session: OpsSession } };
@@ -599,6 +610,70 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
       notified += await store.taxRateNotice(`${what}の消費税率が ${r.rate}% に確定しました`, `${span}、${what}の消費税率は ${r.rate}% になります。その日より後の書類は、新しい税率で作ります（発行した書類は変わりません）。`).catch(() => 0);
     }
     return c.json({ ...(await taxRows()), notified });
+  });
+
+  // 運営の AI の設定（第23.8.14節「マスター管理画面の設定を広げる」）。鍵は書くだけで返さない。試して通らなければ保存しない
+  const aiDeps = deps.platformAi;
+  const checkKey = (apiKey: string) => (aiDeps?.check ?? ((k: string) => checkGeminiText(k, defaultGeminiModels().standard)))(apiKey);
+  app.get('/v1/ops/settings/ai', async (c) => {
+    if (!aiDeps) return c.json({ error: 'AI の設定は使えません（暗号の鍵の設定がありません）' }, 503);
+    const { month, start } = jstMonth(new Date());
+    const [s, used] = await Promise.all([store.platformAiSettings(), store.platformAiTotal(start).catch(() => 0)]);
+    return c.json({
+      key: { source: s.keySet ? 'screen' : aiDeps.env.key ? 'env' : 'none', tail: s.keySet ? s.keyTail : aiDeps.env.key ? aiDeps.env.key.slice(-4) : null, setAt: s.keySetAt, setBy: s.keySetBy },
+      tenantCapJpy: s.tenantCapJpy, platformCapJpy: s.platformCapJpy, envTenantCapJpy: aiDeps.env.tenantCapJpy,
+      month: { month, usedJpy: Math.round(used) },
+    });
+  });
+  app.put('/v1/ops/settings/ai/key', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    if (!aiDeps) return c.json({ error: 'AI の設定は使えません（暗号の鍵の設定がありません）' }, 503);
+    const b = await c.req.json<{ apiKey?: string }>().catch(() => ({} as { apiKey?: string }));
+    const apiKey = (b.apiKey ?? '').trim();
+    if (!/^[A-Za-z0-9_-]{20,200}$/.test(apiKey)) return c.json({ error: '鍵の形が違います（Google AI Studio で出した API の鍵を入れてください）' }, 400);
+    const r = await checkKey(apiKey);
+    const op = c.get('operator');
+    if (!r.ok) {
+      await store.audit(op.id, 'settings.ai_key_rejected', 'settings', 'ai', { tail: apiKey.slice(-4) });
+      return c.json({ error: `この鍵では Gemini に問い合わせられませんでした（${r.error}）。保存していません` }, 400);
+    }
+    await store.setPlatformAiKey(aiDeps.box.encrypt(apiKey), apiKey.slice(-4), op.id);
+    await store.audit(op.id, 'settings.ai_key', 'settings', 'ai', { tail: apiKey.slice(-4) });
+    return c.json({ ok: true, ms: r.ms });
+  });
+  app.delete('/v1/ops/settings/ai/key', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    if (!aiDeps) return c.json({ error: 'AI の設定は使えません（暗号の鍵の設定がありません）' }, 503);
+    await store.setPlatformAiKey(null, null, c.get('operator').id);
+    await store.audit(c.get('operator').id, 'settings.ai_key_delete', 'settings', 'ai');
+    return c.json({ ok: true });
+  });
+  // いま効いている運営の鍵（画面の鍵、無ければ配備の設定の鍵）で試す。運営者なら誰でも
+  app.post('/v1/ops/settings/ai/test', async (c) => {
+    if (!aiDeps) return c.json({ error: 'AI の設定は使えません（暗号の鍵の設定がありません）' }, 503);
+    const enc = await store.platformAiKeyEnc();
+    let key = aiDeps.env.key;
+    if (enc) {
+      try { key = aiDeps.box.decrypt(enc); } catch { return c.json({ ok: false, ms: 0, error: '画面で入れた鍵を復号できませんでした（暗号の鍵が違います）' }); }
+    }
+    if (!key) return c.json({ ok: false, ms: 0, error: '運営の鍵が入っていません' });
+    const r = await checkKey(key);
+    await store.audit(c.get('operator').id, 'settings.ai_test', 'settings', 'ai', { ok: r.ok });
+    return c.json({ ...r, source: enc ? 'screen' : 'env' });
+  });
+  app.put('/v1/ops/settings/ai/limits', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    if (!aiDeps) return c.json({ error: 'AI の設定は使えません（暗号の鍵の設定がありません）' }, 503);
+    const b = await c.req.json<{ tenantCapJpy?: unknown; platformCapJpy?: unknown }>().catch(() => ({} as Record<string, unknown>));
+    const yen = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+    const tenantCap = yen(b.tenantCapJpy);
+    const platformCap = yen(b.platformCapJpy);
+    for (const v of [tenantCap, platformCap]) {
+      if (v !== null && (!Number.isInteger(v) || v <= 0 || v > 100_000_000)) return c.json({ error: '上限は 1 円以上の整数で入れてください（決めないなら空）' }, 400);
+    }
+    await store.setPlatformAiCaps(tenantCap, platformCap, c.get('operator').id);
+    await store.audit(c.get('operator').id, 'settings.ai_limits', 'settings', 'ai', { tenantCapJpy: tenantCap, platformCapJpy: platformCap });
+    return c.json({ ok: true, tenantCapJpy: tenantCap, platformCapJpy: platformCap });
   });
 
   // 運営主体の設定（第23.8.14節）

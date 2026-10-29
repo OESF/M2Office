@@ -98,6 +98,18 @@ export interface OpsTaxRate extends TaxRateEntry {
 }
 
 /** 運営主体の設定（第23.8.14節）。 */
+/** 運営の AI の設定（鍵の値は持たない）。 */
+export interface OpsPlatformAiSettings {
+  keySet: boolean;
+  /** 鍵の末尾 4 文字。 */
+  keyTail: string | null;
+  keySetAt: string | null;
+  /** 入れた運営者のメールアドレス。 */
+  keySetBy: string | null;
+  tenantCapJpy: number | null;
+  platformCapJpy: number | null;
+}
+
 export interface OperatorProfile {
   nameJa: string;
   nameEn: string;
@@ -562,6 +574,51 @@ export class OpsStore {
          contact = excluded.contact, updated_by = excluded.updated_by, updated_at = now()`,
       [p.nameJa, p.nameEn, p.address, p.web, p.contact, by],
     );
+  }
+
+  /**
+   * 運営の AI の設定（第23.8.14節「マスター管理画面の設定を広げる」）。鍵の値は返さず、入っているか・末尾・入れた日時と人だけ。
+   */
+  async platformAiSettings(): Promise<OpsPlatformAiSettings> {
+    const { rows } = await this.pool.query(
+      `select p.gemini_key_enc is not null as key_set, p.gemini_key_tail, p.gemini_key_set_at, o.email as set_by, p.ai_tenant_cap_jpy, p.ai_platform_cap_jpy
+         from ops.platform_settings p left join ops.operators o on o.id = p.gemini_key_set_by where p.id = 1`,
+    );
+    const r = rows[0];
+    const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+    return {
+      keySet: !!r?.key_set, keyTail: r?.gemini_key_tail ?? null, keySetAt: iso(r?.gemini_key_set_at ?? null), keySetBy: r?.set_by ?? null,
+      tenantCapJpy: n(r?.ai_tenant_cap_jpy), platformCapJpy: n(r?.ai_platform_cap_jpy),
+    };
+  }
+
+  /** 画面で入れた運営の鍵（暗号化したもの）。無ければ `null`。試すときだけ使う。 */
+  async platformAiKeyEnc(): Promise<string | null> {
+    const { rows } = await this.pool.query('select gemini_key_enc from ops.platform_settings where id = 1');
+    return rows[0]?.gemini_key_enc ?? null;
+  }
+
+  /** 運営の鍵を入れる（暗号化したもの）・消す（`null`）。 */
+  async setPlatformAiKey(keyEnc: string | null, tail: string | null, by: string): Promise<void> {
+    await this.pool.query(
+      `update ops.platform_settings set gemini_key_enc = $1, gemini_key_tail = $2, gemini_key_set_at = case when $1::text is null then null else now() end,
+         gemini_key_set_by = case when $1::text is null then null else $3 end, updated_by = $3, updated_at = now() where id = 1`,
+      [keyEnc, tail, by],
+    );
+  }
+
+  /** 会社ごとの上限の既定と、全体の上限（円。決めないなら `null`）。 */
+  async setPlatformAiCaps(tenantCapJpy: number | null, platformCapJpy: number | null, by: string): Promise<void> {
+    await this.pool.query(
+      'update ops.platform_settings set ai_tenant_cap_jpy = $1, ai_platform_cap_jpy = $2, updated_by = $3, updated_at = now() where id = 1',
+      [tenantCapJpy, platformCapJpy, by],
+    );
+  }
+
+  /** 運営の鍵での全社の合計（円。`since` から）。 */
+  async platformAiTotal(since: Date): Promise<number> {
+    const { rows } = await this.pool.query('select ops.ai_platform_total($1) as total', [since]);
+    return Number(rows[0]?.total ?? 0);
   }
 
   /**

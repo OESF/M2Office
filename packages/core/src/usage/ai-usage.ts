@@ -48,7 +48,7 @@ export function currentAiUsage(): AiUsageScope | undefined {
 
 /** 上限に当たって、新しい AI の利用を止めたことを伝える。API は 429 にする。 */
 export class AiLimitError extends Error {
-  constructor(message: string, readonly scope: 'company' | 'user') {
+  constructor(message: string, readonly scope: 'company' | 'user' | 'platform') {
     super(message);
     this.name = 'AiLimitError';
   }
@@ -58,6 +58,8 @@ export class AiLimitError extends Error {
 export const AI_LIMIT_COMPANY_MESSAGE = '今月の AI の利用の上限に達しました。管理者にご確認ください';
 /** 1 人の上限に当たったときの文。 */
 export const AI_LIMIT_USER_MESSAGE = 'あなたの今月の AI の利用が、1 人の上限に達しました。管理者にご確認ください';
+/** 運営の鍵の全体の上限に当たったときの文（第23.8.14節「マスター管理画面の設定を広げる」）。 */
+export const AI_LIMIT_PLATFORM_MESSAGE = '運営の側の今月の AI の上限に達したため、AI を使えません。管理者から運営にご連絡ください';
 
 /** 1 回の呼び出しの記録。 */
 export interface AiUsageEntry {
@@ -71,6 +73,8 @@ export interface AiUsageEntry {
   costJpy: number;
   local: boolean;
   runId: string | null;
+  /** 運営の鍵で使ったか（全体の上限に数える）。記録するときに決める。 */
+  platformKey?: boolean;
 }
 
 /** 利用の数え（月の合計と人ごと・用途ごと）。 */
@@ -123,9 +127,9 @@ export class PostgresAiUsageStore implements AiUsageStore {
   }
 
   async insert(tenantId: string, e: AiUsageEntry): Promise<void> {
-    await this.q(tenantId, `insert into ai_usage (tenant_id, user_id, purpose, model, input_tokens, output_tokens, units, cost_jpy, local, run_id)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-    [tenantId, e.userId, e.purpose.slice(0, 80), e.model, Math.round(e.inputTokens), Math.round(e.outputTokens), e.units, e.costJpy, e.local, e.runId]);
+    await this.q(tenantId, `insert into ai_usage (tenant_id, user_id, purpose, model, input_tokens, output_tokens, units, cost_jpy, local, run_id, platform_key)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [tenantId, e.userId, e.purpose.slice(0, 80), e.model, Math.round(e.inputTokens), Math.round(e.outputTokens), e.units, e.costJpy, e.local, e.runId, !!e.platformKey]);
   }
 
   async totals(tenantId: string, since: Date): Promise<AiUsageTotals> {
@@ -213,11 +217,25 @@ export interface AiLimitCheck {
   usedJpy: number;
 }
 
+/** 運営の鍵の全体の上限（第23.8.14節「マスター管理画面の設定を広げる」）。 */
+export interface PlatformAiCap {
+  /** 全社の月の上限（円）。無ければ `null`。 */
+  platformCapJpy(): number | null;
+  /** 運営の鍵での全社の合計（円。`since` から）。 */
+  platformTotal(since: Date): Promise<number>;
+  /** 手元で使った分を、覚えている合計に足す。 */
+  addPlatformUsage(costJpy: number): void;
+}
+
 export interface AiUsageMeterDeps {
   store: AiUsageStore;
   limits: AiLimitSource;
-  /** 配備の既定の上限（円）。無ければ `null`。 */
-  platformCap: number | null;
+  /**
+   * 運営一括の会社の上限の既定（円）。無ければ `null`。マスター管理画面で変えられるときは、いまの値を返す関数を渡す
+   */
+  platformCap: number | null | (() => number | null);
+  /** 運営の鍵の全体の上限。無ければ確かめない。 */
+  platform?: PlatformAiCap;
   /** 知らせを残す（管理者・本人）。 */
   notify(n: Notification): Promise<void>;
   /** 会社の管理者の ID。 */
@@ -237,8 +255,19 @@ const CACHE_MS = 60_000;
  */
 export class AiUsageMeter {
   private readonly cache = new Map<string, { at: number; month: string; total: number; byUser: Map<string, number> }>();
+  private readonly sources = new Map<string, { at: number; source: 'platform' | 'tenant' | 'none' }>();
 
   constructor(private readonly deps: AiUsageMeterDeps) {}
+
+  /** 推論の鍵の出どころ（1 分覚える。記録のたびにデータベースを読まないため）。 */
+  private async sourceOf(tenantId: string): Promise<'platform' | 'tenant' | 'none'> {
+    const now = this.now().getTime();
+    const hit = this.sources.get(tenantId);
+    if (hit && now - hit.at < CACHE_MS) return hit.source;
+    const source = await this.deps.limits.source(tenantId);
+    this.sources.set(tenantId, { at: now, source });
+    return source;
+  }
 
   private now(): Date {
     return this.deps.now ? this.deps.now() : new Date();
@@ -259,7 +288,7 @@ export class AiUsageMeter {
   /** 会社の実際の上限（円）。上限なしなら `null`。 */
   async monthlyLimit(tenantId: string): Promise<number | null> {
     const [limits, source] = await Promise.all([this.deps.limits.limits(tenantId), this.deps.limits.source(tenantId)]);
-    return effectiveMonthlyLimit(limits, source, this.deps.platformCap);
+    return effectiveMonthlyLimit(limits, source, this.platformCap());
   }
 
   /** 1 人の上限の割合。 */
@@ -274,6 +303,9 @@ export class AiUsageMeter {
    * @param userId 使う人（ワーカーの処理なら無し）
    */
   async check(tenantId: string, userId?: string | null): Promise<AiLimitCheck> {
+    // 運営の鍵の全体の上限（会社の上限より先に見る。会社の上限が無い会社も止める）
+    const platformBlocked = await this.platformBlocked(tenantId);
+    if (platformBlocked) return { blocked: platformBlocked, monthlyJpy: await this.monthlyLimit(tenantId), usedJpy: (await this.month(tenantId)).total };
     const limit = await this.monthlyLimit(tenantId);
     if (limit === null) return { blocked: null, monthlyJpy: null, usedJpy: 0 };
     const m = await this.month(tenantId);
@@ -283,6 +315,26 @@ export class AiUsageMeter {
       if (mine >= limit * (await this.share(tenantId))) return { blocked: new AiLimitError(AI_LIMIT_USER_MESSAGE, 'user'), monthlyJpy: limit, usedJpy: m.total };
     }
     return { blocked: null, monthlyJpy: limit, usedJpy: m.total };
+  }
+
+  /**
+   * 運営の鍵の全体の上限に当たっているか。当たっていれば、その会社の管理者に月に 1 度だけ知らせる。
+   *
+   * @returns 当たっていれば止める理由。運営の鍵を使わない会社・上限が無いときは `null`
+   */
+  private async platformBlocked(tenantId: string): Promise<AiLimitError | null> {
+    const p = this.deps.platform;
+    const cap = p?.platformCapJpy() ?? null;
+    if (!p || cap === null || (await this.sourceOf(tenantId)) !== 'platform') return null;
+    const { month, start } = jstMonth(this.now());
+    if ((await p.platformTotal(start)) < cap) return null;
+    if (await this.deps.store.markAlert(tenantId, month, 'platform', '').catch(() => false)) {
+      for (const admin of await this.deps.admins(tenantId)) {
+        await this.deps.notify(this.notice(tenantId, admin, 'usage', '運営の側の AI の上限に達しました',
+          '運営の側の今月の AI の上限に達したため、新しい業務と、AI を使う秘書への依頼を止めています。\n\n運営にご連絡ください。翌月の 1 日に戻ります。')).catch(() => undefined);
+      }
+    }
+    return new AiLimitError(AI_LIMIT_PLATFORM_MESSAGE, 'platform');
   }
 
   /** 止めるべきなら投げる（{@link check} の短い形）。 */
@@ -298,7 +350,10 @@ export class AiUsageMeter {
    */
   async record(tenantId: string, e: AiUsageEntry): Promise<void> {
     try {
-      await this.deps.store.insert(tenantId, e);
+      // 運営の鍵で使ったかを残す（全体の上限に数える）
+      const platformKey = !e.local && (await this.sourceOf(tenantId)) === 'platform';
+      await this.deps.store.insert(tenantId, { ...e, platformKey });
+      if (platformKey) this.deps.platform?.addPlatformUsage(e.costJpy);
       const hit = this.cache.get(tenantId);
       if (hit) {
         hit.total += e.costJpy;
@@ -378,9 +433,10 @@ export class AiUsageMeter {
     return limit === null ? null : limit * (await this.share(tenantId));
   }
 
-  /** 配備の既定の上限（運営一括の会社が上げられる上限）。 */
+  /** 運営一括の会社の上限の既定（運営一括の会社が上げられる上限。マスター管理画面か配備の設定）。 */
   platformCap(): number | null {
-    return this.deps.platformCap;
+    const c = this.deps.platformCap;
+    return typeof c === 'function' ? c() : c;
   }
 
   /** 覚えている合計を捨てる（上限を変えたとき）。 */
@@ -533,12 +589,17 @@ export function aiUsageMeterFromEnv(opts: {
   connectionString: string;
   env: Record<string, string | undefined>;
   onError?: (err: unknown) => void;
+  /**
+   * マスター管理画面の運営の設定（第23.8.14節）。与えれば、会社ごとの上限の既定をここから読み、運営の鍵の全体の上限も確かめる
+   */
+  platform?: PlatformAiCap & { tenantCapJpy(): number | null };
 }): AiUsageMeter {
   const raw = Number(opts.env['AI_MONTHLY_LIMIT_JPY'] ?? '');
-  const { repo } = opts;
+  const { repo, platform } = opts;
   return new AiUsageMeter({
     store: new PostgresAiUsageStore(opts.connectionString),
-    platformCap: Number.isFinite(raw) && raw > 0 ? raw : null,
+    platformCap: platform ? () => platform.tenantCapJpy() : Number.isFinite(raw) && raw > 0 ? raw : null,
+    ...(platform ? { platform } : {}),
     limits: {
       limits: async (tenantId) => (await repo.getTenantSettings(tenantId)).aiLimits,
       source: async (tenantId) => {

@@ -139,7 +139,7 @@ ask CLOUDFLARE_FRONT 'Cloudflare を前に置くか（大量の通信の攻撃�
 ask BLOCK_COUNTRIES '通信を止める国（国の 2 文字をカンマで並べる。止めないなら none）' "${BLOCK_COUNTRIES:-CN,RU,KP}"
 ask GEO_ALLOW '国で止めずに通す相手（アドレスか範囲をカンマで。無ければ空のまま）' "${GEO_ALLOW:-}"
 GEMINI_API_KEY=$(env_value GEMINI_API_KEY)
-ask GEMINI_API_KEY 'Gemini の API の鍵（後でもよい）' "$GEMINI_API_KEY" secret
+ask GEMINI_API_KEY 'Gemini の API の鍵（後でもよい。マスター管理画面でも入れられる）' "$GEMINI_API_KEY" secret
 GOOGLE_LOGIN_CLIENT_ID=$(env_value GOOGLE_LOGIN_CLIENT_ID)
 ask GOOGLE_LOGIN_CLIENT_ID 'Google のログインの OAuth クライアントの ID（後でもよい）' "$GOOGLE_LOGIN_CLIENT_ID"
 GOOGLE_LOGIN_CLIENT_SECRET=$(env_value GOOGLE_LOGIN_CLIENT_SECRET)

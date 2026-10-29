@@ -90,6 +90,10 @@ export {
 } from './secrets/tenant-ai.js';
 export { checkGeminiText, checkGeminiLive, type CheckResult } from './secrets/gemini-check.js';
 export {
+  PlatformAiSource, PostgresPlatformAiSettingsReader, envTenantCapJpy,
+  type PlatformAiSettings, type PlatformAiSettingsReader, type PlatformAiBase,
+} from './secrets/platform-ai.js';
+export {
   GOOGLE_OAUTH_ENDPOINTS, GOOGLE_LOGIN_SCOPES, googleScopeUrl, googleScopeLabel, createPkce, buildGoogleAuthUrl,
   buildGoogleLoginUrl, exchangeGoogleLoginCode,
   exchangeGoogleCode, refreshGoogleAccessToken, googleGrantedScopes, googleUserEmail, revokeGoogleToken, GoogleOAuthError,
@@ -202,8 +206,8 @@ export { answerReservation, maybeReservation, parseReservation, timesOf, itemIn,
 export * from './chat/group-share.js';
 export {
   AiUsageMeter, AiLimitError, PostgresAiUsageStore, aiUsageMeterFromEnv, withAiUsage, enterAiUsage, currentAiUsage, meterLlm, meterResearch,
-  effectiveMonthlyLimit, jstMonth, purposeGroup, AI_LIMIT_COMPANY_MESSAGE, AI_LIMIT_USER_MESSAGE,
-  type AiUsageScope, type AiUsageEntry, type AiUsageTotals, type AiUsageStore, type AiLimitSource, type AiUsageMeterDeps,
+  effectiveMonthlyLimit, jstMonth, purposeGroup, AI_LIMIT_COMPANY_MESSAGE, AI_LIMIT_USER_MESSAGE, AI_LIMIT_PLATFORM_MESSAGE,
+  type AiUsageScope, type AiUsageEntry, type AiUsageTotals, type AiUsageStore, type AiLimitSource, type AiUsageMeterDeps, type PlatformAiCap,
 } from './usage/ai-usage.js';
 export { purposeLabel } from './usage/purpose-labels.js';
 export * from './effect/index.js';
@@ -231,7 +235,7 @@ export {
   type OperatorRole, type OpsAction, type NewTenantInput, type MachineReport, type MachineFlag,
   OpsStore, OpsRuleError, sha256 as opsSha256,
   type Operator, type OpsSession, type TenantOverview, type OpsMachine, type OpsAuditEntry,
-  type OperatorProfile, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsPasskey, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS, OpsAppSide,
+  type OperatorProfile, type OpsPlatformAiSettings, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsPasskey, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS, OpsAppSide,
   proxyAllowed, ProxyAccessStore, PROXY_HOURS, PROXY_DEFAULT_HOURS, type ProxyScope, type ProxyGrant, type ProxySessionInfo,
   serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport, type OpsIncident,
   loadOpsManual, searchOpsManual, linkChapters, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry,
