@@ -1,7 +1,7 @@
 /**
  * @file マスター管理画面（仕様書 第23.8.15節）の決まり。データベースに触れない純粋な関数だけを置く。
  *
- * サブドメインの規則・運営者のロールでできること・会社を作る入力の確かめ・稼働の知らせの中身の確かめと、機械に付ける印。
+ * サブドメインの規則・運営者のロールでできること・運営者に許す Google のドメイン・会社を作る入力の確かめ・稼働の知らせの中身の確かめと、機械に付ける印。
  */
 
 /** 運営が使う名前は払い出さない（第20.4.3節）。API の会社の判定と、データベースの `ops.create_tenant` と同じもの。 */
@@ -13,6 +13,27 @@ const SUBDOMAIN = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 /** 運営者のロール（第23.8.15節）。 */
 export type OperatorRole = 'admin' | 'support' | 'monitor';
 export const OPERATOR_ROLES: readonly OperatorRole[] = ['admin', 'support', 'monitor'];
+
+/**
+ * 運営者に許す Google のドメイン（`OPS_GOOGLE_DOMAIN`。第23.8.9節「提携会社の運営者」）を読む。
+ * カンマか空白で区切って複数並べられる（運営主体と提携会社。例 `oesf.jp,partner.example.co.jp`）。小文字にそろえ、重ねない。
+ *
+ * @returns 許すドメイン。空なら制限しない（開発だけ。クラウドの形の setup.sh は 1 つ以上を求める）
+ */
+export function parseOpsDomains(value: string | undefined | null): string[] {
+  return [...new Set((value ?? '').split(/[,\s]+/).map((d) => d.trim().toLowerCase().replace(/^@/, '')).filter(Boolean))];
+}
+
+/**
+ * そのメールアドレスが、運営者に許すドメインのものか。許すドメインが空なら、どのアドレスも許す。
+ *
+ * @remarks サブドメインは別のドメインとして扱う（`oesf.jp` を許しても `x.oesf.jp` は許さない）
+ */
+export function opsDomainAllowed(email: string, domains: readonly string[]): boolean {
+  if (domains.length === 0) return true;
+  const at = email.lastIndexOf('@');
+  return at > 0 && domains.includes(email.slice(at + 1).toLowerCase());
+}
 
 /** 運営者の操作。 */
 export type OpsAction = 'view' | 'incident.manage' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete';

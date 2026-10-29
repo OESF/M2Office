@@ -9,7 +9,7 @@
 import { Hono, type Context, type Next } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploymentFromEnv,
-  buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, OPERATOR_ROLES,
+  buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, opsDomainAllowed, OPERATOR_ROLES,
   parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
   OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual,
   type SystemLogLine,
@@ -27,8 +27,11 @@ export const OPS_COOKIE = 'm2o_ops_session';
 export interface OpsConfig {
   /** 運営の OAuth クライアント（顧客のログインと同じもの）と、運営の戻り先。 */
   login: { clientId: string; clientSecret: string; redirectUri: string } | null;
-  /** 運営主体の Google Workspace のドメイン（あればこのドメインの人だけ）。 */
-  googleDomain: string | null;
+  /**
+   * 運営者に許す Google のドメイン（運営主体と提携会社の Google Workspace・Cloud Identity。第23.8.9節「提携会社の運営者」）。
+   * 空なら制限しない（開発だけ）。
+   */
+  googleDomains: string[];
   /** 開発用ログイン（運営者を選ぶ）。本番では起動を拒否する。 */
   devLogin: boolean;
   cookieSecure: boolean;
@@ -158,7 +161,8 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     return c.json({
       url: buildGoogleLoginUrl({
         clientId: config.login.clientId, redirectUri: config.login.redirectUri, state, codeChallenge: challenge,
-        ...(config.googleDomain ? { hostedDomain: config.googleDomain } : {}),
+        // Google の画面で絞れるのは 1 つのドメインだけ。複数のときは絞らず、ログインの後にドメインで確かめる
+        ...(config.googleDomains.length === 1 ? { hostedDomain: config.googleDomains[0]! } : {}),
       }),
     });
   });
@@ -173,7 +177,7 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     try {
       const { accessToken } = await exchangeGoogleLoginCode({ ...config.login, code, codeVerifier: pending.codeVerifier });
       const { email, emailVerified } = await googleUserInfo(accessToken);
-      const op = email && emailVerified !== false && (!config.googleDomain || email.split('@')[1] === config.googleDomain) ? await store.findOperatorByEmail(email) : null;
+      const op = email && emailVerified !== false && opsDomainAllowed(email, config.googleDomains) ? await store.findOperatorByEmail(email) : null;
       if (!op || op.status !== 'active') {
         log.warn('運営の画面へのログインを断りました', { reason: op ? '無効にした運営者' : '登録されていない' });
         return back('denied');
@@ -675,7 +679,7 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     const email = (b.email ?? '').trim().toLowerCase();
     const role = b.role as OperatorRole;
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return c.json({ error: 'メールアドレスを入れてください' }, 400);
-    if (config.googleDomain && email.split('@')[1] !== config.googleDomain) return c.json({ error: `運営者は ${config.googleDomain} のアカウントにしてください` }, 400);
+    if (!opsDomainAllowed(email, config.googleDomains)) return c.json({ error: `運営者は ${config.googleDomains.join('・')} のアカウントにしてください` }, 400);
     if (!OPERATOR_ROLES.includes(role)) return c.json({ error: 'ロールを選んでください' }, 400);
     const op = c.get('operator');
     const added = await store.addOperator({ email, displayName: (b.displayName ?? '').trim() || email.split('@')[0]!, role, by: op.id });

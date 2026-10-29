@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import { checkNewTenant, machineFlags, operatorCan, OpsAppSide, OpsRuleError, OpsStore, parseMachineReport, proxyAllowed, ProxyAccessStore, tenantsCsv, welcomeText, type MachineReport } from '../src/index.js';
+import { checkNewTenant, machineFlags, operatorCan, parseOpsDomains, opsDomainAllowed, OpsAppSide, OpsRuleError, OpsStore, parseMachineReport, proxyAllowed, ProxyAccessStore, tenantsCsv, welcomeText, type MachineReport } from '../src/index.js';
 
 test('会社を作る入力: 整え、規則・予約語・ドメインを確かめる', () => {
   const ok = checkNewTenant({ subdomain: ' Acme ', name: 'アクメ', domain: '@ACME.example', admin: 'Boss@acme.example' });
@@ -49,6 +49,19 @@ test('代理アクセスの道: 見るだけ。管理者ページの範囲は知
   assert.equal(proxyAllowed('runs', 'GET', '/v1/runs/r-1'), true);
   assert.equal(proxyAllowed('runs', 'POST', '/v1/runs/r-1/cancel'), false);
   assert.equal(proxyAllowed('admin', 'POST', '/v1/auth/logout'), true);
+});
+
+test('運営者に許すドメイン: カンマか空白で複数並べ、小文字にそろえる。空なら制限しない（第23.8.9節「提携会社の運営者」）', () => {
+  assert.deepEqual(parseOpsDomains(' OESF.jp, partner.example.co.jp ,oesf.jp @other.example'), ['oesf.jp', 'partner.example.co.jp', 'other.example']);
+  assert.deepEqual(parseOpsDomains(''), []);
+  assert.deepEqual(parseOpsDomains(undefined), []);
+  const domains = parseOpsDomains('oesf.jp,partner.example.co.jp');
+  assert.equal(opsDomainAllowed('miura@oesf.jp', domains), true);
+  assert.equal(opsDomainAllowed('someone@Partner.Example.co.jp', domains), true, '大文字と小文字は区別しない');
+  assert.equal(opsDomainAllowed('someone@gmail.com', domains), false, '個人の Gmail は許さない');
+  assert.equal(opsDomainAllowed('someone@x.oesf.jp', domains), false, 'サブドメインは別のドメイン');
+  assert.equal(opsDomainAllowed('oesf.jp@evil.example', domains), false, '@ の後ろだけを見る');
+  assert.equal(opsDomainAllowed('anyone@anywhere.example', []), true, '空なら制限しない（開発だけ）');
 });
 
 test('ロール: 運営管理者はすべて、サポートは会社まで、監視は見るだけ', () => {

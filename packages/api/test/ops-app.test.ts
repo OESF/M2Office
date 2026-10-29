@@ -28,6 +28,7 @@ function fakeStore() {
   const notices: string[] = [];
   const store = {
     listOperators: async () => ops,
+    addOperator: async (o: { email: string; displayName: string; role: string }) => (ops.some((x) => x.email === o.email) ? null : { id: `op-${o.email}`, ...o, status: 'active' }),
     findOperatorByEmail: async (e: string) => ops.find((o) => o.email === e) ?? null,
     findOperator: async (id: string) => ops.find((o) => o.id === id) ?? null,
     createSession: async (operatorId: string, _p: string, _ua: string | null, _ttl: number, verified = false) => {
@@ -63,7 +64,7 @@ function fakeStore() {
   return { store, created, audits, reports, sessions, passkeys, codes, notices, taxRows: () => taxRows };
 }
 
-const config = { login: null, googleDomain: null, devLogin: true, cookieSecure: false, sessionTtlHours: 12 };
+const config = { login: null, googleDomains: [] as string[], devLogin: true, cookieSecure: false, sessionTtlHours: 12 };
 const log = createLogger({ service: 'test', level: 'error', format: 'json', write: () => undefined });
 const OPS = { host: 'ops.lvh.me:3100' };
 
@@ -299,4 +300,30 @@ test('障害の知らせ: 影響の種類を確かめ、起こす・経過・終
   assert.deepEqual(audits.filter((a) => a.startsWith('incident.')), ['incident.open', 'incident.update', 'incident.close']);
   const { operatorCan } = await import('@m2office/core');
   assert.equal(operatorCan('monitor', 'incident.manage'), true, '監視の人も急いで出せる');
+});
+
+test('提携会社の運営者: 許すドメインが複数なら、どれかのドメインのアドレスだけを足せる。個人の Gmail は断る（第23.8.9節）', async () => {
+  const { store } = fakeStore();
+  const app = opsApp({ store, config: { ...config, googleDomains: ['ops.example', 'partner.example.co.jp'] }, log });
+  const { cookie, csrfToken } = await login(app, 'admin@ops.example');
+  const add = (email: string) => app.request('/v1/ops/operators', {
+    method: 'POST', headers: { ...OPS, cookie, 'x-csrf-token': csrfToken, 'content-type': 'application/json' }, body: JSON.stringify({ email, role: 'support' }),
+  });
+  assert.equal((await add('someone@partner.example.co.jp')).status, 201);
+  const gmail = await add('someone@gmail.com');
+  assert.equal(gmail.status, 400);
+  assert.match((await gmail.json() as { error: string }).error, /ops\.example・partner\.example\.co\.jp/);
+  assert.equal((await add('someone@x.partner.example.co.jp')).status, 400, 'サブドメインは別のドメイン');
+});
+
+test('提携会社の運営者: Google の画面で絞るのは許すドメインが 1 つのときだけ（Google が絞れるのは 1 つのため）', async () => {
+  const { store } = fakeStore();
+  const login = { clientId: 'cid', clientSecret: 'sec', redirectUri: 'https://ops.example/v1/ops/auth/callback' };
+  const start = async (googleDomains: string[]) => {
+    const res = await opsApp({ store, config: { ...config, login, googleDomains }, log }).request('/v1/ops/auth/google/start', { headers: OPS });
+    return new URL((await res.json() as { url: string }).url).searchParams.get('hd');
+  };
+  assert.equal(await start(['ops.example']), 'ops.example');
+  assert.equal(await start(['ops.example', 'partner.example.co.jp']), null);
+  assert.equal(await start([]), null);
 });

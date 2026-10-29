@@ -132,7 +132,7 @@ sudo test -f "$CONF" && eval "$(sudo cat "$CONF")"
 say '答えてください（[ ] の中が既定です）'
 ask BASE_DOMAIN '会社のサブドメインの親のドメイン' "${BASE_DOMAIN:-m2office.net}"
 ask ACME_EMAIL '証明書（Let'"'"'s Encrypt）の連絡先のメールアドレス' "${ACME_EMAIL:-}"
-ask OPS_GOOGLE_DOMAIN 'マスター管理画面に入れる Google Workspace のドメイン' "${OPS_GOOGLE_DOMAIN:-}"
+ask OPS_GOOGLE_DOMAIN 'マスター管理画面に入れる Google Workspace のドメイン（提携会社も入れるならカンマで並べる）' "${OPS_GOOGLE_DOMAIN:-}"
 ask WG_NETWORK 'WireGuard の網（運営の画面を開ける範囲）' "${WG_NETWORK:-$WG_NETWORK_DEFAULT}"
 ask WAF_ENGINE 'WAF の動き（DetectionOnly: 記録だけ ／ On: 止める）' "${WAF_ENGINE:-DetectionOnly}"
 ask CLOUDFLARE_FRONT 'Cloudflare を前に置くか（大量の通信の攻撃を受けたときだけ yes）' "${CLOUDFLARE_FRONT:-no}"
@@ -144,6 +144,11 @@ GOOGLE_LOGIN_CLIENT_SECRET=$(env_value GOOGLE_LOGIN_CLIENT_SECRET)
 ask GOOGLE_LOGIN_CLIENT_SECRET 'そのシークレット' "$GOOGLE_LOGIN_CLIENT_SECRET" secret
 [[ "$BASE_DOMAIN" =~ ^[a-z0-9.-]+\.[a-z]+$ ]] || die "ドメインの形が違います: $BASE_DOMAIN"
 [[ "$ACME_EMAIL" == *@* ]] || die '証明書の連絡先のメールアドレスを入れてください'
+# 運営者に許すドメイン（仕様書 第23.8.9節「提携会社の運営者」）。空白を除いて小文字にそろえ、1 つ以上を求める（空だと誰でも運営者に登録できてしまう）
+OPS_GOOGLE_DOMAIN=$(printf '%s' "$OPS_GOOGLE_DOMAIN" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]' | sed -e 's/^,*//' -e 's/,*$//' -e 's/,,*/,/g')
+[ -n "$OPS_GOOGLE_DOMAIN" ] || die 'マスター管理画面に入れる Google Workspace のドメインを 1 つ以上入れてください'
+IFS=, read -ra ops_domains <<< "$OPS_GOOGLE_DOMAIN"
+for d in "${ops_domains[@]}"; do [[ "$d" =~ ^[a-z0-9.-]+\.[a-z]+$ ]] || die "マスター管理画面に入れるドメインの形が違います: $d"; done
 [ "$WAF_ENGINE" = DetectionOnly ] || [ "$WAF_ENGINE" = On ] || die 'WAF の動きは DetectionOnly か On です'
 [ "$CLOUDFLARE_FRONT" = no ] || [ "$CLOUDFLARE_FRONT" = yes ] || die 'Cloudflare を前に置くかは yes か no です'
 # 秘密の値でない答えだけを残す（次の既定）

@@ -6,7 +6,7 @@
  */
 
 import { serve } from '@hono/node-server';
-import { attachLogSink, createLoggerFromEnv, createPool, installPoolLogger, OpsStore, SystemLogSink } from '@m2office/core';
+import { attachLogSink, createLoggerFromEnv, createPool, installPoolLogger, OpsStore, parseOpsDomains, SystemLogSink } from '@m2office/core';
 import { loadAuthConfig } from '../auth/config.js';
 import { opsApp, type OpsConfig } from './app.js';
 import { listenHost } from '../listen.js';
@@ -29,7 +29,7 @@ if (env['NODE_ENV'] === 'production' && auth.login && !redirectUri.startsWith('h
 }
 const config: OpsConfig = {
   login: auth.login ? { clientId: auth.login.clientId, clientSecret: auth.login.clientSecret, redirectUri } : null,
-  googleDomain: env['OPS_GOOGLE_DOMAIN']?.trim().toLowerCase() || null,
+  googleDomains: parseOpsDomains(env['OPS_GOOGLE_DOMAIN']),
   devLogin: auth.devLogin,
   cookieSecure: auth.cookieSecure,
   // 全社に効く権限のため、顧客より短くする
@@ -43,6 +43,6 @@ const app = opsApp({ store, config, log });
 
 const hostname = listenHost();
 serve({ fetch: app.fetch, port, hostname }, (info) => {
-  log.info('運営の API の待ち受けを開始しました', { host: hostname, port: info.port, google: !!config.login, googleDomain: config.googleDomain, devLogin: config.devLogin });
+  log.info('運営の API の待ち受けを開始しました', { host: hostname, port: info.port, google: !!config.login, googleDomains: config.googleDomains, devLogin: config.devLogin });
   if (config.devLogin) log.warn('開発用ログインが有効です（本番では起動を拒否します）');
 });

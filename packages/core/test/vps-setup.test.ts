@@ -19,7 +19,7 @@ const root = fileURLToPath(new URL('../../..', import.meta.url));
 const setup = join(root, 'deploy/vps/setup.sh');
 
 const ANSWERS = {
-  BASE_DOMAIN: 'm2office.net', ACME_EMAIL: 'ops@example.jp', OPS_GOOGLE_DOMAIN: 'example.jp', WG_NETWORK: '10.66.0.0/24', WAF_ENGINE: 'DetectionOnly',
+  BASE_DOMAIN: 'm2office.net', ACME_EMAIL: 'ops@example.jp', OPS_GOOGLE_DOMAIN: 'example.jp,partner.example.co.jp', WG_NETWORK: '10.66.0.0/24', WAF_ENGINE: 'DetectionOnly',
   GEMINI_API_KEY: '', GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', SECRET_KEY: 'k'.repeat(64),
   DB_OWNER_PASSWORD: 'owner-pass', DB_APP_PASSWORD: 'app-pass', DB_OPS_PASSWORD: 'ops-pass',
   RELEASE_DIR: '/opt/m2office/app/dist-release', DATA_DIR: '/var/lib/m2office', LOG_DIR: '/var/log/m2office', CADDY_LOG_DIR: '/var/log/caddy',
@@ -41,6 +41,18 @@ test('スクリプトの文法', () => {
   execFileSync('bash', ['-n', setup]);
 });
 
+test('運営者に許すドメイン: 空白を除いて小文字にそろえ、1 つ以上を求め、1 つずつ形を確かめる', () => {
+  const body = readFileSync(setup, 'utf8');
+  const at = body.indexOf('OPS_GOOGLE_DOMAIN=$(printf');
+  assert.ok(at > body.indexOf("ask OPS_GOOGLE_DOMAIN"), '尋ねた後にそろえる');
+  assert.match(body, /\[ -n "\$OPS_GOOGLE_DOMAIN" \] \|\| die/);
+  assert.match(body, /for d in "\$\{ops_domains\[@\]\}"; do \[\[ "\$d" =~/);
+  // そろえる処理だけを取り出して、実際に動かす
+  const normalize = body.slice(at, body.indexOf('\n', at)).replace(/^OPS_GOOGLE_DOMAIN=\$\(|\)$/g, '');
+  const out = execFileSync('bash', ['-c', `OPS_GOOGLE_DOMAIN=$1; ${normalize}`, '_', ' OESF.jp , Partner.example.co.jp,, '], { encoding: 'utf8' });
+  assert.equal(out, 'oesf.jp,partner.example.co.jp');
+});
+
 test('雛形がすべて埋まり、API は機械の中だけで待ち受ける（日本語の言語の設定でも）', () => {
   for (const locale of ['C', 'ja_JP.UTF-8']) {
     const out = render('no', locale);
@@ -51,6 +63,8 @@ test('雛形がすべて埋まり、API は機械の中だけで待ち受ける�
     assert.match(env, /^M2O_DEPLOYMENT=cloud$/m);
     assert.match(env, /^OPS_DATABASE_URL=postgres:\/\/m2office_ops:ops-pass@127\.0\.0\.1:5432\/m2office$/m);
     assert.match(env, /^GOOGLE_LOGIN_REDIRECT_URI=https:\/\/m2office\.net\/v1\/oauth\/google\/login-callback$/m);
+    // 運営者に許すドメインは、提携会社のものもカンマで並べたまま設定に入る（第23.8.9節「提携会社の運営者」）
+    assert.match(env, /^OPS_GOOGLE_DOMAIN=example\.jp,partner\.example\.co\.jp$/m);
     const api = readFileSync(join(out, 'systemd/m2office-api.service'), 'utf8');
     assert.match(api, /--max-old-space-size=768 \/opt\/m2office\/app\/dist-release\/server\/api\.js/);
     assert.match(api, /^ProtectSystem=strict$/m);
