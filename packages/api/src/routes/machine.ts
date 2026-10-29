@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   readMaintenanceStatus, requestMaintenance, frontDir, setHeartbeatOff, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, holdUpdates, machineDir,
-  appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup, runtimeEnvironment, inferenceText, localLlmFromEnv,
+  appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup, runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -43,8 +43,20 @@ export function machineRoute(deps: AppDeps) {
    */
   app.get('/runtime', async (c) => {
     if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
-    const [beats, postgres] = await Promise.all([deps.runtime.store.read().catch(() => []), deps.runtime.store.postgresVersion().catch(() => null)]);
-    return c.json(runtimeEnvironment(beats, postgres, { deployment: 'onsite', debug: !!deps.debug, inference: inferenceText(localLlmFromEnv(process.env), 'onsite') }));
+    const [beats, postgres, database] = await Promise.all([
+      deps.runtime.store.read().catch(() => []), deps.runtime.store.postgresVersion().catch(() => null), deps.runtime.store.database().catch(() => null),
+    ]);
+    return c.json(runtimeEnvironment(beats, postgres, { deployment: 'onsite', debug: !!deps.debug, inference: inferenceText(localLlmFromEnv(process.env), 'onsite'), database }));
+  });
+
+  /**
+   * 機械の資源の推移（第23.8.7節「機械の資源の図」）。`?days=1`（既定。5 分ごと）か `?days=7`（30 分ごと）。クラウドの形では 404。
+   *
+   * @remarks 使っている割合（%）だけを返す。秘密の値・業務の中身・個人の情報は返さない
+   */
+  app.get('/runtime/samples', async (c) => {
+    if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
+    return c.json({ samples: await deps.runtime.store.samples(sampleDays(c.req.query('days'))) });
   });
 
   /**

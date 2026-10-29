@@ -14,7 +14,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage, appPath, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS } from '@m2office/core';
-import { buildDeps, companyView } from './context.js';
+import { buildDeps, companyView, fileStorageDir } from './context.js';
 import { authenticate, resolveTenant, type AppEnv } from './middleware/tenant.js';
 import { attachVoiceRelay } from './voice/relay.js';
 import { onUnexpectedError, requestLogger } from './middleware/logging.js';
@@ -346,9 +346,10 @@ const server = serve({ fetch: app.fetch, port, hostname }, (info) => {
   }
 });
 
-// 動いている環境（第8.6.7.1節）。起動のときと 5 分ごとに、この API の版・Node.js の版・機械の様子を置く（失敗しても止めない）
+// 動いている環境（第8.6.7.1節）。起動のときと 5 分ごとに、この API の版・Node.js の版・機械の様子を置く（失敗しても止めない）。
+// 同じ値を機械の資源の推移の標本としても置く（第23.8.7節「機械の資源の図」。ディスクはファイルの置き場のもの）
 const apiVersion = (() => { try { return (JSON.parse(readFileSync(appPath('package.json'), 'utf8')) as { version?: string }).version ?? null; } catch { return null; } })();
-const beat = () => void writeRuntimeBeat(deps.runtime.store, 'api', apiVersion, deps.runtime.startedAt).catch((err) => deps.log.warn('動いている環境の知らせを置けませんでした', { err }));
+const beat = () => void writeRuntimeBeat(deps.runtime.store, 'api', apiVersion, deps.runtime.startedAt, fileStorageDir()).catch((err) => deps.log.warn('動いている環境の知らせを置けませんでした', { err }));
 beat();
 setInterval(beat, RUNTIME_BEAT_INTERVAL_MS).unref();
 

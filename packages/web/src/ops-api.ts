@@ -2,7 +2,7 @@
  * @file マスター管理画面（仕様書 第23.8.15節）が呼ぶ運営の API（`/v1/ops`）。顧客の API（`api.ts`）とは別の口と別のログイン状態を使う。
  */
 
-import type { RuntimeEnvironment } from '@m2office/shared';
+import type { RuntimeEnvironment, RuntimeSampleDays, RuntimeSamplePoint } from '@m2office/shared';
 import { logQuery, type EvidenceView, type SystemLogDigestView, type SystemLogPage, type SystemLogQuery } from './api.js';
 
 /** 運営の API の失敗。 */
@@ -211,6 +211,8 @@ export const opsApi = {
   server: () => call<{ status: ServerStatusView }>('/server'),
   /** 動いている環境（仕様書 第8.6.7.1節。クラウドの形では運営だけが見る）。 */
   runtime: () => call<RuntimeEnvironment>('/runtime'),
+  /** 機械の資源の推移（仕様書 第23.8.7節「機械の資源の図」）。 */
+  runtimeSamples: (days: RuntimeSampleDays) => call<{ samples: RuntimeSamplePoint[] }>(`/runtime/samples?days=${days}`),
   /** 障害・計画停止の知らせ（仕様書 第16.11.3節 G-9）。 */
   incidents: () => call<{ incidents: IncidentRow[] }>('/incidents'),
   openIncident: (b: { title: string; impact: IncidentRow['impact']; body: string; tenants: string[] | null; startedAt: string | null }) =>

@@ -2792,3 +2792,51 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .qa-question > span:first-child { font-weight: 600; }
 .qa-answer { padding: 0 calc(12px * var(--space-scale)) calc(10px * var(--space-scale)); }
 .qa-answer .card { box-shadow: none; }
+
+/* 機械の資源（仕様書 第23.8.7節「機械の資源の図」）。80% で注意・90% で危険の色。割合の数も必ず出す */
+.resource-card { --rc-cpu: var(--accent); --rc-memory: #4f46e5; --rc-swap: #c026d3; --rc-disk: #64748b; }
+:root[data-theme="dark"] .resource-card { --rc-memory: #818cf8; --rc-swap: #e879f9; --rc-disk: #94a3b8; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .resource-card { --rc-memory: #818cf8; --rc-swap: #e879f9; --rc-disk: #94a3b8; }
+}
+.rc-meters { display: grid; gap: calc(8px * var(--space-scale)); }
+.rc-row { display: grid; grid-template-columns: 9em minmax(80px, 1fr) minmax(0, 1.4fr); align-items: center; gap: calc(10px * var(--space-scale)); }
+.rc-label { font-size: calc(12px * var(--font-scale)); color: var(--muted); }
+.rc-bar { position: relative; height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.rc-fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--ok-strong); transition: width .4s ease; }
+.rc-fill.warn { background: var(--warn); }
+.rc-fill.danger { background: var(--danger); }
+.rc-value strong { font-size: calc(15px * var(--font-scale)); margin-right: 4px; }
+.rc-value.warn strong { color: var(--warn); }
+.rc-value.danger strong { color: var(--danger); }
+.rc-sub { display: block; }
+.rc-none { grid-column: 2 / -1; font-size: calc(12px * var(--font-scale)); }
+.rc-trend-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: calc(16px * var(--space-scale)); }
+.rc-trend-head h4 { margin: 0; font-size: calc(13px * var(--font-scale)); }
+.rc-trend { margin-top: calc(6px * var(--space-scale)); }
+.rc-readout { min-height: 1.6em; margin: 0 0 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.rc-legend { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.rc-swatch { display: inline-block; width: 12px; height: 3px; border-radius: 2px; }
+.rc-swatch.cpu { background: var(--rc-cpu); }
+.rc-swatch.memory { background: var(--rc-memory); }
+.rc-swatch.swap { background: var(--rc-swap); }
+.rc-swatch.disk { background: var(--rc-disk); }
+.rc-svg { width: 100%; height: auto; display: block; overflow: visible; touch-action: pan-y; }
+.rc-grid { stroke: var(--line); stroke-width: 1; }
+.rc-limit { stroke-width: 1; stroke-dasharray: 4 3; }
+.rc-limit.warn { stroke: var(--warn); }
+.rc-limit.danger { stroke: var(--danger); }
+.rc-axis { font-size: 10px; fill: var(--muted); }
+.rc-line { fill: none; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+.rc-line.cpu { stroke: var(--rc-cpu); }
+.rc-line.memory { stroke: var(--rc-memory); }
+.rc-line.swap { stroke: var(--rc-swap); }
+.rc-line.disk { stroke: var(--rc-disk); }
+.rc-cursor { stroke: var(--muted); stroke-width: 1; }
+@media (max-width: 640px) {
+  .rc-row { grid-template-columns: 1fr; gap: 2px; }
+  .rc-none { grid-column: auto; }
+  /* 図は幅に合わせて縮むので、目盛りの字は図の単位で大きくする */
+  .rc-axis { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .rc-fill { transition: none; } }

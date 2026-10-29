@@ -105,6 +105,14 @@ export interface RuntimeMachine {
   /** メモリー（バイト）。`free` は使える量（macOS はすぐに空けられる分を含む）。 */
   memTotal: number | null;
   memFree: number | null;
+  /** 1・5・15 分の平均の負荷（Windows など取れない OS は `null`）。 */
+  load: [number, number, number] | null;
+  /** Swap（バイト）。Swap の無い機械は全体が 0。読めない OS は `null`。 */
+  swapTotal: number | null;
+  swapFree: number | null;
+  /** ファイルの置き場があるディスク（バイト。`free` は使える量）。 */
+  diskTotal: number | null;
+  diskFree: number | null;
 }
 
 /** API・ワーカーが置く、動いている知らせ（`runtime_beats`）。 */
@@ -152,5 +160,22 @@ export interface RuntimeEnvironment {
   nodeWarn: { expired: boolean; end: string | null; version: string } | null;
   /** セキュリティの修正があるか（API かワーカーの Node.js が、その系の下限より古い）。古い部分ごと。無ければ `null`。 */
   nodeSecurity: NodeSecurityNotice | null;
+  /** データベースの大きさ（バイト）と接続の数・上限（第23.8.7節「機械の資源の図」）。取れなければ `null`。 */
+  database: { bytes: number; connections: number; max: number } | null;
   checkedAt: string;
 }
+
+/**
+ * 機械の資源の推移の 1 点（第23.8.7節「機械の資源の図」）。値は使っている割合（%）。取れなかった値と Swap の無い機械は `null`。
+ * CPU の負荷は 1 分の平均の負荷をコアの数で割ったもので、100 を超えうる。
+ */
+export interface RuntimeSamplePoint {
+  at: string;
+  cpu: number | null;
+  memory: number | null;
+  swap: number | null;
+  disk: number | null;
+}
+
+/** 推移を見る長さ（日）。 */
+export type RuntimeSampleDays = 1 | 7;

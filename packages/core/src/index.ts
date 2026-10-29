@@ -213,7 +213,8 @@ export { appRoot, appPath } from './app-root.js';
 export {
   runBackup, restoreTest, readBackupStatus, requestBackup, takeBackupRequest, backupsToKeep, backupName, diskSpace,
   machineStatus, writeWorkerBeat, machineDir, backupConfigFromEnv, machineConfigFromEnv,
-  availableMemoryOf, currentMachine, inferenceText, beatFromRow, PostgresRuntimeBeatStore, writeRuntimeBeat, runtimeEnvironment,
+  availableMemoryOf, linuxSwapOf, macSwapOf, currentMachine, inferenceText, beatFromRow, samplePointFromRow, sampleDays, databaseFromRow, DATABASE_USAGE_SQL,
+  PostgresRuntimeBeatStore, writeRuntimeBeat, runtimeEnvironment, RUNTIME_SAMPLE_KEEP_DAYS,
   RUNTIME_BEAT_INTERVAL_MS, RUNTIME_BEAT_STALE_MS, WORKER_BEAT_INTERVAL_MS, WORKER_DOWN_MS, workerDown, type RuntimeBeatStore,
   type BackupConfig, type BackupRecord, type BackupStatus, type MachineConfig, type MachineStatus,
   readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus,

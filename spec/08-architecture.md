@@ -361,6 +361,7 @@ Docker 等のコンテナは**環境の再現性のために使う**。
 | 外へ見に行かない | 画面とワーカーが外（nodejs.org など）へ、最新の版や脆弱性を見に行くことはしない（外とつながる口を増やさない） |
 | 推測しない | 取れなかった値は「取得できなかった」と出す |
 | 出さないもの | 秘密の値（鍵・口の URL）・業務の中身・個人の情報 |
+| 機械の資源（第 0.479.0 版。Q-281） | 機械の様子に、CPU の負荷（1・5・15 分の平均）・Swap（全体と空き。Linux は `/proc/meminfo`、macOS は `vm.swapusage`）・ファイルの置き場があるディスク（全体と空き）を足す。この欄のすぐ下に、割合の棒と 24 時間の推移の図で出す（第23.8.7節「機械の資源の図」） |
 
 **実装（第 0.423.0 版）**: 型とサポートの表は `packages/shared/src/types/runtime.ts`（`NODE_RELEASE_LINES`・`nodeSupport`）、集める処理は `packages/core/src/machine/runtime.ts`（`writeRuntimeBeat`・`runtimeEnvironment`・`availableMemoryOf`・`inferenceText`）、画面は `packages/web/src/runtime-card.tsx`（`RuntimeCard`）。API は `GET /v1/admin/machine/runtime`（機械の管理者は `/v1/machine-admin/machine/runtime`。クラウドの形では 404）と、運営の `GET /v1/ops/runtime`（決めた関数 `ops.runtime_beats()` で読む）。ダッシュボードの答え（`nodeWarn`・`nodeSecurity`）はローカルの形だけ。**第 0.429.0 版**: 表に `secure`、`nodeSupport` に `secure`・`insecure`、版を数として比べる `compareNodeVersions`、環境に `nodeSecurity`（古い部分ごとの版と下限）、画面の文は `nodeSecurityText`（欄とダッシュボードで同じ）。M2Medical の同じ部品（M2Medical のコミット 18eaac7）を、M2Office の形（会社を持たない表・API も知らせを置く・運営の画面が別のプロセス）に合わせて写した
 

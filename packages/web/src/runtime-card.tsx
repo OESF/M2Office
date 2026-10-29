@@ -3,10 +3,12 @@
  *
  * M2Office の版・API とワーカーの Node.js（段階とサポートの終わり・セキュリティの修正）・PostgreSQL・OS と CPU・メモリー・動いている形・推論・起動してからの時間。
  * 外へは見に行かない。取れなかった値は「取得できなかった」と出す（推測で埋めない）。M2Medical の同じ欄（Machine.tsx の RuntimeCard）を写した。
+ * すぐ下に、同じ環境から機械の資源の欄（`ResourceCard`。第23.8.7節「機械の資源の図」）を出す。
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { NODE_STAGE_LABELS, type NodeSecurityNotice, type NodeSupport, type RuntimeEnvironment, type RuntimeProcess } from '@m2office/shared';
+import { NODE_STAGE_LABELS, type NodeSecurityNotice, type NodeSupport, type RuntimeEnvironment, type RuntimeProcess, type RuntimeSampleDays, type RuntimeSamplePoint } from '@m2office/shared';
+import { ResourceCard } from './resource-card.js';
 
 const NONE = <span className="muted">取得できなかった</span>;
 
@@ -60,8 +62,14 @@ export function nodeSecurityText(n: NodeSecurityNotice): string {
  * 動いている環境の欄。
  *
  * @param load 環境を読む口（管理者ページは `/admin/machine/runtime`、運営は `/ops/runtime`）
+ * @param loadSamples 機械の資源の推移を読む口。与えれば、すぐ下に機械の資源の欄を出す
+ * @param filesBytes ファイルの置き場の使用量（機械の資源の欄のディスクの内訳に添える）
  */
-export function RuntimeCard({ load }: { load: () => Promise<RuntimeEnvironment> }) {
+export function RuntimeCard({ load, loadSamples, filesBytes }: {
+  load: () => Promise<RuntimeEnvironment>;
+  loadSamples?: (days: RuntimeSampleDays) => Promise<{ samples: RuntimeSamplePoint[] }>;
+  filesBytes?: number | null;
+}) {
   const [env, setEnv] = useState<RuntimeEnvironment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const read = useCallback(() => { load().then((e) => { setEnv(e); setError(null); }).catch(() => setError('動いている環境を読み込めませんでした')); }, [load]);
@@ -72,6 +80,7 @@ export function RuntimeCard({ load }: { load: () => Promise<RuntimeEnvironment> 
   const m = env.machine;
   const versionDiffers = env.api?.version && env.worker?.version && env.api.version !== env.worker.version;
   return (
+    <>
     <div className="card runtime-card">
       <h3>動いている環境</h3>
       {env.nodeWarn && (
@@ -102,5 +111,7 @@ export function RuntimeCard({ load }: { load: () => Promise<RuntimeEnvironment> 
         </dd>
       </dl>
     </div>
+    {loadSamples && <ResourceCard env={env} loadSamples={loadSamples} filesBytes={filesBytes} />}
+    </>
   );
 }

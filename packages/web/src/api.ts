@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { RuntimeEnvironment, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
+import type { RuntimeEnvironment, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemKind, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventoryOutPurpose, InventorySettings, InventoryStockRow,
@@ -195,6 +195,8 @@ function machineFns(base: string) {
     machine: () => call<MachineView>(base),
     /** 動いている環境（仕様書 第8.6.7.1節）。 */
     runtime: () => call<RuntimeEnvironment>(`${base}/runtime`),
+    /** 機械の資源の推移（仕様書 第23.8.7節「機械の資源の図」）。 */
+    runtimeSamples: (days: RuntimeSampleDays) => call<{ samples: RuntimeSamplePoint[] }>(`${base}/runtime/samples?days=${days}`),
     /** 機械のシステムログ（仕様書 第16.10.4節）。 */
     systemLogs: (q: SystemLogQuery) => call<SystemLogPage>(`${base}/logs?${logQuery(q)}`),
     systemLogDigests: (q: SystemLogQuery) => call<{ items: SystemLogDigestView[] }>(`${base}/logs/digests?${logQuery(q)}`),

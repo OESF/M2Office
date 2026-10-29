@@ -39,8 +39,8 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
   return (
     <>
       <PageTitle trail={['機械']} help={help ?? null} />
-      {/* 動いている環境（第8.6.7.1節）。いちばん上に置く */}
-      <RuntimeCard load={fns.runtime} />
+      {/* 動いている環境（第8.6.7.1節）。いちばん上に置き、すぐ下に機械の資源（第23.8.7節「機械の資源の図」） */}
+      <RuntimeCard load={fns.runtime} loadSamples={fns.runtimeSamples} />
       {error && <p className="error">{error}</p>}
       {data && (
         <>

@@ -8,8 +8,8 @@
 import type { EvidencePackage, SystemLogDigest, SystemLogFilter, SystemLogLine } from '../log/store.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import type { RuntimeBeat, TaxRateEntry } from '@m2office/shared';
-import { beatFromRow } from '../machine/runtime.js';
+import type { RuntimeBeat, RuntimeEnvironment, RuntimeSampleDays, RuntimeSamplePoint, TaxRateEntry } from '@m2office/shared';
+import { beatFromRow, databaseFromRow, DATABASE_USAGE_SQL, samplePointFromRow } from '../machine/runtime.js';
 import type { MachineReport, NewTenantInput, OperatorRole } from './rules.js';
 import type { IncidentImpact, ServiceIncident } from './incidents.js';
 
@@ -473,6 +473,18 @@ export class OpsStore {
       this.pool.query<{ server_version: string }>('show server_version').then((r) => r.rows[0]?.server_version?.split(' ')[0] ?? null).catch(() => null),
     ]);
     return { beats: rows.map((r) => beatFromRow(r as Parameters<typeof beatFromRow>[0])), postgres: pgv };
+  }
+
+  /** データベースの大きさと接続の数・上限（第23.8.7節「機械の資源の図」）。取れなければ `null`。 */
+  async databaseUsage(): Promise<RuntimeEnvironment['database']> {
+    const { rows } = await this.pool.query(DATABASE_USAGE_SQL).catch(() => ({ rows: [] }));
+    return databaseFromRow(rows[0]);
+  }
+
+  /** 機械の資源の推移（使っている割合 %。決めた関数 ops.runtime_samples() で読む）。 */
+  async runtimeSamples(days: RuntimeSampleDays): Promise<RuntimeSamplePoint[]> {
+    const { rows } = await this.pool.query('select * from ops.runtime_samples($1)', [days]);
+    return rows.map(samplePointFromRow);
   }
 
   /** サーバー全体の稼働状況。 */

@@ -410,7 +410,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/usage` | 管理者: エージェント別の利用量 |
 | `GET /v1/admin/service-report` | 管理者: 月ごとの稼働の報告（`?month=YYYY-MM`。稼働率（計画停止を除く）・止まった時間・計画停止の時間・その会社に関わる障害の経過）と、いま続いている障害（仕様書 第16.11.3節 G-9） |
 | `GET /v1/admin/machine` | 管理者: ローカルの形の「機械」の様子（版・各部の動き・ディスク・証明書・ローカル AI・控え。仕様書 第8.6.7節）。クラウドの形では 404 |
-| `GET /v1/admin/machine/runtime` | 管理者: 動いている環境（M2Office の版・API とワーカーの Node.js の段階とサポートの終わり・PostgreSQL・OS と CPU・メモリー・動いている形・推論・起動の時刻。API とワーカーが 5 分ごとに置く `runtime_beats` から組み立てる。仕様書 第8.6.7.1節）。クラウドの形では 404（運営の `/v1/ops/runtime` だけ） |
+| `GET /v1/admin/machine/runtime` | 管理者: 動いている環境（M2Office の版・API とワーカーの Node.js の段階とサポートの終わり・PostgreSQL・OS と CPU・メモリー・動いている形・推論・起動の時刻。API とワーカーが 5 分ごとに置く `runtime_beats` から組み立てる。仕様書 第8.6.7.1節）。クラウドの形では 404（運営の `/v1/ops/runtime` だけ）。データベースの大きさと接続の数・上限（`database`）も返す |
+| `GET /v1/admin/machine/runtime/samples?days=1\|7` | 管理者: 機械の資源の推移（CPU の負荷・メモリー・Swap・ディスクの使っている割合 %。1 日は 5 分ごと、7 日は 30 分ごと。API が 5 分ごとに `runtime_samples` に置き 7 日で消す。仕様書 第23.8.7節「機械の資源の図」）。クラウドの形では 404 |
 | `POST /v1/admin/machine/backup` | 管理者: 今すぐ控えを取る（ワーカーが次の見回りで取る。202。控えの置き場が無ければ 400） |
 | `GET /v1/admin/machine/logs` | 管理者（ローカルの形だけ。クラウドの形は 404）: システムログ（`from`・`to`・`levels`・`service`・`q`・`requestId`・`runId`・`before`・`beforeId`。新しい順に 200 件）。最初の 1 回を監査ログ `log.view` に残す（仕様書 第16.10.4節） |
 | `GET /v1/admin/machine/logs/digests`・`/logs/export`・`/logs/files`・`/logs/files/:name` | 管理者（ローカルの形だけ）: 日ごとの改ざんの確かめ（7 日まで）・絞った結果の ZIP（`format=jsonl|csv`。28 日・100 万行まで）・機械のログのファイルの一覧とダウンロード。`log.download` に残す |
@@ -603,7 +604,8 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | GET | `/v1/ops/tenants/:id` | 会社の詳細（概要・利用状況の 12 か月・稼働・シートの氏名とロール・履歴）。開いたことを記録に残す | すべて |
 | GET | `/v1/ops/tenants.csv` | 会社一覧の CSV（書き出したことを記録に残す） | すべて |
 | GET | `/v1/ops/server` | サーバー全体の稼働状況 | すべて |
-| GET | `/v1/ops/runtime` | 動いている環境（仕様書 第8.6.7.1節。決めた関数 `ops.runtime_beats()` で読む） | すべて |
+| GET | `/v1/ops/runtime` | 動いている環境（仕様書 第8.6.7.1節。決めた関数 `ops.runtime_beats()` で読む）。データベースの大きさと接続の数・上限も返す | すべて |
+| GET | `/v1/ops/runtime/samples?days=1\|7` | 機械の資源の推移（使っている割合 %。仕様書 第23.8.7節「機械の資源の図」。決めた関数 `ops.runtime_samples()` で読む） | すべて |
 | GET・POST | `/v1/ops/incidents` | 障害・計画停止の一覧 ／ 起こす（`title`・`impact`（`down`・`degraded`・`maintenance`）・`body`・`tenants`（無ければすべての会社）・`startedAt`）。対象の会社の管理者に知らせる（仕様書 第16.11.3節 G-9） | すべて |
 | POST | `/v1/ops/incidents/:id/update`・`/v1/ops/incidents/:id/close` | 経過を知らせる ／ 終える（復旧・計画停止の終わり。`endedAt` を渡せる） | すべて |
 | GET・PUT | `/v1/ops/settings/operator` | 運営主体の設定（第23.8.14節） | 見る: すべて・変える: 運営管理者 |

@@ -8,7 +8,7 @@
 
 import { Hono, type Context, type Next } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { runtimeEnvironment, inferenceText, localLlmFromEnv, deploymentFromEnv,
+import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploymentFromEnv,
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, OPERATOR_ROLES,
   parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
   OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS,
@@ -473,12 +473,21 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
    * @remarks 外へは見に行かない。秘密の値・業務の中身・個人の情報は返さない
    */
   app.get('/v1/ops/runtime', async (c) => {
-    const { beats, postgres } = await store.runtimeBeats().catch(() => ({ beats: [], postgres: null }));
+    const [{ beats, postgres }, database] = await Promise.all([
+      store.runtimeBeats().catch(() => ({ beats: [], postgres: null })), store.databaseUsage().catch(() => null),
+    ]);
     return c.json(runtimeEnvironment(beats, postgres, {
       deployment: deploymentFromEnv(process.env) === 'onsite' ? 'onsite' : 'cloud', debug: process.env['M2O_DEBUG'] === 'true',
-      inference: inferenceText(localLlmFromEnv(process.env), 'cloud'),
+      inference: inferenceText(localLlmFromEnv(process.env), 'cloud'), database,
     }));
   });
+
+  /**
+   * 機械の資源の推移（第23.8.7節「機械の資源の図」）。`?days=1`（既定。5 分ごと）か `?days=7`（30 分ごと）。
+   *
+   * @remarks 使っている割合（%）だけを返す。秘密の値・業務の中身・個人の情報は返さない
+   */
+  app.get('/v1/ops/runtime/samples', async (c) => c.json({ samples: await store.runtimeSamples(sampleDays(c.req.query('days'))) }));
 
   // 障害・計画停止の知らせ（第16.11.3節 G-9）。運営者なら誰でも出せる（急ぐため）。対象の会社の管理者に知らせ、会社の監査ログに残す
   app.get('/v1/ops/incidents', async (c) => c.json({ incidents: await store.listIncidents(Number(c.req.query('limit') ?? 100)) }));

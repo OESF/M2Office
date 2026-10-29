@@ -8241,7 +8241,7 @@ console.log('\n■ 118. 不正の兆しの見張りの段 3（Google のログ�
   }
 }
 
-console.log('\n■ 119. 動いている環境（API とワーカーが知らせを置く・クラウドの形では会社の管理者に出さない。第8.6.7.1節）');
+console.log('\n■ 119. 動いている環境（API とワーカーが知らせを置く・クラウドの形では会社の管理者に出さない。第8.6.7.1節。機械の資源の推移は第23.8.7節）');
 {
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
@@ -8263,6 +8263,13 @@ console.log('\n■ 119. 動いている環境（API とワーカーが知らせ�
     byMember.status === 403 && byAdmin.status === 404 && (live?.nodeWarn ?? null) === null
       ? ok('クラウドの形では、会社の管理者に環境を出さない（運営の画面だけ）。ダッシュボードにも Node.js の知らせを出さない')
       : ng('クラウドの形の環境の扱いが違う', JSON.stringify({ member: byMember.status, admin: byAdmin.status, nodeWarn: live?.nodeWarn }));
+    // 機械の資源の推移（第23.8.7節「機械の資源の図」）。標本は API が置き、会社・人・秘密を持たない。クラウドの形では会社の管理者に出さない
+    const { rows: scols } = await owner.query(`select column_name from information_schema.columns where table_name = 'runtime_samples'`);
+    const { rows: srows } = await owner.query(`select count(*)::int as n from runtime_samples where at > now() - interval '15 minutes'`);
+    const samplesByAdmin = await call('a', '/v1/admin/machine/runtime/samples?days=7');
+    scols.length > 0 && !scols.some((c) => /key|secret|token|tenant|user/.test(c.column_name)) && srows[0].n > 0 && samplesByAdmin.status === 404
+      ? ok('機械の資源の標本を API が置き（15 分以内）、表は会社・人・秘密を持たず、クラウドの形では会社の管理者に推移を出さない')
+      : ng('機械の資源の標本の扱いが違う', JSON.stringify({ cols: scols.map((c) => c.column_name), recent: srows[0]?.n, admin: samplesByAdmin.status }));
   } catch (err) {
     ng('動いている環境の確認が途中で止まった', String(err));
   } finally {

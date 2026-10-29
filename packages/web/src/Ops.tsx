@@ -646,8 +646,9 @@ function Server() {
   return (
     <>
       <h2>稼働状況</h2>
-      {/* 動いている環境（第8.6.7.1節）。クラウドの形では運営の機械の情報なので、運営の画面だけに出す */}
-      <RuntimeCard load={opsApi.runtime} />
+      {/* 動いている環境（第8.6.7.1節）と機械の資源（第23.8.7節）。クラウドの形では運営の機械の情報なので、運営の画面だけに出す。
+          データベースとファイルの置き場の量は、機械の資源のディスクの内訳に出す */}
+      <RuntimeCard load={opsApi.runtime} loadSamples={opsApi.runtimeSamples} filesBytes={s ? Number(s.filesBytes) : null} />
       {error && <p className="error">{error}</p>}
       {s && (
         <>
@@ -657,8 +658,6 @@ function Server() {
             <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '動いています' : '応答がありません'}</span></strong><span>最後の応答 {when(lastWorker)}{liveWorkers.length > 1 ? `・${liveWorkers.length} 台` : ''}</span></div>
             <div className="stat"><span>遅れている定時実行</span><strong>{s.schedulesLate}</strong></div>
             <div className="stat"><span>AI の費用（今日 ／ 今月）</span><strong>{yen(Number(s.ai.today))} ／ {yen(Number(s.ai.month))}</strong><span>前の月の同じ時期 {yen(Number(s.ai.lastMonthSamePeriod))}</span></div>
-            <div className="stat"><span>データベース</span><strong>{bytes(Number(s.database.bytes))}</strong><span>接続 {s.database.connections}</span></div>
-            <div className="stat"><span>ファイルの置き場</span><strong>{bytes(Number(s.filesBytes))}</strong></div>
           </div>
           <h3>外部の接続（24 時間）</h3>
           {s.targets.length === 0 ? <p className="muted">まだありません</p> : <div className="table-scroll"><table className="table">
