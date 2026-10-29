@@ -188,6 +188,10 @@ export interface StatusRequestRow {
   doneAt: string | null;
   confirmedBy: string | null;
   confirmedAt: string | null;
+  /** 申請した本人が 1 人で承認したときの理由（ADR-0116）。 */
+  decidedSoloNote: string | null;
+  /** 発動した本人が 1 人で確かめたときの理由。 */
+  confirmedSoloNote: string | null;
 }
 
 /** 代理アクセスの申請（第23.6.1節）。 */
@@ -273,12 +277,12 @@ export const opsApi = {
   setDemoDefaults: (b: { days: number; aiCapJpy: number }) => call<{ days: number; aiCapJpy: number }>('/settings/demo', send('PUT', b)),
   operatorProfile: () => call<{ profile: OperatorProfileView }>('/settings/operator'),
   setOperatorProfile: (p: OperatorProfileView) => call<{ profile: OperatorProfileView }>('/settings/operator', send('PUT', p)),
-  statusRequests: (tenantId?: string) => call<{ requests: StatusRequestRow[] }>(`/status-requests${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),
+  statusRequests: (tenantId?: string) => call<{ requests: StatusRequestRow[]; solo: boolean }>(`/status-requests${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),
   requestStatus: (tenantId: string, b: { kind: StatusRequestRow['kind']; reasonCode: string; reason: string }) =>
     call<{ id: string; notice: string | null }>(`/tenants/${encodeURIComponent(tenantId)}/requests`, send('POST', b)),
-  decideStatus: (id: string, approve: boolean) => call<{ state: string; notice: string | null }>(`/status-requests/${encodeURIComponent(id)}/decide`, send('POST', { approve })),
+  decideStatus: (id: string, approve: boolean, soloNote?: string) => call<{ state: string; notice: string | null }>(`/status-requests/${encodeURIComponent(id)}/decide`, send('POST', { approve, soloNote })),
   withdrawStatus: (id: string) => call<{ ok: true }>(`/status-requests/${encodeURIComponent(id)}/withdraw`, send('POST')),
-  confirmLock: (id: string) => call<{ ok: true }>(`/status-requests/${encodeURIComponent(id)}/confirm`, send('POST')),
+  confirmLock: (id: string, soloNote?: string) => call<{ ok: true }>(`/status-requests/${encodeURIComponent(id)}/confirm`, send('POST', { soloNote })),
   proxyGrants: (tenantId?: string) => call<{ grants: ProxyGrantRow[] }>(`/proxy${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),
   requestProxy: (tenantId: string, scope: 'admin' | 'runs', reason: string) => call<{ id: string }>(`/tenants/${encodeURIComponent(tenantId)}/proxy`, send('POST', { scope, reason })),
   openProxy: (id: string) => call<{ url: string }>(`/proxy/${encodeURIComponent(id)}/open`, send('POST')),

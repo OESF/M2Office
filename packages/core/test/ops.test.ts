@@ -226,6 +226,50 @@ test('停止と再開: 2 人の承認・7 日の予告・期限で止める・�
   }
 });
 
+test('運営者が 1 人だけのとき: 本人が理由を書いて承認・確認でき、2 人目がいれば別の人に戻る（第23.8.6節、ADR-0116）', { skip: dbReady ? false : '開発のデータベース（移行 173 まで）が動いていません' }, async () => {
+  const pool = new pg.Pool({ connectionString: OPS, max: 1 });
+  const owner = new pg.Client({ connectionString: OWNER });
+  await owner.connect();
+  const sub = `zz-solo-${Date.now().toString(36)}`;
+  const store = new OpsStore(pool);
+  const id = await store.createTenant({ subdomain: sub, name: '1 人の確かめ', domain: `${sub}.example`, admin: `boss@${sub}.example`, status: 'active' }, 'op-solo');
+  /** 失敗するはずの呼び出しの理由を返す（取引を壊さないよう、区切りの中で呼ぶ）。 */
+  const failure = async (sql: string, args: unknown[]) => {
+    await owner.query('savepoint s');
+    try { await owner.query(sql, args); return 'ok'; } catch (e) { return (e as Error).message; } finally { await owner.query('rollback to savepoint s'); }
+  };
+  try {
+    // 開発のデータベースの運営者を取引の中だけ止め、承認できる運営者を 1 人にする（監視のロールは数に入れない）
+    await owner.query('begin');
+    await owner.query(`update ops.operators set status = 'disabled' where status = 'active'`);
+    await owner.query(`insert into ops.operators (id, email, display_name, role, created_by) values ('op-solo', 'solo@solo.example', '1 人', 'admin', 'test'), ('op-watch', 'watch@solo.example', '監視', 'monitor', 'test')`);
+    assert.equal((await owner.query(`select ops.solo_operator('op-solo') as v`)).rows[0].v, true);
+    const lock = (await owner.query(`select ops.request_status($1, 'lock', 'other', '見本の会社を止める', 'op-solo') as id`, [id])).rows[0].id;
+    assert.match(await failure('select ops.confirm_lock($1, $2)', [lock, 'op-solo']), /solo_note_required/);
+    assert.match(await failure('select ops.confirm_lock($1, $2, $3)', [lock, 'op-solo', '  ']), /solo_note_required/);
+    await owner.query('select ops.confirm_lock($1, $2, $3)', [lock, 'op-solo', '運営者がまだ 1 人のため']);
+    const resume = (await owner.query(`select ops.request_status($1, 'resume', 'resolved', '確かめた', 'op-solo') as id`, [id])).rows[0].id;
+    assert.equal((await owner.query('select ops.decide_status($1, true, $2, $3) as s', [resume, 'op-solo', '運営者がまだ 1 人のため'])).rows[0].s, 'done');
+    const rows = (await owner.query('select id, confirmed_solo_note, decided_solo_note from ops.status_requests where tenant_id = $1', [id])).rows;
+    assert.equal(rows.find((r) => r.id === lock)?.confirmed_solo_note, '運営者がまだ 1 人のため');
+    assert.equal(rows.find((r) => r.id === resume)?.decided_solo_note, '運営者がまだ 1 人のため');
+    const audit = await owner.query(`select action from audit_events where tenant_id = $1 and (detail->>'solo')::boolean`, [id]);
+    assert.deepEqual(audit.rows.map((r) => r.action).sort(), ['tenant.lock_confirmed', 'tenant.resume']);
+    // 2 人目（サポート）がいれば、理由を書いても本人は行えない
+    await owner.query(`insert into ops.operators (id, email, display_name, role, created_by) values ('op-second', 'second@solo.example', '2 人目', 'support', 'test')`);
+    assert.equal((await owner.query(`select ops.solo_operator('op-solo') as v`)).rows[0].v, false);
+    const lock2 = (await owner.query(`select ops.request_status($1, 'lock', 'other', 'もう一度', 'op-solo') as id`, [id])).rows[0].id;
+    assert.match(await failure('select ops.confirm_lock($1, $2, $3)', [lock2, 'op-solo', '急ぐため']), /same_operator/);
+    await owner.query('select ops.confirm_lock($1, $2)', [lock2, 'op-second']);
+  } finally {
+    await owner.query('rollback').catch(() => undefined);
+    await owner.query('delete from ops.status_requests where tenant_id = $1', [id]);
+    await owner.query('delete from tenants where id = $1', [id]);
+    await owner.end();
+    await pool.end();
+  }
+});
+
 test('代理アクセス: 申請・許す・1 回だけの券で入る・切る・終わりを知らせる', { skip: dbReady ? false : '開発のデータベース（移行 114 まで）が動いていません' }, async () => {
   const pool = new pg.Pool({ connectionString: OPS, max: 2 });
   const appPool = new pg.Pool({ connectionString: APP, max: 2 });

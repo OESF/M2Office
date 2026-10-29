@@ -198,7 +198,9 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
   const flagged = useFlaggedMachines();
   const aiAlert = usePlatformAiAlert();
   const [requests, setRequests] = useState<StatusRequestRow[]>([]);
-  const loadRequests = useCallback(() => { opsApi.statusRequests().then((r) => setRequests(r.requests)).catch(() => undefined); }, []);
+  // 承認できる運営者が自分だけか（自分の申請を理由を書いて承認・確認できる。ADR-0116）
+  const [solo, setSolo] = useState(false);
+  const loadRequests = useCallback(() => { opsApi.statusRequests().then((r) => { setRequests(r.requests); setSolo(r.solo); }).catch(() => undefined); }, []);
   useEffect(() => { loadRequests(); const t = window.setInterval(loadRequests, 60_000); return () => clearInterval(t); }, [loadRequests]);
   // 扱いの残っているもの（承認待ちと、確認待ちの緊急停止）。確認待ちの緊急停止は運営者全員に、どの画面の上にも出す
   const unconfirmed = requests.filter((r) => r.kind === 'lock' && r.state === 'done' && !r.confirmedAt);
@@ -228,7 +230,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           )}
           {page === 'tenants' && <Tenants me={me} flagged={flagged} onMachines={() => setPage('machines')} onChanged={loadRequests} />}
           {page === 'demos' && <OpsDemos me={me} />}
-          {page === 'requests' && <Requests me={me} rows={requests} onChanged={loadRequests} />}
+          {page === 'requests' && <Requests me={me} rows={requests} solo={solo} onChanged={loadRequests} />}
           {page === 'server' && <Server />}
           {page === 'incidents' && <Incidents />}
           {page === 'logs' && <OpsLogs me={me} />}
@@ -1030,7 +1032,8 @@ function StatusControl({ tenant, me, onChanged }: { tenant: TenantDetailView['te
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const load = useCallback(() => { opsApi.statusRequests(tenant.id).then((r) => setRows(r.requests)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, [tenant.id]);
+  const [solo, setSolo] = useState(false);
+  const load = useCallback(() => { opsApi.statusRequests(tenant.id).then((r) => { setRows(r.requests); setSolo(r.solo); }).catch((e) => setError(errText(e, '読み込めませんでした'))); }, [tenant.id]);
   useEffect(() => { load(); }, [load]);
   const open = (k: StatusRequestRow['kind']) => { setForm(k); setCode(Object.keys(REASONS[k])[0]!); setReason(''); setError(null); };
   const submit = () => {
@@ -1071,14 +1074,17 @@ function StatusControl({ tenant, me, onChanged }: { tenant: TenantDetailView['te
         </>
       )}
       {notice && <NoticeToSend text={notice} onClose={() => setNotice(null)} />}
-      {rows && rows.length > 0 && <RequestTable me={me} rows={rows} onChanged={() => { load(); onChanged(); }} onNotice={setNotice} />}
+      {rows && rows.length > 0 && <RequestTable me={me} rows={rows} solo={solo} onChanged={() => { load(); onChanged(); }} onNotice={setNotice} />}
     </div>
   );
 }
 
-/** 申請の表。承認・承認しない・取り下げ・確認のボタン（申請した人は自分の申請を承認・確認できない）。 */
-function RequestTable({ me, rows, onChanged, onNotice, showTenant = false }: {
-  me: OpsMe; rows: StatusRequestRow[]; onChanged: () => void; onNotice: (t: string) => void; showTenant?: boolean;
+/**
+ * 申請の表。承認・承認しない・取り下げ・確認のボタン。申請した人は自分の申請を承認・確認できない。
+ * ただし承認できる運営者が自分だけ（`solo`）なら、1 人で行う理由を書いて承認・確認できる（第23.8.6節、ADR-0116）。
+ */
+function RequestTable({ me, rows, solo, onChanged, onNotice, showTenant = false }: {
+  me: OpsMe; rows: StatusRequestRow[]; solo: boolean; onChanged: () => void; onNotice: (t: string) => void; showTenant?: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
   const act = (p: Promise<{ notice?: string | null } | unknown>, fallback: string) => {
@@ -1086,6 +1092,20 @@ function RequestTable({ me, rows, onChanged, onNotice, showTenant = false }: {
     p.then((r) => { const t = (r as { notice?: string | null })?.notice; if (t) onNotice(t); onChanged(); }).catch((e) => setError(errText(e, fallback)));
   };
   const mine = (r: StatusRequestRow) => r.requestedBy === me.operator.id;
+  /** 自分の申請を 1 人で扱うときは理由を尋ねる。やめたら null。 */
+  const soloNote = (r: StatusRequestRow, what: string): string | undefined | null => {
+    if (!mine(r)) return undefined;
+    const note = prompt(`ほかに運営者がいないため、1 人で${what}。理由を書いてください`);
+    return note && note.trim() ? note.trim() : null;
+  };
+  const approve = (r: StatusRequestRow) => {
+    const note = soloNote(r, '承認します');
+    if (note !== null) act(opsApi.decideStatus(r.id, true, note), '承認できませんでした');
+  };
+  const confirmIt = (r: StatusRequestRow) => {
+    const note = soloNote(r, '確かめます');
+    if (note !== null) act(opsApi.confirmLock(r.id, note), '確認できませんでした');
+  };
   return (
     <>
       {error && <p className="error">{error}</p>}
@@ -1098,16 +1118,18 @@ function RequestTable({ me, rows, onChanged, onNotice, showTenant = false }: {
             <td>{KIND_LABEL[r.kind]}</td>
             <td>{REASONS[r.kind][r.reasonCode] ?? r.reasonCode}<div className="small muted">{r.reason}</div></td>
             <td>{STATE_LABEL[r.state]}{r.state === 'scheduled' && r.effectiveAt ? `（${when(r.effectiveAt)} に止める）` : ''}
-              {r.kind === 'lock' && r.state === 'done' && <div className="small">{r.confirmedAt ? `確認済み ${when(r.confirmedAt)}` : <span className="badge warn">確認待ち</span>}</div>}</td>
+              {r.decidedSoloNote && <div className="small muted">1 人で承認: {r.decidedSoloNote}</div>}
+              {r.kind === 'lock' && r.state === 'done' && <div className="small">{r.confirmedAt ? `確認済み ${when(r.confirmedAt)}${r.confirmedSoloNote ? '（1 人で）' : ''}` : <span className="badge warn">確認待ち</span>}</div>}
+              {r.confirmedSoloNote && <div className="small muted">{r.confirmedSoloNote}</div>}</td>
             <td>
-              {r.state === 'pending' && me.can['tenant.suspend'] && !mine(r) && <>
-                <button className="btn small" onClick={() => act(opsApi.decideStatus(r.id, true), '承認できませんでした')}>承認する</button>{' '}
-                <button className="btn ghost small" onClick={() => act(opsApi.decideStatus(r.id, false), '扱えませんでした')}>承認しない</button>{' '}
+              {r.state === 'pending' && me.can['tenant.suspend'] && (!mine(r) || solo) && <>
+                <button className="btn small" onClick={() => approve(r)}>承認する</button>{' '}
+                {!mine(r) && <><button className="btn ghost small" onClick={() => act(opsApi.decideStatus(r.id, false), '扱えませんでした')}>承認しない</button>{' '}</>}
               </>}
               {(r.state === 'pending' || r.state === 'scheduled') && me.can['tenant.suspend'] &&
                 <button className="btn ghost small" onClick={() => confirm('この申請を取り下げますか？') && act(opsApi.withdrawStatus(r.id), '取り下げられませんでした')}>取り下げる</button>}
-              {r.kind === 'lock' && r.state === 'done' && !r.confirmedAt && me.can['tenant.suspend'] && !mine(r) &&
-                <button className="btn small" onClick={() => act(opsApi.confirmLock(r.id), '確認できませんでした')}>確認した</button>}
+              {r.kind === 'lock' && r.state === 'done' && !r.confirmedAt && me.can['tenant.suspend'] && (!mine(r) || solo) &&
+                <button className="btn small" onClick={() => confirmIt(r)}>確認した</button>}
             </td>
           </tr>
         ))}</tbody>
@@ -1117,13 +1139,13 @@ function RequestTable({ me, rows, onChanged, onNotice, showTenant = false }: {
 }
 
 /** 停止と再開の申請（承認待ち・予告中・確認待ちの緊急停止と、直近 30 日の記録）。 */
-function Requests({ me, rows, onChanged }: { me: OpsMe; rows: StatusRequestRow[]; onChanged: () => void }) {
+function Requests({ me, rows, solo, onChanged }: { me: OpsMe; rows: StatusRequestRow[]; solo: boolean; onChanged: () => void }) {
   const [notice, setNotice] = useState<string | null>(null);
   return (
     <>
       <OpsTitle title="停止と再開" help={{ chapter: '05-suspension', text: '会社の利用を止める・再開する申請と承認です。' }} />
       {notice && <NoticeToSend text={notice} onClose={() => setNotice(null)} />}
-      {rows.length === 0 ? <p className="muted">申請はありません</p> : <RequestTable me={me} rows={rows} onChanged={onChanged} onNotice={setNotice} showTenant />}
+      {rows.length === 0 ? <p className="muted">申請はありません</p> : <RequestTable me={me} rows={rows} solo={solo} onChanged={onChanged} onNotice={setNotice} showTenant />}
     </>
   );
 }

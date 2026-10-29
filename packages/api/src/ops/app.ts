@@ -390,7 +390,11 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     throw err;
   };
 
-  app.get('/v1/ops/status-requests', async (c) => c.json({ requests: await store.listStatusRequests(c.req.query('tenant') || undefined) }));
+  // solo: 見ている運営者が、承認できるただ 1 人の運営者か（自分の申請を理由を書いて承認・確認できる。ADR-0116）
+  app.get('/v1/ops/status-requests', async (c) => c.json({
+    requests: await store.listStatusRequests(c.req.query('tenant') || undefined),
+    solo: await store.soloOperator(c.get('operator').id),
+  }));
 
   // 申請する。緊急停止はすぐに止め、運営者が会社へ渡す案内の文を返す
   app.post('/v1/ops/tenants/:id/requests', async (c) => {
@@ -417,13 +421,14 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
   // 承認するか、しない。通常の停止の承認と再開のあとに、運営者が会社へ渡す案内の文を返す
   app.post('/v1/ops/status-requests/:id/decide', async (c) => {
     if (!can(c, 'tenant.suspend')) return denied(c);
-    const { approve } = await c.req.json<{ approve?: boolean }>().catch(() => ({ approve: undefined }));
+    const { approve, soloNote } = await c.req.json<{ approve?: boolean; soloNote?: string }>().catch(() => ({ approve: undefined, soloNote: undefined }));
     if (typeof approve !== 'boolean') return c.json({ error: '承認するかどうかを選んでください' }, 400);
     const op = c.get('operator');
     try {
-      const state = await store.decideStatus(c.req.param('id'), approve, op.id);
+      const state = await store.decideStatus(c.req.param('id'), approve, op.id, typeof soloNote === 'string' ? soloNote : undefined);
       const req = (await store.listStatusRequests()).find((r) => r.id === c.req.param('id'));
-      await store.audit(op.id, approve ? 'tenant.status_approve' : 'tenant.status_reject', 'tenant', req?.tenantId ?? '', { request: c.req.param('id'), state });
+      await store.audit(op.id, approve ? 'tenant.status_approve' : 'tenant.status_reject', 'tenant', req?.tenantId ?? '',
+        { request: c.req.param('id'), state, ...(req?.decidedSoloNote ? { solo: true } : {}) });
       const notice = !req || !approve ? null
         : req.kind === 'suspend' ? statusNoticeText('suspend_scheduled', { name: req.tenantName ?? '', effectiveAt: req.effectiveAt, reasonLabel: reasonLabel(req.kind, req.reasonCode) })
           : req.kind === 'resume' ? statusNoticeText('resume', { name: req.tenantName ?? '', reasonLabel: '' }) : null;
@@ -441,13 +446,14 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     } catch (err) { return ruleError(c, err); }
   });
 
-  // 緊急停止の事後の確認（申請した人とは別の運営管理者かサポート）
+  // 緊急停止の事後の確認（申請した人とは別の運営管理者かサポート。ほかにいなければ本人が理由を書いて。ADR-0116）
   app.post('/v1/ops/status-requests/:id/confirm', async (c) => {
     if (!can(c, 'tenant.suspend')) return denied(c);
+    const { soloNote } = await c.req.json<{ soloNote?: string }>().catch(() => ({ soloNote: undefined }));
     const op = c.get('operator');
     try {
-      await store.confirmLock(c.req.param('id'), op.id);
-      await store.audit(op.id, 'tenant.lock_confirm', 'status-request', c.req.param('id'));
+      await store.confirmLock(c.req.param('id'), op.id, typeof soloNote === 'string' ? soloNote : undefined);
+      await store.audit(op.id, 'tenant.lock_confirm', 'status-request', c.req.param('id'), typeof soloNote === 'string' && soloNote.trim() ? { solo: true } : undefined);
       return c.json({ ok: true });
     } catch (err) { return ruleError(c, err); }
   });

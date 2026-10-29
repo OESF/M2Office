@@ -187,6 +187,10 @@ export interface StatusRequest {
   doneAt: string | null;
   confirmedBy: string | null;
   confirmedAt: string | null;
+  /** 申請した本人が 1 人で承認したときの理由（第23.8.6節、ADR-0116）。 */
+  decidedSoloNote: string | null;
+  /** 発動した本人が 1 人で確かめたときの理由。 */
+  confirmedSoloNote: string | null;
 }
 
 /** 障害・計画停止（運営の画面が見る形。第16.11.3節 G-9）。 */
@@ -256,7 +260,7 @@ export class OpsRuleError extends Error {
 /** データベースの関数の失敗を、決めた理由に直す（決めた理由でなければそのまま投げる）。 */
 function rethrow(err: unknown): never {
   const msg = err instanceof Error ? err.message : '';
-  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found|reason_required|already_requested|not_stopped|not_pending|same_operator|kind_invalid|time_invalid|login_invalid|login_taken|days_invalid|cap_invalid)$/.test(msg)) throw new OpsRuleError(msg);
+  if (/^(subdomain_invalid|subdomain_taken|domain_taken|admin_domain|status_invalid|status_locked|not_found|reason_required|already_requested|not_stopped|not_pending|same_operator|solo_note_required|kind_invalid|time_invalid|login_invalid|login_taken|days_invalid|cap_invalid)$/.test(msg)) throw new OpsRuleError(msg);
   throw err;
 }
 
@@ -717,6 +721,7 @@ export class OpsStore {
       id: r.id, tenantId: r.tenant_id, tenantName: r.tenant_name ?? null, kind: r.kind, reasonCode: r.reason_code, reason: r.reason, state: r.state,
       fromStatus: r.from_status, requestedBy: r.requested_by, requestedAt: iso(r.requested_at)!, decidedBy: r.decided_by, decidedAt: iso(r.decided_at),
       effectiveAt: iso(r.effective_at), doneAt: iso(r.done_at), confirmedBy: r.confirmed_by, confirmedAt: iso(r.confirmed_at),
+      decidedSoloNote: r.decided_solo_note ?? null, confirmedSoloNote: r.confirmed_solo_note ?? null,
     }));
   }
 
@@ -732,10 +737,15 @@ export class OpsStore {
     } catch (err) { rethrow(err); }
   }
 
-  /** 申請を承認するか、しない（申請した人は承認できない）。 */
-  async decideStatus(requestId: string, approve: boolean, operatorId: string): Promise<string> {
+  /**
+   * 申請を承認するか、しない。申請した人は、ほかに承認できる運営者がいないときだけ、1 人で行う理由を書いて行える（第23.8.6節、ADR-0116）。
+   *
+   * @param soloNote 申請した本人が行うときの、1 人で行う理由
+   * @throws {OpsRuleError} `same_operator`（ほかに運営者がいる）・`solo_note_required`（理由が無い）など
+   */
+  async decideStatus(requestId: string, approve: boolean, operatorId: string, soloNote?: string): Promise<string> {
     try {
-      const { rows } = await this.pool.query('select ops.decide_status($1,$2,$3) as s', [requestId, approve, operatorId]);
+      const { rows } = await this.pool.query('select ops.decide_status($1,$2,$3,$4) as s', [requestId, approve, operatorId, soloNote ?? null]);
       return rows[0].s as string;
     } catch (err) { rethrow(err); }
   }
@@ -745,9 +755,19 @@ export class OpsStore {
     try { await this.pool.query('select ops.withdraw_status($1,$2)', [requestId, operatorId]); } catch (err) { rethrow(err); }
   }
 
-  /** 緊急停止を、事後に別の運営者が確かめる。 */
-  async confirmLock(requestId: string, operatorId: string): Promise<void> {
-    try { await this.pool.query('select ops.confirm_lock($1,$2)', [requestId, operatorId]); } catch (err) { rethrow(err); }
+  /**
+   * 緊急停止を、事後に別の運営者が確かめる。発動した人は、ほかに承認できる運営者がいないときだけ、1 人で行う理由を書いて確かめられる。
+   *
+   * @param soloNote 発動した本人が確かめるときの、1 人で行う理由
+   */
+  async confirmLock(requestId: string, operatorId: string, soloNote?: string): Promise<void> {
+    try { await this.pool.query('select ops.confirm_lock($1,$2,$3)', [requestId, operatorId, soloNote ?? null]); } catch (err) { rethrow(err); }
+  }
+
+  /** この運営者が、承認できるただ 1 人の運営者か（2 人の決まりの承認と確認を本人が行えるか。ADR-0116）。 */
+  async soloOperator(operatorId: string): Promise<boolean> {
+    const { rows } = await this.pool.query('select ops.solo_operator($1) as solo', [operatorId]);
+    return rows[0]?.solo === true;
   }
 
   /** 代理アクセスを申請する（会社の管理者全員に知らせる）。 */

@@ -108,6 +108,7 @@ export function tenantErrorText(code: string): string {
     case 'not_stopped': return 'この会社は止まっていません';
     case 'not_pending': return 'この申請は、もう扱えません（承認・取り下げ済みなど）';
     case 'same_operator': return '申請した人とは別の運営者が行ってください';
+    case 'solo_note_required': return 'ほかに運営者がいないため、1 人で行う理由を書いてください';
     case 'kind_invalid': return '操作の種類が違います';
     case 'time_invalid': return '終わりの時刻は、始まりより後で、いまより前にしてください';
     case 'login_invalid': return 'ゲストの ID の形が違います';
