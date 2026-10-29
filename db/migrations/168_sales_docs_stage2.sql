@@ -3,7 +3,7 @@
 -- 巻き戻し: 足した列と表を消し、書類の種類の制約を元の 4 つに戻す（注文請書を消してから）。
 
 alter table sales_documents drop constraint if exists sales_documents_kind_check;
-alter table sales_documents add constraint sales_documents_kind_check check (kind in ('purchase_order', 'delivery', 'invoice', 'receipt', 'acknowledgement'));
+alter table sales_documents add constraint sales_documents_kind_check check (kind in ('purchase_order', 'delivery', 'invoice', 'receipt', 'acknowledgement')) not valid;  -- 移行は毎回すべて流すため、後で足した種類（見積書）の行があっても止まらないよう、ここでは確かめない（最後の形は移行 169）
 -- 納品書で出庫した在庫の記録（取り消しで戻すため）
 alter table sales_documents add column if not exists stock_moves jsonb not null default '[]';
 

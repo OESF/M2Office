@@ -4,7 +4,7 @@
 
 alter table slide_decks add column if not exists kind text not null default 'slides';
 alter table slide_decks drop constraint if exists slide_decks_kind_check;
-alter table slide_decks add constraint slide_decks_kind_check check (kind in ('slides', 'doc'));
+alter table slide_decks add constraint slide_decks_kind_check check (kind in ('slides', 'doc')) not valid;  -- 移行は毎回すべて流すため、後で足した種類の行があっても止まらないよう、ここでは確かめない（最後の形は移行 163）
 alter table slide_decks add column if not exists body text;
 alter table slide_decks alter column plan drop not null;
 create index if not exists slide_decks_kind on slide_decks (tenant_id, kind, user_id, updated_at desc);

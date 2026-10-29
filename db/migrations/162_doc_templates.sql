@@ -5,5 +5,5 @@
 
 alter table slide_themes add column if not exists kind text not null default 'slides';
 alter table slide_themes drop constraint if exists slide_themes_kind_check;
-alter table slide_themes add constraint slide_themes_kind_check check (kind in ('slides', 'doc'));
+alter table slide_themes add constraint slide_themes_kind_check check (kind in ('slides', 'doc')) not valid;  -- 移行は毎回すべて流すため、後で足した種類の行があっても止まらないよう、ここでは確かめない（最後の形は移行 163）
 create index if not exists slide_themes_kind on slide_themes (tenant_id, kind, created_at desc);

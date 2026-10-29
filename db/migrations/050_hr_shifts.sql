@@ -6,7 +6,7 @@
 
 alter table hr_terms add column if not exists schedule text not null default 'fixed';
 alter table hr_terms drop constraint if exists hr_terms_schedule_check;
-alter table hr_terms add constraint hr_terms_schedule_check check (schedule in ('fixed', 'shift'));
+alter table hr_terms add constraint hr_terms_schedule_check check (schedule in ('fixed', 'shift')) not valid;  -- 移行は毎回すべて流すため、後で足した型の行があっても止まらないよう、ここでは確かめない（最後の形は移行 110）
 
 create table if not exists hr_shift_plans (
   tenant_id     text not null references tenants(id) on delete cascade,
