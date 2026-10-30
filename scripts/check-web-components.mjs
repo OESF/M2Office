@@ -6,6 +6,8 @@
  * 2. **利用者に見える文に、社内の文書への参照が混じっていないか**（仕様書 第6.10.4.1節）。
  *    「仕様書 第6.1.3節」のような書き方は、コードの説明には要るが、画面に出してはならない。
  *    実際に個人設定へ出ていた（2026-09-24）。
+ * 3. **画面の言葉の決まりに外れた言い方が無いか。** クリップボードへのコピーは「コピー」「コピーしました」で、
+ *    「写す」は使わない（2026-10-03 に決めたのに、2026-10-30 に体験版の画面で使ってしまった）。
  *
  * 使い方: node scripts/check-web-components.mjs
  */
@@ -88,6 +90,29 @@ function docLeaks(source) {
   return hits;
 }
 
+/** 画面で使わない言い方と、代わりに使う言葉。 */
+const AVOID_WORDS = [
+  { word: /写す|写しました/, use: '「コピー」「コピーしました」' },
+];
+
+/**
+ * 画面の言葉の決まりに外れた言い方を探す。
+ *
+ * @remarks コメントは見ない。文字列（`'…'`・`"…"`・`` `…` ``）と JSX の地の文を見る
+ */
+function wordRuleHits(source) {
+  const code = withoutComments(source);
+  const texts = [
+    ...[...code.matchAll(/(["'`])((?:(?!\1)[^\\\n]|\\.)*)\1/g)].map((m) => m[2]),
+    ...[...code.matchAll(/>([^<>{}]*[^\s<>{}][^<>{}]*)</g)].map((m) => m[1]),
+  ];
+  const hits = [];
+  for (const t of texts) {
+    for (const r of AVOID_WORDS) if (r.word.test(t)) hits.push(`「${t.trim()}」→ ${r.use}`);
+  }
+  return hits;
+}
+
 const problems = [];
 for (const path of files(ROOT)) {
   const source = readFileSync(path, 'utf8');
@@ -98,13 +123,16 @@ for (const path of files(ROOT)) {
   for (const leak of docLeaks(source)) {
     problems.push(`${path.replace(ROOT, '')}: 画面に社内の文書への参照が出ています: ${leak}`);
   }
+  for (const hit of wordRuleHits(source)) {
+    problems.push(`${path.replace(ROOT, '')}: 画面の言葉の決まりに外れています: ${hit}`);
+  }
 }
 
 if (problems.length > 0) {
   console.error('画面の確認:');
   for (const p of problems) console.error(`  ${p}`);
   console.error('部品はブラウザ標準の名前（Text・Option など）と重なっていないか、');
-  console.error('文は「仕様書 第○節」のような社内の参照を含んでいないかを確かめてください。');
+  console.error('文は「仕様書 第○節」のような社内の参照を含んでいないか、画面の言葉の決まりに合っているかを確かめてください。');
   process.exit(1);
 }
 console.log('画面の確認: 部品の取り込みと、利用者に見える文の書き方はどちらも問題ありません。');

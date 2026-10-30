@@ -59,9 +59,7 @@ export interface DemoStore {
 export interface DemoSelfSignup {
   loginId: string;
   passwordHash: string;
-  company: string;
-  contact: string;
-  email: string;
+  /** そろえた形のメールアドレス（データベースの関数が控えにするだけで、文字のままは残さない）。 */
   emailKey: string;
   source: string;
   /** 体験用の会社の名前（見本の会社名）。 */
@@ -126,8 +124,8 @@ export class PostgresDemoStore implements DemoStore {
   }
 
   async selfSignup(p: DemoSelfSignup) {
-    const { rows } = await this.pool.query('select * from m2o_demo_self_signup($1,$2,$3,$4,$5,$6,$7,$8)',
-      [p.loginId, p.passwordHash, p.company, p.contact, p.email, p.emailKey, p.source, p.companyName]);
+    const { rows } = await this.pool.query('select * from m2o_demo_self_signup($1,$2,$3,$4,$5)',
+      [p.loginId, p.passwordHash, p.emailKey, p.source, p.companyName]);
     const r = rows[0];
     return { guestId: r.guest_id, tenantId: r.tenant_id, userId: r.user_id, expiresAt: iso(r.expires_at)! };
   }

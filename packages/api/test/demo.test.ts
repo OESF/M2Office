@@ -178,7 +178,7 @@ function signupSetup() {
   return { app, deps, store, sessions, challenge, signup, seeds: () => seeds };
 }
 
-const SIGNUP = { company: '見本商事', contact: '山田', email: 'yamada@example.co.jp', agree: true };
+const SIGNUP = { email: 'yamada@example.co.jp', agree: true };
 
 test('自分で申し込む: ロボットよけを解くと、その場で体験用の会社ができてログインした状態になる。ID とパスワードは応答で 1 度だけ', async () => {
   process.env['BASE_DOMAIN'] = BASE;

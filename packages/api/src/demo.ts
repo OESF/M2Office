@@ -177,8 +177,7 @@ export function demoSignupRoute(deps: AppDeps, opts: { throttle?: DemoLoginThrot
       let made: Awaited<ReturnType<AppDeps['demo']['store']['selfSignup']>>;
       try {
         made = await deps.demo.store.selfSignup({
-          loginId, passwordHash, company: v.company, contact: v.contact, email: v.email, emailKey: v.emailKey,
-          source: demoSignupSource(address), companyName: DEMO_COMPANY_NAME,
+          loginId, passwordHash, emailKey: v.emailKey, source: demoSignupSource(address), companyName: DEMO_COMPANY_NAME,
         });
       } catch (err) {
         if (err instanceof Error && /login_taken/.test(err.message)) continue;

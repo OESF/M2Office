@@ -355,7 +355,7 @@ function CreateTenant({ onClose, onCreated }: { onClose: () => void; onCreated: 
         <h3>作りました</h3>
         <p><a className="link" href={done.loginUrl} target="_blank" rel="noreferrer">{done.loginUrl}</a></p>
         <div className="field"><label>最初の管理者に渡す案内</label><textarea readOnly value={done.welcome} rows={7} /></div>
-        <button className="btn small" onClick={() => void copyText(done.welcome).then(setCopied)}>{copied ? '写しました' : '案内を写す'}</button>{' '}
+        <button className="btn small" onClick={() => void copyText(done.welcome).then(setCopied)}>{copied ? 'コピーしました' : '案内をコピーする'}</button>{' '}
         <button className="btn ghost small" onClick={onClose}>閉じる</button>
       </div>
     );
@@ -924,14 +924,14 @@ function DisplayCard() {
   );
 }
 
-/** 運営者が会社へ自分で渡す案内の文と、写すボタン。 */
+/** 運営者が会社へ自分で渡す案内の文と、コピーするボタン。 */
 function NoticeToSend({ text, onClose }: { text: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="card">
       <h3>会社の管理者へ渡す案内</h3>
       <div className="field"><textarea readOnly value={text} rows={6} /></div>
-      <button className="btn small" onClick={() => void copyText(text).then(setCopied)}>{copied ? '写しました' : '案内を写す'}</button>{' '}
+      <button className="btn small" onClick={() => void copyText(text).then(setCopied)}>{copied ? 'コピーしました' : '案内をコピーする'}</button>{' '}
       <button className="btn ghost small" onClick={onClose}>閉じる</button>
     </div>
   );

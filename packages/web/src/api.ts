@@ -1440,7 +1440,7 @@ export const api = {
   /** 体験版のロボットよけの問題をもらう。 */
   demoChallenge: () => call<DemoChallenge>('/demo-signup/challenge'),
   /** 体験版を自分で申し込む（その場でログインした状態になる）。 */
-  demoSignup: async (b: { company: string; contact: string; email: string; agree: boolean; challenge: DemoChallenge & { number: number } }) => {
+  demoSignup: async (b: { email: string; agree: boolean; challenge: DemoChallenge & { number: number } }) => {
     const res = await call<DemoSignupResult & { csrfToken: string | null }>('/demo-signup', { method: 'POST', body: JSON.stringify(b) });
     csrfToken = res.csrfToken;
     return { loginId: res.loginId, password: res.password, expiresAt: res.expiresAt } as DemoSignupResult;

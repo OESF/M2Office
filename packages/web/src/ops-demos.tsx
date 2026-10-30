@@ -3,7 +3,7 @@
  *
  * 運営者が相手の会社名・担当者名・案内を送るメールアドレスを入れて体験を出すと、ゲストの ID とパスワードを 1 度だけ出す。
  * 運営者は案内の文を写して、自分のメールで送る（M2Office からは送らない）。一覧には相手の情報と数だけを出し、体験用の会社の中身は見ない。
- * 紹介のページから自分で申し込んだ体験（ADR-0117）も同じ一覧に出し、出し方で見分ける。
+ * 紹介のページから自分で申し込んだ体験（ADR-0117）も同じ一覧に出し、出し方で見分ける。自分で申し込んだ体験は相手の情報を持たない。
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -40,7 +40,7 @@ function Issued({ title, loginId, password, url, welcome, onClose }: { title: st
         <dt>パスワード（いまだけ出します）</dt><dd><code>{password}</code></dd>
       </dl>
       {welcome && <div className="field"><label>相手に送る案内</label><textarea readOnly value={welcome} rows={11} /></div>}
-      <button className="btn small" onClick={() => void copyText(welcome ?? `ゲストの ID: ${loginId}\nパスワード: ${password}`).then(setCopied)}>{copied ? '写しました' : '案内を写す'}</button>{' '}
+      <button className="btn small" onClick={() => void copyText(welcome ?? `ゲストの ID: ${loginId}\nパスワード: ${password}`).then(setCopied)}>{copied ? 'コピーしました' : '案内をコピーする'}</button>{' '}
       <button className="btn ghost small" onClick={onClose}>閉じる</button>
     </div>
   );
@@ -124,7 +124,7 @@ export function OpsDemos({ me }: { me: OpsMe }) {
           <tbody>
             {list.demos.map((d) => (
               <tr key={d.id}>
-                <td>{d.contactPurgedAt ? <span className="muted">（相手の情報は削除済み）</span> : <>{d.company}<div className="small muted">{[d.contact, d.email].filter(Boolean).join(' ・ ')}</div></>}</td>
+                <td>{d.origin === 'self' ? <span className="muted">—</span> : d.contactPurgedAt ? <span className="muted">（相手の情報は削除済み）</span> : <>{d.company}<div className="small muted">{[d.contact, d.email].filter(Boolean).join(' ・ ')}</div></>}</td>
                 <td>{ORIGIN_LABEL[d.origin]}</td>
                 <td><code>{d.loginId}</code></td>
                 <td>{STATE_LABEL[d.state]}{d.lockedUntil && Date.parse(d.lockedUntil) > Date.now() && <span className="badge warn">ログインを止めています</span>}</td>

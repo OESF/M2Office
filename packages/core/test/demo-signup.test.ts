@@ -32,14 +32,13 @@ test('送り元は IPv4 はそのまま、IPv6 は前の 64 ビットで見る',
   assert.equal(demoSignupSource('2001:db8::1'), '2001:db8:0:0::/64');
 });
 
-test('申し込みの入力: 会社名・お名前・メールアドレスと規約への同意が要る', () => {
-  const ok = checkDemoSignup({ company: ' 見本商事 ', contact: '山田', email: 'Yamada+t@Example.co.jp', agree: true });
-  assert.deepEqual(ok, { ok: true, value: { company: '見本商事', contact: '山田', email: 'yamada+t@example.co.jp', emailKey: 'yamada@example.co.jp' } });
-  assert.equal(checkDemoSignup({ company: '', contact: '山田', email: 'a@example.com', agree: true }).ok, false);
-  assert.equal(checkDemoSignup({ company: 'x', contact: '', email: 'a@example.com', agree: true }).ok, false);
-  assert.equal(checkDemoSignup({ company: 'x', contact: 'y', email: 'bad', agree: true }).ok, false);
-  assert.equal(checkDemoSignup({ company: 'x', contact: 'y', email: 'a@example.com', agree: 'yes' }).ok, false, '同意は true だけ');
-  assert.equal(checkDemoSignup({ company: 'x'.repeat(101), contact: 'y', email: 'a@example.com', agree: true }).ok, false);
+test('申し込みの入力: メールアドレスと規約への同意だけ。会社名やお名前は受け取っても使わない', () => {
+  const ok = checkDemoSignup({ company: '見本商事', contact: '山田', email: ' Yamada+t@Example.co.jp ', agree: true });
+  assert.deepEqual(ok, { ok: true, value: { emailKey: 'yamada@example.co.jp' } });
+  assert.equal(checkDemoSignup({ email: 'bad', agree: true }).ok, false);
+  assert.equal(checkDemoSignup({ email: '', agree: true }).ok, false);
+  assert.equal(checkDemoSignup({ email: 'a@example.com', agree: 'yes' }).ok, false, '同意は true だけ');
+  assert.equal(checkDemoSignup({ email: `${'a'.repeat(200)}@example.com`, agree: true }).ok, false);
 });
 
 /** 問題を解く（画面と同じ探し方）。 */
@@ -85,7 +84,7 @@ test('申し込みの関数: 同じメールアドレスは一度だけ・同じ
   const made: string[] = [];
   const saved = (await owner.query('select demo_self_signup, demo_daily_limit, demo_monthly_ai_cap_jpy from ops.platform_settings where id = 1')).rows[0];
   const sign = (email: string, source: string) => store.selfSignup({
-    loginId: newGuestLoginId(), passwordHash: hashMachinePassword('x'), company: '見本商事', contact: '山田', email, emailKey: demoEmailKey(email)!,
+    loginId: newGuestLoginId(), passwordHash: hashMachinePassword('x'), emailKey: demoEmailKey(email)!,
     source, companyName: '見本精工株式会社',
   });
   const refused = (code: string) => (e: unknown) => demoSignupRefusalOf(e) === code;
@@ -94,8 +93,9 @@ test('申し込みの関数: 同じメールアドレスは一度だけ・同じ
     const a = await sign(`a-${tag}@example.com`, `198.51.100.${tag.length}`);
     made.push(a.tenantId);
     assert.match(a.tenantId, /^d-/);
-    const g = (await owner.query('select origin, terms_accepted_at, created_by, ai_cap_jpy from ops.demo_guests where tenant_id = $1', [a.tenantId])).rows[0];
+    const g = (await owner.query('select origin, terms_accepted_at, created_by, ai_cap_jpy, company, contact, email from ops.demo_guests where tenant_id = $1', [a.tenantId])).rows[0];
     assert.equal(g.origin, 'self');
+    assert.deepEqual([g.company, g.contact, g.email], ['', '', ''], 'メールアドレスの文字も、会社名・お名前も残さない');
     assert.ok(g.terms_accepted_at, '規約には申し込みのときに同意した');
     assert.equal(g.created_by, 'self-signup');
     assert.equal((await owner.query("select count(*)::int as n from ops.audit where action = 'demo.self_signup' and target_id = (select id from ops.demo_guests where tenant_id = $1)", [a.tenantId])).rows[0].n, 1);
@@ -126,7 +126,7 @@ test('申し込みの関数: 同じメールアドレスは一度だけ・同じ
       [saved.demo_self_signup, saved.demo_daily_limit, saved.demo_monthly_ai_cap_jpy]);
     await owner.query("delete from ops.demo_signup_sources where created_at > now() - interval '5 minutes' and addr_hash in (select encode(sha256(convert_to(s.pepper || ':addr:' || a, 'UTF8')), 'hex') from ops.demo_signup_secret s, unnest($1::text[]) a)",
       [[`198.51.100.${tag.length}`, '198.51.100.200', '198.51.100.201', '198.51.100.202']]);
-    await owner.query("delete from ops.demo_guests where tenant_id = any($1) or email like $2", [made, `%-${tag}@example.com`]);
+    await owner.query('delete from ops.demo_guests where tenant_id = any($1)', [made]);
     await owner.query("delete from ops.demo_signup_emails where email_hash in (select encode(sha256(convert_to(s.pepper || ':email:' || e, 'UTF8')), 'hex') from ops.demo_signup_secret s, unnest($1::text[]) e)",
       [[`a-${tag}@example.com`, `b-${tag}@example.com`]]);
     await owner.end();

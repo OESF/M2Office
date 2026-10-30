@@ -1,7 +1,8 @@
 /**
  * @file 体験版を自分で申し込む画面（`demo.<親のドメイン>/start`。仕様書 第23.3.2節「自分で申し込む」、ADR-0117）。
  *
- * 会社名・お名前・メールアドレスと規約への同意だけで、その場で体験用の会社ができ、ログインした状態になる。
+ * メールアドレスと規約への同意だけで、その場で体験用の会社ができ、ログインした状態になる。メールアドレスは「同じ人は 1 回だけ」の
+ * 確かめにだけ使い、文字のままは残さない（会社名・お名前は聞かない。第 0.491.0 版）。
  * ロボットよけは、画面を開いたときから裏で問題を解いておく（ALTCHA と同じ仕組み。利用者の操作は要らない）。
  * 次に入るためのゲストの ID とパスワードは、このときだけ出す。
  */
@@ -48,8 +49,6 @@ const ASK_US = new Set(['signup_email_used', 'signup_daily_limit', 'signup_budge
  * @param onStarted 体験が始まったあと（ログインした状態になっている）
  */
 export function DemoStart({ terms, onStarted }: { terms: string[]; onStarted: () => void }) {
-  const [company, setCompany] = useState('');
-  const [contact, setContact] = useState('');
   const [email, setEmail] = useState('');
   const [agree, setAgree] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -77,7 +76,7 @@ export function DemoStart({ terms, onStarted }: { terms: string[]; onStarted: ()
     setError(null);
     try {
       const challenge = await solution();
-      setDone(await api.demoSignup({ company: company.trim(), contact: contact.trim(), email: email.trim(), agree, challenge }));
+      setDone(await api.demoSignup({ email: email.trim(), agree, challenge }));
     } catch (err) {
       const code = err instanceof ApiError ? String(err.body['code'] ?? '') : '';
       setError({ text: err instanceof Error ? err.message : '申し込めませんでした', askUs: ASK_US.has(code) });
@@ -112,7 +111,7 @@ export function DemoStart({ terms, onStarted }: { terms: string[]; onStarted: ()
             <dt>パスワード</dt><dd><code>{done.password}</code></dd>
           </dl>
           <p className="small">次に入るときに使います。この画面を閉じると、もう出せません。</p>
-          <button className="btn ghost wide" onClick={copy}>{copied ? '写しました' : '写す'}</button>
+          <button className="btn ghost wide" onClick={copy}>{copied ? 'コピーしました' : 'クリップボードにコピーする'}</button>
           <button className="btn wide" onClick={start}>始める</button>
         </div>
       </div>
@@ -125,15 +124,11 @@ export function DemoStart({ terms, onStarted }: { terms: string[]; onStarted: ()
         <h1>M2Office</h1>
         <p className="lead">体験版</p>
         <form onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-          <div className="field"><label htmlFor="demo-company">会社名</label>
-            <input id="demo-company" autoComplete="organization" maxLength={100} value={company} onChange={(e) => setCompany(e.target.value)} /></div>
-          <div className="field"><label htmlFor="demo-contact">お名前</label>
-            <input id="demo-contact" autoComplete="name" maxLength={100} value={contact} onChange={(e) => setContact(e.target.value)} /></div>
           <div className="field"><label htmlFor="demo-email">メールアドレス</label>
             <input id="demo-email" type="email" autoComplete="email" maxLength={200} value={email} onChange={(e) => setEmail(e.target.value)} /></div>
           <ul className="demo-terms-list">{terms.map((t) => <li key={t}>{t}</li>)}</ul>
           <label className="demo-agree"><input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} /> 体験版の利用規約に同意する</label>
-          <button className="btn wide" type="submit" disabled={busy || !agree || !company.trim() || !contact.trim() || !email.trim()}>{busy ? '…' : '体験を始める'}</button>
+          <button className="btn wide" type="submit" disabled={busy || !agree || !email.trim()}>{busy ? '…' : '体験を始める'}</button>
         </form>
         {error && <p className="error">{error.text}{error.askUs && <> <a href={contactUrl}>お問い合わせ</a></>}</p>}
         <p className="small login-machine"><a href="/">ゲストの ID でログイン</a></p>

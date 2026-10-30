@@ -2,6 +2,8 @@
  * @file 体験版を自分で申し込む（仕様書 第23.3.2節「自分で申し込む」、Q-289、ADR-0117）の決まり。データベースに触れない純粋な関数だけを置く。
  *
  * 入力の確かめ、同じ人を見分けるためのメールアドレスと送り元のそろえ方、ロボットよけの問題と答えの確かめを持つ。
+ * 聞くのはメールアドレスだけで、それも「同じ人は 1 回だけ」の確かめの控えにしか使わない（第 0.491.0 版。情報漏洩を避けるため、
+ * 体験版を動かすのに要らない会社名・お名前は聞かず、メールアドレスの文字も残さない）。
  * ロボットよけは ALTCHA と同じ仕組み（画面が `SHA-256(salt + 数)` が問題と一致する数を探す）で、外の部品やサービスを使わない。
  */
 
@@ -9,11 +11,7 @@ import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 
 
 /** 申し込みの入力（整えたもの）。 */
 export interface DemoSignupInput {
-  company: string;
-  contact: string;
-  /** 入れたままのメールアドレス（前後の空白を除き、小文字にしたもの）。 */
-  email: string;
-  /** 同じ人を見分けるための、そろえた形のメールアドレス。 */
+  /** 同じ人を見分けるための、そろえた形のメールアドレス（控えを作るためだけに使う）。 */
   emailKey: string;
 }
 
@@ -52,17 +50,11 @@ export function demoSignupSource(address: string): string {
  * @returns 整えた入力か、申し込んだ人に見せる理由
  */
 export function checkDemoSignup(raw: Record<string, unknown>): { ok: true; value: DemoSignupInput } | { ok: false; error: string } {
-  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
-  const company = str(raw['company']);
-  const contact = str(raw['contact']);
-  const email = str(raw['email']).toLowerCase();
-  if (!company) return { ok: false, error: '会社名を入れてください' };
-  if (!contact) return { ok: false, error: 'お名前を入れてください' };
-  if (company.length > 100 || contact.length > 100) return { ok: false, error: '会社名とお名前は 100 文字までで入れてください' };
+  const email = typeof raw['email'] === 'string' ? raw['email'].trim().toLowerCase() : '';
   const emailKey = email.length <= 200 ? demoEmailKey(email) : null;
   if (!emailKey) return { ok: false, error: 'メールアドレスの形が違います' };
   if (raw['agree'] !== true) return { ok: false, error: '体験版の利用規約に同意してください' };
-  return { ok: true, value: { company, contact, email, emailKey } };
+  return { ok: true, value: { emailKey } };
 }
 
 /** データベースが断った理由（`m2o_demo_self_signup`）。 */
