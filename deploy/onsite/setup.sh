@@ -112,10 +112,8 @@ else
 fi
 sudo -v
 
-# 同じ機械のほかの製品（M2Medical など）。共通の入口に置かれた名前の設定と、遠隔の保守を持つ製品を見る（第8.6.9節）
+# 同じ機械のほかの製品（M2Medical など）。共通の入口に置かれた名前の設定を見る（第8.6.9節）
 OTHER_SITES=$(find "$FRONT_DIR/sites" -name '*.caddy' ! -name 'm2office.caddy' -exec basename {} .caddy \; 2>/dev/null | tr '\n' ' ' || true)
-MAINT_OWNER=$("$FRONT_SH" owner 2>/dev/null || true)
-[ "$MAINT_OWNER" = M2Office ] && MAINT_OWNER=''
 [ -n "$OTHER_SITES" ] && info "同じ機械のほかの製品: ${OTHER_SITES}（入口を分け合います）"
 
 # これまでの答え（2 回目から既定にする）
@@ -198,24 +196,12 @@ if [ -n "$ALLOWED_SIGNERS_SOURCE" ]; then
 fi
 ask UPDATE_HOUR '自動の更新の時刻（時。0〜23）' "${UPDATE_HOUR:-3}"
 
-say '7. 遠隔の保守（保守を引き受ける人がいるときに決める。仕様書 第8.6.4節）'
-info '遠隔の保守: 保守を引き受ける人（SIer など）の Tailscale にこの機械を登録し、ふだんは閉じておく。会社の管理者が「機械」で時間を限って開ける'
-MAINTENANCE=no
-if [ -n "$MAINT_OWNER" ]; then
-  # 開けると技術者は機械全体に入れるため、守りの厳しい側（患者の情報を持つ製品）の管理者だけが開ける
-  info "この機械の遠隔の保守は $MAINT_OWNER が持ちます（$MAINT_OWNER の管理者が開けます）。M2Office では入れません"
-elif yes_no '遠隔の保守を入れますか' "$( [ "${MAINTENANCE_SAVED:-no}" = yes ] && echo y || echo n)"; then
-  MAINTENANCE=yes
-  ask TAILSCALE_AUTHKEY '保守する人からもらった Tailscale の鍵（登録済みなら空）' '' secret
-fi
-MAINTENANCE_SAVED=$MAINTENANCE
-
 say '答えの確かめ'
 info "会社: ${COMPANY_NAME}（${SUBDOMAIN}）／ ドメイン: $GW_DOMAIN ／ 管理者: $ADMIN_EMAIL"
 info "名前: https://$HOST ／ 証明書: $TLS_MODE ${DNS_PROVIDER:+（${DNS_PROVIDER}）}"
 info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）} ／ 社外の控え: $( [ "$OFFSITE" = yes ] && echo "$OFFSITE_REPOSITORY" || echo 送らない)"
 info "ローカル AI: ${LOCAL_LLM_URL:-（使わない）} ${LOCAL_LLM_MODEL} ／ Gemini の鍵: $( [ -n "$GEMINI_API_KEY" ] && echo 入れる || echo 入れない)"
-info "自動の更新: ${AUTO_UPDATE}（${UPDATE_HOUR} 時）／ 遠隔の保守: $MAINTENANCE${MAINT_OWNER:+（$MAINT_OWNER が持つ）}"
+info "自動の更新: ${AUTO_UPDATE}（${UPDATE_HOUR} 時）"
 yes_no 'この答えで入れますか' y || exit 1
 
 # ---- 2. 前提のソフト（Homebrew） ----
@@ -224,7 +210,6 @@ command -v brew >/dev/null || die 'Homebrew がありません。https://brew.sh
 missing=''
 # ffmpeg はナレーション付きスライドを MP4 にまとめるのに使う（M2Office には同梱しない。第32.18.6節 段 3、ADR-0094）
 formulas="$NODE_FORMULA $PG_FORMULA pgvector caddy ffmpeg"
-[ "$MAINTENANCE" = yes ] && formulas="$formulas tailscale"
 [ "$OFFSITE" = yes ] && formulas="$formulas restic"
 for f in $formulas; do
   brew list --versions "$f" >/dev/null 2>&1 || missing="$missing $f"
@@ -240,8 +225,6 @@ NPM_DIR="$(brew --prefix "$NODE_FORMULA")/bin"
 PG_BIN="$(brew --prefix "$PG_FORMULA")/bin"
 CADDY_BIN="$(brew --prefix caddy)/bin/caddy"
 FFMPEG_BIN="$(brew --prefix ffmpeg)/bin/ffmpeg"
-TAILSCALE_BIN=''
-[ "$MAINTENANCE" = yes ] && TAILSCALE_BIN="$(brew --prefix tailscale)/bin/tailscale"
 RESTIC_BIN=''
 [ "$OFFSITE" = yes ] && RESTIC_BIN="$(brew --prefix restic)/bin/restic"
 info "Node.js $("$NODE_BIN" --version) ／ PostgreSQL $("$PG_BIN/postgres" --version | awk '{print $3}') ／ Caddy $("$CADDY_BIN" version | awk '{print $1}')"
@@ -347,7 +330,7 @@ conf="$work/setup.conf"
   printf '# M2Office ローカルの形の答え（setup.sh が書く。秘密の値は m2office.env にだけ置く）\n'
   for k in COMPANY_NAME SUBDOMAIN GW_DOMAIN ADMIN_EMAIL HOST TLS_MODE DNS_PROVIDER ACME_EMAIL DATA_DIR BACKUP_DIR API_PORT DB_PORT \
     LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL ALLOWED_SIGNERS_SOURCE ALLOWED_SIGNERS AUTO_UPDATE UPDATE_HOUR \
-    INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE FRONT_DIR NODE_BIN NPM_DIR PG_BIN CADDY_BIN SERVICE_USER MAINTENANCE MAINTENANCE_SAVED TAILSCALE_BIN \
+    INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE FRONT_DIR NODE_BIN NPM_DIR PG_BIN CADDY_BIN SERVICE_USER \
     OFFSITE OFFSITE_SAVED RESTIC_BIN FFMPEG_BIN; do
     printf "%s='%s'\n" "$k" "$(printf '%s' "${!k}" | sed "s/'/'\\\\''/g")"
   done
@@ -356,8 +339,8 @@ sudo install -m 644 -o root -g wheel "$conf" "$CONF"
 printf '{"auto":%s,"signed":%s,"hour":%s}\n' "$( [ "$AUTO_UPDATE" = yes ] && echo true || echo false)" \
   "$( [ -n "$ALLOWED_SIGNERS" ] && echo true || echo false)" "$UPDATE_HOUR" > "$work/update-settings.json"
 sudo install -m 644 -o "$SERVICE_USER" -g "$SERVICE_USER" "$work/update-settings.json" "$DATA_DIR/machine/update-settings.json"
-printf '{"configured":%s}\n' "$( [ "$MAINTENANCE" = yes ] && echo true || echo false)" > "$work/maintenance-settings.json"
-sudo install -m 644 -o "$SERVICE_USER" -g "$SERVICE_USER" "$work/maintenance-settings.json" "$DATA_DIR/machine/maintenance-settings.json"
+# 遠隔の保守は第 0.492.0 版でなくした。前の版で入れた機械では、印のファイルを片付ける
+sudo rm -f "$DATA_DIR/machine/maintenance-settings.json" "$DATA_DIR/machine/maintenance-request.json"
 
 # launchd の設定を入れて（入れ直して）動かす
 load_daemon() {
@@ -411,22 +394,12 @@ else
   sudo launchctl bootout system/jp.m2office.update >/dev/null 2>&1 || true
   sudo rm -f "$DAEMONS/jp.m2office.update.plist"
 fi
-if [ "$MAINTENANCE" = yes ]; then
-  # Tailscale の常駐を入れ、保守する人の Tailscale に 1 度だけ登録して、閉じておく（開けるのは会社の管理者）
-  if ! sudo launchctl print system/com.tailscale.tailscaled >/dev/null 2>&1; then
-    sudo "$(brew --prefix tailscale)/bin/tailscaled" install-system-daemon
-    sleep 3
-  fi
-  if sudo "$TAILSCALE_BIN" status 2>&1 | grep -qi 'logged out\|NeedsLogin'; then
-    [ -n "${TAILSCALE_AUTHKEY:-}" ] || die '遠隔の保守の登録には、保守する人からもらった Tailscale の鍵が要ります'
-    sudo "$TAILSCALE_BIN" up --authkey "$TAILSCALE_AUTHKEY" --hostname "m2o-$SUBDOMAIN" --ssh --accept-dns=false
-  fi
-  sudo "$TAILSCALE_BIN" down || true
-  load_daemon jp.m2office.maintenance
-  info '遠隔の保守: 登録して閉じました（会社の管理者が「機械」で開けます）'
-else
+# 遠隔の保守（第 0.492.0 版でなくした。仕様書 第8.6.4節）。前の版で入れた開け閉めの見回りを外す。
+# Tailscale そのものは、保守を引き受ける人やほかの製品が使っているかもしれないので、ここでは触れない
+if [ -f "$DAEMONS/jp.m2office.maintenance.plist" ]; then
   sudo launchctl bootout system/jp.m2office.maintenance >/dev/null 2>&1 || true
   sudo rm -f "$DAEMONS/jp.m2office.maintenance.plist"
+  info '遠隔の保守の見回りを外しました。Tailscale を使わないなら、自分で登録を外して削除してください（sudo tailscale logout）'
 fi
 
 # ---- 社外の控えの置き場を用意する（初めてのときだけ暗号化した置き場を作る） ----

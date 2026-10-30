@@ -211,7 +211,6 @@ function machineFns(base: string) {
     /** 今すぐ控えを取る（ワーカーが次の見回りで取る）。 */
     machineBackup: () => call<{ ok: true }>(`${base}/backup`, { method: 'POST', body: '{}' }),
     /** 遠隔の保守を開ける（`hours` 時間）か、閉じる（`null`）。 */
-    machineMaintenance: (hours: number | null) => call<{ until: string | null }>(`${base}/maintenance`, { method: 'PUT', body: JSON.stringify({ hours }) }),
     /** 運営への稼働の知らせを入れる・切る。 */
     /** 夜の自動の更新を止める（延ばす。`days`）か、止めるのをやめる（`null`）。 */
     machineUpdateHold: (days: number | null) => call<{ heldUntil: string | null }>(`${base}/update-hold`, { method: 'PUT', body: JSON.stringify({ days }) }),
@@ -726,7 +725,7 @@ export interface LoginProviders {
   dev: { enabled: boolean; users: { email: string; displayName: string; roles: string[] }[] };
   /** ローカルの形で機械の管理者を作った機械か（ログイン画面に「機械の管理」を出す。仕様書 第8.6.3節）。 */
   machineAdmin?: boolean;
-  /** 体験版の入口か（ゲストの ID とパスワードの欄を出す。仕様書 第23.3.2節）。 */
+  /** 体験版の入口か（ゲスト ID とパスワードの欄を出す。仕様書 第23.3.2節）。 */
   demo?: boolean;
   /** 体験版の利用規約（自分で申し込むときに同意を求める。第23.3.2節「自分で申し込む」）。 */
   demoTerms?: string[];
@@ -741,7 +740,7 @@ export interface DemoChallenge {
   signature: string;
 }
 
-/** 自分で申し込んだ体験（ゲストの ID とパスワードは、このときだけ届く）。 */
+/** 自分で申し込んだ体験（ゲスト ID とパスワードは、このときだけ届く）。 */
 export interface DemoSignupResult {
   loginId: string;
   password: string;
@@ -3110,15 +3109,7 @@ export interface MachineView {
     last: { at: string; from: string; to: string; result: 'updated' | 'rolled-back' | 'failed' | 'none'; error?: string } | null;
     heldUntil: string | null;
   };
-  /** 遠隔の保守（仕様書 第8.6.4節）。会社の管理者が時間を限って開ける。 */
-  maintenance: {
-    configured: boolean;
-    open: boolean;
-    until: string | null;
-    sessions: { openedAt: string; by: string; until: string; closedAt: string | null; peers: string[] }[];
-    /** 同じ機械のほかの製品（M2Medical）が遠隔の保守を持つとき、その名前。M2Office からは開けられない（第8.6.9節）。 */
-    managedBy: string | null;
-  };
+
 }
 
 

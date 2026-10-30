@@ -56,7 +56,7 @@ function pick(chars: string, n: number): string {
   return out;
 }
 
-/** ゲストの ID（`guest-` と英数字 6 文字）。 */
+/** ゲスト ID（`guest-` と英数字 6 文字）。 */
 export function newGuestLoginId(): string {
   return `guest-${pick(ID_CHARS, 6)}`;
 }
@@ -66,7 +66,7 @@ export function newGuestPassword(): string {
   return pick(PASSWORD_CHARS, 16);
 }
 
-/** ゲストの ID の形か。 */
+/** ゲスト ID の形か。 */
 export function isGuestLoginId(v: string): boolean {
   return /^guest-[a-z0-9]{6}$/.test(v);
 }
@@ -78,7 +78,7 @@ export type DemoRestriction = 'users' | 'connection' | 'storage' | 'feature';
 export const DEMO_RESTRICTED_MESSAGE: Record<DemoRestriction, string> = {
   users: '体験版では、利用者を招待できません（1 社に 1 人です）',
   connection: '体験版では、接続の設定はできません。見本のデータで動いています',
-  storage: '体験版のファイルの置き場（500 MB）がいっぱいです。要らないファイルを削除してください',
+  storage: '体験版のデータ容量（500 MB）がいっぱいです。要らないファイルを削除してください',
   feature: '体験版では使えません',
 };
 
@@ -163,10 +163,10 @@ export function demoWelcomeText(p: { company: string; contact: string; url: stri
   return [
     `${p.company}${p.contact ? ` ${p.contact} 様` : ' ご担当者様'}`,
     '',
-    'M2Office の体験版をご用意しました。次の URL を開き、ゲストの ID とパスワードでログインしてください。',
+    'M2Office の体験版をご用意しました。次の URL を開き、ゲスト ID とパスワードでログインしてください。',
     '',
     p.url,
-    `ゲストの ID: ${p.loginId}`,
+    `ゲスト ID: ${p.loginId}`,
     `パスワード: ${p.password}`,
     `期限: ${day}（日本時間）まで`,
     '',

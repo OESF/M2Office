@@ -222,7 +222,6 @@ export {
   RUNTIME_BEAT_INTERVAL_MS, RUNTIME_BEAT_STALE_MS, WORKER_BEAT_INTERVAL_MS, WORKER_DOWN_MS, workerDown, type RuntimeBeatStore,
   type BackupConfig, type BackupRecord, type BackupStatus, type MachineConfig, type MachineStatus,
   readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus,
-  readMaintenanceStatus, requestMaintenance, frontDir, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, type MaintenanceSession, type MaintenanceStatus,
   runOffsite, checkOffsite, readOffsiteStatus, offsiteConfigFromEnv, parseBackupSummary, OFFSITE_KEEP, type OffsiteConfig, type OffsiteRecord, type OffsiteStatus,
   machineAdminFromEnv, hashMachinePassword, verifyMachinePassword, base32Encode, base32Decode, totpCode, verifyTotp, totpUri,
   machineSessionKey, issueMachineSession, verifyMachineSession, machineCsrf, MachineLoginThrottle,

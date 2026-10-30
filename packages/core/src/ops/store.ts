@@ -100,7 +100,7 @@ export interface OpsDemo {
   lockedUntil: string | null;
   /** 使える・期限切れ（消す前）・終えた（消した）。 */
   state: 'active' | 'expired' | 'ended';
-  /** 出し方（運営が出した・自分で申し込み）。 */
+  /** 提供者（運営者・申し込み画面）。 */
   origin: 'ops' | 'self';
 }
 

@@ -10,7 +10,7 @@
 set -u
 DIR=${1:?ログの置き場を渡してください}
 KEEP=4
-for name in api.log worker.log postgres.log maintenance.log update.log; do
+for name in api.log worker.log postgres.log update.log; do
   f="$DIR/$name"
   [ -s "$f" ] || continue
   # 古い世代を 1 つずつ後ろへ送り、いちばん古いものを消す

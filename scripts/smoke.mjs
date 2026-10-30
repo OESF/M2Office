@@ -8838,7 +8838,7 @@ console.log('\n■ 133. 体験版（ゲストの表はアプリが読めない�
       const me = await demoCall('/v1/me', { cookie: good.cookie });
       const seeded = (await owner.query('select count(*)::int as n from knowledge_items where tenant_id = $1', [guest.tenant_id])).rows[0].n;
       wrong.status === 401 && good.status === 200 && me.status === 200 && me.body.tenant?.id === guest.tenant_id && me.body.demo?.terms?.length > 0 && seeded >= 3
-        ? ok('ゲストの ID とパスワードでログインでき、ログイン状態から体験用の会社が決まり、最初のログインで見本のデータが入る')
+        ? ok('ゲスト ID とパスワードでログインでき、ログイン状態から体験用の会社が決まり、最初のログインで見本のデータが入る')
         : ng('ゲストのログインが違う', JSON.stringify({ wrong: wrong.status, good: good.status, me: me.status, tenant: me.body?.tenant?.id, seeded }).slice(0, 300));
       const csrf = good.body.csrfToken;
       const mcp = await demoCall('/v1/admin/connections/mcp', { method: 'POST', body: { name: 'x', url: 'https://example.com/mcp' }, cookie: good.cookie, csrf });

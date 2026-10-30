@@ -687,7 +687,7 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     const op = c.get('operator');
     const password = newGuestPassword();
     const passwordHash = hashMachinePassword(password);
-    // ゲストの ID がたまたま重なったら、引き直す
+    // ゲスト ID がたまたま重なったら、引き直す
     for (let i = 0; i < 3; i++) {
       const loginId = newGuestLoginId();
       try {

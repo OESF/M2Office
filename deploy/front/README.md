@@ -18,7 +18,7 @@
 | `/Library/M2Front/Caddyfile` | 共通の Caddyfile。`sites/*.caddy` を読み込むだけで、全体の設定の段（`{ … }`）は持たない | `front.sh`（手で書き換えない） |
 | `/Library/M2Front/CONTRACT` | 取り決めの版（整数）。新しい写しは、古い写しが書いた共通の設定を置き換える。古い写しは、新しいものを置き換えない | `front.sh` |
 | `/Library/M2Front/sites/<製品>.caddy` | 製品ごとの名前・証明書・振り分け（M2Office は `m2office.caddy`、M2Medical は `m2medical.caddy`）。DNS の鍵を含むため root だけが読める | 各製品のセットアップ（`front.sh put-site`） |
-| `/Library/M2Front/maintenance-owner` | 遠隔の保守を開けられる製品の名前（1 行。下の「遠隔の保守」） | M2Medical のセットアップ |
+| `/Library/M2Front/maintenance-owner` | 遠隔の保守を開けられる製品の名前（1 行。下の「遠隔の保守」）。M2Office は第 0.492.0 版から読まない | M2Medical のセットアップ |
 | `/Library/M2Front/data`・`config` | Caddy の証明書と状態（root だけ） | Caddy |
 | `/Library/M2Front/logs/caddy-run.log` | 入口の起動のログ | Caddy |
 | `/Library/LaunchDaemons/jp.m2front.caddy.plist` | 入口の起動の設定（root で動かす。443 番を受けるため） | `front.sh` |
@@ -59,15 +59,11 @@
 
 ## 遠隔の保守
 
-Tailscale の保守のトンネルを開けると、技術者は**機械全体**に入れる。患者の情報がある機械では、守りの厳しい側に合わせる。
+**M2Office は、第 0.492.0 版で遠隔の保守をなくした**（仕様書 第8.6.4節。基本方針で、自社運用の保守は使う人と保守を引き受ける人が決めることにしたため）。
 
-- **M2Medical がある機械では、遠隔の保守を開けられるのは M2Medical の管理者だけにする。**
-- M2Medical のセットアップは、遠隔の保守を入れるかどうかにかかわらず、`/Library/M2Front/maintenance-owner` に `M2Medical` と書く（1 行。読めるように 644）。
-- M2Office は、このファイルにほかの製品の名前があれば、
-  - セットアップで遠隔の保守を尋ねず、Tailscale を登録しない
-  - 開け閉めの見回り（`jp.m2office.maintenance`）を入れていても、Tailscale に触れない（M2Medical が開けたトンネルを閉じない）
-  - 管理者ページの「機械」に「M2Medical の管理者が開けます」と出し、開けるボタンを出さない
-- Tailscale の常駐（`tailscaled`）は機械に 1 つ。登録と開け閉めは、遠隔の保守を持つ製品だけが行う。
+- M2Office は Tailscale を登録せず、開け閉めの見回りも持たない。`maintenance-owner` も読まない。
+- M2Medical が遠隔の保守を持つときは、M2Medical だけが Tailscale の登録と開け閉めを行う。M2Office と取り合うことはない。
+- `front.sh owner`（`maintenance-owner` の 1 行目を返す）は、M2Medical のために残す。
 
 ## M2Medical の側で行うこと（M2Medical の作業）
 
@@ -75,7 +71,7 @@ Tailscale の保守のトンネルを開けると、技術者は**機械全体**
 2. セットアップで、自分の名前の設定を作って `front.sh put-site m2medical …` で置く。
 3. セットアップで `/Library/M2Front/maintenance-owner` に `M2Medical` と書く。
 4. 上の「製品ごとに分けるもの」に従って、置き場・利用者・launchd の名前・ポートを決める。
-5. 遠隔の保守の開け閉めは、M2Medical の管理者の画面と見回りで行う（M2Office の `deploy/onsite/maintenance.sh` を写してよい）。
+5. 遠隔の保守の開け閉めは、M2Medical の管理者の画面と見回りで行う（M2Office の `deploy/onsite/maintenance.sh` は第 0.492.0 版で消した。写すなら v0.26.0 のタグから）。
 
 ## スクリプトの書き方
 

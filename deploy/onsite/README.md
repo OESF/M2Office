@@ -39,14 +39,13 @@ git clone --branch v0.18.0 https://github.com/OESF/M2Office.git /Library/M2Offic
 | AI | ローカル AI の口とモデル・埋め込みのモデル・Gemini の鍵（外部の AI を使う会社だけ） |
 | Google のログイン | 会社の OAuth クライアントの ID とシークレット（後でもよい） |
 | 更新 | 署名を確かめる鍵のファイル（`allowed_signers`）・夜に自動で更新するか・時刻 |
-| 遠隔の保守 | 遠隔の保守を入れるか（入れるなら、保守を引き受ける人からもらった Tailscale の鍵） |
 | 機械の管理者 | ID（既定 `machine`）。2 回目からは「作り直しますか」（忘れた・漏れたときだけ「はい」） |
 
 スクリプトが行うこと: 前提のソフトを入れる → 秘密の値を機械の上で作る（運営は知らない）→ 専用の利用者 `_m2office` を作る →
 設定のファイルを雛形から作る → データベースを作り pgvector を有効にする → 本番の組み立て → データベースの移行 → 会社と最初の管理者を作る →
 launchd で動かし、共通の入口（`/Library/M2Front`。無ければ作る）に M2Office の名前の設定を置く → 動きを確かめる（API・ワーカー・入口と証明書・ローカル AI）→ 残りの作業と、紙の「戻すための控え」に書く秘密の値を出す。
 
-**機械の管理者**（仕様書 第8.6.3節）: インターネットや Google が止まって誰もログインできないときに、機械の様子（各部の動き・控え・更新・遠隔の保守・システムログ）を見るための 1 人。
+**機械の管理者**（仕様書 第8.6.3節）: インターネットや Google が止まって誰もログインできないときに、機械の様子（各部の動き・控え・更新・システムログ）を見るための 1 人。
 `https://<名前>/machine` から、ID・合言葉・認証アプリ（Google Authenticator など）の 6 桁の確認コードで入る。業務の画面には入れない。
 `setup.sh` が最後に ID・合言葉・確認コードの種（`qrencode` を入れていれば QR）を 1 度だけ出す。**合言葉はどこにも残らない**（`m2office.env` には控えだけ）ので、
 会社の機械の担当の人に紙で渡し、その場で認証アプリに種を入れてもらう。忘れた・漏れたときは `setup.sh` を走らせ直して作り直す（前のログイン状態はすべて使えなくなる）。
@@ -66,7 +65,7 @@ launchd で動かし、共通の入口（`/Library/M2Front`。無ければ作る
 | `/Library/M2Front/` | 機械に 1 つの共通の入口（Caddy）。M2Office の名前の設定は `sites/m2office.caddy`（DNS の鍵を含むため root だけが読める）。起動のログは `logs/caddy-run.log`。M2Medical と分け合う（`deploy/front/README.md`） |
 | `<データの置き場>/` | `postgres/`・`files/`・`logs/`・`caddy/`・`machine/`（`_m2office` のもの）。`logs/` の標準出力のファイルは、週に 1 回（日曜の 3 時 15 分）`jp.m2office.logrotate` が写して空にして 4 世代を残し、入口のアクセスログは Caddy が 28 日分を残す。会社の管理者は「機械」で見てダウンロードできる（仕様書 第16.10節） |
 | `<控えの置き場>/` | 毎晩の控え（`YYYYMMDD-HHMMSS/`）・`status.json`（社内の控えの結果）・`offsite.json`（社外の控えの結果） |
-| `/Library/LaunchDaemons/jp.m2office.*.plist` | 起動の設定（`launchd/` の雛形から作る。api・worker・postgres と、自動の更新の update・遠隔の保守の maintenance） |
+| `/Library/LaunchDaemons/jp.m2office.*.plist` | 起動の設定（`launchd/` の雛形から作る。api・worker・postgres と、自動の更新の update） |
 | `/Library/LaunchDaemons/jp.m2front.caddy.plist` | 共通の入口の起動の設定（`deploy/front/front.sh` が書く） |
 
 ## M2Medical と同じ機械に入れる
@@ -76,7 +75,7 @@ launchd で動かし、共通の入口（`/Library/M2Front`。無ければ作る
 - 入口（Caddy）は機械に 1 つ。どちらを先に入れても、先に入れた方が共通の入口（`/Library/M2Front`）を作り、後の方は自分の名前の設定を置くだけ。片方を外しても、もう片方は動き続ける。
 - 同じ社内の IP に 2 つの名前（例 `office.<会社のドメイン>` と `medical.<会社のドメイン>`）を向ける。両方とも名前の形にする（`ip` の形は 1 つの製品だけの機械で使う。`setup.sh` が止める）。
 - データベース・置き場・OS の利用者・控えと鍵・更新は別々。ローカル AI は 1 つを両方で使う。夜の自動の更新の時刻はずらす。
-- **遠隔の保守は M2Medical の管理者だけが開ける。** M2Medical が `/Library/M2Front/maintenance-owner` に名前を書くと、`setup.sh` は遠隔の保守を尋ねず、M2Office の見回りはトンネルに触れず、「機械」には開けるボタンが出ない。
+- M2Office は遠隔の保守を持たない（第 0.492.0 版でなくした）。M2Medical が遠隔の保守を持つときは、M2Medical だけが登録と開け閉めを行う。
 - 第 0.318.0 版までの `setup.sh` で入れた機械は、走らせ直すと、M2Office の中にあった入口（`jp.m2office.caddy`）を外して共通の入口に移る（証明書は取り直す）。
 
 ## 更新
@@ -124,11 +123,7 @@ sudo rsync -a /tmp/m2o-restore/files/ <データの置き場>/files/ && sudo cho
 
 ## 遠隔の保守
 
-- 保守を引き受ける人（SIer など）の Tailscale に、導入のときに 1 度だけ登録し（その人からもらった鍵。使い捨ての鍵を勧める）、すぐ閉じる。
-- **ふだんは閉じている。** 会社の管理者が管理者ページの「機械」で時間（1〜24 時間）を選んで「遠隔の保守を開ける」を押すと、30 秒ほどで開き、期限で閉じる。保守する人の側からは開けられない。
-- 開いている間、技術者は Tailscale の SSH で入る（`ssh <利用者>@m2o-<会社の短い名前>`）。触れるのは機械の様子と道具だけで、業務のデータは見ない。
-- 開けた回・閉じた時刻・つないだ相手（Tailscale の機械の名前）は、会社の監査ログに残る。
-- 開け閉めは `jp.m2office.maintenance`（管理者の権限で 30 秒ごと）が `maintenance.sh` を呼んで行う。ログは `<データの置き場>/logs/maintenance.log`。
+M2Office は遠隔の保守の仕組みを持ちません（第 0.492.0 版でなくした。仕様書 第8.6.4節）。社外から機械に入る必要があるときは、使う方と保守を引き受ける人（SIer など）が、自分たちで道具と手順を決めてください。v0.26.0 までの `setup.sh` で遠隔の保守を入れた機械は、`setup.sh` を走らせ直すと開け閉めの見回り（`jp.m2office.maintenance`）を外します。Tailscale そのものには触れないので、使わなければ自分で登録を外して削除してください。
 
 ## 運営: リリースのタグに署名する
 

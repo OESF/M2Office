@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  readMaintenanceStatus, requestMaintenance, frontDir, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, holdUpdates, machineDir,
+  holdUpdates, machineDir,
   appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup, runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -73,28 +73,6 @@ export function machineRoute(deps: AppDeps) {
     const until = await holdUpdates(machineDir(process.env), days, user.id);
     await audit(deps, tenant.id, user.id, until ? 'machine.update_hold' : 'machine.update_resume', 'machine', 'update', { until });
     return c.json({ heldUntil: until });
-  });
-
-  /**
-   * 遠隔の保守を開ける（本文 `hours`。1〜24 時間）か、閉じる（`null`）（第8.6.4節）。会社の管理者だけ。運営は自分で開けられない。
-   * 同じ機械の M2Medical が遠隔の保守を持つときは 409（第8.6.9節）。
-   *
-   * @remarks トンネルの開け閉めは機械の上の maintenance.sh が行う。ここは印を書くだけ
-   */
-  app.put('/maintenance', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
-    const dir = machineDir(process.env);
-    const st = await readMaintenanceStatus(dir, new Date(), frontDir(process.env));
-    // 同じ機械の M2Medical が持つときは、その管理者だけが開ける（第8.6.9節）
-    if (st.managedBy) return c.json({ error: `この機械の遠隔の保守は ${st.managedBy} の管理者が開けます` }, 409);
-    if (!st.configured) return c.json({ error: '遠隔の保守は入れていません（導入のときに入れます）' }, 400);
-    const b = await c.req.json<{ hours?: unknown }>().catch(() => ({} as { hours?: unknown }));
-    const hours = b.hours === null ? null : Number(b.hours ?? MAINTENANCE_DEFAULT_HOURS);
-    if (hours !== null && !(hours >= 1 && hours <= MAINTENANCE_MAX_HOURS)) return c.json({ error: `開けておく時間は 1〜${MAINTENANCE_MAX_HOURS} 時間にしてください` }, 400);
-    const until = await requestMaintenance(dir, hours, user.id);
-    await audit(deps, tenant.id, user.id, until ? 'machine.maintenance_open' : 'machine.maintenance_close', 'machine', 'maintenance', { until });
-    return c.json({ until });
   });
 
   // システムログと証拠保全（ローカルの形だけ。第16.10.4節・第16.10.5節）

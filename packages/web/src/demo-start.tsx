@@ -4,7 +4,7 @@
  * メールアドレスと規約への同意だけで、その場で体験用の会社ができ、ログインした状態になる。メールアドレスは「同じ人は 1 回だけ」の
  * 確かめにだけ使い、文字のままは残さない（会社名・お名前は聞かない。第 0.491.0 版）。
  * ロボットよけは、画面を開いたときから裏で問題を解いておく（ALTCHA と同じ仕組み。利用者の操作は要らない）。
- * 次に入るためのゲストの ID とパスワードは、このときだけ出す。
+ * 次に入るためのゲスト ID とパスワードは、このときだけ出す。
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -87,7 +87,7 @@ export function DemoStart({ terms, onStarted }: { terms: string[]; onStarted: ()
 
   function copy() {
     if (!done) return;
-    void navigator.clipboard?.writeText(`${location.origin}/\nゲストの ID: ${done.loginId}\nパスワード: ${done.password}`)
+    void navigator.clipboard?.writeText(`${location.origin}/\nゲスト ID: ${done.loginId}\nパスワード: ${done.password}`)
       .then(() => setCopied(true)).catch(() => undefined);
   }
 
@@ -107,7 +107,7 @@ export function DemoStart({ terms, onStarted }: { terms: string[]; onStarted: ()
           <p className="lead">体験版・{endText(done.expiresAt)}まで</p>
           <dl className="demo-credentials">
             <dt>URL</dt><dd>{location.origin}/</dd>
-            <dt>ゲストの ID</dt><dd><code>{done.loginId}</code></dd>
+            <dt>ゲスト ID</dt><dd><code>{done.loginId}</code></dd>
             <dt>パスワード</dt><dd><code>{done.password}</code></dd>
           </dl>
           <p className="small">次に入るときに使います。この画面を閉じると、もう出せません。</p>
@@ -128,10 +128,10 @@ export function DemoStart({ terms, onStarted }: { terms: string[]; onStarted: ()
             <input id="demo-email" type="email" autoComplete="email" maxLength={200} value={email} onChange={(e) => setEmail(e.target.value)} /></div>
           <ul className="demo-terms-list">{terms.map((t) => <li key={t}>{t}</li>)}</ul>
           <label className="demo-agree"><input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} /> 体験版の利用規約に同意する</label>
-          <button className="btn wide" type="submit" disabled={busy || !agree || !email.trim()}>{busy ? '…' : '体験を始める'}</button>
+          <button className="btn wide" type="submit" disabled={busy || !agree || !email.trim()}>{busy ? '…' : '体験版を始める'}</button>
         </form>
         {error && <p className="error">{error.text}{error.askUs && <> <a href={contactUrl}>お問い合わせ</a></>}</p>}
-        <p className="small login-machine"><a href="/">ゲストの ID でログイン</a></p>
+        <p className="small login-machine"><a href="/">ゲスト ID でログイン</a></p>
       </div>
     </div>
   );

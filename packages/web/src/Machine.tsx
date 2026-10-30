@@ -1,7 +1,7 @@
 /**
  * @file ローカルの形の「機械」の画面（仕様書 第8.6.7節）。管理者ページの「機械」と、機械の管理者の画面（第8.6.3節）で同じものを使う。
  *
- * 版と更新・各部の動き・ディスク・証明書・ローカル AI・控え・遠隔の保守・稼働の知らせ・システムログと証拠保全。業務の中身は出さない。
+ * 版と更新・各部の動き・ディスク・証明書・ローカル AI・控え・システムログと証拠保全。業務の中身は出さない。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -76,7 +76,6 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
             )}
           </div>
           <MachineUpdate fns={fns} data={data.update} onChanged={load} onError={setError} />
-          <MachineMaintenance fns={fns} data={data.maintenance} onChanged={load} onError={setError} />
         </>
       )}
       <SystemLogs source={logs} />
@@ -125,48 +124,6 @@ function MachineUpdate({ fns, data, onChanged, onError }: { fns: MachineApi; dat
       {s?.auto && (data.heldUntil
         ? <button className="btn ghost small" onClick={() => hold(null)}>止めるのをやめる</button>
         : <button className="btn ghost small" onClick={() => hold(7)}>7 日延ばす</button>)}
-    </div>
-  );
-}
-
-/**
- * 「機械」の遠隔の保守（仕様書 第8.6.4節）。
- *
- * @remarks 遠隔の保守は、ふだん閉じておき、会社の管理者が時間を限って開ける（運営は自分で開けられない）。開けた回と、つないだ相手を出す。
- * 同じ機械の M2Medical が持つときは、開けるボタンを出さず、どちらが開けるかだけを出す（第8.6.9節）
- */
-function MachineMaintenance({ fns, data, onChanged, onError }: {
-  fns: MachineApi; data: MachineView['maintenance']; onChanged: () => void; onError: (m: string) => void;
-}) {
-  const [hours, setHours] = useState(4);
-  const run = (p: Promise<unknown>) => void p.then(onChanged).catch((e) => onError(describeError(e, '変えられませんでした')));
-  const managed = data.managedBy ?? null;
-  if (!data.configured && !managed) return null;
-  return (
-    <div className="card">
-      <h3>遠隔の保守</h3>
-      <dl className="kv">
-        {managed && <><dt>遠隔の保守</dt><dd className="muted">{managed} の管理者が開けます</dd></>}
-        {data.configured && (
-          <>
-            <dt>遠隔の保守</dt>
-            <dd>{data.until ? <span className="badge warn">{whenText(data.until)} まで開けています{data.open ? '' : '（開けている途中）'}</span> : <span className="muted">閉じています</span>}</dd>
-            {data.sessions.length > 0 && <><dt>これまで</dt><dd><ul className="plain small">{data.sessions.slice(0, 5).map((s) => (
-              <li key={s.openedAt}>{whenText(s.openedAt)}〜{s.closedAt ? whenText(s.closedAt) : ''} {s.peers.length ? `つないだ相手: ${s.peers.join('、')}` : 'つないだ相手なし'}</li>
-            ))}</ul></dd></>}
-          </>
-        )}
-      </dl>
-      <div className="row wrap">
-        {data.configured && (data.until
-          ? <button className="btn ghost small" onClick={() => run(fns.machineMaintenance(null))}>閉じる</button>
-          : <>
-            <select value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label="開けておく時間">
-              {[1, 2, 4, 8, 24].map((h) => <option key={h} value={h}>{h} 時間</option>)}
-            </select>
-            <button className="btn small" onClick={() => run(fns.machineMaintenance(hours))}>遠隔の保守を開ける</button>
-          </>)}
-      </div>
     </div>
   );
 }

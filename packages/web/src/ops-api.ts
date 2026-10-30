@@ -192,7 +192,7 @@ export interface DemoRow {
   endedAt: string | null; deletedAt: string | null; contactPurgedAt: string | null; termsAcceptedAt: string | null;
   loginCount: number; lastLoginAt: string | null; lockedUntil: string | null;
   state: 'active' | 'expired' | 'ended';
-  /** 出し方（運営が出した・自分で申し込み）。 */
+  /** 提供者（運営者・申し込み画面）。 */
   origin: 'ops' | 'self';
 }
 

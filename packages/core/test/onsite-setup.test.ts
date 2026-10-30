@@ -68,7 +68,7 @@ test('日本語の言語の設定でも、雛形を埋められる', () => {
 });
 
 test('スクリプトの文法', () => {
-  for (const f of ['setup.sh', 'update.sh', 'maintenance.sh']) execFileSync('/bin/bash', ['-n', join(onsite, f)]);
+  for (const f of ['setup.sh', 'update.sh']) execFileSync('/bin/bash', ['-n', join(onsite, f)]);
   execFileSync('/bin/bash', ['-n', frontSh]);
 });
 
@@ -89,7 +89,7 @@ test('雛形がすべて埋まり、launchd の設定は正しい形', () => {
   assert.doesNotMatch(caddy, /import/);
   assert.match(env, /^M2O_FRONT_DIR=\/Library\/M2Front$/m);
   const plists = readdirSync(join(out, 'launchd'));
-  assert.deepEqual(plists.sort(), ['jp.m2office.api.plist', 'jp.m2office.logrotate.plist', 'jp.m2office.maintenance.plist', 'jp.m2office.postgres.plist', 'jp.m2office.update.plist', 'jp.m2office.worker.plist']);
+  assert.deepEqual(plists.sort(), ['jp.m2office.api.plist', 'jp.m2office.logrotate.plist', 'jp.m2office.postgres.plist', 'jp.m2office.update.plist', 'jp.m2office.worker.plist']);
   // 機械のログのファイルを週に 1 回入れ替える（第16.10.2節）。入口のアクセスログは 28 日、ログの置き場は設定に入れる
   assert.match(readFileSync(join(out, 'launchd', 'jp.m2office.logrotate.plist'), 'utf8'), /logrotate\.sh<\/string>[\s\S]*<integer>0<\/integer>/);
   assert.match(caddy, /roll_keep_for 672h/);
@@ -116,41 +116,6 @@ test('IP の形は、機械の認証局で証明書を出す。埋められな�
   const answers = join(dir, 'answers');
   writeFileSync(answers, 'HOST=x');
   assert.throws(() => execFileSync('/bin/bash', [join(onsite, 'setup.sh'), '--render-only', join(dir, 'out'), '--answers', answers], { env: { ...process.env, NODE_BIN: process.execPath }, stdio: 'pipe' }));
-});
-
-test('遠隔の保守: 会社の管理者の印の期限まで開け、切れたら閉じ、話した相手を回ごとに残す', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'm2o-maint-'));
-  const status = join(dir, 'ts.json');
-  const run = (running: 0 | 1, nowMs: number) => execFileSync(process.execPath, [join(onsite, 'maintenance-state.mjs'), dir, String(running), status], { env: { ...process.env, M2O_NOW_MS: String(nowMs) } }).toString();
-  const t0 = Date.parse('2026-10-08T01:00:00Z');
-  writeFileSync(status, '{}');
-  assert.equal(run(0, t0), 'none');
-  writeFileSync(join(dir, 'maintenance-request.json'), JSON.stringify({ until: '2026-10-08T05:00:00Z', by: 'u-admin' }));
-  assert.equal(run(0, t0), 'up');
-  writeFileSync(status, JSON.stringify({ BackendState: 'Running', Peer: { a: { HostName: 'ops-laptop', Active: true }, b: { HostName: 'idle', Active: false } } }));
-  assert.equal(run(1, t0 + 60_000), 'none');
-  assert.equal(run(1, Date.parse('2026-10-08T05:00:01Z')), 'down');
-  const st = JSON.parse(readFileSync(join(dir, 'maintenance.json'), 'utf8'));
-  assert.equal(st.open, false);
-  assert.equal(st.sessions.length, 1);
-  assert.equal(st.sessions[0].by, 'u-admin');
-  assert.deepEqual(st.sessions[0].peers, ['ops-laptop']);
-  assert.ok(st.sessions[0].closedAt);
-  assert.equal(run(0, Date.parse('2026-10-08T06:00:00Z')), 'none');
-});
-
-test('遠隔の保守: 同じ機械の M2Medical が持つときは、印があってもトンネルに触れない（第8.6.9節）', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'm2o-maint-'));
-  const status = join(dir, 'ts.json');
-  writeFileSync(status, JSON.stringify({ BackendState: 'Running', Peer: {} }));
-  const run = (running: 0 | 1) => execFileSync(process.execPath, [join(onsite, 'maintenance-state.mjs'), dir, String(running), status], {
-    env: { ...process.env, M2O_NOW_MS: String(Date.parse('2026-10-09T01:00:00Z')), M2O_MAINT_FOREIGN: '1' },
-  }).toString();
-  writeFileSync(join(dir, 'maintenance-request.json'), JSON.stringify({ until: '2026-10-09T05:00:00Z', by: 'u-admin' }));
-  // M2Medical が開けたトンネル（動いている）を閉じない。M2Office の印でも開けない
-  assert.equal(run(1), 'none');
-  assert.equal(run(0), 'none');
-  assert.equal(JSON.parse(readFileSync(join(dir, 'maintenance.json'), 'utf8')).open, false);
 });
 
 /** 共通の入口を、偽の caddy と launchctl で動かす。 */

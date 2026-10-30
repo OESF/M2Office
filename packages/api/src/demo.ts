@@ -1,9 +1,9 @@
 /**
- * @file 体験版の入口（`demo.<親のドメイン>`。仕様書 第23.3.2節、ADR-0115・ADR-0117）。ゲストの ID とパスワードでのログイン、
+ * @file 体験版の入口（`demo.<親のドメイン>`。仕様書 第23.3.2節、ADR-0115・ADR-0117）。ゲスト ID とパスワードでのログイン、
  * 自分で申し込む口、規約への同意。
  *
  * 体験版の入口では、会社をサブドメインではなく**ゲストのログイン状態から**決める（会社の判定のミドルウェア）。
- * ログインの口は会社の判定より前に置き、ゲストの ID から体験用の会社を引く。パスワードは scrypt の控えと時間を一定にして比べる。
+ * ログインの口は会社の判定より前に置き、ゲスト ID から体験用の会社を引く。パスワードは scrypt の控えと時間を一定にして比べる。
  * Google のログインの決まり（第16.1節）の例外は、この入口と体験用の会社の中だけに閉じる。
  */
 
@@ -34,7 +34,7 @@ export function isDemoHost(host: string | undefined, sub: string | null, baseDom
   return name === `${sub}.${base}` || name === `${sub}.localhost`;
 }
 
-/** 体験版の入口のログイン手段（画面はこれを見て、ゲストの ID とパスワードの欄を出す）。 */
+/** 体験版の入口のログイン手段（画面はこれを見て、ゲスト ID とパスワードの欄を出す）。 */
 export function demoProviders(): Record<string, unknown> {
   return {
     tenant: { name: DEMO_PRODUCT_NAME, subdomain: '' },
@@ -69,7 +69,7 @@ export class DemoLoginThrottle {
 const DUMMY_HASH = hashMachinePassword(randomBytes(12).toString('base64url'));
 
 /** 断るときの文（ID が無い・パスワードが違う・期限が過ぎた、を分けない）。 */
-const LOGIN_FAILED = 'ゲストの ID かパスワードが違うか、体験の期限が過ぎています';
+const LOGIN_FAILED = 'ゲスト ID かパスワードが違うか、体験の期限が過ぎています';
 
 /**
  * ゲストのログイン（`POST /v1/demo-login`）。会社の判定より前に置く。
@@ -146,7 +146,7 @@ export class DemoChallengeLedger {
  * @remarks
  * 危険度: 中（体験用の会社を作る）。作るのはデータベースの決めた関数だけで、同じメールアドレス・同じ送り元・1 日の数・
  * 体験版全体の月の上限はその中で見る。ここでは入力・ロボットよけ・送り元ごとの回数を確かめる。
- * ゲストの ID とパスワードは応答で 1 度だけ返し、メールでは送らない（ADR-0117）
+ * ゲスト ID とパスワードは応答で 1 度だけ返し、メールでは送らない（ADR-0117）
  */
 export function demoSignupRoute(deps: AppDeps, opts: { throttle?: DemoLoginThrottle; ledger?: DemoChallengeLedger } = {}) {
   const throttle = opts.throttle ?? new DemoLoginThrottle();
@@ -171,7 +171,7 @@ export function demoSignupRoute(deps: AppDeps, opts: { throttle?: DemoLoginThrot
     const v = checked.value;
     const password = newGuestPassword();
     const passwordHash = hashMachinePassword(password);
-    // ゲストの ID がたまたま重なったら、引き直す
+    // ゲスト ID がたまたま重なったら、引き直す
     for (let i = 0; i < 3; i++) {
       const loginId = newGuestLoginId();
       let made: Awaited<ReturnType<AppDeps['demo']['store']['selfSignup']>>;

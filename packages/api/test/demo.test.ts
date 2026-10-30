@@ -81,7 +81,7 @@ function setup(opts: { seeded?: boolean; expiresInMs?: number } = {}) {
   return { app, store, sessions, audits, login, seeds: () => seeds };
 }
 
-test('ゲストの ID とパスワードでログインし、最初の 1 回だけ見本のデータを入れる。ログイン状態は 12 時間', async () => {
+test('ゲスト ID とパスワードでログインし、最初の 1 回だけ見本のデータを入れる。ログイン状態は 12 時間', async () => {
   process.env['BASE_DOMAIN'] = BASE;
   const s = setup();
   const r = await s.login('GUEST-ABC234 ', 'Secret-Pass-16ch');

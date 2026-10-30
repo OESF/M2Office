@@ -1,5 +1,5 @@
 /**
- * @file ログイン画面。Google ログインと、準備中の間だけ使う開発用ログインを出す。体験版の入口では、ゲストの ID とパスワードの欄を出し、
+ * @file ログイン画面。Google ログインと、準備中の間だけ使う開発用ログインを出す。体験版の入口では、ゲスト ID とパスワードの欄を出し、
  * `/start` では自分で申し込む画面を出す。
  *
  * @see 仕様書 第16.1節 認証
@@ -100,12 +100,12 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
 
         {providers?.demo ? (
           <form className="demo-login" onSubmit={(e) => { e.preventDefault(); void demoLogin(); }}>
-            <div className="field"><label htmlFor="guest-id">ゲストの ID</label>
+            <div className="field"><label htmlFor="guest-id">ゲスト ID</label>
               <input id="guest-id" autoComplete="username" autoCapitalize="none" spellCheck={false} value={guestId} onChange={(e) => setGuestId(e.target.value)} placeholder="guest-xxxxxx" /></div>
             <div className="field"><label htmlFor="guest-password">パスワード</label>
               <input id="guest-password" type="password" autoComplete="current-password" value={guestPassword} onChange={(e) => setGuestPassword(e.target.value)} /></div>
             <button className="btn wide" type="submit" disabled={busy || !guestId.trim() || !guestPassword}>{busy ? '…' : 'ログイン'}</button>
-            <p className="small login-machine"><a href="/start">体験を申し込む</a></p>
+            <p className="small login-machine"><a href="/start">体験版を申し込む</a></p>
           </form>
         ) : (
           <>

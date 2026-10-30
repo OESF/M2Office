@@ -19,7 +19,7 @@ import {
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, PlatformAiSource, PostgresPlatformAiSettingsReader, envTenantCapJpy, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, isPublicImageBase, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, WORKER_BEAT_INTERVAL_MS, keepAliveOnTransientErrors,
   PostgresDemoStore, isDemoTenantId,
 } from '@m2office/core';
@@ -874,21 +874,6 @@ while (running) {
       } catch (err) {
         log.warn('会社ごとの毎日の数を残せませんでした', { err });
       }
-    }
-  }
-  // 遠隔の保守の閉じた回を、会社の監査ログに残す（開けた時刻・つないだ相手・閉じた時刻。第8.6.4節）
-  if (onsite && Date.now() - lastUpdateCheck >= 60_000) {
-    try {
-      for (const s of await takeClosedMaintenanceSessions(machineDir(process.env))) {
-        for (const tenantId of await repo.listTenantIds()) {
-          await repo.appendAudit({
-            id: randomUUID(), tenantId, actorType: 'system', actorId: 'machine', action: 'machine.maintenance_session', targetType: 'machine', targetId: 'maintenance',
-            detail: { openedAt: s.openedAt, openedBy: s.by, closedAt: s.closedAt, peers: s.peers }, occurredAt: s.closedAt ?? new Date().toISOString(),
-          });
-        }
-      }
-    } catch (err) {
-      log.warn('遠隔の保守の記録で例外が発生しました', { err });
     }
   }
   // 更新（機械の上の update.sh が行う）に失敗していたら、会社の管理者に 1 度だけ知らせる（第8.6.4節）

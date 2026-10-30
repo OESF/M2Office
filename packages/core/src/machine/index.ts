@@ -6,7 +6,6 @@ import { appPath } from '../app-root.js';
 import type { BackupConfig } from './backup.js';
 import type { MachineConfig } from './status.js';
 import { offsiteConfigFromEnv } from './offsite.js';
-import { frontDir } from './maintenance.js';
 
 export {
   runBackup, restoreTest, readBackupStatus, requestBackup, takeBackupRequest, backupsToKeep, backupName, diskSpace,
@@ -28,10 +27,6 @@ export {
   MACHINE_ADMIN_SESSION_MS, MACHINE_ADMIN_MAX_FAILURES, MACHINE_ADMIN_LOCK_MS, MACHINE_ADMIN_ACTOR, type MachineAdminConfig,
 } from './machine-admin.js';
 export { readUpdateStatus, holdUpdates, takeUnnotifiedUpdateFailure, type UpdateRecord, type UpdateSettings, type UpdateStatus } from './update.js';
-export {
-  readMaintenanceStatus, requestMaintenance, frontDir, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS,
-  type MaintenanceSession, type MaintenanceStatus,
-} from './maintenance.js';
 
 /** 機械の様子の知らせを置く場所（`M2O_MACHINE_DIR`。無ければ `.data/machine`）。 */
 export function machineDir(env: Record<string, string | undefined>): string {
@@ -68,6 +63,5 @@ export function machineConfigFromEnv(env: Record<string, string | undefined>, ve
     host,
     localLlm: env['LOCAL_LLM_URL'] ? { url: env['LOCAL_LLM_URL'], model: env['LOCAL_LLM_MODEL'] || null } : null,
     offsite: !!env['M2O_BACKUP_DIR'] && offsiteConfigFromEnv(env, machineDir(env)) !== null,
-    frontDir: frontDir(env),
   };
 }
