@@ -246,9 +246,10 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .home-suggestions { display: flex; flex-wrap: wrap; gap: calc(8px * var(--space-scale)); margin-top: calc(12px * var(--space-scale)); }
 .home-suggestion { border: 1px solid var(--line); background: var(--panel); color: inherit; font: inherit; font-size: calc(13px * var(--font-scale)); border-radius: 999px; padding: calc(6px * var(--space-scale)) calc(14px * var(--space-scale)); cursor: pointer; text-align: left; }
 .home-suggestion:hover { border-color: var(--accent); color: var(--accent); }
-.home-example { margin-top: calc(16px * var(--space-scale)); }
-.home-example-ask { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
-.home-example-ask:hover { text-decoration: underline; }
+.home-suggestion.is-asked { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.home-tip { margin-top: calc(24px * var(--space-scale)); padding: calc(12px * var(--space-scale)) calc(16px * var(--space-scale)); border: 1px solid var(--warn-line); border-left: 4px solid var(--amber); border-radius: 8px; background: var(--warn-soft); max-width: 36em; }
+.home-tip-head { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: calc(13px * var(--font-scale)); color: var(--amber); }
+.home-tip p { margin: calc(6px * var(--space-scale)) 0 calc(10px * var(--space-scale)); line-height: 1.6; }
 .canvas .lead { color: var(--muted); margin: 0 0 calc(20px * var(--space-scale)); }
 
 /* 秘書のキャンバス（仕様書 第6.2節、ADR-0026）。秘書が結果を見せる場所で、会話の履歴は並べない */

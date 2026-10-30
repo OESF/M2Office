@@ -9,10 +9,10 @@ import { canDecide } from '@m2office/shared';
 import type { Logger } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 
-/** 最初の画面に添える未読のお知らせの数の上限。 */
-const UNREAD_MAX = 3;
-/** 未読のお知らせを見る長さ（ミリ秒）。 */
-const UNREAD_WINDOW_MS = 24 * 3_600_000;
+/** 最初の画面に題名を添える未読のお知らせの数の上限。 */
+const UNREAD_TITLES = 3;
+/** 未読のお知らせを数える件数の上限（超えたら「〇件以上」と伝える）。 */
+const UNREAD_SCAN = 200;
 
 /**
  * 音声を始めたときの第一声の材料を集める（このあとの予定と、本人が判断できる承認待ち）。
@@ -53,17 +53,22 @@ export async function greetingFacts(
 }
 
 /**
- * 最初の画面の材料を集める（第一声の材料に、この 24 時間の未読のお知らせの題名を足す）。
+ * 最初の画面の材料を集める（第一声の材料に、未読のお知らせのすべての数と、新しいものの題名を足す）。
+ *
+ * @remarks 数は題名を添えた分ではなく未読のすべてで伝える。題名だけを渡すと、AI が題名の数を未読の数として話してしまう
  */
 export async function homeFacts(
-  deps: AppDeps, tenantId: string, userId: string, log: Logger, now: number = Date.now(),
+  deps: AppDeps, tenantId: string, userId: string, log: Logger,
 ): Promise<string[]> {
   const facts = await greetingFacts(deps, tenantId, userId, log);
   try {
-    const unread = (await deps.repo.listNotifications(tenantId, userId, 20))
-      .filter((n) => !n.readAt && now - Date.parse(n.createdAt) < UNREAD_WINDOW_MS)
-      .slice(0, UNREAD_MAX);
-    for (const n of unread) facts.push(`まだ見ていないお知らせ「${n.title}」`);
+    const all = await deps.repo.listNotifications(tenantId, userId, UNREAD_SCAN);
+    const unread = all.filter((n) => !n.readAt);
+    if (unread.length > 0) {
+      const count = all.length >= UNREAD_SCAN && unread.length === all.length ? `${UNREAD_SCAN} 件以上` : `${unread.length} 件`;
+      const titles = unread.slice(0, UNREAD_TITLES).map((n) => `「${n.title}」`).join('');
+      facts.push(`まだ見ていないお知らせが全部で ${count}。新しいものは ${titles}`);
+    }
   } catch (err) {
     log.warn('最初の画面のお知らせを取れませんでした', { err });
   }

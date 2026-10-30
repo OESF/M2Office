@@ -691,6 +691,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             avatar={avatar}
             captions={captions}
             request={homeRequest}
+            onRequestTaken={() => setHomeRequest(null)}
             onResult={show}
             onVoice={(on) => { voiceOn.current = on; }}
           />
@@ -1098,7 +1099,9 @@ function Home({ callMe, notFound = false, avatar, secretaryName, onRequest }: {
   // 今日の様子と候補。取れなければ呼びかけだけを出す（詫びない）
   const [brief, setBrief] = useState<SecretaryHome | null>(null);
   useEffect(() => { api.secretaryHome().then(setBrief).catch(() => undefined); }, []);
-  const ask = (text: string) => onRequest({ kind: 'ask', text });
+  // 押した候補。押したことが分かるように印を付ける（答えは秘書のキャンバスに出る）
+  const [asked, setAsked] = useState<string | null>(null);
+  const ask = (text: string) => { setAsked(text); onRequest({ kind: 'ask', text }); };
   return (
     <div className="home">
       {notFound && (
@@ -1117,11 +1120,20 @@ function Home({ callMe, notFound = false, avatar, secretaryName, onRequest }: {
       {brief?.message && <p className="home-message">{brief.message}</p>}
       {brief && brief.suggestions.length > 0 && (
         <div className="home-suggestions">
-          {brief.suggestions.map((t) => <button key={t} className="home-suggestion" onClick={() => ask(t)}>{t}</button>)}
+          {brief.suggestions.map((t) => (
+            <button key={t} className={`home-suggestion${asked === t ? ' is-asked' : ''}`} onClick={() => ask(t)}>{t}</button>
+          ))}
         </div>
       )}
       {brief?.example && (
-        <p className="home-example small muted">たとえば<button className="home-example-ask" onClick={() => ask(brief.example!)}>「{brief.example}」</button>と頼めます</p>
+        <div className="home-tip">
+          <div className="home-tip-head">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 21h6v-1.5H9V21Zm3-19a7 7 0 0 0-4 12.7V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.3A7 7 0 0 0 12 2Zm2.6 11.3-.6.4V16h-4v-2.3l-.6-.4a5 5 0 1 1 5.2 0Z" fill="currentColor" /></svg>
+            ワンポイント
+          </div>
+          <p>秘書には「{brief.example}」のように、ふだんの言葉で頼めます。</p>
+          <button className={`home-suggestion${asked === brief.example ? ' is-asked' : ''}`} onClick={() => ask(brief.example!)}>頼んでみる</button>
+        </div>
       )}
     </div>
   );
@@ -1269,7 +1281,7 @@ function CanvasView({ result, onOpenAgent }: {
  * 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。
  * 音声でも話しかけられ（第10.5節）、手元のファイルを 1 つ渡せる（第10.10節）。
  */
-function SecretaryBar({ drive, lookups, avatar, captions, request, onResult, onVoice }: {
+function SecretaryBar({ drive, lookups, avatar, captions, request, onRequestTaken, onResult, onVoice }: {
   /** 秘書に Google ドライブのファイルを渡せるか（第10.10.8節）。 */
   drive: boolean;
   /** 後ろで動いている調べもの。処理中であることを常に見せる（仕様書 第10.11.6節） */
@@ -1280,6 +1292,8 @@ function SecretaryBar({ drive, lookups, avatar, captions, request, onResult, onV
   captions: boolean;
   /** 最初の画面から頼まれたこと（候補を押した・アバターを押した。第6.1.5節）。`n` が変わるたびに 1 回だけ受ける */
   request: HomeRequest | null;
+  /** 最初の画面からの頼みを受けた（受けたら頼みを消してもらい、帯を作り直しても二度送らない） */
+  onRequestTaken: () => void;
   /** 秘書のキャンバスに結果を出す（第6.2.0節）。帯には出さない */
   onResult: (result: Omit<CanvasResult, 'id'>) => void;
   /** 音声を始めた・終えた。その間の調べものは声で伝わる（第6.2.0節） */
@@ -1418,14 +1432,13 @@ function SecretaryBar({ drive, lookups, avatar, captions, request, onResult, onV
     setCall(started);
   }
 
-  // 最初の画面から頼まれたことを受ける（第6.1.5節）。同じ頼みを二度受けないよう、番号で見分ける
-  const handled = useRef(0);
+  // 最初の画面から頼まれたことを受ける（第6.1.5節）。答えを待っている間は取りこぼさず、終わってから送る
   useEffect(() => {
-    if (!request || request.n === handled.current) return;
-    handled.current = request.n;
+    if (!request || busy) return;
+    onRequestTaken();
     if (request.kind === 'voice') { if (!call) void toggleVoice(); } else void send(request.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request]);
+  }, [request, busy]);
 
   // 終わったものは出さない。終わったことは秘書が応答として伝える（第10.11.7節）
   const running = lookups.filter((x) => !x.done);
