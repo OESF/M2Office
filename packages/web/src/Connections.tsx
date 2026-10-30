@@ -92,21 +92,23 @@ function HealthCard({ group }: { group: ConnectionHealth['group'] }) {
 }
 
 /**
- * 登録済みの OAuth クライアントを Google で確かめるボタン（仕様書 第14.3.3節「登録の確認」）。
+ * 登録済みの OAuth クライアントを Google で確かめる「Google で確認」のボタン（仕様書 第14.3.3節「登録の確認」）。
  *
  * @remarks
  * 保存し直さずに試せる。何も変えない。結果はボタンのすぐ横に出す（第6.10.4.2節）。
  * 確かめられなかったときは注意の色で出し、正しいとは言わない。
+ * 押したら `onCheck` で知らせ、横の保存の古い結果を消してもらう。保存したら `resetKey` が変わり、こちらの古い結果を消す。
  */
-function CheckClientButton() {
+function CheckClientButton({ onCheck, resetKey }: { onCheck: () => void; resetKey: number }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ verdict: GoogleClientVerdict | 'error'; text: string } | null>(null);
+  useEffect(() => { setResult(null); }, [resetKey]);
   const tone = (v: GoogleClientVerdict | 'error') =>
     v === 'ok' ? 'saved' : v === 'unreachable' || v === 'unexpected' ? 'saved warn' : 'error-inline';
   return (
     <span className="save-row">
       <button className="btn ghost" disabled={busy} onClick={() => void (async () => {
-        setBusy(true); setResult(null);
+        setBusy(true); setResult(null); onCheck();
         try {
           const r = await api.admin.testGoogleClient();
           setResult({ verdict: r.verdict, text: r.message });
@@ -115,7 +117,7 @@ function CheckClientButton() {
         } finally {
           setBusy(false);
         }
-      })()}>{busy ? '確かめています…' : 'Google で確かめる'}</button>
+      })()}>{busy ? '確認しています…' : 'Google で確認'}</button>
       <span className="save-result" role="status" aria-live="polite">
         {result && <span className={tone(result.verdict)}>{result.text}</span>}
       </span>
@@ -466,6 +468,9 @@ function GoogleCard({ data, page, onSaved }: {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 保存と「Google で確認」は、どちらかを押したら、もう一方の古い結果を消す（仕様書 第14.3.3節）
+  const [checks, setChecks] = useState(0);
+  const [saves, setSaves] = useState(0);
   const [audit, setAudit] = useState<GoogleLoginAuditStatus | null>(null);
   // ログインの記録の接続から戻ってきたとき（`?loginaudit=`）は、その結果が見えるように開いておく
   const [open, setOpen] = useState<Set<Extra>>(() => new Set(new URLSearchParams(location.search).get('loginaudit') ? ['audit'] : []));
@@ -571,6 +576,7 @@ function GoogleCard({ data, page, onSaved }: {
           {/* 保存の前に Google で組を確かめる。誤りなら API が断り、その理由をボタンの横に出す（仕様書 第14.3.3節） */}
           <SaveButton
             disabled={busy}
+            resetKey={checks}
             run={async () => {
               // クライアント ID を替えると、全員の接続が使えなくなる。先に確かめる（仕様書 第6.5.2.1節）
               if (registered && data.clientId && clientId.trim() !== data.clientId) {
@@ -578,6 +584,7 @@ function GoogleCard({ data, page, onSaved }: {
                 if (impact && impact.users > 0 && !confirm(clientChangeText(impact, 'クライアント ID を替えます'))) return null;
               }
               setMsg(null);
+              setSaves((n) => n + 1);
               const r = await api.admin.saveGoogleClient({ clientId, clientSecret: secret || undefined });
               setSecret('');
               onSaved();
@@ -585,7 +592,7 @@ function GoogleCard({ data, page, onSaved }: {
             }}
             done={(r) => (r === null ? '' : { text: r.message, warn: r.verdict !== 'ok' })}
           />
-          {registered && <CheckClientButton />}
+          {registered && <CheckClientButton resetKey={saves} onCheck={() => setChecks((n) => n + 1)} />}
           {registered && (
             <button className="btn danger" disabled={busy} onClick={() => void (async () => {
               const impact = await api.admin.googleClientImpact().catch(() => null);

@@ -28,17 +28,25 @@ export type SaveDone = string | { text: string; warn?: boolean };
  * 注意を成功の色で出さない。「確かめられなかった」を「確かめた」ように見せないためである（仕様書 第14.3.3節）。
  * 押している間はボタンを止め、二重に保存させない。
  */
-export function SaveButton<R>({ run, label = '保存', done = '保存しました', disabled = false }: {
+export function SaveButton<R>({ run, label = '保存', done = '保存しました', disabled = false, resetKey }: {
   run: () => Promise<R>;
   label?: string;
   done?: SaveDone | ((result: R) => SaveDone);
   disabled?: boolean;
+  /** 変わったら、出している結果（保存しました・保存できなかった理由）を消す。横のボタンで別の操作をしたときに、古い結果を残さないため */
+  resetKey?: unknown;
 }) {
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState<{ text: string; warn: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    setOk(null);
+    setError(null);
+  }, [resetKey]);
 
   async function press() {
     setBusy(true);

@@ -1516,7 +1516,7 @@ console.log('\n■ 28. 接続の設定（Gemini・Google Workspace）');
     afterOver.google.updatedAt === seeded.google.updatedAt && afterOver.google.secretRegistered
       ? ok('確かめて誤りなら、いまの登録を上書きしない') : ng('上書きされた', JSON.stringify(afterOver.google));
   }
-  // 「Google で確かめる」は何も変えず、判定と文だけを返す。シークレットは返さない
+  // 「Google で確認」は何も変えず、判定と文だけを返す。シークレットは返さない
   const tried = await call('a', '/v1/admin/connections/google/test', { method: 'POST' });
   tried.status === 200 && ['no-client', 'unreachable'].includes(tried.body.verdict) && tried.body.message && !JSON.stringify(tried.body).includes('GOCSPX')
     ? ok(`登録済みのクライアントを確かめられる（判定: ${tried.body.verdict}）`) : ng('確かめの応答が違う', JSON.stringify(tried.body));
