@@ -1205,6 +1205,16 @@ export interface DecidedApprovalView {
 }
 
 /** 後ろへ回した調べもの 1 件（仕様書 第10.11節）。 */
+/** 最初の画面で秘書が話しかける一言（仕様書 第6.1.5節）。 */
+export interface SecretaryHome {
+  /** 今日の様子（1〜3 文）。材料が無い・作れなかったら `null`。 */
+  message: string | null;
+  /** 次の頼みの候補（3 つまで）。押すと秘書に頼む。 */
+  suggestions: string[];
+  /** 会話の例から 1 つ（「たとえば「…」と頼めます」）。無ければ `null`。 */
+  example: string | null;
+}
+
 export interface Lookup {
   runId: string;
   request: string;
@@ -3050,6 +3060,8 @@ export const api = {
    * 受け取ったら必ず画面に出すこと。
    */
   claimLookups: () => call<{ items: Lookup[] }>('/secretary/lookups/claim', { method: 'POST' }),
+  /** 最初の画面で秘書が話しかける一言（仕様書 第6.1.5節）。 */
+  secretaryHome: () => call<SecretaryHome>('/secretary/home'),
   /** 秘書に聞く。手元のファイルを 5 つまで添えられる（仕様書 第10.10節）。 */
   ask: (message: string, fileIds: string[] = []) =>
     call<SecretaryReply>('/secretary', {

@@ -360,6 +360,11 @@ console.log('\n■ 8. ダミー接続による照会（Google 未接続）');
   item?.agentName === 'メールの整理・下書きの作成' && delegated?.run?.status === 'completed' && item.done
     ? ok('頼んだ業務は秘書バーの一覧に名前つきで並び、終わると伝える対象になる')
     : ng('頼んだ業務が秘書バーに並ばない', JSON.stringify(item));
+  // 最初の画面の一言（第6.1.5節）。候補は 3 つまで、会話の例は 1 つ。今日の様子は AI が作れたときだけ
+  const { status: homeStatus, body: home } = await call('a', '/v1/secretary/home');
+  homeStatus === 200 && Array.isArray(home.suggestions) && home.suggestions.length <= 3 && (home.message === null || typeof home.message === 'string')
+    && (home.example === null || typeof home.example === 'string')
+    ? ok('最初の画面で、秘書の今日の様子・次の頼みの候補・会話の例を返す') : ng('最初の画面の一言の形が違う', JSON.stringify({ homeStatus, home }).slice(0, 200));
 }
 
 console.log('\n■ 9. AG-01 受信箱整理（承認なし・送信しない）');

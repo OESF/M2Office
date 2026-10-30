@@ -19,7 +19,7 @@ import { CategoryMenuActions, ItemMenuActions } from './MenuActions.js';
 import { openDebugPanel } from './debug.js';
 import {
   api, ApiError, describeError,
-  type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryReply,
+  type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryHome, type SecretaryReply,
 } from './api.js';
 import { BriefScreen } from './Briefs.js';
 import { AgentHelpTip, HelpCenter, HelpRating, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
@@ -250,6 +250,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [avatar, setAvatar] = useState('');
   // 本人の呼ばれ方（仕様書 第6.5.3節）。最初の画面の呼びかけに使う（第6.1.5節）
   const [callMe, setCallMe] = useState('');
+  const [secretaryName, setSecretaryName] = useState('');
+  // 最初の画面から秘書の帯へ渡す頼み（第6.1.5節）
+  const [homeRequest, setHomeRequest] = useState<HomeRequest | null>(null);
   // 個人設定「サービスとの接続」は、会社に利用者ごとに許可する接続があるときだけ出す（仕様書 第6.5.9節）
   const [hasServices, setHasServices] = useState(false);
   useEffect(() => {
@@ -270,6 +273,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       setMenu(s.menu);
       setAvatar(s.secretary.avatar ?? '');
       setCallMe(s.secretary.callMe ?? '');
+      setSecretaryName(s.secretary.name ?? '');
       setCaptions(showsCaptions(s.secretary));
     }).catch(() => undefined);
   }, []);
@@ -686,6 +690,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             lookups={lookups}
             avatar={avatar}
             captions={captions}
+            request={homeRequest}
             onResult={show}
             onVoice={(on) => { voiceOn.current = on; }}
           />
@@ -693,7 +698,10 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       >
         <main className="canvas">
           {error && <p className="error">{error}</p>}
-          {view.kind === 'home' && <Home callMe={callMe || `${me.user.displayName}さん`} notFound={notFound} />}
+          {view.kind === 'home' && (
+            <Home callMe={callMe || `${me.user.displayName}さん`} notFound={notFound} avatar={avatar} secretaryName={secretaryName}
+              onRequest={(r) => setHomeRequest({ ...r, n: Date.now() } as HomeRequest)} />
+          )}
           {view.kind === 'agent' && view.agent.category === 'briefing' && (
             // ブリーフは直近の本文と過去の一覧を出す（仕様書 第9.5.5.1.2節）
             <BriefScreen key={view.agent.id} agent={view.agent} initialRunId={view.briefRunId} title={<>
@@ -1063,10 +1071,23 @@ const VIEW_LABELS: Record<string, string> = {
   settings: '個人設定',
 };
 
-function Home({ callMe, notFound = false }: {
+/** 最初の画面から秘書の帯へ渡す頼み（仕様書 第6.1.5節）。\`n\` は頼むたびに変える番号。 */
+type HomeRequest = { kind: 'ask'; text: string; n: number } | { kind: 'voice'; n: number };
+
+/**
+ * 最初の画面（仕様書 第6.1.5節、ADR-0119）。秘書の顔と名乗り・呼びかけ・今日の様子・次の頼みの候補・会話の例を出す。
+ *
+ * @param onRequest 候補か会話の例を押した（秘書に頼む）・アバターを押した（音声を始める）
+ */
+function Home({ callMe, notFound = false, avatar, secretaryName, onRequest }: {
   callMe: string;
   /** 開こうとした画面が無い・見られなかった（仕様書 第6.1.6節）。 */
   notFound?: boolean;
+  /** 秘書のアバター（個人設定）。 */
+  avatar: string;
+  /** 秘書の名前。無ければ名乗らない。 */
+  secretaryName: string;
+  onRequest: (r: { kind: 'ask'; text: string } | { kind: 'voice' }) => void;
 }) {
   // 日をまたいでも、時刻が変わっても、開いたままで正しい挨拶になるようにする
   const [greeting, setGreeting] = useState(() => timeGreeting());
@@ -1074,13 +1095,34 @@ function Home({ callMe, notFound = false }: {
     const t = setInterval(() => setGreeting(timeGreeting()), 60_000);
     return () => clearInterval(t);
   }, []);
+  // 今日の様子と候補。取れなければ呼びかけだけを出す（詫びない）
+  const [brief, setBrief] = useState<SecretaryHome | null>(null);
+  useEffect(() => { api.secretaryHome().then(setBrief).catch(() => undefined); }, []);
+  const ask = (text: string) => onRequest({ kind: 'ask', text });
   return (
     <div className="home">
       {notFound && (
         <p className="warn-msg small">お探しの画面は見つかりませんでした</p>
       )}
-      <p className="home-greeting">{callMe}、{greeting}。</p>
-      <h1>何かお手伝いしましょうか</h1>
+      <div className="home-head">
+        <button className="home-avatar" onClick={() => onRequest({ kind: 'voice' })} title="押すと、秘書と音声で話せます">
+          <SecretaryAvatar avatar={avatar} />
+          <span className="sr-only">秘書と音声で話す</span>
+        </button>
+        <div>
+          <p className="home-greeting">{callMe}、{greeting}。{secretaryName && <>秘書の{secretaryName}です。</>}</p>
+          <h1>何かお手伝いしましょうか</h1>
+        </div>
+      </div>
+      {brief?.message && <p className="home-message">{brief.message}</p>}
+      {brief && brief.suggestions.length > 0 && (
+        <div className="home-suggestions">
+          {brief.suggestions.map((t) => <button key={t} className="home-suggestion" onClick={() => ask(t)}>{t}</button>)}
+        </div>
+      )}
+      {brief?.example && (
+        <p className="home-example small muted">たとえば<button className="home-example-ask" onClick={() => ask(brief.example!)}>「{brief.example}」</button>と頼めます</p>
+      )}
     </div>
   );
 }
@@ -1227,7 +1269,7 @@ function CanvasView({ result, onOpenAgent }: {
  * 常駐の秘書バー。どの画面からでも呼び出せる（仕様書 第10.4節）。
  * 音声でも話しかけられ（第10.5節）、手元のファイルを 1 つ渡せる（第10.10節）。
  */
-function SecretaryBar({ drive, lookups, avatar, captions, onResult, onVoice }: {
+function SecretaryBar({ drive, lookups, avatar, captions, request, onResult, onVoice }: {
   /** 秘書に Google ドライブのファイルを渡せるか（第10.10.8節）。 */
   drive: boolean;
   /** 後ろで動いている調べもの。処理中であることを常に見せる（仕様書 第10.11.6節） */
@@ -1236,6 +1278,8 @@ function SecretaryBar({ drive, lookups, avatar, captions, onResult, onVoice }: {
   avatar: string;
   /** 音声の字幕を出すか（仕様書 第6.5.3節「会話を文字で出す」）。 */
   captions: boolean;
+  /** 最初の画面から頼まれたこと（候補を押した・アバターを押した。第6.1.5節）。`n` が変わるたびに 1 回だけ受ける */
+  request: HomeRequest | null;
   /** 秘書のキャンバスに結果を出す（第6.2.0節）。帯には出さない */
   onResult: (result: Omit<CanvasResult, 'id'>) => void;
   /** 音声を始めた・終えた。その間の調べものは声で伝わる（第6.2.0節） */
@@ -1374,6 +1418,15 @@ function SecretaryBar({ drive, lookups, avatar, captions, onResult, onVoice }: {
     setCall(started);
   }
 
+  // 最初の画面から頼まれたことを受ける（第6.1.5節）。同じ頼みを二度受けないよう、番号で見分ける
+  const handled = useRef(0);
+  useEffect(() => {
+    if (!request || request.n === handled.current) return;
+    handled.current = request.n;
+    if (request.kind === 'voice') { if (!call) void toggleVoice(); } else void send(request.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request]);
+
   // 終わったものは出さない。終わったことは秘書が応答として伝える（第10.11.7節）
   const running = lookups.filter((x) => !x.done);
 
@@ -1407,14 +1460,19 @@ function SecretaryBar({ drive, lookups, avatar, captions, onResult, onVoice }: {
     return () => ro.disconnect();
   }, [fitBox]);
 
-  async function send() {
-    if (!text.trim() || busy) return;
+  /**
+   * 秘書に頼む。`chosen` は最初の画面の候補を押したとき（第6.1.5節）で、書きかけの文と渡すファイルには触れない。
+   */
+  async function send(chosen?: string) {
+    const asked = chosen ?? text;
+    if (!asked.trim() || busy) return;
     setBusy(true);
-    const asked = text;
-    const withFiles = files;
+    const withFiles = chosen ? [] : files;
     try {
-      setText('');
-      setFiles([]);
+      if (!chosen) {
+        setText('');
+        setFiles([]);
+      }
       setHint('考えています…');
       // 書いた依頼には、文字で秘書のキャンバスに返す。音声で話している最中でも読み上げない（第6.2.0節）
       const reply = await api.ask(asked, withFiles.map((f) => f.id));

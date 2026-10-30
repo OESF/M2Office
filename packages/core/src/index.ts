@@ -174,6 +174,7 @@ export { ProactiveWatcher, PROACTIVE_TRIGGER, TRAVEL_PREFIX, PREP_WINDOW_MIN, TR
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
 export { REFERS_TO_PAST, closeness, recall, type Recall } from './secretary/recall.js';
 export { LIST_MIN, SPOKEN_MAX, needsCanvas } from './secretary/canvas.js';
+export { HOME_SUGGESTIONS_MAX, homeBriefPrompt, parseHomeBrief, pickSome, secretaryExamples, type HomeBrief } from './secretary/home.js';
 export { CORRECTION, correctMemory, correctionPrompt, parseCorrection, type CorrectionOp, type CorrectionResult } from './secretary/correct.js';
 export { DIRECT_QUERIES, type EvidenceItem } from './secretary/catalog.js';
 export {

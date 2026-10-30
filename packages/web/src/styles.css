@@ -235,6 +235,20 @@ body.resizing-rows { cursor: row-resize; user-select: none; }
 .home { padding-top: 8vh; max-width: 40em; }
 .home-greeting { font-size: calc(15px * var(--font-scale)); color: var(--muted); margin: 0 0 calc(4px * var(--space-scale)); }
 .home h1 { font-size: calc(26px * var(--font-scale)); margin: 0 0 calc(8px * var(--space-scale)); }
+/* 最初の画面の秘書（仕様書 第6.1.5節）: 顔と名乗り・今日の様子・次の頼みの候補・会話の例 */
+.home-head { display: flex; align-items: center; gap: calc(16px * var(--space-scale)); }
+.home-head h1 { margin: 0; }
+.home-avatar { flex: none; width: 72px; height: 72px; border-radius: 50%; overflow: hidden; padding: 0; border: 2px solid var(--accent-soft); background: var(--neutral-soft); color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.home-avatar:hover { border-color: var(--accent); }
+.home-avatar .avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.home-avatar svg { width: 36px; height: 36px; }
+.home-message { margin: calc(20px * var(--space-scale)) 0 0; padding: calc(12px * var(--space-scale)) calc(16px * var(--space-scale)); border-radius: 12px; border-top-left-radius: 4px; background: var(--accent-soft); line-height: 1.7; }
+.home-suggestions { display: flex; flex-wrap: wrap; gap: calc(8px * var(--space-scale)); margin-top: calc(12px * var(--space-scale)); }
+.home-suggestion { border: 1px solid var(--line); background: var(--panel); color: inherit; font: inherit; font-size: calc(13px * var(--font-scale)); border-radius: 999px; padding: calc(6px * var(--space-scale)) calc(14px * var(--space-scale)); cursor: pointer; text-align: left; }
+.home-suggestion:hover { border-color: var(--accent); color: var(--accent); }
+.home-example { margin-top: calc(16px * var(--space-scale)); }
+.home-example-ask { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.home-example-ask:hover { text-decoration: underline; }
 .canvas .lead { color: var(--muted); margin: 0 0 calc(20px * var(--space-scale)); }
 
 /* 秘書のキャンバス（仕様書 第6.2節、ADR-0026）。秘書が結果を見せる場所で、会話の履歴は並べない */
@@ -548,7 +562,8 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .demo-credentials code { font-size: calc(15px * var(--font-scale)); user-select: all; }
 .demo-terms .small { margin-top: calc(12px * var(--space-scale)); text-align: center; }
 .demo-banner { padding: calc(6px * var(--space-scale)) calc(16px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); background: var(--accent-soft); color: var(--accent); border-bottom: 1px solid var(--line); }
-.btn.wide { display: block; width: 100%; text-align: left; margin-bottom: calc(8px * var(--space-scale)); padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); }
+.btn.wide { display: block; width: 100%; text-align: center; margin-bottom: calc(8px * var(--space-scale)); padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); }
+.dev-login .btn.wide { text-align: left; }
 .btn.wide .sub { display: block; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 .btn.small { padding: calc(3px * var(--space-scale)) calc(10px * var(--space-scale)); font-size: calc(12px * var(--font-scale)); }
 .small { font-size: calc(12px * var(--font-scale)); }

@@ -14,12 +14,12 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket as NodeWebSocket } from 'ws';
-import { canDecide } from '@m2office/shared';
 import { AiNotConfiguredError, AiPolicyBlockedError, needsCanvas, type Logger, type SecretaryReply, type VoiceEvent, type VoiceSession, type VoiceTool, AiLimitError, withAiUsage, addMishear, correctHeard, mishearOf, voiceWords, voiceWordsLine, type VoiceWord } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
 import { extractSubdomain } from '../middleware/tenant.js';
 import { claimUntold } from '../secretary/lookups.js';
+import { greetingFacts } from '../secretary/facts.js';
 import { TurnGate } from './turn-gate.js';
 import { callMeOf, personaLines, voiceNameOf, voiceStyleLine, type VoicePersona } from './persona.js';
 
@@ -38,48 +38,6 @@ const EARLY_AUDIO_MAX = 200;
 
 /** 終わった調べものを探す間隔（ミリ秒）。実行はワーカー（別のプロセス）で進むため、見に行く。 */
 const LOOKUP_POLL_MS = 3000;
-
-/**
- * 音声を始めたときの第一声の材料を集める（仕様書 第6.1.4節）。
- *
- * @remarks
- * **取れたものだけを渡す。** 取れなかったものは渡さず、第一声で詫びさせない。
- * 渡すのは材料であり、読み上げる原稿ではない。
- *
- * 失敗しても会話は始める。挨拶のために対話そのものを止めない。
- */
-async function greetingFacts(
-  deps: AppDeps, tenantId: string, userId: string, log: Logger,
-): Promise<string[]> {
-  const facts: string[] = [];
-  const day = new Date();
-  const from = new Date(day.getFullYear(), day.getMonth(), day.getDate()).toISOString();
-  const to = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).toISOString();
-  try {
-    const events = await deps.connector.calendar.list({ tenantId, userId }, { from, to });
-    const ahead = events.filter((e) => Date.parse(e.start) > Date.now());
-    if (ahead.length > 0) {
-      const next = ahead[0]!;
-      const at = new Date(next.start).toLocaleTimeString('ja-JP', {
-        hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo',
-      });
-      facts.push(`このあとの予定は ${ahead.length} 件。次は ${at} から「${next.title}」`);
-    } else if (events.length > 0) {
-      facts.push('今日の予定はすべて終わっている');
-    }
-  } catch (err) {
-    // 取れなければ触れない。「取得できませんでした」と言わせない
-    log.warn('第一声の予定を取れませんでした', { err });
-  }
-  try {
-    const mine = (await deps.repo.listPendingApprovals(tenantId))
-      .filter((a) => canDecide(a, { id: userId, roles: [] }));
-    if (mine.length > 0) facts.push(`あなたが判断できる承認待ちが ${mine.length} 件`);
-  } catch (err) {
-    log.warn('第一声の承認待ちを取れませんでした', { err });
-  }
-  return facts;
-}
 
 /**
  * 第一声の内部の指示を組み立てる（仕様書 第6.1.4節）。
