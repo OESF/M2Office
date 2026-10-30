@@ -76,7 +76,7 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
             )}
           </div>
           <MachineUpdate fns={fns} data={data.update} onChanged={load} onError={setError} />
-          <MachineMaintenance fns={fns} data={data.maintenance} heartbeat={data.heartbeat} onChanged={load} onError={setError} />
+          <MachineMaintenance fns={fns} data={data.maintenance} onChanged={load} onError={setError} />
         </>
       )}
       <SystemLogs source={logs} />
@@ -130,21 +130,21 @@ function MachineUpdate({ fns, data, onChanged, onError }: { fns: MachineApi; dat
 }
 
 /**
- * 「機械」の遠隔の保守と、運営への稼働の知らせ（仕様書 第8.6.4節・第8.6.8節）。
+ * 「機械」の遠隔の保守（仕様書 第8.6.4節）。
  *
  * @remarks 遠隔の保守は、ふだん閉じておき、会社の管理者が時間を限って開ける（運営は自分で開けられない）。開けた回と、つないだ相手を出す。
  * 同じ機械の M2Medical が持つときは、開けるボタンを出さず、どちらが開けるかだけを出す（第8.6.9節）
  */
-function MachineMaintenance({ fns, data, heartbeat, onChanged, onError }: {
-  fns: MachineApi; data: MachineView['maintenance']; heartbeat: MachineView['heartbeat']; onChanged: () => void; onError: (m: string) => void;
+function MachineMaintenance({ fns, data, onChanged, onError }: {
+  fns: MachineApi; data: MachineView['maintenance']; onChanged: () => void; onError: (m: string) => void;
 }) {
   const [hours, setHours] = useState(4);
   const run = (p: Promise<unknown>) => void p.then(onChanged).catch((e) => onError(describeError(e, '変えられませんでした')));
   const managed = data.managedBy ?? null;
-  if (!data.configured && !heartbeat.configured && !managed) return null;
+  if (!data.configured && !managed) return null;
   return (
     <div className="card">
-      <h3>遠隔の保守と稼働の知らせ</h3>
+      <h3>遠隔の保守</h3>
       <dl className="kv">
         {managed && <><dt>遠隔の保守</dt><dd className="muted">{managed} の管理者が開けます</dd></>}
         {data.configured && (
@@ -154,12 +154,6 @@ function MachineMaintenance({ fns, data, heartbeat, onChanged, onError }: {
             {data.sessions.length > 0 && <><dt>これまで</dt><dd><ul className="plain small">{data.sessions.slice(0, 5).map((s) => (
               <li key={s.openedAt}>{whenText(s.openedAt)}〜{s.closedAt ? whenText(s.closedAt) : ''} {s.peers.length ? `つないだ相手: ${s.peers.join('、')}` : 'つないだ相手なし'}</li>
             ))}</ul></dd></>}
-          </>
-        )}
-        {heartbeat.configured && (
-          <>
-            <dt>運営への稼働の知らせ</dt>
-            <dd>{heartbeat.off ? <span className="muted">切っています</span> : <>送っています {heartbeat.lastAt && <span className="small muted">最後 {whenText(heartbeat.lastAt)} {heartbeat.lastOk ? '' : `届きませんでした${heartbeat.lastError ? `（${heartbeat.lastError}）` : ''}`}</span>}</>}</dd>
           </>
         )}
       </dl>
@@ -172,7 +166,6 @@ function MachineMaintenance({ fns, data, heartbeat, onChanged, onError }: {
             </select>
             <button className="btn small" onClick={() => run(fns.machineMaintenance(hours))}>遠隔の保守を開ける</button>
           </>)}
-        {heartbeat.configured && <button className="btn ghost small" onClick={() => run(fns.machineHeartbeat(heartbeat.off))}>{heartbeat.off ? '稼働の知らせを送る' : '稼働の知らせを切る'}</button>}
       </div>
     </div>
   );

@@ -9,8 +9,8 @@
 import { Hono, type Context, type Next } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploymentFromEnv,
-  buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, machineFlags, operatorCan, opsDomainAllowed, OPERATOR_ROLES,
-  parseMachineReport, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, MACHINE_REPORT_MAX_BYTES, OpsRuleError,
+  buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, operatorCan, opsDomainAllowed, OPERATOR_ROLES,
+  tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, OpsRuleError,
   OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual,
   checkGeminiText, defaultGeminiModels, jstMonth, type CheckResult, type SecretBox,
   checkNewDemo, demoSubdomain, demoWelcomeText, hashMachinePassword, newGuestLoginId, newGuestPassword, DEMO_COMPANY_NAME, DEMO_EXTEND_MAX_DAYS, DEMO_MAX_DAYS,
@@ -128,21 +128,6 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     return c.json({ error: '見つかりません' }, 404);
   });
 
-  // ---- 稼働の知らせの受け口（ローカルの形の機械が 1 時間に 1 回送る。第8.6.8節）。ログインではなく機械の鍵で名乗る ----
-  app.post('/v1/ops/heartbeat', async (c) => {
-    const token = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
-    if (!token) return c.json({ error: '鍵がありません' }, 401);
-    const text = await c.req.text();
-    if (text.length > MACHINE_REPORT_MAX_BYTES) return c.json({ error: '大きすぎます' }, 413);
-    let body: unknown;
-    try { body = JSON.parse(text); } catch { return c.json({ error: '形が違います' }, 400); }
-    const report = parseMachineReport(body);
-    if (!report) return c.json({ error: '形が違います' }, 400);
-    const id = await store.receiveReport(token, report);
-    if (!id) return c.json({ error: '鍵が違います' }, 401);
-    return c.json({ ok: true });
-  });
-
   // ---- ログイン（Google だけ。Q-211） ----
   app.get('/v1/ops/auth/providers', async (c) => c.json({
     google: { enabled: !!config.login },
@@ -248,7 +233,7 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
       operator: op, csrfToken: c.get('session').csrfToken,
       // パスキーで確かめたか。確かめていなければ、登録済みなら確かめ、まだなら登録の合言葉で登録する
       verified: c.get('session').verified, passkeyCount: op.passkeyCount ?? 0,
-      can: Object.fromEntries((['tenant.create', 'tenant.status', 'tenant.suspend', 'tenant.lock', 'machine.manage', 'operator.manage', 'settings.manage', 'evidence.create', 'evidence.delete', 'demo.manage'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
+      can: Object.fromEntries((['tenant.create', 'tenant.status', 'tenant.suspend', 'tenant.lock', 'operator.manage', 'settings.manage', 'evidence.create', 'evidence.delete', 'demo.manage'] as OpsAction[]).map((a) => [a, operatorCan(op.role, a)])),
     });
   });
 
@@ -820,30 +805,6 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
       if (err instanceof OpsRuleError) return c.json({ error: tenantErrorText(err.code) }, err.code === 'not_found' ? 404 : 409);
       throw err;
     }
-  });
-
-  // ---- ローカルの形の機械（稼働の知らせ。第8.6.8節） ----
-  app.get('/v1/ops/machines', async (c) => {
-    const now = new Date();
-    return c.json({ machines: (await store.listMachines()).map((m) => ({ ...m, flags: machineFlags(m.lastAt, m.report, now) })) });
-  });
-
-  app.post('/v1/ops/machines', async (c) => {
-    if (!can(c, 'machine.manage')) return denied(c);
-    const { name } = await c.req.json<{ name?: string }>().catch(() => ({ name: undefined }));
-    const n = (name ?? '').trim();
-    if (!n || n.length > 100) return c.json({ error: '呼び名を入れてください' }, 400);
-    const op = c.get('operator');
-    const { machine, token } = await store.addMachine(n, op.id);
-    await store.audit(op.id, 'machine.add', 'machine', machine.id, { name: n });
-    return c.json({ machine, token }, 201);
-  });
-
-  app.delete('/v1/ops/machines/:id', async (c) => {
-    if (!can(c, 'machine.manage')) return denied(c);
-    if (!(await store.removeMachine(c.req.param('id')))) return c.json({ error: '見つかりません' }, 404);
-    await store.audit(c.get('operator').id, 'machine.remove', 'machine', c.req.param('id'));
-    return c.json({ ok: true });
   });
 
   // ---- 運営者と操作履歴 ----

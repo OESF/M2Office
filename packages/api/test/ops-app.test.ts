@@ -2,12 +2,12 @@
  * @file マスター管理画面の API（仕様書 第23.8.15節）の確かめ。データベースの代わりに手元の見本の口を使う。
  *
  * `ops.` の名前の要求だけを受けること、ログインと CSRF が要ること、ロールでできることが分かれること、
- * 会社を作ったらログインの URL と案内の文を返すこと、稼働の知らせを機械の鍵で受けることを見る。
+ * 会社を作ったらログインの URL と案内の文を返すことを見る。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createLogger, type MachineReport, type NewTenantInput, type Operator, type OpsStore } from '@m2office/core';
+import { createLogger, type NewTenantInput, type Operator, type OpsStore } from '@m2office/core';
 import { opsApp, isOpsHost, tenantLoginUrl, OPS_COOKIE } from '../src/ops/app.js';
 
 /** 手元の見本の口（運営の表の代わり）。 */
@@ -21,7 +21,6 @@ function fakeStore() {
   const codes = new Map<string, string>([['op-mon', 'GOOD-CODE-0001']]);
   const created: NewTenantInput[] = [];
   const audits: string[] = [];
-  const reports: MachineReport[] = [];
   let n = 0;
   // 運営の税率の表（第15.1.1.1節）。はじめは空（同梱の表を出す）
   let taxRows: { id: string; category: string; rate: number; from: string; to?: string; planned?: boolean; sourceUrl: string; checkedOn: string | null; updatedBy: string; updatedAt: string }[] = [];
@@ -55,13 +54,12 @@ function fakeStore() {
     setOperatorProfile: async () => undefined,
     requestStatus: async (_t: string, kind: string) => { audits.push(`store:${kind}`); return 'req-1'; },
     listStatusRequests: async () => [{ id: 'req-1', tenantId: 't-acme', tenantName: 'アクメ', kind: 'lock', reasonCode: 'abuse', reason: 'x', state: 'done', effectiveAt: null }],
-    receiveReport: async (token: string, r: MachineReport) => { if (token !== 'machine-key') return null; reports.push(r); return 'm-1'; },
     listTaxRates: async () => taxRows,
     saveTaxRates: async (rows: typeof taxRows) => { taxRows = rows.map((r) => ({ ...r, updatedBy: 'op', updatedAt: '' })); },
     salesDraftCount: async () => 3,
     taxRateNotice: async (title: string) => { notices.push(title); return 2; },
   } as unknown as OpsStore;
-  return { store, created, audits, reports, sessions, passkeys, codes, notices, taxRows: () => taxRows };
+  return { store, created, audits, sessions, passkeys, codes, notices, taxRows: () => taxRows };
 }
 
 const config = { login: null, googleDomains: [] as string[], devLogin: true, cookieSecure: false, sessionTtlHours: 12 };
@@ -115,23 +113,6 @@ test('会社を作る: 入力を確かめ、ログインの URL と案内の文�
   assert.ok(audits.includes('tenant.create'));
   const mon = await login(app, 'mon@ops.example');
   assert.equal((await post(mon, { subdomain: 'beta', name: 'b', domain: 'b.example', admin: 'a@b.example' })).status, 403);
-});
-
-test('稼働の知らせ: 機械の鍵で受け、形の違うもの・違う鍵・大きすぎるものは断る', async () => {
-  const { store, reports } = fakeStore();
-  const app = opsApp({ store, config, log });
-  const report = {
-    machineId: 'm-1', version: '0.18.0', at: '2026-10-08T01:00:00Z', parts: { database: true, worker: true, entrance: true, localAi: null },
-    backup: { configured: true, lastAt: '2026-10-08T00:00:00Z', lastOk: true, restoreOk: null }, disk: { dataFree: 1, dataTotal: 2, backupFree: null },
-    cert: { daysLeft: 60 }, update: { lastAt: null, lastResult: null, version: null }, injected: '指示として読まないこと',
-  };
-  const send = (key: string, body: string) => app.request('/v1/ops/heartbeat', { method: 'POST', headers: { ...OPS, authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body });
-  assert.equal((await send('wrong', JSON.stringify(report))).status, 401);
-  assert.equal((await send('machine-key', '{"x":1}')).status, 400);
-  assert.equal((await send('machine-key', 'x'.repeat(20_000))).status, 413);
-  assert.equal((await send('machine-key', JSON.stringify(report))).status, 200);
-  assert.equal(reports.length, 1);
-  assert.equal('injected' in reports[0]!, false);
 });
 
 test('会社の詳細と CSV は開いたことを残す。運営主体の設定は運営管理者だけ', async () => {

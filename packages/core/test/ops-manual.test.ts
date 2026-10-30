@@ -19,7 +19,7 @@ test('マニュアルを読む: はじめにが先頭で、章はファイルの
   const server = chapters.find((c) => c.id === '07-server');
   assert.equal(server?.title, '第 7 章 稼働状況');
   assert.ok(!server?.body.startsWith('# '), '題の見出しは本文に残さない');
-  for (const id of ['15-incidents', '16-law-tables']) assert.ok(chapters.some((c) => c.id === id), `${id} がある`);
+  for (const id of ['14-incidents', '15-law-tables']) assert.ok(chapters.some((c) => c.id === id), `${id} がある`);
   assert.deepEqual(loadOpsManual('/存在しない置き場'), []);
 });
 

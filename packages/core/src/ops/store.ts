@@ -10,7 +10,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { RuntimeBeat, RuntimeEnvironment, RuntimeSampleDays, RuntimeSamplePoint, TaxRateEntry } from '@m2office/shared';
 import { beatFromRow, databaseFromRow, DATABASE_USAGE_SQL, samplePointFromRow } from '../machine/runtime.js';
-import type { MachineReport, NewTenantInput, OperatorRole } from './rules.js';
+import type { NewTenantInput, OperatorRole } from './rules.js';
 import type { IncidentImpact, ServiceIncident } from './incidents.js';
 
 /** 運営者。 */
@@ -114,15 +114,6 @@ export interface OpsDemoDefaults {
   dailyLimit: number;
   /** 体験版全体の月の AI の上限（円）。 */
   monthlyAiCapJpy: number;
-}
-
-/** ローカルの形の機械。 */
-export interface OpsMachine {
-  id: string;
-  name: string;
-  createdAt: string;
-  lastAt: string | null;
-  report: MachineReport | null;
 }
 
 /** 運営の税率の表の 1 行（第15.1.1.1節）。 */
@@ -916,40 +907,5 @@ export class OpsStore {
       const { rows } = await this.pool.query('select ops.set_tenant_status($1,$2,$3) as from', [tenantId, status, operatorId]);
       return rows[0].from as string;
     } catch (err) { rethrow(err); }
-  }
-
-  /** 機械の一覧。 */
-  async listMachines(): Promise<OpsMachine[]> {
-    const { rows } = await this.pool.query('select id, name, created_at, last_at, last_payload from ops.machines order by name');
-    return rows.map((r) => ({ id: r.id, name: r.name, createdAt: iso(r.created_at)!, lastAt: iso(r.last_at), report: r.last_payload ?? null }));
-  }
-
-  /** 機械を登録する。受け口の鍵を返す（1 度だけ。データベースには SHA-256 だけを持つ）。 */
-  async addMachine(name: string, by: string): Promise<{ machine: OpsMachine; token: string }> {
-    const id = `m-${randomBytes(4).toString('hex')}`;
-    const token = randomBytes(32).toString('base64url');
-    const { rows } = await this.pool.query(
-      'insert into ops.machines (id, name, token_hash, created_by) values ($1,$2,$3,$4) returning created_at',
-      [id, name, sha256(token), by],
-    );
-    return { machine: { id, name, createdAt: iso(rows[0].created_at)!, lastAt: null, report: null }, token };
-  }
-
-  async removeMachine(id: string): Promise<boolean> {
-    const { rowCount } = await this.pool.query('delete from ops.machines where id = $1', [id]);
-    return (rowCount ?? 0) > 0;
-  }
-
-  /**
-   * 稼働の知らせを受け取る（鍵で機械を決める）。
-   *
-   * @returns 受け取った機械の ID（鍵が違えば `null`）
-   */
-  async receiveReport(token: string, report: MachineReport): Promise<string | null> {
-    const { rows } = await this.pool.query(
-      'update ops.machines set last_at = now(), last_payload = $2 where token_hash = $1 returning id',
-      [sha256(token), JSON.stringify(report)],
-    );
-    return rows[0]?.id ?? null;
   }
 }

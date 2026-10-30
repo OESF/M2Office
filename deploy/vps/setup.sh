@@ -1,7 +1,7 @@
 #!/bin/bash
 # @file クラウドの形のセットアップ（Xserver の VPS・Ubuntu 24.04 か 26.04。仕様書 第20.4.6節、ADR-0113）。技術者が対話で答えて、VPS に M2Office を入れる。
 #
-# 前提: 運営のマニュアル 第 13 章（VPS の用意）を終えていること（SSH は WireGuard の網から・ufw・自動の更新・スワップ）。
+# 前提: 運営のマニュアル 第 12 章（VPS の用意）を終えていること（SSH は WireGuard の網から・ufw・自動の更新・スワップ）。
 #
 # 使い方（管理する置き場に、GitHub のリリースのタグを取ってきてから）:
 #   sudo mkdir -p /opt/m2office && sudo chown "$USER" /opt/m2office
@@ -137,8 +137,8 @@ else
   die "リリースのタグ（v で始まる版）を取ってきてください（いま: $(git -C "$REPO_DIR" rev-parse --short HEAD)）"
 fi
 # 言語の設定が日本語でも同じ表示で確かめる（ufw は「状態: アクティブ」と出すため）
-sudo LC_ALL=C ufw status | grep -q 'Status: active' || die 'ufw が有効ではありません。先に運営のマニュアル 第 13 章を終えてください'
-ip link show wg0 >/dev/null 2>&1 || die 'WireGuard（wg0）がありません。先に運営のマニュアル 第 13 章の手順 8 を終えてください'
+sudo LC_ALL=C ufw status | grep -q 'Status: active' || die 'ufw が有効ではありません。先に運営のマニュアル 第 12 章を終えてください'
+ip link show wg0 >/dev/null 2>&1 || die 'WireGuard（wg0）がありません。先に運営のマニュアル 第 12 章の手順 8 を終えてください'
 
 # ---- 2. 尋ねる（前の答えを既定にする） ----
 sudo mkdir -p "$ETC_DIR" && sudo chmod 750 "$ETC_DIR"
@@ -342,7 +342,7 @@ if ! systemctl is-active --quiet "$BOUNCER" || ! sudo cscli bouncers list -o raw
   sudo systemctl enable "$BOUNCER" >/dev/null 2>&1
   sudo systemctl restart "$BOUNCER"
 fi
-# 80・443 を開ける（WireGuard の UDP と、網の中の SSH は第 13 章で開けてある）
+# 80・443 を開ける（WireGuard の UDP と、網の中の SSH は第 12 章で開けてある）
 sudo ufw allow 80/tcp >/dev/null && sudo ufw allow 443/tcp >/dev/null
 
 # 国で通信を止める（仕様書 第20.4.6節「国で通信を止める」）。nftables の専用の表に入れ、週に 1 回一覧を取り直す
@@ -389,10 +389,10 @@ fi
 
 say '残りの作業'
 info "1. Xserver の DNS に、${BASE_DOMAIN}・www・*.$BASE_DOMAIN の A の記録（この VPS の IP）を作る"
-info '2. Xserver の管理画面のパケットフィルターで、TCP 80・443 を開ける（UDP 51820 は第 13 章で開けてある）'
+info '2. Xserver の管理画面のパケットフィルターで、TCP 80・443 を開ける（UDP 51820 は第 12 章で開けてある）'
 info "3. 開けたら https://$BASE_DOMAIN を開いて確かめる。運営者の端末の hosts に「10.66.0.1 ops.${BASE_DOMAIN}」を足し、WireGuard を入れて https://ops.$BASE_DOMAIN を開く"
 info '4. Google のログインの OAuth クライアントに、戻り先（m2office.env の GOOGLE_LOGIN_REDIRECT_URI と OPS_GOOGLE_REDIRECT_URI）を登録する'
 info "   最初の運営管理者を作る: cd / && sudo -u $SERVICE_USER node --env-file=$ENV_FILE $REPO_DIR/scripts/create-operator.mjs --email <アドレス> --name <名前> --role admin"
 [ -n "$SITE_PREVIEW_HASH" ] && info "紹介のページは公開前の確認の BASIC 認証で守っています（利用者 ${SITE_PREVIEW_USER}）。公開するときは、利用者の名前とハッシュを - で外して走らせ直す"
 [ "$WAF_ENGINE" = DetectionOnly ] && info '5. WAF は記録だけです。誤りが無いことを確かめたら、WAF の動きを On にして走らせ直す'
-info '更新は update.sh で入れます。社外の控え（pgBackRest・restic）と夜の自動の更新は、まだ入れません（運営のマニュアル 第 14 章）'
+info '更新は update.sh で入れます。社外の控え（pgBackRest・restic）と夜の自動の更新は、まだ入れません（運営のマニュアル 第 13 章）'

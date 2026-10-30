@@ -12,7 +12,7 @@ import { SystemLogs, type LogSource } from './SystemLogs.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import {
-  opsApi, OpsApiError, TENANTS_CSV_URL, type MachineRow, type OperatorProfileView, type OpsAiSettingsView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
+  opsApi, OpsApiError, TENANTS_CSV_URL, type OperatorProfileView, type OpsAiSettingsView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
   type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
@@ -23,14 +23,10 @@ import { useOpenHelp } from './help.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
 const ROLE_LABEL: Record<OperatorRole, string> = { admin: '運営管理者', support: 'サポート', monitor: '監視' };
-const FLAG_LABEL: Record<string, string> = {
-  never: 'まだ届いていない', silent: '3 時間届いていない', 'part-down': '止まっている部分', 'backup-failed': '控えの失敗', 'offsite-failed': '社外の控えの失敗',
-  'disk-low': '空きが少ない', 'cert-soon': '証明書の期限が近い', 'update-failed': '更新の失敗',
-};
 const ACTION_LABEL: Record<string, string> = {
   'ops.login': 'ログイン', 'ops.logout': 'ログアウト', 'tenant.create': '会社を作った', 'tenant.status': '状態を変えた',
   'log.view': 'システムログを見た', 'log.download': 'システムログをダウンロードした', 'evidence.create': '証拠保全を始めた', 'evidence.download': '保全したものをダウンロードした', 'evidence.delete': '保全したものを削除した',
-  'machine.add': '機械を登録した', 'machine.remove': '機械を削除した', 'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
+  'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
   'passkey.add': 'パスキーを登録した', 'passkey.verify': 'パスキーで確かめた', 'passkey.delete': 'パスキーを削除した',
   'operator.enroll_code': '登録の合言葉を出した', 'operator.reset_passkeys': 'パスキーを削除してやり直させた',
   'tenant.view': '会社の詳細を開いた', 'tenants.export': '会社一覧を書き出した', 'settings.operator': '運営主体の設定を変えた', 'settings.ai_key': '運営の鍵を入れた', 'settings.ai_key_rejected': '運営の鍵を入れようとした（試して通らなかった）', 'settings.ai_key_delete': '運営の鍵を削除した', 'settings.ai_test': '運営の鍵を試した', 'settings.ai_limits': 'AI の上限を変えた', 'settings.demo': '体験版の既定を変えた', 'demo.create': '体験を出した', 'demo.extend': '体験を延ばした', 'demo.password': '体験のパスワードを出し直した', 'demo.end': '体験を終えた', 'demo.self_signup': '体験を自分で申し込んだ', 'law.tax_rates': '消費税の税率の表を変えた',
@@ -135,7 +131,7 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'demos' | 'requests' | 'server' | 'incidents' | 'logs' | 'machines' | 'operators' | 'audit' | 'law' | 'settings' | 'help';
+type OpsPage = 'tenants' | 'demos' | 'requests' | 'server' | 'incidents' | 'logs' | 'operators' | 'audit' | 'law' | 'settings' | 'help';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
   { id: 'demos', label: '体験', icon: 'sample' },
@@ -143,7 +139,6 @@ const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'server', label: '稼働状況', icon: 'usage' },
   { id: 'incidents', label: '障害の知らせ', icon: 'notifications' },
   { id: 'logs', label: 'システムログ', icon: 'console' },
-  { id: 'machines', label: 'ローカルの形の機械', icon: 'dashboard' },
   { id: 'operators', label: '運営者', icon: 'users' },
   { id: 'audit', label: '操作履歴', icon: 'audit' },
   { id: 'law', label: '法令の表', icon: 'doc' },
@@ -151,18 +146,6 @@ const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   // 運営者のヘルプ（第23.8.16節）。いちばん下
   { id: 'help', label: 'ヘルプ', icon: 'help' },
 ];
-
-/** 印のある機械の数（左のメニューと会社一覧の要約で知らせる。運営の画面からは社外に送らない）。5 分ごとに読み直す。 */
-function useFlaggedMachines(): number | null {
-  const [n, setN] = useState<number | null>(null);
-  useEffect(() => {
-    const load = () => { opsApi.machines().then((r) => setN(r.machines.filter((m) => m.flags.length > 0).length)).catch(() => setN(null)); };
-    load();
-    const t = window.setInterval(load, 300_000);
-    return () => clearInterval(t);
-  }, []);
-  return n;
-}
 
 /**
  * 運営の鍵の全体の上限に近いか（第23.8.14節）。8 割と 10 割で、どの画面の上にも印を出す。5 分ごとに読み直す。
@@ -195,7 +178,6 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
   const [helpChapter, setHelpChapter] = useState<string | null>(null);
   // 画面の「？」の「詳しく見る」で、その画面の章を開く（第23.8.16節）
   useOpenHelp(useCallback((id: string | null) => { setHelpChapter(id); setPage('help'); }, []));
-  const flagged = useFlaggedMachines();
   const aiAlert = usePlatformAiAlert();
   const [requests, setRequests] = useState<StatusRequestRow[]>([]);
   // 承認できる運営者が自分だけか（自分の申請を理由を書いて承認・確認できる。ADR-0116）
@@ -214,7 +196,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
         <span className="badge">{me.operator.displayName}（{ROLE_LABEL[me.operator.role]}）</span>
         <button className="btn ghost small" onClick={onLogout}>ログアウト</button>
       </header>
-      <SideNavLayout extraClass="no-talk" nav={<>{PAGES.map((p) => <NavItem key={p.id} icon={p.icon} label={p.label} hint={p.id === 'machines' && flagged ? `印 ${flagged}` : p.id === 'requests' && todo ? `要対応 ${todo}` : ''} active={page === p.id} onClick={() => { if (p.id === 'help') setHelpChapter(null); setPage(p.id); }} />)}</>}>
+      <SideNavLayout extraClass="no-talk" nav={<>{PAGES.map((p) => <NavItem key={p.id} icon={p.icon} label={p.label} hint={p.id === 'requests' && todo ? `要対応 ${todo}` : ''} active={page === p.id} onClick={() => { if (p.id === 'help') setHelpChapter(null); setPage(p.id); }} />)}</>}>
         <main className="canvas">
           {unconfirmed.length > 0 && (
             <div className="suspended-banner" role="alert">
@@ -228,7 +210,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
               {' '}<button className="link-btn" onClick={() => setPage('settings')}>設定を開く</button>
             </div>
           )}
-          {page === 'tenants' && <Tenants me={me} flagged={flagged} onMachines={() => setPage('machines')} onChanged={loadRequests} />}
+          {page === 'tenants' && <Tenants me={me} onChanged={loadRequests} />}
           {page === 'demos' && <OpsDemos me={me} />}
           {page === 'requests' && <Requests me={me} rows={requests} solo={solo} onChanged={loadRequests} />}
           {page === 'server' && <Server />}
@@ -236,7 +218,6 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           {page === 'logs' && <OpsLogs me={me} />}
           {page === 'settings' && <Settings me={me} />}
           {page === 'law' && <LawTables me={me} />}
-          {page === 'machines' && <Machines me={me} />}
           {page === 'operators' && <Operators me={me} />}
           {page === 'audit' && <Audit />}
           {page === 'help' && <OpsHelp chapter={helpChapter} onChapter={setHelpChapter} />}
@@ -249,7 +230,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
 type SortKey = 'name' | 'subdomain' | 'status' | 'createdAt' | 'lastUsedAt' | 'runs30d' | 'aiCostMonth' | 'filesBytes';
 
 /** 会社一覧（要約・検索・状態の絞り込み・並べ替え）と、会社を作る。 */
-function Tenants({ me, flagged, onMachines, onChanged }: { me: OpsMe; flagged: number | null; onMachines: () => void; onChanged: () => void }) {
+function Tenants({ me, onChanged }: { me: OpsMe; onChanged: () => void }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [rows, setRows] = useState<TenantRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -301,7 +282,6 @@ function Tenants({ me, flagged, onMachines, onChanged }: { me: OpsMe; flagged: n
         <div className="stat"><span>業務の実行（今日 ／ 30 日）</span><strong>{totals.runsToday.toLocaleString()} ／ {totals.runs30.toLocaleString()}</strong><span>失敗 {totals.failRate}%</span></div>
         <div className="stat"><span>今月の AI の費用</span><strong>{yen(totals.ai)}</strong><span>概算</span></div>
         <div className="stat"><span>注意</span><strong>{totals.attention}</strong></div>
-        {!!flagged && <div className="stat" style={{ cursor: 'pointer' }} onClick={onMachines}><span>印のある機械</span><strong>{flagged}</strong></div>}
       </div>
       <div className="field" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <input placeholder="会社名・サブドメイン・ドメインで探す" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 320 }} />
@@ -394,73 +374,6 @@ function CreateTenant({ onClose, onCreated }: { onClose: () => void; onCreated: 
       <button className="btn small" disabled={busy} onClick={submit}>作る</button>{' '}
       <button className="btn ghost small" onClick={onClose}>キャンセル</button>
     </div>
-  );
-}
-
-/** ローカルの形の機械（稼働の知らせ。第8.6.8節）。 */
-function Machines({ me }: { me: OpsMe }) {
-  const [rows, setRows] = useState<MachineRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [issued, setIssued] = useState<{ id: string; token: string } | null>(null);
-  const load = useCallback(() => { opsApi.machines().then((r) => setRows(r.machines)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
-  useEffect(() => { load(); const t = window.setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
-  const add = () => {
-    opsApi.addMachine(name.trim()).then((r) => { setIssued({ id: r.machine.id, token: r.token }); setName(''); load(); }).catch((e) => setError(errText(e, '登録できませんでした')));
-  };
-  const remove = (m: MachineRow) => {
-    if (!confirm(`${m.name} を削除しますか？この機械からの知らせは受け取らなくなります。`)) return;
-    opsApi.removeMachine(m.id).then(load).catch((e) => setError(errText(e, '削除できませんでした')));
-  };
-  const ok = (v: boolean | null | undefined) => (v === null || v === undefined ? '—' : v ? '○' : '×');
-  return (
-    <>
-      <OpsTitle title="ローカルの形の機械" help={{ chapter: '08-machines', text: '社内に置いた機械からの稼働の知らせと、その印を見ます。' }} />
-      {error && <p className="error">{error}</p>}
-      {me.can['machine.manage'] && (
-        <div className="field" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input placeholder="呼び名" value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 280 }} />
-          <button className="btn small" disabled={!name.trim()} onClick={add}>登録</button>
-        </div>
-      )}
-      {issued && (
-        <div className="card">
-          <h3>導入のときに setup.sh へ入れる値（鍵はいまだけ出します）</h3>
-          <dl className="kv">
-            <dt>運営の受け口</dt><dd><code>{`${location.origin}/v1/ops/heartbeat`}</code></dd>
-            <dt>鍵</dt><dd><code>{issued.token}</code></dd>
-            <dt>機械の番号</dt><dd><code>{issued.id}</code></dd>
-          </dl>
-          <button className="btn ghost small" onClick={() => setIssued(null)}>閉じる</button>
-        </div>
-      )}
-      {rows && (
-        <div style={{ overflowX: 'auto' }}>
-          <div className="table-scroll"><table className="table ops-table">
-            <thead><tr><th>呼び名</th><th>版</th><th>最後の知らせ</th><th>データベース ／ ワーカー ／ 入口 ／ ローカル AI</th><th>控え ／ 戻せるか ／ 社外</th><th className="num">データの空き</th><th className="num">証明書</th><th>印</th><th /></tr></thead>
-            <tbody>
-              {rows.map((m) => {
-                const r = m.report;
-                return (
-                  <tr key={m.id}>
-                    <td>{m.name}<div className="small muted">{m.id}</div></td>
-                    <td>{r?.version ?? '—'}</td>
-                    <td>{when(m.lastAt)}</td>
-                    <td>{r ? `${ok(r.parts.database)} ／ ${ok(r.parts.worker)} ／ ${ok(r.parts.entrance)} ／ ${ok(r.parts.localAi)}` : '—'}</td>
-                    <td>{r ? `${r.backup.configured ? ok(r.backup.lastOk) : '—'} ／ ${ok(r.backup.restoreOk)} ／ ${r.backup.offsite?.configured ? ok(r.backup.offsite.lastOk) : '—'}` : '—'}</td>
-                    <td className="num">{r && r.disk.dataFree !== null ? `${bytes(r.disk.dataFree)}${r.disk.dataTotal ? `（${Math.round((r.disk.dataFree / r.disk.dataTotal) * 100)}%）` : ''}` : '—'}</td>
-                    <td className="num">{r?.cert.daysLeft !== null && r?.cert.daysLeft !== undefined ? `あと ${r.cert.daysLeft} 日` : '—'}</td>
-                    <td>{m.flags.map((f) => <span key={f} className="badge warn">{FLAG_LABEL[f] ?? f}</span>)}</td>
-                    <td>{me.can['machine.manage'] && <button className="btn ghost small danger" onClick={() => remove(m)}>削除</button>}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table></div>
-          {rows.length === 0 && <p className="muted">登録した機械はありません</p>}
-        </div>
-      )}
-    </>
   );
 }
 
@@ -558,7 +471,7 @@ function OpsLogs({ me }: { me: OpsMe }) {
   }), [tenants, me]);
   return (
     <>
-      <OpsTitle title="システムログ" help={{ chapter: '12-system-logs', text: 'API・ワーカーなどの記録を探し、書き出し、証拠として保全します。' }} />
+      <OpsTitle title="システムログ" help={{ chapter: '11-system-logs', text: 'API・ワーカーなどの記録を探し、書き出し、証拠として保全します。' }} />
       {source ? <SystemLogs source={source} /> : <p className="muted">読み込んでいます…</p>}
     </>
   );
@@ -571,7 +484,7 @@ function Audit() {
   useEffect(() => { opsApi.audit().then((r) => setRows(r.entries)).catch((e) => setError(e instanceof OpsApiError ? e.message : '読み込めませんでした')); }, []);
   return (
     <>
-      <OpsTitle title="操作履歴" help={{ chapter: '09-settings-audit', text: '運営者の操作の記録です。' }} />
+      <OpsTitle title="操作履歴" help={{ chapter: '08-settings-audit', text: '運営者の操作の記録です。' }} />
       {error && <p className="error">{error}</p>}
       {rows && (
         <div className="table-scroll"><table className="table">
@@ -747,7 +660,7 @@ function Incidents() {
   };
   return (
     <>
-      <OpsTitle title="障害の知らせ" help={{ chapter: '15-incidents', text: '障害や計画停止を、対象の会社の管理者に知らせます。' }} />
+      <OpsTitle title="障害の知らせ" help={{ chapter: '14-incidents', text: '障害や計画停止を、対象の会社の管理者に知らせます。' }} />
       {error && <p className="error">{error}</p>}
       {notice && <p className="ok">{notice}</p>}
       <div className="card">
@@ -823,7 +736,7 @@ function LawTables({ me }: { me: OpsMe }) {
   };
   return (
     <>
-      <OpsTitle title="法令の表" help={{ chapter: '16-law-tables', text: '全社に効く消費税の税率の表を直します。' }} />
+      <OpsTitle title="法令の表" help={{ chapter: '15-law-tables', text: '全社に効く消費税の税率の表を直します。' }} />
       {error && <p className="error">{error}</p>}
       {rows && (
         <div className="card">
@@ -867,7 +780,7 @@ function LawTables({ me }: { me: OpsMe }) {
 function Settings({ me }: { me: OpsMe }) {
   return (
     <>
-      <OpsTitle title="設定" help={{ chapter: '09-settings-audit', text: '運営主体・運営の AI の鍵と上限・体験版の既定・表示を決めます。' }} />
+      <OpsTitle title="設定" help={{ chapter: '08-settings-audit', text: '運営主体・運営の AI の鍵と上限・体験版の既定・表示を決めます。' }} />
       <OperatorProfileCard me={me} />
       <AiSettingsCard me={me} />
       <DemoDefaultsCard me={me} />

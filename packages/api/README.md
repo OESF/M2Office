@@ -422,7 +422,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET・POST /v1/admin/machine/evidence`・`GET /evidence/:id/download`・`DELETE /evidence/:id` | 管理者（ローカルの形だけ）: 証拠保全の一覧・頼む（`reason`・`days`。202）・ZIP のダウンロード・1 年を過ぎたものの削除（1 年に満たなければ 409）（仕様書 第16.10.5節） |
 | `POST /v1/machine-admin/login` | ローカルの形の機械の管理者のログイン（`id`・`password`・`code`。認証アプリの 6 桁）。署名した Cookie `m2o_machine`（8 時間）と CSRF の印を返す。5 回の間違いで 15 分 429。会社の判定より前に置く。クラウドの形・機械の管理者を作っていない機械では 404（仕様書 第8.6.3節） |
 | `GET /v1/machine-admin/me`・`POST /v1/machine-admin/logout` | 機械の管理者のログイン状態・ログアウト |
-| `/v1/machine-admin/machine/…` | 機械の管理者: 管理者ページの `/v1/admin/machine/…` と同じ口（様子・更新・遠隔の保守・稼働の知らせ・控え・システムログ・証拠保全）。状態を変える操作は CSRF の印が要る。データベースにつながらないときは `GET /machine` だけ返し、ほかは 503 |
+| `/v1/machine-admin/machine/…` | 機械の管理者: 管理者ページの `/v1/admin/machine/…` と同じ口（様子・更新・遠隔の保守・控え・システムログ・証拠保全）。状態を変える操作は CSRF の印が要る。データベースにつながらないときは `GET /machine` だけ返し、ほかは 503 |
 | `GET /v1/admin/ai-usage` | 管理者: 今月の AI の利用と上限（会社の月の上限・1 人の上限・用途ごと・人ごと。仕様書 第6.6.2節）。上限は `PUT /v1/admin/settings/aiLimits`（`monthlyJpy`・`perUserShare`）。AI の利用の上限に当たった要求は 429 |
 | `GET /v1/admin/runs` | 管理者: 全利用者の実行の状態（中身は返さない） |
 | `GET /v1/admin/schedules` | 管理者: 会社の全員の定時実行（人・業務・繰り返し・次回・前回・状態）。次の回に動かないものは、起動役と同じ判定（`scheduleBlocker`）の理由を添える。**業務の入力は返さない**。操作の口は無い（仕様書 第6.6.8.2節） |
@@ -629,8 +629,6 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | POST | `/v1/ops/status-requests/:id/decide`・`withdraw`・`confirm` | 承認するか・取り下げ・緊急停止の事後の確認（申請した人は承認と確認ができない。ほかに承認できる運営者がいないときだけ、本文の `soloNote` に 1 人で行う理由を書いて行える。第23.8.6節） | 運営管理者とサポート |
 | GET・POST | `/v1/ops/proxy`・`/v1/ops/tenants/:id/proxy` | 代理アクセスの申請の一覧・申請（範囲と理由。第23.6.1節） | 運営管理者とサポート（見るのはすべて） |
 | POST | `/v1/ops/proxy/:id/open`・`end` | 許された閲覧の会社の画面を開く URL（1 回だけの 2 分の引換券。申請した運営者だけ）・取り下げと終わり | 運営管理者とサポート |
-| GET・POST・DELETE | `/v1/ops/machines` | ローカルの形の機械（印つき）・登録（鍵を 1 度だけ返す）・削除 | 見る: すべて・登録と削除: 運営管理者 |
-| POST | `/v1/ops/heartbeat` | 稼働の知らせの受け口（機械の鍵で名乗る。決めた項目だけを残す） | 機械 |
 | GET・POST・PUT | `/v1/ops/operators` | 運営者の一覧・追加・ロールと状態の変更（最後の運営管理者は外せない） | 見る: すべて・変える: 運営管理者 |
 | GET | `/v1/ops/audit` | 運営の操作の記録 | すべて |
 | GET | `/v1/ops/logs`・`/logs/digests`・`/logs/export` | すべての会社のシステムログ（`tenant` で会社か `system`）・日ごとの改ざんの確かめ・ZIP（全社は 1 日、会社で絞れば 28 日まで）。見た・ダウンロードしたことを残す（仕様書 第16.10.4節） | すべて |

@@ -14,7 +14,6 @@ import { diskSpace, readBackupStatus, type BackupStatus } from './backup.js';
 import { readOffsiteStatus, type OffsiteStatus } from './offsite.js';
 import { readUpdateStatus, type UpdateStatus } from './update.js';
 import { readMaintenanceStatus, type MaintenanceStatus } from './maintenance.js';
-import { readHeartbeatStatus, type HeartbeatConfig, type HeartbeatStatus } from './heartbeat.js';
 
 /** ワーカーの知らせが、これより古ければ止まっているとみなす（ミリ秒）。 */
 const WORKER_STALE_MS = 3 * 60_000;
@@ -33,8 +32,6 @@ export interface MachineConfig {
   host: string | null;
   /** ローカル AI の口とモデル。無ければ `null`。 */
   localLlm: { url: string; model: string | null } | null;
-  /** 運営への稼働の知らせの受け口（第8.6.8節）。無ければ `null`。 */
-  heartbeat?: HeartbeatConfig | null;
   /** 社外の控えを設定しているか（第8.6.5節）。 */
   offsite?: boolean;
   /** 共通の入口の置き場（第8.6.9節）。ほかの製品が遠隔の保守を持つかを見る。 */
@@ -55,8 +52,6 @@ export interface MachineStatus {
   update: UpdateStatus;
   /** 遠隔の保守（第8.6.4節）。 */
   maintenance: MaintenanceStatus;
-  /** 運営への稼働の知らせ（第8.6.8節）。 */
-  heartbeat: HeartbeatStatus;
 }
 
 /** ワーカーが動いていることを書く（見回りのたび。30 秒より短い間隔では書かない）。 */
@@ -145,6 +140,5 @@ export async function machineStatus(cfg: MachineConfig, now: Date = new Date()):
     },
     update: await readUpdateStatus(cfg.dir, now),
     maintenance: await readMaintenanceStatus(cfg.dir, now, cfg.frontDir ?? null),
-    heartbeat: await readHeartbeatStatus(cfg.dir, cfg.heartbeat ?? null),
   };
 }

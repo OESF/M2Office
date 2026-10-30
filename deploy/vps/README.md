@@ -8,8 +8,8 @@
 
 | 章 | 中身 |
 |---|---|
-| [第 13 章 VPS の用意](../../docs/ops-manual/13-vps-setup.md) | OS の固め・スワップ・WireGuard（`setup.sh` の前に終える） |
-| [第 14 章 M2Office のセットアップ](../../docs/ops-manual/14-vps-m2office-setup.md) | 入口の守りの考え方と、`setup.sh` の走らせ方 |
+| [第 12 章 VPS の用意](../../docs/ops-manual/12-vps-setup.md) | OS の固め・スワップ・WireGuard（`setup.sh` の前に終える） |
+| [第 13 章 M2Office のセットアップ](../../docs/ops-manual/13-vps-m2office-setup.md) | 入口の守りの考え方と、`setup.sh` の走らせ方 |
 
 ## 入れる
 

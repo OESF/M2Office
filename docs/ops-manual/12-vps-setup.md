@@ -1,11 +1,11 @@
-# 第 13 章 VPS の用意（OS の初期設定）
+# 第 12 章 VPS の用意（OS の初期設定）
 
 クラウドの形の M2Office を置く VPS（Xserver の VPS・Ubuntu）を、**M2Office を入れる前に**固める手順です。配備する技術者（提携先の技術者を含む）が行います。
 仕組みの考え方は仕様書 第20.4.6節にあります。この章は、その「機械」と「資源の配分」と「保守の入り口」の部分を、打つ命令に落としたものです。
 
-**目指す形: VPS が開ける口を、HTTPS（443）・HTTP（80）・WireGuard の UDP の 3 つだけにする。** 保守の SSH は、VPS に立てる WireGuard の網からだけ通します。この章を終えると、開いている口は WireGuard だけになり、SSH には WireGuard からしか入れなくなります。80・443 は、M2Office を入れる第 14 章で開けます。
+**目指す形: VPS が開ける口を、HTTPS（443）・HTTP（80）・WireGuard の UDP の 3 つだけにする。** 保守の SSH は、VPS に立てる WireGuard の網からだけ通します。この章を終えると、開いている口は WireGuard だけになり、SSH には WireGuard からしか入れなくなります。80・443 は、M2Office を入れる第 13 章で開けます。
 
-M2Office 本体（Node.js・PostgreSQL・Caddy・CrowdSec と置き場所）は、この章では入れません（第 14 章）。セットアップの手順（`deploy/vps/setup.sh`。これから作る）でまとめて入れます。
+M2Office 本体（Node.js・PostgreSQL・Caddy・CrowdSec と置き場所）は、この章では入れません（第 13 章）。セットアップの手順（`deploy/vps/setup.sh`。これから作る）でまとめて入れます。
 
 ## 1. 用意するもの
 
@@ -51,7 +51,7 @@ API・ワーカーなどの値は Node.js が使える上限で、いつも使�
 
 1. **OS は Ubuntu 26.04 LTS**（または 24.04 LTS）を選ぶ。`m2office-cloud-1` は 26.04
 2. **SSH の鍵を登録して作る**（パスワードでのログインにしない）。手元の公開鍵（`~/.ssh/id_ed25519.pub` の中身）を貼る
-3. **パケットフィルターを ON にし、SSH（22 番）だけを、作業する人の接続元の IP に限って開ける**。HTTP（80）・HTTPS（443）は第 14 章まで開けない。SSH は手順 8 で WireGuard に移したあと閉じる
+3. **パケットフィルターを ON にし、SSH（22 番）だけを、作業する人の接続元の IP に限って開ける**。HTTP（80）・HTTPS（443）は第 13 章まで開けない。SSH は手順 8 で WireGuard に移したあと閉じる
 4. 管理画面の**コンソール**（ブラウザから入れる画面）の開き方を確かめておく。SSH でも WireGuard でも入れなくなったときの、最後の入り口になる
 
 ## 4. 初めてのログインからの手順
@@ -170,7 +170,7 @@ sudo mkdir -p /etc/systemd/journald.conf.d && printf '[Journal]\nStorage=persist
 | 開ける口 | VPS は UDP の 1 つの口（**51820 番**）だけを開ける。**登録した鍵を持たない相手には何も返事をしない**ため、外からは口があることも分からない |
 | 通るもの | 端末から VPS の網のアドレス（`10.66.0.1`）あての通信だけを網に通す。ふだんのインターネットの通信は、今までどおり網を通らない |
 
-**M2Office で使う理由。** VPS の SSH（22 番）をインターネットに開けると、世界中から総当たりを受けます。WireGuard の網からだけ SSH を受けるようにすれば、鍵を登録した人の端末からしか SSH に届きません。マスター管理画面（`ops`）も、この網からだけ開けます（第 14 章）。
+**M2Office で使う理由。** VPS の SSH（22 番）をインターネットに開けると、世界中から総当たりを受けます。WireGuard の網からだけ SSH を受けるようにすれば、鍵を登録した人の端末からしか SSH に届きません。マスター管理画面（`ops`）も、この網からだけ開けます（第 13 章）。
 
 | 比べるもの | WireGuard（自前） | Tailscale（使わない） |
 |---|---|---|
@@ -346,6 +346,6 @@ M2Office の設定の置き場（`/etc/m2office`）の見張りは、セット�
 |---|---|
 | Node.js（24 系。セキュリティの修正の下限以上） | セットアップの手順 |
 | PostgreSQL 17 と pgvector | セットアップの手順 |
-| Caddy（Let's Encrypt の証明書・WAF）・CrowdSec と、80・443 を開けること | セットアップの手順と、Xserver の DNS の設定（第 14 章） |
+| Caddy（Let's Encrypt の証明書・WAF）・CrowdSec と、80・443 を開けること | セットアップの手順と、Xserver の DNS の設定（第 13 章） |
 | 置き場所（`/opt/m2office`・`/var/lib/m2office`・`/etc/m2office`）と動かす利用者 `m2office` | セットアップの手順 |
 | 控え（pgBackRest・restic） | セットアップの手順 |

@@ -5,7 +5,6 @@
 import { appPath } from '../app-root.js';
 import type { BackupConfig } from './backup.js';
 import type { MachineConfig } from './status.js';
-import { heartbeatConfigFromEnv } from './heartbeat.js';
 import { offsiteConfigFromEnv } from './offsite.js';
 import { frontDir } from './maintenance.js';
 
@@ -33,10 +32,6 @@ export {
   readMaintenanceStatus, requestMaintenance, frontDir, takeClosedMaintenanceSessions, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS,
   type MaintenanceSession, type MaintenanceStatus,
 } from './maintenance.js';
-export {
-  heartbeatConfigFromEnv, heartbeatPayload, readHeartbeatStatus, setHeartbeatOff, sendHeartbeat, HEARTBEAT_INTERVAL_MS,
-  type HeartbeatConfig, type HeartbeatPayload, type HeartbeatStatus,
-} from './heartbeat.js';
 
 /** 機械の様子の知らせを置く場所（`M2O_MACHINE_DIR`。無ければ `.data/machine`）。 */
 export function machineDir(env: Record<string, string | undefined>): string {
@@ -72,7 +67,6 @@ export function machineConfigFromEnv(env: Record<string, string | undefined>, ve
     backupDir: env['M2O_BACKUP_DIR'] || null,
     host,
     localLlm: env['LOCAL_LLM_URL'] ? { url: env['LOCAL_LLM_URL'], model: env['LOCAL_LLM_MODEL'] || null } : null,
-    heartbeat: heartbeatConfigFromEnv(env),
     offsite: !!env['M2O_BACKUP_DIR'] && offsiteConfigFromEnv(env, machineDir(env)) !== null,
     frontDir: frontDir(env),
   };

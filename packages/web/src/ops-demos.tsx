@@ -104,7 +104,7 @@ export function OpsDemos({ me }: { me: OpsMe }) {
 
   return (
     <>
-      <OpsTitle title="体験" help={{ chapter: '17-demo', text: '導入を考えている会社に、体験版のゲストの ID とパスワードを出します。' }} />
+      <OpsTitle title="体験" help={{ chapter: '16-demo', text: '導入を考えている会社に、体験版のゲストの ID とパスワードを出します。' }} />
       {error && <p className="error">{error}</p>}
       {list && !list.url && <p className="error">体験版の入口が設定されていません（DEMO_SUBDOMAIN）</p>}
       {list?.signupUrl && (

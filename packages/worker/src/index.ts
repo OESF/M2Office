@@ -19,7 +19,7 @@ import {
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, PlatformAiSource, PostgresPlatformAiSettingsReader, envTenantCapJpy, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, heartbeatConfigFromEnv, sendHeartbeat, HEARTBEAT_INTERVAL_MS, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, takeClosedMaintenanceSessions, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, isPublicImageBase, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, WORKER_BEAT_INTERVAL_MS, keepAliveOnTransientErrors,
   PostgresDemoStore, isDemoTenantId,
 } from '@m2office/core';
@@ -748,9 +748,6 @@ function startOffsite(backupDir: string, name: string): void {
   })();
 }
 let lastUpdateCheck = 0;
-// 運営への稼働の知らせ（第8.6.8節）。受け口と鍵を入れた機械だけ
-const heartbeatCfg = onsite ? heartbeatConfigFromEnv(process.env) : null;
-let lastHeartbeat = 0;
 let lastBackupCheck = 0;
 // マスター管理画面のための、ワーカーの知らせと毎晩の数の記録（クラウドの形だけ。仕様書 第23.8.15節）
 const opsSide = onsite ? null : new OpsAppSide(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'ops' }));
@@ -893,12 +890,6 @@ while (running) {
     } catch (err) {
       log.warn('遠隔の保守の記録で例外が発生しました', { err });
     }
-  }
-  // 運営への稼働の知らせ（1 時間に 1 回。件数と状態だけ。第8.6.8節）
-  if (heartbeatCfg && Date.now() - lastHeartbeat >= HEARTBEAT_INTERVAL_MS) {
-    lastHeartbeat = Date.now();
-    const sent = await sendHeartbeat(machineDir(process.env), heartbeatCfg, () => machineStatus(machineConfigFromEnv(process.env, appVersion()))).catch(() => false);
-    if (!sent) log.debug('稼働の知らせを送れませんでした（切っているか、受け口に届きません）');
   }
   // 更新（機械の上の update.sh が行う）に失敗していたら、会社の管理者に 1 度だけ知らせる（第8.6.4節）
   if (onsite && Date.now() - lastUpdateCheck >= 60_000) {

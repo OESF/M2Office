@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
-  readMaintenanceStatus, requestMaintenance, frontDir, setHeartbeatOff, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, holdUpdates, machineDir,
+  readMaintenanceStatus, requestMaintenance, frontDir, MAINTENANCE_DEFAULT_HOURS, MAINTENANCE_MAX_HOURS, holdUpdates, machineDir,
   appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup, runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -95,17 +95,6 @@ export function machineRoute(deps: AppDeps) {
     const until = await requestMaintenance(dir, hours, user.id);
     await audit(deps, tenant.id, user.id, until ? 'machine.maintenance_open' : 'machine.maintenance_close', 'machine', 'maintenance', { until });
     return c.json({ until });
-  });
-
-  /** 運営への稼働の知らせを切る（本文 `on: false`）か、入れる（`on: true`）（第8.6.8節）。 */
-  app.put('/heartbeat', async (c) => {
-    const { tenant, user } = c.get('ctx');
-    if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
-    const b = await c.req.json<{ on?: unknown }>().catch(() => ({} as { on?: unknown }));
-    if (typeof b.on !== 'boolean') return c.json({ error: 'on を指定してください' }, 400);
-    await setHeartbeatOff(machineDir(process.env), !b.on, user.id);
-    await audit(deps, tenant.id, user.id, b.on ? 'machine.heartbeat_on' : 'machine.heartbeat_off', 'machine', 'heartbeat', {});
-    return c.json({ on: b.on });
   });
 
   // システムログと証拠保全（ローカルの形だけ。第16.10.4節・第16.10.5節）

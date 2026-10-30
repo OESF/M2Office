@@ -34,7 +34,6 @@ const ANSWERS = {
   NODE_BIN: '/opt/homebrew/opt/node@22/bin/node', PG_BIN: '/opt/homebrew/opt/postgresql@17/bin', CADDY_BIN: '/opt/homebrew/opt/caddy/bin/caddy',
   LOCAL_LLM_URL: 'http://127.0.0.1:11434/v1', LOCAL_LLM_MODEL: 'gemma3', LOCAL_LLM_EMBED_MODEL: 'embeddinggemma', GEMINI_API_KEY: '',
   GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', SECRET_KEY: 'k'.repeat(64), DB_APP_PASSWORD: 'app-pass', DB_OWNER_PASSWORD: 'owner-pass', UPDATE_HOUR: '3',
-  HEARTBEAT_URL: 'https://ops.example/heartbeat', HEARTBEAT_TOKEN: 'hb-token', MACHINE_ID: 'm-001',
   OFFSITE_REPOSITORY: 's3:https://s3.example/bucket/m2office', OFFSITE_PASSWORD: 'offsite-pass', OFFSITE_ACCESS_KEY_ID: 'AKID', OFFSITE_SECRET_ACCESS_KEY: 'SKEY',
   OFFSITE_REGION: '', RESTIC_BIN: '/opt/homebrew/opt/restic/bin/restic', FFMPEG_BIN: '/opt/homebrew/opt/ffmpeg/bin/ffmpeg',
   MACHINE_ADMIN_ID: 'machine', MACHINE_ADMIN_PASSWORD_HASH: 'scrypt:16384:8:1:c2FsdA:aGFzaA', MACHINE_ADMIN_TOTP: 'JBSWY3DPEHPK3PXP',
@@ -95,7 +94,7 @@ test('雛形がすべて埋まり、launchd の設定は正しい形', () => {
   assert.match(readFileSync(join(out, 'launchd', 'jp.m2office.logrotate.plist'), 'utf8'), /logrotate\.sh<\/string>[\s\S]*<integer>0<\/integer>/);
   assert.match(caddy, /roll_keep_for 672h/);
   assert.match(env, /^M2O_LOG_DIR=.+\/logs$/m);
-  assert.match(env, /^M2O_HEARTBEAT_URL=https:\/\/ops\.example\/heartbeat$/m);
+  assert.doesNotMatch(env, /M2O_HEARTBEAT/, '運営への稼働の知らせは送らない（第 0.490.0 版、ADR-0118）');
   assert.match(env, /^M2O_OFFSITE_REPOSITORY=s3:https:\/\/s3\.example\/bucket\/m2office$/m);
   assert.match(env, /^M2O_OFFSITE_PASSWORD=offsite-pass$/m);
   for (const p of plists) {

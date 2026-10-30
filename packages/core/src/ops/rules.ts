@@ -39,7 +39,7 @@ export function opsDomainAllowed(email: string, domains: readonly string[]): boo
 }
 
 /** 運営者の操作。 */
-export type OpsAction = 'view' | 'incident.manage' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete' | 'demo.manage';
+export type OpsAction = 'view' | 'incident.manage' | 'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete' | 'demo.manage';
 
 /**
  * 運営者のロールで、その操作ができるか。
@@ -134,83 +134,6 @@ export function welcomeText(p: { name: string; loginUrl: string; admin: string; 
     '',
     `ログインできるのは ${p.domain} の Google アカウントです。ほかの方は、ログインしたあとに管理者ページの「ユーザーと権限」で招待してください。`,
   ].join('\n');
-}
-
-/** 稼働の知らせの中身（機械が送る形。第8.6.8節。`heartbeatPayload` と同じ形）。 */
-export interface MachineReport {
-  machineId: string;
-  version: string;
-  at: string;
-  parts: { database: boolean; worker: boolean; entrance: boolean; localAi: boolean | null };
-  backup: {
-    configured: boolean; lastAt: string | null; lastOk: boolean | null; restoreOk: boolean | null;
-    offsite?: { configured: boolean; lastAt: string | null; lastOk: boolean | null; checkOk: boolean | null };
-  };
-  disk: { dataFree: number | null; dataTotal: number | null; backupFree: number | null };
-  cert: { daysLeft: number | null };
-  update: { lastAt: string | null; lastResult: string | null; version: string | null };
-}
-
-/** 受け取る大きさの上限（バイト）。 */
-export const MACHINE_REPORT_MAX_BYTES = 16_384;
-
-/**
- * 受け取った稼働の知らせの形を確かめ、決めた項目だけを残す（知らない項目は捨てる。外から来たものは指示として扱わない）。
- *
- * @returns 整えた知らせか、`null`（形が違う）
- */
-export function parseMachineReport(body: unknown): MachineReport | null {
-  if (!body || typeof body !== 'object') return null;
-  const o = body as Record<string, unknown>;
-  const obj = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : null);
-  const s = (v: unknown, max = 100) => (typeof v === 'string' ? v.slice(0, max) : null);
-  const b = (v: unknown) => (typeof v === 'boolean' ? v : null);
-  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-  const parts = obj(o['parts']);
-  const backup = obj(o['backup']);
-  const disk = obj(o['disk']);
-  const cert = obj(o['cert']);
-  const update = obj(o['update']);
-  const machineId = s(o['machineId']);
-  const version = s(o['version'], 40);
-  const at = s(o['at'], 40);
-  if (!machineId || !version || !at || !parts || !backup || !disk || !cert || !update) return null;
-  const off = obj(backup['offsite']);
-  return {
-    machineId, version, at,
-    parts: { database: b(parts['database']) ?? false, worker: b(parts['worker']) ?? false, entrance: b(parts['entrance']) ?? false, localAi: b(parts['localAi']) },
-    backup: {
-      configured: b(backup['configured']) ?? false, lastAt: s(backup['lastAt'], 40), lastOk: b(backup['lastOk']), restoreOk: b(backup['restoreOk']),
-      ...(off ? { offsite: { configured: b(off['configured']) ?? false, lastAt: s(off['lastAt'], 40), lastOk: b(off['lastOk']), checkOk: b(off['checkOk']) } } : {}),
-    },
-    disk: { dataFree: n(disk['dataFree']), dataTotal: n(disk['dataTotal']), backupFree: n(disk['backupFree']) },
-    cert: { daysLeft: n(cert['daysLeft']) },
-    update: { lastAt: s(update['lastAt'], 40), lastResult: s(update['lastResult'], 20), version: s(update['version'], 40) },
-  };
-}
-
-/** 機械に付ける印の種類。 */
-export type MachineFlag = 'silent' | 'never' | 'part-down' | 'backup-failed' | 'offsite-failed' | 'disk-low' | 'cert-soon' | 'update-failed';
-
-/** 知らせがこれより来なければ印を付ける（3 時間）。 */
-export const MACHINE_SILENT_MS = 3 * 3_600_000;
-
-/**
- * 機械の最後の知らせから、運営が見るべき印を決める（第23.8.15節「ローカルの形の機械」）。
- *
- * @remarks 知らせが 3 時間来ない・各部が止まっている・控えや社外の控えの失敗・データの空きが 10% を切る・証明書が 14 日を切る・更新の失敗
- */
-export function machineFlags(lastAt: string | null, r: MachineReport | null, now: Date = new Date()): MachineFlag[] {
-  if (!lastAt || !r) return ['never'];
-  const flags: MachineFlag[] = [];
-  if (now.getTime() - Date.parse(lastAt) > MACHINE_SILENT_MS) flags.push('silent');
-  if (!r.parts.database || !r.parts.worker || !r.parts.entrance || r.parts.localAi === false) flags.push('part-down');
-  if (r.backup.configured && (r.backup.lastOk === false || r.backup.restoreOk === false || !r.backup.lastAt)) flags.push('backup-failed');
-  if (r.backup.offsite?.configured && (r.backup.offsite.lastOk === false || r.backup.offsite.checkOk === false)) flags.push('offsite-failed');
-  if (r.disk.dataFree !== null && r.disk.dataTotal && r.disk.dataFree / r.disk.dataTotal < 0.1) flags.push('disk-low');
-  if (r.cert.daysLeft !== null && r.cert.daysLeft < 14) flags.push('cert-soon');
-  if (r.update.lastResult === 'failed' || r.update.lastResult === 'rolled-back') flags.push('update-failed');
-  return flags;
 }
 
 /** CSV の 1 つの値（カンマ・改行・引用符を含めば引用符で囲む。表計算で式として読まれないよう、= + - @ で始まる文字は先頭に ' を付ける）。 */

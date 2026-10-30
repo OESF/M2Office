@@ -213,7 +213,6 @@ function machineFns(base: string) {
     /** 遠隔の保守を開ける（`hours` 時間）か、閉じる（`null`）。 */
     machineMaintenance: (hours: number | null) => call<{ until: string | null }>(`${base}/maintenance`, { method: 'PUT', body: JSON.stringify({ hours }) }),
     /** 運営への稼働の知らせを入れる・切る。 */
-    machineHeartbeat: (on: boolean) => call<{ on: boolean }>(`${base}/heartbeat`, { method: 'PUT', body: JSON.stringify({ on }) }),
     /** 夜の自動の更新を止める（延ばす。`days`）か、止めるのをやめる（`null`）。 */
     machineUpdateHold: (days: number | null) => call<{ heldUntil: string | null }>(`${base}/update-hold`, { method: 'PUT', body: JSON.stringify({ days }) }),
   };
@@ -3120,8 +3119,6 @@ export interface MachineView {
     /** 同じ機械のほかの製品（M2Medical）が遠隔の保守を持つとき、その名前。M2Office からは開けられない（第8.6.9節）。 */
     managedBy: string | null;
   };
-  /** 運営への稼働の知らせ（仕様書 第8.6.8節）。 */
-  heartbeat: { configured: boolean; off: boolean; lastAt: string | null; lastOk: boolean | null; lastError: string | null };
 }
 
 

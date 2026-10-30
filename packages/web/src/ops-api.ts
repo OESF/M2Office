@@ -48,7 +48,7 @@ export interface OpsMe {
   /** パスキーで確かめたか（第23.8.15節）。確かめるまでは、ほかの操作ができない。 */
   verified: boolean;
   passkeyCount: number;
-  can: Record<'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'machine.manage' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete' | 'demo.manage', boolean>;
+  can: Record<'tenant.create' | 'tenant.status' | 'tenant.suspend' | 'tenant.lock' | 'operator.manage' | 'settings.manage' | 'evidence.create' | 'evidence.delete' | 'demo.manage', boolean>;
 }
 
 export interface TenantRow {
@@ -73,22 +73,6 @@ export interface TenantRow {
   /** この 24 時間の不正の兆しの数と、そのうち重いもの（中身と人は返さない）。古い API では無い。 */
   securitySignals24h?: number;
   securityHigh24h?: number;
-}
-
-export interface MachineRow {
-  id: string;
-  name: string;
-  createdAt: string;
-  lastAt: string | null;
-  flags: string[];
-  report: {
-    version: string;
-    parts: { database: boolean; worker: boolean; entrance: boolean; localAi: boolean | null };
-    backup: { configured: boolean; lastAt: string | null; lastOk: boolean | null; restoreOk: boolean | null; offsite?: { configured: boolean; lastOk: boolean | null; checkOk: boolean | null } };
-    disk: { dataFree: number | null; dataTotal: number | null; backupFree: number | null };
-    cert: { daysLeft: number | null };
-    update: { lastResult: string | null; version: string | null };
-  } | null;
 }
 
 export interface OpsAuditRow {
@@ -299,9 +283,6 @@ export const opsApi = {
   requestProxy: (tenantId: string, scope: 'admin' | 'runs', reason: string) => call<{ id: string }>(`/tenants/${encodeURIComponent(tenantId)}/proxy`, send('POST', { scope, reason })),
   openProxy: (id: string) => call<{ url: string }>(`/proxy/${encodeURIComponent(id)}/open`, send('POST')),
   endProxy: (id: string) => call<{ ok: true }>(`/proxy/${encodeURIComponent(id)}/end`, send('POST')),
-  machines: () => call<{ machines: MachineRow[] }>('/machines'),
-  addMachine: (name: string) => call<{ machine: MachineRow; token: string }>('/machines', send('POST', { name })),
-  removeMachine: (id: string) => call<{ ok: true }>(`/machines/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   operators: () => call<{ operators: OperatorView[] }>('/operators'),
   addOperator: (b: { email: string; displayName: string; role: OperatorRole }) => call<{ operator: OperatorView }>('/operators', send('POST', b)),
   updateOperator: (id: string, b: { role?: OperatorRole; status?: 'active' | 'disabled' }) => call<{ operator: OperatorView }>(`/operators/${encodeURIComponent(id)}`, send('PUT', b)),

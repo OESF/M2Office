@@ -198,32 +198,24 @@ if [ -n "$ALLOWED_SIGNERS_SOURCE" ]; then
 fi
 ask UPDATE_HOUR '自動の更新の時刻（時。0〜23）' "${UPDATE_HOUR:-3}"
 
-say '7. 遠隔の保守と稼働の知らせ（保守の契約に合わせて決める。仕様書 第8.6.4節・第8.6.8節）'
-info '遠隔の保守: 運営の Tailscale にこの機械を登録し、ふだんは閉じておく。会社の管理者が「機械」で時間を限って開ける'
+say '7. 遠隔の保守（保守を引き受ける人がいるときに決める。仕様書 第8.6.4節）'
+info '遠隔の保守: 保守を引き受ける人（SIer など）の Tailscale にこの機械を登録し、ふだんは閉じておく。会社の管理者が「機械」で時間を限って開ける'
 MAINTENANCE=no
 if [ -n "$MAINT_OWNER" ]; then
   # 開けると技術者は機械全体に入れるため、守りの厳しい側（患者の情報を持つ製品）の管理者だけが開ける
   info "この機械の遠隔の保守は $MAINT_OWNER が持ちます（$MAINT_OWNER の管理者が開けます）。M2Office では入れません"
 elif yes_no '遠隔の保守を入れますか' "$( [ "${MAINTENANCE_SAVED:-no}" = yes ] && echo y || echo n)"; then
   MAINTENANCE=yes
-  ask TAILSCALE_AUTHKEY '運営からもらった Tailscale の鍵（登録済みなら空）' '' secret
+  ask TAILSCALE_AUTHKEY '保守する人からもらった Tailscale の鍵（登録済みなら空）' '' secret
 fi
 MAINTENANCE_SAVED=$MAINTENANCE
-info '稼働の知らせ: 1 時間に 1 回、件数と状態だけを運営の受け口へ送る（人の名前や業務の中身は送らない）'
-ask HEARTBEAT_URL '運営の受け口（https。送らないなら空）' "$(env_value M2O_HEARTBEAT_URL)"
-if [ -n "$HEARTBEAT_URL" ]; then
-  ask HEARTBEAT_TOKEN '運営からもらった鍵' "$(env_value M2O_HEARTBEAT_TOKEN)" secret
-  ask MACHINE_ID '機械の番号（運営が付けた呼び名。会社の名前は入れない）' "$(env_value M2O_MACHINE_ID)"
-else
-  HEARTBEAT_TOKEN=''; MACHINE_ID=''
-fi
 
 say '答えの確かめ'
 info "会社: ${COMPANY_NAME}（${SUBDOMAIN}）／ ドメイン: $GW_DOMAIN ／ 管理者: $ADMIN_EMAIL"
 info "名前: https://$HOST ／ 証明書: $TLS_MODE ${DNS_PROVIDER:+（${DNS_PROVIDER}）}"
 info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）} ／ 社外の控え: $( [ "$OFFSITE" = yes ] && echo "$OFFSITE_REPOSITORY" || echo 送らない)"
 info "ローカル AI: ${LOCAL_LLM_URL:-（使わない）} ${LOCAL_LLM_MODEL} ／ Gemini の鍵: $( [ -n "$GEMINI_API_KEY" ] && echo 入れる || echo 入れない)"
-info "自動の更新: ${AUTO_UPDATE}（${UPDATE_HOUR} 時）／ 遠隔の保守: $MAINTENANCE${MAINT_OWNER:+（$MAINT_OWNER が持つ）} ／ 稼働の知らせ: $( [ -n "$HEARTBEAT_URL" ] && echo 送る || echo 送らない)"
+info "自動の更新: ${AUTO_UPDATE}（${UPDATE_HOUR} 時）／ 遠隔の保守: $MAINTENANCE${MAINT_OWNER:+（$MAINT_OWNER が持つ）}"
 yes_no 'この答えで入れますか' y || exit 1
 
 # ---- 2. 前提のソフト（Homebrew） ----
@@ -334,7 +326,7 @@ answers="$work/answers"
 {
   for k in INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE FRONT_DIR DATA_DIR BACKUP_DIR API_PORT DB_PORT HOST SUBDOMAIN ACME_EMAIL \
     NODE_BIN PG_BIN CADDY_BIN LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL GEMINI_API_KEY GOOGLE_LOGIN_CLIENT_ID \
-    GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR HEARTBEAT_URL HEARTBEAT_TOKEN MACHINE_ID \
+    GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR \
     OFFSITE_REPOSITORY OFFSITE_PASSWORD OFFSITE_ACCESS_KEY_ID OFFSITE_SECRET_ACCESS_KEY OFFSITE_REGION RESTIC_BIN FFMPEG_BIN \
     MACHINE_ADMIN_ID MACHINE_ADMIN_PASSWORD_HASH MACHINE_ADMIN_TOTP; do
     printf '%s=%s\n' "$k" "${!k}"
@@ -420,13 +412,13 @@ else
   sudo rm -f "$DAEMONS/jp.m2office.update.plist"
 fi
 if [ "$MAINTENANCE" = yes ]; then
-  # Tailscale の常駐を入れ、運営の Tailscale に 1 度だけ登録して、閉じておく（開けるのは会社の管理者）
+  # Tailscale の常駐を入れ、保守する人の Tailscale に 1 度だけ登録して、閉じておく（開けるのは会社の管理者）
   if ! sudo launchctl print system/com.tailscale.tailscaled >/dev/null 2>&1; then
     sudo "$(brew --prefix tailscale)/bin/tailscaled" install-system-daemon
     sleep 3
   fi
   if sudo "$TAILSCALE_BIN" status 2>&1 | grep -qi 'logged out\|NeedsLogin'; then
-    [ -n "${TAILSCALE_AUTHKEY:-}" ] || die '遠隔の保守の登録には、運営からもらった Tailscale の鍵が要ります'
+    [ -n "${TAILSCALE_AUTHKEY:-}" ] || die '遠隔の保守の登録には、保守する人からもらった Tailscale の鍵が要ります'
     sudo "$TAILSCALE_BIN" up --authkey "$TAILSCALE_AUTHKEY" --hostname "m2o-$SUBDOMAIN" --ssh --accept-dns=false
   fi
   sudo "$TAILSCALE_BIN" down || true

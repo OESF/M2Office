@@ -48,10 +48,14 @@ npm run dev
 
 | 形 | 向いている使い方 | 手順 |
 |---|---|---|
-| クラウド（VPS） | 多くの会社に、サブドメインごとにサービスとして出す | [deploy/vps/README.md](deploy/vps/README.md)（運営者マニュアル [第 13 章](docs/ops-manual/13-vps-setup.md)・[第 14 章](docs/ops-manual/14-vps-m2office-setup.md)） |
+| クラウド（VPS） | 多くの会社に、サブドメインごとにサービスとして出す | [deploy/vps/README.md](deploy/vps/README.md)（運営者マニュアル [第 12 章](docs/ops-manual/12-vps-setup.md)・[第 13 章](docs/ops-manual/13-vps-m2office-setup.md)） |
 | 社内の Mac | 1 つの会社が、社内の機械とローカルの AI で使う | [deploy/onsite/README.md](deploy/onsite/README.md) |
 
 どちらも、GitHub のリリースのタグ（`v` で始まる版）を入れます。Google Workspace とのつなぎ方は [docs/google-setup.md](docs/google-setup.md) にあります。
+
+**自分で動かすのは自由です（Apache License 2.0）。** 社内の Mac や自分のサーバーで動かすときは、運営は機械とつながず、公式のサポートもしません。保守とセキュリティは使う方の責任で、常に GitHub の最新の版を取得してお使いください。SIer などが導入やサポートを事業として行うことも妨げません。不具合の報告や提案は GitHub の Issues・Pull Request でお寄せください。
+自分で動かすのが難しい方には、運営が動かすクラウド版（有償）があります。
+このソースを使って、ほかの方がクラウドのサービスを運営するのも自由です。ただし「M2Office」は登録商標にする予定のため、ほかのサービスには別の名前をお使いください。
 
 ## ドキュメント
 

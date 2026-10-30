@@ -3,13 +3,13 @@
  */
 
 export {
-  RESERVED_SUBDOMAINS, OPERATOR_ROLES, MACHINE_REPORT_MAX_BYTES, MACHINE_SILENT_MS,
-  operatorCan, parseOpsDomains, opsDomainAllowed, checkNewTenant, tenantErrorText, welcomeText, parseMachineReport, machineFlags, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS,
-  type OperatorRole, type OpsAction, type NewTenantInput, type MachineReport, type MachineFlag,
+  RESERVED_SUBDOMAINS, OPERATOR_ROLES,
+  operatorCan, parseOpsDomains, opsDomainAllowed, checkNewTenant, tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS,
+  type OperatorRole, type OpsAction, type NewTenantInput,
 } from './rules.js';
 export {
   OpsStore, OpsRuleError, sha256,
-  type Operator, type OpsSession, type TenantOverview, type OpsMachine, type OpsAuditEntry,
+  type Operator, type OpsSession, type TenantOverview, type OpsAuditEntry,
   type OperatorProfile, type OpsPlatformAiSettings, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsIncident, type OpsPasskey, type OpsDemo, type OpsDemoDefaults, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS,
 } from './store.js';
 export { OpsAppSide } from './app-side.js';
