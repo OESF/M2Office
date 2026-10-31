@@ -127,6 +127,9 @@ button { font: inherit; cursor: pointer; }
   padding: calc(8px * var(--space-scale)) calc(16px * var(--space-scale)); background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .topbar .brand { font-weight: 700; letter-spacing: .02em; }
+.brand-home { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; border-radius: 6px; }
+.brand-home:hover { opacity: .8; }
+.brand-home:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .topbar .tenant { color: var(--muted); }
 .topbar .spacer { flex: 1; }
 /* 上の帯の小さなメニュー: 版の表示と Google のアプリの一覧（仕様書 第6.1.1.1節・第6.1.1.2節） */

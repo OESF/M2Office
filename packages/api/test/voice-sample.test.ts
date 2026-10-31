@@ -17,6 +17,8 @@ const PERSONA: VoicePersona = {
   org: 'アルファ商事',
   displayName: '三浦雅孝',
   secretary: { name: 'みどり', callMe: '', style: 'polite', voiceStyle: '関西弁で話して' },
+  // 時刻を決めておく。名乗りの指示にいまの日時が入るため、比べる間に分が変わらないように
+  now: new Date('2026-10-31T00:30:00+09:00'),
 };
 
 /** 開いたときの指示と送られた内部の指示を控え、決めた出来事を返す提供者。 */

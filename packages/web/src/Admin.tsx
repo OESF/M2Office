@@ -238,9 +238,12 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
   return (
     <div className="app">
       <header className="topbar">
-        {me.tenant.logo
-          ? <><img className="brand-logo" src={me.tenant.logo} alt={me.tenant.shortName ?? me.tenant.name} /><span className="brand">管理</span></>
-          : <span className="brand">M2Office 管理</span>}
+        {/* 押すとワークスペースの最初の画面に戻る（仕様書 第6.1節） */}
+        <a className="brand-home" href={`/${location.search}`} title="ワークスペースの最初の画面に戻る">
+          {me.tenant.logo
+            ? <><img className="brand-logo" src={me.tenant.logo} alt={me.tenant.shortName ?? me.tenant.name} /><span className="brand">管理</span></>
+            : <span className="brand">M2Office 管理</span>}
+        </a>
         <AppVersionBadge serverVersion={me.serverVersion} />
         <span className="tenant">{me.tenant.name}</span>
         <span className="spacer" />

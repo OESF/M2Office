@@ -193,7 +193,8 @@ export function meRoute(deps: AppDeps) {
     const org = company?.shortName?.trim() || company?.legalName?.trim() || '';
     sampling.add(key);
     try {
-      const sample = await speakSample(provider, { org, displayName: user.displayName, secretary: prefs }, voiceNameOf(prefs.voice));
+      const timeZone = (await deps.repo.getUserSettings(tenant.id, user.id).catch(() => null))?.profile?.timezone;
+      const sample = await speakSample(provider, { org, displayName: user.displayName, secretary: prefs, timeZone }, voiceNameOf(prefs.voice));
       return c.json({
         text: sample.text,
         audio: Buffer.from(sample.pcm).toString('base64'),

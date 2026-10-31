@@ -36,6 +36,7 @@ import { answerHrStaff, hrStaffRequest, type HrStaffDeps } from './hr-staff.js';
 import { answerSecurity, securityRequest, type SecuritySecretaryDeps } from './security.js';
 import { signageFileRequest, signageRequest, answerSignage, signageConfirmText, SIGNAGE_NO, SIGNAGE_YES, type SignageRequest, type SignageSecretaryDeps } from './signage.js';
 import { answerReservation, maybeReservation, type ReservationSecretaryDeps } from './reservations.js';
+import { secretaryClockLine } from './clock.js';
 import { jstDate } from '../hr/attendance.js';
 import { CARD_BULK_MAIL, CARD_UPDATE } from '../cards/agents.js';
 import { answerBriefSettings } from '../brief/settings.js';
@@ -600,6 +601,8 @@ export class Secretary {
       `あなたは${org ? `「${org}」` : '中小企業'}の従業員に付く秘書${s.name ? `「${s.name}」` : ''}です。`,
       `相手を「${s.callMe || `${user?.displayName ?? ''}さん`}」と呼びます。`,
       s.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
+      // AI は自分ではいまの日時を知らない。渡さないと、深夜に「おはようございます」と挨拶する（第10.3.1節）
+      secretaryClockLine(prefs.profile?.timezone),
       'あなたは本人と一心同体の秘書で、本人とのやり取りをずっと覚えています。覚えていることを踏まえて答えます。',
       // この層では設定を変えたり業務を動かしたりしない。行っていないことを「行いました」と答えさせない（2026-09-28 に、朝のブリーフの中身を「変更しました」と答えた）
       'この会話では設定の変更や業務の実行は行いません。行っていない変更・実行を「行いました」「更新しました」と言わないでください。頼まれたら、どう頼めばよいか（言い方の例）か、どの画面で行えるかを伝えてください。',

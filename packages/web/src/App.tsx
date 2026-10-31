@@ -558,10 +558,20 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   return (
     <div className="app">
       <header className="topbar">
-        {/* 会社のロゴがあれば、プロダクトの名前の代わりに出す（仕様書 第6.6.1節） */}
-        {me.tenant.logo
-          ? <img className="brand-logo" src={me.tenant.logo} alt={me.tenant.shortName ?? me.tenant.name} />
-          : <span className="brand">M2Office</span>}
+        {/* 会社のロゴがあれば、プロダクトの名前の代わりに出す（仕様書 第6.6.1節）。押すと最初の画面に戻る（第6.1節） */}
+        <a
+          className="brand-home" href={`/${location.search}`} title="最初の画面に戻る"
+          onClick={(e) => {
+            // 新しいタブで開く操作（Ctrl・Cmd・中ボタン）は、ブラウザーに任せる
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            setView({ kind: 'home' });
+          }}
+        >
+          {me.tenant.logo
+            ? <img className="brand-logo" src={me.tenant.logo} alt={me.tenant.shortName ?? me.tenant.name} />
+            : <span className="brand">M2Office</span>}
+        </a>
         <AppVersionBadge serverVersion={me.serverVersion} />
         <span className="tenant">{me.tenant.name}</span>
         {me.workspaceSource === 'mock' && (

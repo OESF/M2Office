@@ -249,7 +249,7 @@ async function start(
   // 会社の呼び方は略称（無ければ正式な会社名。仕様書 第6.6.1節）
   const company = (await deps.repo.getTenantSettings(tenantId).catch(() => null))?.company;
   const org = company?.shortName?.trim() || company?.legalName?.trim() || '';
-  const persona: VoicePersona = { org, displayName, secretary: prefs.secretary };
+  const persona: VoicePersona = { org, displayName, secretary: prefs.secretary, timeZone: prefs.profile?.timezone };
   // 推論が使えない会社では、音声を始めない（仕様書 第20.2.4節、ADR-0030）
   let provider: Awaited<ReturnType<typeof deps.ai.voiceFor>>;
   try {

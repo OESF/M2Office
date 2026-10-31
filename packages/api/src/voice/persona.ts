@@ -6,6 +6,7 @@
  */
 
 import { VOICE_CHOICES, type UserSettings } from '@m2office/shared';
+import { secretaryClockLine } from '@m2office/core';
 
 /** 名乗りと応対のしかたを決める材料。 */
 export interface VoicePersona {
@@ -15,6 +16,10 @@ export interface VoicePersona {
   displayName: string;
   /** 個人設定「秘書」の値（第6.5.3節）。 */
   secretary: Pick<UserSettings['secretary'], 'name' | 'callMe' | 'style' | 'voiceStyle'>;
+  /** 本人のタイムゾーン（個人設定の `profile.timezone`）。空なら日本時間。 */
+  timeZone?: string;
+  /** いまの時刻。省けば呼んだときの時刻（試験のために渡せる）。 */
+  now?: Date;
 }
 
 /**
@@ -27,7 +32,7 @@ export function callMeOf(p: VoicePersona): string {
 }
 
 /**
- * 秘書の名乗り・呼び方・応対スタイルの指示（音声の相手への指示の先頭）。
+ * 秘書の名乗り・呼び方・応対スタイルと、いまの日時の指示（音声の相手への指示の先頭）。
  *
  * @remarks 話し方の指示は末尾に足すため、ここには入れない（{@link voiceStyleLine}）
  */
@@ -36,6 +41,8 @@ export function personaLines(p: VoicePersona): string[] {
     `あなたは${p.org ? `「${p.org}」` : '中小企業'}の従業員に付く秘書${p.secretary.name ? `「${p.secretary.name}」` : ''}です。`,
     `相手を「${callMeOf(p)}」と呼びます。`,
     p.secretary.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
+    // AI は自分ではいまの日時を知らない。渡さないと、深夜に「おはようございます」と挨拶する（第10.3.1節）
+    secretaryClockLine(p.timeZone, p.now),
   ];
 }
 

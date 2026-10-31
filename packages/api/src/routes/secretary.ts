@@ -122,7 +122,7 @@ export function secretaryRoute(deps: AppDeps) {
         const llm = await deps.ai.llmFor(tenantId);
         const res = await llm.complete({
           tier: 'fast', maxOutputTokens: 400,
-          messages: homeBriefPrompt(personaLines({ org, displayName: ctx.user.displayName, secretary: s }), facts, examples),
+          messages: homeBriefPrompt(personaLines({ org, displayName: ctx.user.displayName, secretary: s, timeZone: prefs.profile?.timezone }), facts, examples),
         });
         brief = parseHomeBrief(res.text);
       } catch (err) {
