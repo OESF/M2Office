@@ -215,11 +215,11 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
         <label className="small check"><input type="checkbox" checked={!!personal} onChange={(e) => setPersonal(e.target.checked)} /> 自分だけ</label>
         <button className="btn ghost" disabled={busy || trash} onClick={() => onBulk([...picked.values()])}>まとめてメール</button>
         {admin && (
-          <select className="cards-export" value="" disabled={busy} aria-label="書き出し"
-            onChange={(e) => { const f = e.target.value as 'csv' | 'xlsx'; e.target.value = ''; if (f) void api.cards.exportTable(f).catch((err) => setMessage(describeError(err, '書き出せませんでした'))); }}>
-            <option value="">書き出し…</option>
-            <option value="csv">CSV</option>
-            <option value="xlsx">Excel</option>
+          <select className="cards-export" value="" disabled={busy} aria-label="ダウンロード"
+            onChange={(e) => { const f = e.target.value as 'csv' | 'xlsx'; e.target.value = ''; if (f) void api.cards.exportTable(f).catch((err) => setMessage(describeError(err, 'ダウンロードできませんでした'))); }}>
+            <option value="">ダウンロード…</option>
+            <option value="csv">CSV でダウンロード</option>
+            <option value="xlsx">Excel でダウンロード</option>
           </select>
         )}
         <input ref={camera} type="file" accept="image/*" capture="environment" hidden
@@ -574,7 +574,7 @@ function CardDetailView({ id, onBack, onOpen, mailer, onInquiry, onContract }: {
           ) : <div className="small"><span className="badge">{c.scope === 'company' ? '会社で共有' : '自分だけ'}</span></div>}
           <div className="card-actions">
             {c.emails[0] && <button className="btn small" disabled={writing} onClick={() => void writeMail()}>{writing ? '用意しています…' : 'メールを書く'}</button>}
-            <button className="btn ghost small" onClick={() => act(() => api.cards.downloadVCard(c.id, c.name))}>vCard</button>
+            <button className="btn ghost small" onClick={() => act(() => api.cards.downloadVCard(c.id, c.name))}>vCard をダウンロード</button>
             {/* 本人の Google の連絡先（第27.15節）。入れたものは「外す」。Google で消されたものは入れ直せる */}
             {d.google && !d.google.gone
               ? <button className="btn ghost small" onClick={() => act(() => api.cards.removeGoogle(c.id))}>Google の連絡先から外す</button>

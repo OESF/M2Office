@@ -287,9 +287,9 @@ function DesignView({ id, onBack, onOpen, changeKey, onAnnouncement }: { id: str
             <Checks v={current} />
             {fromCanva ? <p className="small muted">Canva で直した版</p> : <ReviseBox busy={busy} tags={d.kind === 'tags'} drive={!!data.links?.drive} onRevise={(instruction, photo) => act(() => api.printDesigns.revise(d.id, instruction, photoArg(photo)), '直せませんでした')} />}
             <div className="row wrap prd-downloads">
-              <button className="btn small" disabled={busy} onClick={() => void act(() => api.printDesigns.download(d.id, current.id, 'pdf'), '書き出せませんでした')}>PDF</button>
-              {!fromCanva && <button className="btn ghost small" disabled={busy} onClick={() => void act(() => api.printDesigns.download(d.id, current.id, 'bleed'), '書き出せませんでした')}>入稿用の PDF</button>}
-              <button className="btn ghost small" disabled={busy} onClick={() => void act(() => api.printDesigns.download(d.id, current.id, 'png'), '書き出せませんでした')}>画像（PNG）</button>
+              <button className="btn small" disabled={busy} onClick={() => void act(() => api.printDesigns.download(d.id, current.id, 'pdf'), 'ダウンロードできませんでした')}>PDF をダウンロード</button>
+              {!fromCanva && <button className="btn ghost small" disabled={busy} onClick={() => void act(() => api.printDesigns.download(d.id, current.id, 'bleed'), 'ダウンロードできませんでした')}>入稿用の PDF をダウンロード</button>}
+              <button className="btn ghost small" disabled={busy} onClick={() => void act(() => api.printDesigns.download(d.id, current.id, 'png'), 'ダウンロードできませんでした')}>画像（PNG）をダウンロード</button>
             </div>
             <Links data={data} state={state} busy={busy}
               onSignage={() => act(() => api.printDesigns.toSignage(d.id), '流せませんでした')}

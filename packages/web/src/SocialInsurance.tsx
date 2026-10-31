@@ -67,7 +67,7 @@ export function SocialTab() {
 
       <div className="row wrap hr-toolbar">
         <h3 className="pay-sub grow">随時改定</h3>
-        {changesToFile.length > 0 && <button className="btn small" disabled={busy} onClick={() => report('change', '月額変更届')}>月額変更届の下書き（{changesToFile.length} 人）</button>}
+        {changesToFile.length > 0 && <button className="btn small" disabled={busy} onClick={() => report('change', '月額変更届')}>月額変更届の下書きをダウンロード（{changesToFile.length} 人）</button>}
       </div>
       {data.changes.length === 0 ? <p className="muted small">候補はありません</p> : (
         <div className="pay-table"><div className="table-scroll"><table className="table hr-table social-table">
@@ -89,7 +89,7 @@ export function SocialTab() {
 
       <div className="row wrap hr-toolbar">
         <h3 className="pay-sub grow">資格の取得・喪失</h3>
-        {eventKinds.map((k) => <button key={k} className="btn small" disabled={busy} onClick={() => report(k, HR_FILING_LABELS[k])}>{HR_FILING_LABELS[k]}の下書き</button>)}
+        {eventKinds.map((k) => <button key={k} className="btn small" disabled={busy} onClick={() => report(k, HR_FILING_LABELS[k])}>{HR_FILING_LABELS[k]}の下書きをダウンロード</button>)}
       </div>
       {data.events.length === 0 ? <p className="muted small">前後 60 日の届出はありません</p> : (
         <div className="pay-table"><div className="table-scroll"><table className="table hr-table social-table">
@@ -118,7 +118,7 @@ export function SocialTab() {
         <strong>{year} 年</strong>
         <button className="btn ghost small" onClick={() => setYear(year + 1)}>次 →</button>
         <span className="grow" />
-        {data.regular.some((d) => !d.excluded && d.after) && <button className="btn small" disabled={busy} onClick={() => report('regular', `算定基礎届 ${year}`)}>算定基礎届の下書き</button>}
+        {data.regular.some((d) => !d.excluded && d.after) && <button className="btn small" disabled={busy} onClick={() => report('regular', `算定基礎届 ${year}`)}>算定基礎届の下書きをダウンロード</button>}
       </div>
       {data.regular.length === 0 ? <p className="muted small">対象の人はいません</p> : (
         <div className="pay-table"><div className="table-scroll"><table className="table hr-table social-table">

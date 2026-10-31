@@ -22,6 +22,8 @@ import { BackButton } from './back-button.js';
 const label = <T extends string>(list: { id: T; label: string }[], id: T) => list.find((x) => x.id === id)?.label ?? id;
 /** 日本時間の今日（YYYY-MM-DD）。 */
 const today = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+/** 有給の期限（その日には使えない日）の前日＝使える最後の日。 */
+const lastDay = (expiresOn: string) => new Date(Date.parse(`${expiresOn}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
 const yen = (n: number | null | undefined) => (n === null || n === undefined ? '' : `${n.toLocaleString('ja-JP')} 円`);
 const wage = (t: Pick<HrTerms, 'wageType' | 'wageAmount'> | null) => (t && t.wageAmount !== null ? `${label(HR_WAGE_TYPES, t.wageType)} ${yen(t.wageAmount)}` : '');
 
@@ -88,7 +90,7 @@ function AttendanceTab() {
         {data.close
           ? <button className="btn ghost small" onClick={() => act(() => api.hr.reopenAttendance(data.close!.id), '締めを戻せませんでした')}>締めを戻す</button>
           : <button className="btn small" onClick={() => act(() => api.hr.closeAttendance(ym), '締められませんでした')}>締める</button>}
-        <button className="btn ghost small" onClick={() => void api.hr.attendanceBook(ym).catch((e) => setError(describeError(e, '書き出せませんでした')))}>出勤簿</button>
+        <button className="btn ghost small" onClick={() => void api.hr.attendanceBook(ym).catch((e) => setError(describeError(e, 'ダウンロードできませんでした')))}>出勤簿をダウンロード</button>
       </div>
       {data.close && <p className="small muted">締めました（{data.close.closedAt.slice(0, 10)}）</p>}
       {error && <p className="error">{error}</p>}
@@ -234,7 +236,7 @@ function PayrollTab({ onOpen }: { onOpen: (id: string) => void }) {
         {mode === 'monthly' && !confirmed && <button className="btn small" disabled={busy} onClick={calc}>{main ? '計算し直す' : '計算する'}</button>}
       </div>
       <div className="row wrap hr-toolbar small">
-        <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.ledger(Number(month.slice(0, 4)), 'xlsx'), '書き出せませんでした')}>{month.slice(0, 4)} 年の賃金台帳</button>
+        <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.ledger(Number(month.slice(0, 4)), 'xlsx'), 'ダウンロードできませんでした')}>{month.slice(0, 4)} 年の賃金台帳をダウンロード</button>
         <button className="btn ghost small" disabled={busy} onClick={() => noticeRef.current?.click()}>住民税の通知書を読む</button>
         {mode === 'monthly' && <button className="btn ghost small" disabled={busy} onClick={() => trialRef.current?.click()}>今の明細と試しに比べる</button>}
         <input ref={noticeRef} type="file" accept="application/pdf,image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) readNotice(f); }} />
@@ -322,7 +324,7 @@ function RunPanel({ data, busy, act, setNote, onOpen, month, recalc, at, onChang
   const request = () => act(async () => { const x = await api.hr.payroll.requestConfirm(r.id); setNote(x.sent ? `管理者 ${x.sent} 人に確定を頼みました` : '知らせる管理者がいません'); }, '頼めませんでした');
   const transfer = () => act(async () => {
     const x = await api.hr.payroll.transfer(r.id, `${month}${r.kind === 'monthly' ? '' : `-${KIND_NAME[r.kind]}`}`);
-    setNote(`振込データ（${x.count} 件）を保存しました${x.excluded.length ? `。入っていない人: ${x.excluded.join('、')}` : ''}`);
+    setNote(`振込データ（${x.count} 件）をダウンロードしました${x.excluded.length ? `。入っていない人: ${x.excluded.join('、')}` : ''}`);
     onChanged();
   }, '振込データを作れませんでした');
   const addAdj = (employeeId: string) => act(async () => {
@@ -342,8 +344,8 @@ function RunPanel({ data, busy, act, setNote, onOpen, month, recalc, at, onChang
         {!confirmed && (data.canConfirm
           ? <button className="btn primary small" disabled={busy || data.blockers.length > 0} onClick={confirm}>確定する</button>
           : <button className="btn small" disabled={busy} onClick={request}>{r.confirmRequestedAt ? '管理者にもう一度頼む' : '管理者に確定を頼む'}</button>)}
-        {confirmed && data.canConfirm && <button className="btn small" disabled={busy} onClick={transfer}>{r.transferAt ? '振込データを作り直す' : '振込データ'}</button>}
-        {confirmed && r.kind === 'bonus' && <button className="btn ghost small" disabled={busy} onClick={() => act(() => api.hr.payroll.bonusReport(r.id, r.payDate), '出せませんでした')}>賞与支払届（下書き）</button>}
+        {confirmed && data.canConfirm && <button className="btn small" disabled={busy} onClick={transfer}>{r.transferAt ? '振込データを作り直してダウンロード' : '振込データをダウンロード'}</button>}
+        {confirmed && r.kind === 'bonus' && <button className="btn ghost small" disabled={busy} onClick={() => act(() => api.hr.payroll.bonusReport(r.id, r.payDate), 'ダウンロードできませんでした')}>賞与支払届（下書き）をダウンロード</button>}
       </div>
       {!confirmed && stops.length > 0 && (
         <div className="pay-checks stop"><strong className="small">止まっているもの</strong>
@@ -408,7 +410,7 @@ function RunPanel({ data, busy, act, setNote, onOpen, month, recalc, at, onChang
                         )}
                         <div className="row">
                           <button className="btn ghost small" onClick={() => onOpen(s.employeeId)}>台帳と給与の情報を開く</button>
-                          {confirmed && <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.slipPdf(s.id, `${KIND_NAME[r.kind]}の明細-${month}-${s.employeeName ?? ''}.pdf`), 'PDF を出せませんでした')}>明細の PDF</button>}
+                          {confirmed && <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.slipPdf(s.id, `${KIND_NAME[r.kind]}の明細-${month}-${s.employeeName ?? ''}.pdf`), 'ダウンロードできませんでした')}>明細の PDF をダウンロード</button>}
                         </div>
                       </div>
                     </td></tr>
@@ -562,26 +564,37 @@ function LeaveTab() {
   }, []);
   useEffect(load, [load]);
   if (!rows) return <p className="muted">{error ?? '読み込んでいます…'}</p>;
+  const now = today();
   return (
     <div className="hr">
       <div className="row wrap hr-toolbar">
         <span className="grow" />
-        <button className="btn ghost small" onClick={() => void api.hr.leaveRegister().catch((e) => setError(describeError(e, '書き出せませんでした')))}>管理簿</button>
+        <button className="btn ghost small" onClick={() => void api.hr.leaveRegister().catch((e) => setError(describeError(e, 'ダウンロードできませんでした')))}>管理簿をダウンロード</button>
       </div>
       {error && <p className="error">{error}</p>}
-      <div className="table-scroll"><table className="table hr-table">
-        <thead><tr><th>氏名</th><th>残り</th><th>付与</th><th>取得義務</th><th /></tr></thead>
+      <div className="table-scroll"><table className="table hr-table leave-table">
+        <thead><tr><th>氏名</th><th>残り</th><th>使える付与</th><th>取得義務</th><th /></tr></thead>
         <tbody>
           {rows.map((r) => (
             <Fragment key={r.employeeId}>
               <tr>
-                <td>{r.name}</td>
-                <td>{r.balance.remaining} 日</td>
-                <td className="small">{r.balance.grants.filter((g) => g.left > 0).map((g) => `${g.grantedOn} ${g.days} 日（残り ${g.left}）`).join('・')}</td>
+                <td className="nowrap">{r.name}</td>
+                <td className="nowrap leave-remaining">{r.balance.remaining} 日</td>
+                <td className="small">
+                  <ul className="plain leave-grants">
+                    {r.balance.grants.filter((g) => g.grantedOn <= now && g.expiresOn > now).map((g) => (
+                      <li key={g.grantedOn}>
+                        <span className="leave-grant-date">{g.grantedOn}</span>
+                        <span>{g.days} 日のうち残り <strong>{g.left}</strong> 日</span>
+                        <span className="muted">{lastDay(g.expiresOn)} まで</span>
+                      </li>
+                    ))}
+                  </ul>
+                </td>
                 <td className="small">
                   {r.balance.obligation && (r.balance.obligation.taken >= r.balance.obligation.required
                     ? '済み'
-                    : <span className="badge warn">{r.balance.obligation.deadline} までにあと {r.balance.obligation.required - r.balance.obligation.taken} 日</span>)}
+                    : <span className="badge warn leave-duty">{r.balance.obligation.deadline} まで<br />あと {r.balance.obligation.required - r.balance.obligation.taken} 日</span>)}
                   {r.lowAttendance !== null && <div className="error">出勤率 {Math.round(r.lowAttendance * 100)}%（付与を確かめる）</div>}
                 </td>
                 <td className="nowrap">
@@ -706,11 +719,11 @@ function EmployeeList({ onOpen }: { onOpen: (id: string) => void }) {
         <input ref={file} type="file" accept=".csv,.xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
         <button className="btn ghost" disabled={!!photos && photos.done < photos.total} onClick={() => photoFiles.current?.click()}>顔写真の取り込み</button>
         <input ref={photoFiles} type="file" accept="image/*" multiple hidden onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) void importPhotos(fs); }} />
-        <button className="btn ghost" onClick={() => void api.hr.roster('xlsx').catch((e) => setError(describeError(e, '書き出せませんでした')))}>労働者名簿</button>
+        <button className="btn ghost" onClick={() => void api.hr.roster('xlsx').catch((e) => setError(describeError(e, 'ダウンロードできませんでした')))}>労働者名簿をダウンロード</button>
         <button className="btn ghost" disabled={exporting} onClick={() => {
           setExporting(true); setError(null); setBooksNote(null);
-          void api.hr.books().then((n) => setBooksNote(`帳簿を ${n} ファイルにまとめて書き出しました`)).catch((e) => setError(describeError(e, '書き出せませんでした'))).finally(() => setExporting(false));
-        }}>{exporting ? 'まとめています…' : '帳簿の一括書き出し'}</button>
+          void api.hr.books().then((n) => setBooksNote(`帳簿を ${n} ファイルにまとめてダウンロードしました`)).catch((e) => setError(describeError(e, 'ダウンロードできませんでした'))).finally(() => setExporting(false));
+        }}>{exporting ? 'まとめています…' : '帳簿をまとめてダウンロード'}</button>
       </div>
       {error && <p className="error">{error}</p>}
       {booksNote && <p className="ok-msg small">{booksNote}</p>}
@@ -1081,7 +1094,7 @@ function TermsNotice({ employeeId, name }: { employeeId: string; name: string })
             </label>
           ))}
           <div className="row">
-            <button className="btn small" onClick={() => void api.hr.termsNoticePdf(employeeId, texts, name).then(load).catch((e) => setError(describeError(e, '作れませんでした')))}>PDF を作る</button>
+            <button className="btn small" onClick={() => void api.hr.termsNoticePdf(employeeId, texts, name).then(load).catch((e) => setError(describeError(e, '作れませんでした')))}>PDF をダウンロード</button>
           </div>
         </>
       )}

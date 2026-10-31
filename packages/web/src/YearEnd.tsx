@@ -61,7 +61,7 @@ export function YearEndTab({ RunView }: { RunView: ComponentType<{ runId: string
         <button className="btn small" disabled={busy || (run && run.status !== 'draft')} onClick={() => act(async () => { await api.hr.payroll.yeaCalculate(year, payDate); load(); }, '計算できませんでした')}>{run ? '計算し直す' : '計算する'}</button>
       </div>
       <div className="row wrap hr-toolbar small">
-        <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.yeaReport(year), '書き出せませんでした')}>源泉徴収票・給与支払報告書（下書き）</button>
+        <button className="btn ghost small" onClick={() => act(() => api.hr.payroll.yeaReport(year), 'ダウンロードできませんでした')}>源泉徴収票・給与支払報告書（下書き）をダウンロード</button>
         {!data.decemberConfirmed && <span className="muted">12 月の給与が確定すると、年末調整を確定できます</span>}
       </div>
       {error && <p className="error">{error}</p>}
@@ -76,7 +76,7 @@ export function YearEndTab({ RunView }: { RunView: ComponentType<{ runId: string
                 <td className="small">{r.target ? '対象' : <span className="muted">{r.reason}</span>}</td>
                 <td className="small">{r.checkedAt ? '確かめた' : r.submittedAt ? <span className="badge warn">確かめ待ち</span> : r.target ? <span className="muted">まだ</span> : ''}</td>
                 <td className="small">{r.problems.length > 0 && <span className="badge warn">{r.problems.length}</span>}</td>
-                <td><button className="btn ghost small" onClick={() => act(() => api.hr.payroll.yeaWithholding(r.employeeId, year, r.name), '源泉徴収票を出せませんでした')}>源泉徴収票</button></td>
+                <td><button className="btn ghost small" onClick={() => act(() => api.hr.payroll.yeaWithholding(r.employeeId, year, r.name), 'ダウンロードできませんでした')}>源泉徴収票をダウンロード</button></td>
               </tr>
               {open === r.employeeId && (
                 <tr><td colSpan={5}>

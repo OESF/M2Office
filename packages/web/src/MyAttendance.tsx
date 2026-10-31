@@ -197,7 +197,7 @@ function MyPayslips() {
               <tr><td /><td><strong>差引支給</strong></td><td className="num"><strong>{open.slip.net.toLocaleString('ja-JP')}</strong></td></tr>
             </tbody>
           </table>
-          <button className="btn ghost small" onClick={() => void api.myHr.payslipPdf(open.slip.id, open.slip.run.payMonth).catch((e) => setError(describeError(e, 'PDF を出せませんでした')))}>PDF</button>
+          <button className="btn ghost small" onClick={() => void api.myHr.payslipPdf(open.slip.id, open.slip.run.payMonth).catch((e) => setError(describeError(e, 'ダウンロードできませんでした')))}>PDF をダウンロード</button>
         </div>
       )}
     </div>
@@ -279,7 +279,7 @@ function MyYearEnd() {
       <div className="row wrap">
         <strong className="grow">{year} 年の年末調整</strong>
         <span className="small muted">{v.target ? state : v.reason}</span>
-        {v.result && <button className="btn ghost small" onClick={() => void api.myHr.withholdingPdf(year).catch((e) => setError(describeError(e, '出せませんでした')))}>源泉徴収票</button>}
+        {v.result && <button className="btn ghost small" onClick={() => void api.myHr.withholdingPdf(year).catch((e) => setError(describeError(e, 'ダウンロードできませんでした')))}>源泉徴収票をダウンロード</button>}
         {v.target && <button className="btn ghost small" onClick={() => setOpen(!open)}>{open ? '閉じる' : v.canEdit ? '申告する' : '申告を見る'}</button>}
       </div>
       {v.result && <p className="small">年末調整で{v.result.difference >= 0 ? ` ${v.result.difference.toLocaleString('ja-JP')} 円が戻ります` : ` ${(-v.result.difference).toLocaleString('ja-JP')} 円が不足し、1 月の給与で差し引きます`}（年税額 {v.result.annualTax.toLocaleString('ja-JP')} 円）。</p>}

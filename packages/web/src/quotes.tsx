@@ -145,7 +145,7 @@ export function QuoteView({ id, onBack, onOpen, onOpenRun, onOpenSales, backLabe
           <p className="small muted">{d.taxLines.map((x) => (x.rate === 0 ? `対象外 ${yen(x.base)}` : `${taxRateLabel(x.rate)} ${yen(x.base)}・消費税 ${yen(x.tax)}`)).join('　')}</p>
           {r.taxNotes.map((n) => <p key={n} className="small"><span className="badge warn">予定</span> {n}</p>)}
           <div className="row wrap">
-            <a className="btn ghost small" href={api.quotes.pdfUrl(d.id, true)}>PDF を保存</a>
+            <a className="btn ghost small" href={api.quotes.pdfUrl(d.id, true)}>PDF をダウンロード</a>
             {live && orders && (state === 'submitted' || state === 'expired' || state === 'lost') && (
               <button className="btn small" disabled={busy} onClick={() => {
                 setBusy(true);

@@ -52,7 +52,7 @@ export function LaborTab() {
         <button className="btn ghost small" onClick={() => setYear(year + 1)}>次 →</button>
         <span className="small muted">確定 {data.period.from} 〜 {data.period.to}</span>
         <span className="grow" />
-        {r && <button className="btn small" disabled={busy} onClick={() => act(async () => { await api.hr.payroll.laborReport(year); load(); }, '下書きを作れませんでした', '年度更新の下書きを作りました')}>申告書の下書き</button>}
+        {r && <button className="btn small" disabled={busy} onClick={() => act(async () => { await api.hr.payroll.laborReport(year); load(); }, '下書きを作れませんでした', '年度更新の下書きを作りました')}>申告書の下書きをダウンロード</button>}
         {data.filedAt && <span className="small muted">下書き済み {data.filedAt.slice(5, 10).replace('-', '/')}</span>}
       </div>
       {error && <p className="error">{error}</p>}

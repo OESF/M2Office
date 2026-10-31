@@ -396,7 +396,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
                 onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void cover(() => api.columns.addPhoto(id, f), '画像を変えました'); }} />
               {current.cover && (
                 <button className="btn ghost small" onClick={() => void api.columns.downloadCover(id, current.title)
-                  .catch((err) => setMessage({ kind: 'error', text: describeError(err, '書き出せませんでした'), at: 'cover' }))}>画像を書き出す</button>
+                  .catch((err) => setMessage({ kind: 'error', text: describeError(err, 'ダウンロードできませんでした'), at: 'cover' }))}>画像をダウンロード</button>
               )}
               {past.length > 0 && (
                 <button className="link small" onClick={() => setShowPast(!showPast)}>{showPast ? '以前の画像を閉じる' : `以前の画像（${past.length}）`}</button>

@@ -1653,6 +1653,14 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .hr-notice-field textarea { width: 100%; font: inherit; }
 .hr-table tr.hr-overdue td { background: var(--warn-soft); }
 .hr-table td.nowrap { white-space: nowrap; }
+/* 有給: 使える付与を 1 件ずつ 1 行に。名前・残り・操作は折り返さない（仕様書 第30.7.1節） */
+.leave-table td { vertical-align: middle; }
+.leave-table td.leave-remaining { font-weight: 600; }
+.leave-table td.nowrap, .leave-table th:not(:nth-child(3)) { width: 1%; white-space: nowrap; }
+.leave-grants { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(3, max-content); gap: 2px 16px; }
+.leave-grants li { display: contents; }
+.leave-grants span { font-variant-numeric: tabular-nums; }
+.hr-table .badge.leave-duty { margin-left: 0; white-space: nowrap; display: inline-block; line-height: 1.5; border-radius: 6px; }
 .hr-calendar { table-layout: auto; }
 .hr-calendar td.nowrap { width: 1%; }
 .pay-checks { border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; margin: 6px 0; }

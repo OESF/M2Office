@@ -291,7 +291,7 @@ function Tenants({ me, onChanged }: { me: OpsMe; onChanged: () => void }) {
           <option value="attention">注意のある会社</option>
         </select>
         {me.can['tenant.create'] && !creating && <button className="btn small" onClick={() => setCreating(true)}>会社を作る</button>}
-        <a className="btn ghost small" href={TENANTS_CSV_URL} download>CSV で書き出す</a>
+        <a className="btn ghost small" href={TENANTS_CSV_URL} download>CSV をダウンロード</a>
       </div>
       {creating && <CreateTenant onClose={() => setCreating(false)} onCreated={load} />}
       {rows && (

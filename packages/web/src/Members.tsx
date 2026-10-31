@@ -192,7 +192,7 @@ function MemberView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () 
         </div>
         <div className="mbr-qr">
           <img src={api.members.qrUrl(m.id)} alt="会員証の QR" width={140} height={140} />
-          <a className="btn ghost small" href={api.members.cardPdfUrl(m.id)}>紙の会員証（PDF）</a>
+          <a className="btn ghost small" href={api.members.cardPdfUrl(m.id)}>紙の会員証（PDF）をダウンロード</a>
           {d.cardUrl && <a className="small" href={d.cardUrl} target="_blank" rel="noopener noreferrer">会員証のページ</a>}
         </div>
       </div>

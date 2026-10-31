@@ -461,9 +461,9 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
           <summary className="btn ghost">その他</summary>
           <div className="inventory-more-menu" role="menu" onClick={() => more.current?.removeAttribute('open')}>
             <button role="menuitem" disabled={busy} onClick={() => picker.current?.click()}>取り込み（CSV・Excel）</button>
-            <button role="menuitem" onClick={() => void api.inventory.exportFile('csv').catch((e) => setMessage(describeError(e, '書き出せませんでした')))}>書き出し（CSV）</button>
+            <button role="menuitem" onClick={() => void api.inventory.exportFile('csv').catch((e) => setMessage(describeError(e, 'ダウンロードできませんでした')))}>CSV をダウンロード</button>
             <button role="menuitem" disabled={!list || list.locations.length === 0}
-              onClick={() => void api.inventory.downloadLabels().catch((e) => setMessage(describeError(e, 'ラベルを作れませんでした')))}>棚ラベルの印刷</button>
+              onClick={() => void api.inventory.downloadLabels().catch((e) => setMessage(describeError(e, 'ラベルを作れませんでした')))}>棚ラベル（PDF）をダウンロード</button>
             <button role="menuitem" onClick={() => {
               if (mobileQr) { URL.revokeObjectURL(mobileQr); setMobileQr(null); return; }
               void api.inventory.mobileQrUrl().then((url) => { closeWork(); setMobileQr(url); }).catch((e) => setMessage(describeError(e, 'QR を作れませんでした')));

@@ -59,7 +59,7 @@ function DownloadButton({ deck, format, small }: { deck: SlideDeckSummary; forma
     }
   }
   const name = SLIDE_DECK_FORMAT_LABEL[format];
-  const label = small ? name : `${name} でダウンロード`;
+  const label = `${name} でダウンロード`;
   return (
     <>
       <button type="button" className={`btn ghost${small ? ' small' : ''}`} disabled={since !== null} onClick={() => void download()}>

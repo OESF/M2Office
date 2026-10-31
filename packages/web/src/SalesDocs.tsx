@@ -547,7 +547,7 @@ function DocView({ id, onBack, onOpen, onOpenRun, changeKey }: {
           {/* まだ確定していない税率の変更（食料品の 1% など。第15.1.1節） */}
           {r.taxNotes.map((n) => <p key={n} className="small"><span className="badge warn">予定</span> {n}</p>)}
           <div className="row wrap">
-            <a className="btn ghost small" href={api.sales.pdfUrl(d.id, true)}>PDF を保存</a>
+            <a className="btn ghost small" href={api.sales.pdfUrl(d.id, true)}>PDF をダウンロード</a>
             {d.status === 'draft' && latest && (
               <button className="btn small" disabled={busy} onClick={() => {
                 if (window.confirm(`この内容で${SALES_DOC_KIND_LABELS[d.kind]}を発行しますか。番号が付き、書き換えられなくなります`)) act(api.sales.issue(d.id), '発行しました', '発行できませんでした');
