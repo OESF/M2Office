@@ -1,26 +1,32 @@
 /**
- * @file ローカルの形の社外の控え（仕様書 第8.6.5節）。会社が選んだときだけ、毎晩の控えを restic で暗号化して、
- * 会社が契約した S3 互換の置き場へ送る。
+ * @file ローカルの形の別の置き場の控え（仕様書 第8.6.5節）。会社が選んだときだけ、毎晩の控えを restic で暗号化して、
+ * 社内の NAS の rest-server（足せるが消せない形）か、会社が契約した S3 互換の置き場へ送る（ADR-0120）。
  *
  * 暗号化の合言葉は導入のときに機械の上で作り、紙の「戻すための控え」に書いて会社に渡す。運営は合言葉も置き場の鍵も持たない。
  * restic は送る前に暗号化し、前回と同じ部分は送らない。控えの置き場の 1 回分（`db.dump` と `files/`）を、
  * その中から相対の道で送るので、毎晩の名前が違っても前回の控えを親にでき、変わったところだけを読む。
- * 残す数は社内の控えと同じ（毎日 14 回・毎週 8 回・毎月 12 回）。毎月 1 回、置き場の中身の一部を読み戻して壊れていないかを確かめる。
+ * 残す数は社内の控えと同じ（毎日 14 回・毎週 8 回・毎月 12 回）。ただし NAS の rest-server は足せるが消せない形で受けるので、
+ * 機械は古い控えを消さない（間引くのは NAS の管理者）。毎月 1 回、置き場の中身の一部を読み戻して壊れていないかを確かめる。
  */
 
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-/** 社外の控えの設定。 */
+/** 別の置き場の控えの設定。 */
 export interface OffsiteConfig {
-  /** restic の置き場（`s3:https://<口>/<バケット>/<道>`）。 */
+  /** restic の置き場（`s3:https://<口>/<バケット>/<道>` か、NAS の `rest:https://<NAS>:<ポート>/<道>`）。 */
   repository: string;
   /** 暗号化の合言葉（導入のときに機械の上で作る）。 */
   password: string;
-  /** 置き場の鍵（会社が契約した S3 互換の置き場のアクセスキー）。 */
-  accessKeyId: string;
-  secretAccessKey: string;
+  /** 置き場の鍵（S3 互換の置き場のアクセスキー。NAS では `null`）。 */
+  accessKeyId: string | null;
+  secretAccessKey: string | null;
+  /** NAS の rest-server の利用者と合言葉（S3 互換の置き場では無し）。 */
+  restUser?: string | null;
+  restPassword?: string | null;
+  /** NAS が自分で作った証明書のファイル（要るときだけ）。 */
+  cacert?: string | null;
   /** 地域（要る置き場だけ）。 */
   region: string | null;
   /** restic の道（Homebrew で入れたもの）。無ければ PATH から探す。 */
@@ -29,7 +35,7 @@ export interface OffsiteConfig {
   cacheDir: string;
 }
 
-/** 社外の控えの 1 回。 */
+/** 別の置き場の控えの 1 回。 */
 export interface OffsiteRecord {
   /** 送った社内の控えの名前。 */
   name: string;
@@ -42,7 +48,7 @@ export interface OffsiteRecord {
   error: string | null;
 }
 
-/** 社外の控えの状態（控えの置き場の `offsite.json`）。 */
+/** 別の置き場の控えの状態（控えの置き場の `offsite.json`）。 */
 export interface OffsiteStatus {
   last: OffsiteRecord | null;
   /** 最後にうまくいった restic の控えの番号（次の回の親）。 */
@@ -62,22 +68,45 @@ const CHECK_SUBSET = '5%';
 /** 1 回に待つ長さ（最初の回は量が多いため長くとる）。 */
 const RESTIC_TIMEOUT_MS = 8 * 3_600_000;
 
-/** 環境変数から設定を読む（置き場・合言葉・鍵がそろっていなければ `null`）。 */
+/**
+ * 置き場が NAS の rest-server か。rest-server は足せるが消せない形（`--append-only`）で受ける前提なので、
+ * 機械は古い控えを消さない（ADR-0120）。
+ */
+export function isAppendOnly(cfg: Pick<OffsiteConfig, 'repository'>): boolean {
+  return cfg.repository.startsWith('rest:');
+}
+
+/**
+ * 環境変数から設定を読む。置き場と合言葉に加え、S3 互換の置き場ならアクセスキー、NAS の rest-server なら利用者と合言葉が
+ * そろっていなければ `null`。
+ */
 export function offsiteConfigFromEnv(env: Record<string, string | undefined>, machineDir: string): OffsiteConfig | null {
   const repository = env['M2O_OFFSITE_REPOSITORY']?.trim();
   const password = env['M2O_OFFSITE_PASSWORD'];
-  const accessKeyId = env['M2O_OFFSITE_ACCESS_KEY_ID']?.trim();
-  const secretAccessKey = env['M2O_OFFSITE_SECRET_ACCESS_KEY'];
-  if (!repository || !password || !accessKeyId || !secretAccessKey || !repository.startsWith('s3:')) return null;
-  return {
-    repository, password, accessKeyId, secretAccessKey,
+  if (!repository || !password) return null;
+  const common = {
+    repository, password,
     region: env['M2O_OFFSITE_REGION']?.trim() || null,
     resticBin: env['M2O_RESTIC_BIN']?.trim() || null,
     cacheDir: join(machineDir, 'restic-cache'),
+    cacert: env['M2O_OFFSITE_CACERT']?.trim() || null,
   };
+  if (repository.startsWith('s3:')) {
+    const accessKeyId = env['M2O_OFFSITE_ACCESS_KEY_ID']?.trim();
+    const secretAccessKey = env['M2O_OFFSITE_SECRET_ACCESS_KEY'];
+    if (!accessKeyId || !secretAccessKey) return null;
+    return { ...common, accessKeyId, secretAccessKey, restUser: null, restPassword: null };
+  }
+  if (repository.startsWith('rest:')) {
+    const restUser = env['M2O_OFFSITE_REST_USER']?.trim();
+    const restPassword = env['M2O_OFFSITE_REST_PASSWORD'];
+    if (!restUser || !restPassword) return null;
+    return { ...common, accessKeyId: null, secretAccessKey: null, restUser, restPassword };
+  }
+  return null;
 }
 
-/** 社外の控えの状態を読む（無ければ空）。 */
+/** 別の置き場の控えの状態を読む（無ければ空）。 */
 export async function readOffsiteStatus(backupDir: string): Promise<OffsiteStatus> {
   try {
     return JSON.parse(await readFile(join(backupDir, STATUS), 'utf8')) as OffsiteStatus;
@@ -100,10 +129,11 @@ function restic(cfg: OffsiteConfig, args: string[], cwd?: string): Promise<strin
     PATH: process.env['PATH'] ?? '/usr/bin:/bin',
     RESTIC_REPOSITORY: cfg.repository,
     RESTIC_PASSWORD: cfg.password,
-    AWS_ACCESS_KEY_ID: cfg.accessKeyId,
-    AWS_SECRET_ACCESS_KEY: cfg.secretAccessKey,
     RESTIC_CACHE_DIR: cfg.cacheDir,
+    ...(cfg.accessKeyId && cfg.secretAccessKey ? { AWS_ACCESS_KEY_ID: cfg.accessKeyId, AWS_SECRET_ACCESS_KEY: cfg.secretAccessKey } : {}),
     ...(cfg.region ? { AWS_DEFAULT_REGION: cfg.region } : {}),
+    ...(cfg.restUser && cfg.restPassword ? { RESTIC_REST_USERNAME: cfg.restUser, RESTIC_REST_PASSWORD: cfg.restPassword } : {}),
+    ...(cfg.cacert ? { RESTIC_CACERT: cfg.cacert } : {}),
   };
   return new Promise((resolve, reject) => {
     const p = spawn(cfg.resticBin || 'restic', args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -134,11 +164,12 @@ export function parseBackupSummary(out: string): { snapshot: string | null; byte
 }
 
 /**
- * 社内の控えの 1 回分を、社外へ送る。送ったら、残す数を超えた古い控えを置き場から消す。
+ * 社内の控えの 1 回分を、別の置き場へ送る。S3 互換の置き場では、送ったら残す数を超えた古い控えを置き場から消す。
+ * NAS の rest-server は足せるが消せない形なので消さない。
  *
  * @param backupDir 控えの置き場
  * @param name 送る社内の控えの名前（うまくいったもの）
- * @remarks 危険度: 社外への送信。ただし会社が導入のときに選び、会社が契約した置き場へ、会社だけが合言葉を持つ暗号化をしてから送る（第8.6.5節）。中身は運営にも置き場の事業者にも読めない
+ * @remarks 危険度: 社外への送信（S3 互換の置き場のとき）。ただし会社が導入のときに選び、会社が契約した置き場へ、会社だけが合言葉を持つ暗号化をしてから送る（第8.6.5節）。中身は運営にも置き場の事業者にも読めない。NAS のときは社内の送信
  */
 export async function runOffsite(backupDir: string, name: string, cfg: OffsiteConfig, now: Date = new Date()): Promise<OffsiteRecord> {
   const status = await readOffsiteStatus(backupDir);
@@ -149,8 +180,8 @@ export async function runOffsite(backupDir: string, name: string, cfg: OffsiteCo
     const args = ['backup', '--json', '--tag', TAG, '--host', HOST, ...(status.lastOkSnapshot ? ['--parent', status.lastOkSnapshot] : []), 'db.dump', 'files'];
     const sum = parseBackupSummary(await restic(cfg, args, join(backupDir, name)));
     if (!sum.snapshot) throw new Error('restic が控えの番号を返しませんでした');
-    // 古い控えを消す。道が毎晩違うため、印と機械の名前でまとめて数える
-    await restic(cfg, ['forget', '--tag', TAG, '--group-by', 'host,tags', ...OFFSITE_KEEP, '--prune']);
+    // 古い控えを消す。道が毎晩違うため、印と機械の名前でまとめて数える。足せるが消せない置き場では消さない
+    if (!isAppendOnly(cfg)) await restic(cfg, ['forget', '--tag', TAG, '--group-by', 'host,tags', ...OFFSITE_KEEP, '--prune']);
     record = { name, at, ok: true, snapshot: sum.snapshot, bytesAdded: sum.bytesAdded, error: null };
   } catch (err) {
     record = { name, at, ok: false, snapshot: null, bytesAdded: 0, error: err instanceof Error ? err.message.slice(0, 300) : String(err) };

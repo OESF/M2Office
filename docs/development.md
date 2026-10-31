@@ -264,7 +264,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `M2O_ONSITE_TENANT` | （なし） | ローカルの形で入っている 1 社のサブドメイン。アドレスにかかわらずこの会社に決める |
 | `AI_MONTHLY_LIMIT_JPY` | （なし） | 運営が AI の費用をまとめて払う会社の、AI の利用の月の上限（円）の既定と、管理者が上げられる上限。無ければ上限なし。自社の鍵の会社には効かない（仕様書 第6.6.2節）。マスター管理画面で決めれば、そちらが優先する |
 | `M2O_BACKUP_DIR` | （なし） | ローカルの形の控えの置き場（RAID とは別のディスク）。あれば毎晩控えを取り、毎月戻せるかを確かめる（仕様書 第8.6.5節） |
-| `M2O_OFFSITE_REPOSITORY`・`M2O_OFFSITE_PASSWORD`・`M2O_OFFSITE_ACCESS_KEY_ID`・`M2O_OFFSITE_SECRET_ACCESS_KEY`・`M2O_OFFSITE_REGION`・`M2O_RESTIC_BIN` | （なし） | ローカルの形の社外の控え。会社が契約した S3 互換の置き場（`s3:https://…`）・暗号化の合言葉（機械の上で作り、紙の控えに書く）・置き場の鍵・地域・restic の道。そろったときだけ、毎晩の控えの後に restic で暗号化して送る（仕様書 第8.6.5節） |
+| `M2O_OFFSITE_REPOSITORY`・`M2O_OFFSITE_PASSWORD`・`M2O_OFFSITE_ACCESS_KEY_ID`・`M2O_OFFSITE_SECRET_ACCESS_KEY`・`M2O_OFFSITE_REGION`・`M2O_OFFSITE_REST_USER`・`M2O_OFFSITE_REST_PASSWORD`・`M2O_OFFSITE_CACERT`・`M2O_RESTIC_BIN` | （なし） | ローカルの形の別の置き場の控え。置き場は社内の NAS の rest-server（`rest:https://…`。足せるが消せない形で受ける前提で、古い控えを消さない）か、会社が契約した S3 互換の置き場（`s3:https://…`）。暗号化の合言葉（機械の上で作り、紙の控えに書く）・S3 の鍵と地域・rest-server の利用者と合言葉・NAS の証明書・restic の道。そろったときだけ、毎晩の控えの後に restic で暗号化して送る（仕様書 第8.6.5節、ADR-0120） |
 | `M2O_MACHINE_ADMIN_ID`・`M2O_MACHINE_ADMIN_PASSWORD_HASH`・`M2O_MACHINE_ADMIN_TOTP` | （なし） | ローカルの形の機械の管理者（`/machine`）の ID・合言葉の控え（scrypt）・認証アプリの確認コードの種（base32）。導入のときに setup.sh が作る。3 つがそろったときだけ使える（仕様書 第8.6.3節） |
 | `M2O_PG_BIN` ／ `M2O_PG_DOCKER` | （なし） | 控えに使う PostgreSQL の道具のある場所（同梱した実行環境）。開発ではデータベースのコンテナの名前（`m2office-db`）を `M2O_PG_DOCKER` に渡すと、その中の道具を使う |
 | `M2O_MACHINE_DIR` | `.data/machine` | ローカルの形の「機械」の様子の知らせ（ワーカーの知らせ）を置く場所（仕様書 第8.6.7節） |

@@ -151,19 +151,33 @@ ask DATA_DIR 'データの置き場' "${DATA_DIR:-$INSTALL_DIR/data}"
 ask BACKUP_DIR '控えの置き場（空なら控えを取りません）' "${BACKUP_DIR:-}"
 OFFSITE=no
 if [ -n "$BACKUP_DIR" ]; then
-  info '社外の控え: 毎晩の控えを、会社が契約した S3 互換の置き場（Amazon S3・Cloudflare R2・Wasabi・Backblaze B2 など）へ送る。'
+  info '別の置き場の控え: 毎晩の控えを、社内の NAS（restic の rest-server。足せるが消せない形で動かす）か、'
+  info '会社が契約した S3 互換の置き場（Amazon S3・Wasabi・Backblaze B2 など）へも送る（ADR-0120）。'
   info '送る前に restic で暗号化する。合言葉はこの機械で作り、紙の「戻すための控え」に書いて会社に渡す（運営は持たない）'
-  if yes_no '社外の控えを送りますか（会社が選んだときだけ）' "$( [ "${OFFSITE_SAVED:-no}" = yes ] && echo y || echo n)"; then
+  if yes_no '別の置き場へ控えを送りますか（会社が選んだときだけ）' "$( [ "${OFFSITE_SAVED:-no}" = yes ] && echo y || echo n)"; then
     OFFSITE=yes
-    ask OFFSITE_REPOSITORY '置き場（s3:https://<口>/<バケット>/<道>。例 s3:https://s3.ap-northeast-1.amazonaws.com/<バケット>/m2office）' "$(env_value M2O_OFFSITE_REPOSITORY)"
-    case "$OFFSITE_REPOSITORY" in s3:https://*) ;; *) die '置き場は s3:https:// で始めてください' ;; esac
-    ask OFFSITE_REGION '地域（要る置き場だけ。例 ap-northeast-1。要らなければ空）' "$(env_value M2O_OFFSITE_REGION)"
-    ask OFFSITE_ACCESS_KEY_ID '置き場のアクセスキー ID' "$(env_value M2O_OFFSITE_ACCESS_KEY_ID)"
-    ask OFFSITE_SECRET_ACCESS_KEY '置き場のシークレットアクセスキー' "$(env_value M2O_OFFSITE_SECRET_ACCESS_KEY)" secret
-    [ -n "$OFFSITE_ACCESS_KEY_ID" ] && [ -n "$OFFSITE_SECRET_ACCESS_KEY" ] || die '置き場の鍵が要ります'
+    info 'NAS なら rest:https://<NAS>:<ポート>/<道>、S3 互換なら s3:https://<口>/<バケット>/<道>'
+    ask OFFSITE_REPOSITORY '置き場（例 rest:https://nas.example:8000/m2office/ か s3:https://s3.ap-northeast-1.amazonaws.com/<バケット>/m2office）' "$(env_value M2O_OFFSITE_REPOSITORY)"
+    case "$OFFSITE_REPOSITORY" in
+      s3:https://*)
+        ask OFFSITE_REGION '地域（要る置き場だけ。例 ap-northeast-1。要らなければ空）' "$(env_value M2O_OFFSITE_REGION)"
+        ask OFFSITE_ACCESS_KEY_ID '置き場のアクセスキー ID' "$(env_value M2O_OFFSITE_ACCESS_KEY_ID)"
+        ask OFFSITE_SECRET_ACCESS_KEY '置き場のシークレットアクセスキー' "$(env_value M2O_OFFSITE_SECRET_ACCESS_KEY)" secret
+        [ -n "$OFFSITE_ACCESS_KEY_ID" ] && [ -n "$OFFSITE_SECRET_ACCESS_KEY" ] || die '置き場の鍵が要ります'
+        OFFSITE_REST_USER=''; OFFSITE_REST_PASSWORD=''; OFFSITE_CACERT='' ;;
+      rest:https://*)
+        info 'NAS の rest-server は --append-only で動かしてください。この機械は古い控えを消しません（間引くのは NAS の上で）'
+        ask OFFSITE_REST_USER 'rest-server の利用者' "$(env_value M2O_OFFSITE_REST_USER)"
+        ask OFFSITE_REST_PASSWORD 'rest-server の合言葉' "$(env_value M2O_OFFSITE_REST_PASSWORD)" secret
+        [ -n "$OFFSITE_REST_USER" ] && [ -n "$OFFSITE_REST_PASSWORD" ] || die 'rest-server の利用者と合言葉が要ります'
+        ask OFFSITE_CACERT 'NAS が自分で作った証明書のファイル（公的な証明書なら空）' "$(env_value M2O_OFFSITE_CACERT)"
+        [ -z "$OFFSITE_CACERT" ] || [ -f "$OFFSITE_CACERT" ] || die "証明書のファイルがありません: $OFFSITE_CACERT"
+        OFFSITE_REGION=''; OFFSITE_ACCESS_KEY_ID=''; OFFSITE_SECRET_ACCESS_KEY='' ;;
+      *) die '置き場は rest:https:// か s3:https:// で始めてください' ;;
+    esac
   fi
 fi
-[ "$OFFSITE" = yes ] || { OFFSITE_REPOSITORY=''; OFFSITE_REGION=''; OFFSITE_ACCESS_KEY_ID=''; OFFSITE_SECRET_ACCESS_KEY=''; }
+[ "$OFFSITE" = yes ] || { OFFSITE_REPOSITORY=''; OFFSITE_REGION=''; OFFSITE_ACCESS_KEY_ID=''; OFFSITE_SECRET_ACCESS_KEY=''; OFFSITE_REST_USER=''; OFFSITE_REST_PASSWORD=''; OFFSITE_CACERT=''; }
 OFFSITE_SAVED=$OFFSITE
 ask API_PORT 'API のポート（機械の中だけで使う）' "${API_PORT:-3101}"
 ask DB_PORT 'データベースのポート（機械の中だけで使う）' "${DB_PORT:-5433}"
@@ -199,7 +213,7 @@ ask UPDATE_HOUR '自動の更新の時刻（時。0〜23）' "${UPDATE_HOUR:-3}"
 say '答えの確かめ'
 info "会社: ${COMPANY_NAME}（${SUBDOMAIN}）／ ドメイン: $GW_DOMAIN ／ 管理者: $ADMIN_EMAIL"
 info "名前: https://$HOST ／ 証明書: $TLS_MODE ${DNS_PROVIDER:+（${DNS_PROVIDER}）}"
-info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）} ／ 社外の控え: $( [ "$OFFSITE" = yes ] && echo "$OFFSITE_REPOSITORY" || echo 送らない)"
+info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）} ／ 別の置き場の控え: $( [ "$OFFSITE" = yes ] && echo "$OFFSITE_REPOSITORY" || echo 送らない)"
 info "ローカル AI: ${LOCAL_LLM_URL:-（使わない）} ${LOCAL_LLM_MODEL} ／ Gemini の鍵: $( [ -n "$GEMINI_API_KEY" ] && echo 入れる || echo 入れない)"
 info "自動の更新: ${AUTO_UPDATE}（${UPDATE_HOUR} 時）"
 yes_no 'この答えで入れますか' y || exit 1
@@ -243,7 +257,7 @@ DB_APP_PASSWORD=$(env_value DB_APP_PASSWORD_SAVED)
 [ -n "$SECRET_KEY" ] || SECRET_KEY=$(rand_hex 32)
 [ -n "$DB_OWNER_PASSWORD" ] || DB_OWNER_PASSWORD=$(rand_hex 24)
 [ -n "$DB_APP_PASSWORD" ] || DB_APP_PASSWORD=$(rand_hex 24)
-# 社外の控えの暗号化の合言葉（一度作ったら変えない。変えると置き場の控えを開けなくなる）
+# 別の置き場の控えの暗号化の合言葉（一度作ったら変えない。変えると置き場の控えを開けなくなる）
 OFFSITE_PASSWORD=$(env_value M2O_OFFSITE_PASSWORD)
 [ "$OFFSITE" = yes ] && [ -z "$OFFSITE_PASSWORD" ] && OFFSITE_PASSWORD=$(rand_hex 24)
 [ "$OFFSITE" = yes ] || OFFSITE_PASSWORD=''
@@ -310,7 +324,8 @@ answers="$work/answers"
   for k in INSTALL_DIR REPO_DIR RELEASE_DIR ENV_FILE FRONT_DIR DATA_DIR BACKUP_DIR API_PORT DB_PORT HOST SUBDOMAIN ACME_EMAIL \
     NODE_BIN PG_BIN CADDY_BIN LOCAL_LLM_URL LOCAL_LLM_MODEL LOCAL_LLM_EMBED_MODEL GEMINI_API_KEY GOOGLE_LOGIN_CLIENT_ID \
     GOOGLE_LOGIN_CLIENT_SECRET SECRET_KEY DB_APP_PASSWORD DB_OWNER_PASSWORD UPDATE_HOUR \
-    OFFSITE_REPOSITORY OFFSITE_PASSWORD OFFSITE_ACCESS_KEY_ID OFFSITE_SECRET_ACCESS_KEY OFFSITE_REGION RESTIC_BIN FFMPEG_BIN \
+    OFFSITE_REPOSITORY OFFSITE_PASSWORD OFFSITE_ACCESS_KEY_ID OFFSITE_SECRET_ACCESS_KEY OFFSITE_REGION \
+    OFFSITE_REST_USER OFFSITE_REST_PASSWORD OFFSITE_CACERT RESTIC_BIN FFMPEG_BIN \
     MACHINE_ADMIN_ID MACHINE_ADMIN_PASSWORD_HASH MACHINE_ADMIN_TOTP; do
     printf '%s=%s\n' "$k" "${!k}"
   done
@@ -402,22 +417,25 @@ if [ -f "$DAEMONS/jp.m2office.maintenance.plist" ]; then
   info '遠隔の保守の見回りを外しました。Tailscale を使わないなら、自分で登録を外して削除してください（sudo tailscale logout）'
 fi
 
-# ---- 社外の控えの置き場を用意する（初めてのときだけ暗号化した置き場を作る） ----
+# ---- 別の置き場を用意する（初めてのときだけ暗号化した置き場を作る） ----
 if [ "$OFFSITE" = yes ]; then
-  say '社外の控えの置き場を確かめます'
+  say '別の置き場を確かめます'
   # 合言葉と鍵は環境変数で渡す（引数に出すと、ほかの利用者から見える）
   if (
-    export RESTIC_REPOSITORY="$OFFSITE_REPOSITORY" RESTIC_PASSWORD="$OFFSITE_PASSWORD" AWS_ACCESS_KEY_ID="$OFFSITE_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$OFFSITE_SECRET_ACCESS_KEY"
+    export RESTIC_REPOSITORY="$OFFSITE_REPOSITORY" RESTIC_PASSWORD="$OFFSITE_PASSWORD"
+    [ -n "$OFFSITE_ACCESS_KEY_ID" ] && export AWS_ACCESS_KEY_ID="$OFFSITE_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$OFFSITE_SECRET_ACCESS_KEY"
     [ -n "$OFFSITE_REGION" ] && export AWS_DEFAULT_REGION="$OFFSITE_REGION"
+    [ -n "$OFFSITE_REST_USER" ] && export RESTIC_REST_USERNAME="$OFFSITE_REST_USER" RESTIC_REST_PASSWORD="$OFFSITE_REST_PASSWORD"
+    [ -n "$OFFSITE_CACERT" ] && export RESTIC_CACERT="$OFFSITE_CACERT"
     if "$RESTIC_BIN" --no-cache cat config >/dev/null 2>&1; then
       info '置き場はできています（合言葉で開けました）'
     else
       "$RESTIC_BIN" --no-cache init >/dev/null && info '暗号化した置き場を作りました'
     fi
   ); then
-    info '社外の控え: 毎晩の控えの後に送ります。結果は管理者ページの「機械」に出ます'
+    info '別の置き場の控え: 毎晩の控えの後に送ります。結果は管理者ページの「機械」に出ます'
   else
-    warn '社外の置き場を開けられませんでした。置き場・鍵・バケットの権限を確かめて、setup.sh を走らせ直してください'
+    warn '別の置き場を開けられませんでした。置き場・鍵・権限（NAS なら rest-server の利用者と証明書）を確かめて、setup.sh を走らせ直してください'
   fi
 fi
 
@@ -466,8 +484,8 @@ if yes_no '紙の「戻すための控え」に書き写す秘密の値を、い
   info "M2OFFICE_SECRET_KEY: $SECRET_KEY"
   info "データベースの所有者の合言葉: $DB_OWNER_PASSWORD"
   if [ "$OFFSITE" = yes ]; then
-    info "社外の控えの置き場: $OFFSITE_REPOSITORY"
-    info "社外の控えの暗号化の合言葉: ${OFFSITE_PASSWORD}（これが無いと社外の控えは誰にも開けません）"
+    info "別の置き場: $OFFSITE_REPOSITORY"
+    info "別の置き場の控えの暗号化の合言葉: ${OFFSITE_PASSWORD}（これが無いと別の置き場の控えも、そこからコピーしたディスクも誰にも開けません）"
   fi
   info '書き写したら画面を消してください。運営はこれを持ちません'
 fi

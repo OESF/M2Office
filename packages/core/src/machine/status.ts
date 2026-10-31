@@ -31,7 +31,7 @@ export interface MachineConfig {
   host: string | null;
   /** ローカル AI の口とモデル。無ければ `null`。 */
   localLlm: { url: string; model: string | null } | null;
-  /** 社外の控えを設定しているか（第8.6.5節）。 */
+  /** 別の置き場の控えを設定しているか（第8.6.5節）。 */
   offsite?: boolean;
 }
 

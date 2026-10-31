@@ -720,7 +720,7 @@ let lastNoticeRemind = 0;
 /** 控えの設定（ローカルの形で M2O_BACKUP_DIR があるときだけ。第8.6.5節）。 */
 const onsite = deploymentFromEnv(process.env) === 'onsite';
 const backupCfg = onsite ? backupConfigFromEnv(process.env) : null;
-// 社外の控え（会社が選んだときだけ。restic で暗号化して S3 互換の置き場へ。第8.6.5節）。送るのに時間がかかるため、見回りを止めずに裏で行う
+// 別の置き場の控え（会社が選んだときだけ。restic で暗号化して NAS か S3 互換の置き場へ。第8.6.5節）。送るのに時間がかかるため、見回りを止めずに裏で行う
 const offsiteCfg = backupCfg ? offsiteConfigFromEnv(process.env, machineDir(process.env)) : null;
 let offsiteRunning = false;
 
@@ -732,16 +732,16 @@ function startOffsite(backupDir: string, name: string): void {
     try {
       const before = await readOffsiteStatus(backupDir);
       const rec = await runOffsite(backupDir, name, offsiteCfg);
-      log.info(rec.ok ? '社外の控えを送りました' : '社外の控えを送れませんでした', { name, snapshot: rec.snapshot, bytesAdded: rec.bytesAdded, error: rec.error });
-      if (!rec.ok) await notifyMachine('社外の控えを送れませんでした', `${rec.error ?? ''}。管理者ページの「機械」で確かめてください。`);
+      log.info(rec.ok ? '別の置き場の控えを送りました' : '別の置き場の控えを送れませんでした', { name, snapshot: rec.snapshot, bytesAdded: rec.bytesAdded, error: rec.error });
+      if (!rec.ok) await notifyMachine('別の置き場の控えを送れませんでした', `${rec.error ?? ''}。管理者ページの「機械」で確かめてください。`);
       const month = (iso: string) => new Date(Date.parse(iso) + 9 * 3_600_000).toISOString().slice(0, 7);
       if (rec.ok && (!before.check || month(before.check.at) !== month(rec.at))) {
         const c = await checkOffsite(backupDir, offsiteCfg);
-        log.info(c.ok ? '社外の控えが壊れていないことを確かめました' : '社外の控えの確かめに失敗しました', { error: c.error });
-        if (!c.ok) await notifyMachine('社外の控えの確かめに失敗しました', `${c.error ?? ''}。管理者ページの「機械」で確かめ、導入した技術者に伝えてください。`);
+        log.info(c.ok ? '別の置き場の控えが壊れていないことを確かめました' : '別の置き場の控えの確かめに失敗しました', { error: c.error });
+        if (!c.ok) await notifyMachine('別の置き場の控えの確かめに失敗しました', `${c.error ?? ''}。管理者ページの「機械」で確かめ、導入した技術者に伝えてください。`);
       }
     } catch (err) {
-      log.warn('社外の控えで例外が発生しました', { err });
+      log.warn('別の置き場の控えで例外が発生しました', { err });
     } finally {
       offsiteRunning = false;
     }

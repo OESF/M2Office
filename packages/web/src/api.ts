@@ -3113,7 +3113,7 @@ export interface MachineView {
       lastOk: string | null;
       restoreTest: { at: string; ok: boolean; name: string; tables: number; error: string | null } | null;
     } | null;
-    /** 社外の控え（仕様書 第8.6.5節）。会社が選んだときだけ。 */
+    /** 別の置き場の控え（NAS か社外。仕様書 第8.6.5節）。会社が選んだときだけ。 */
     offsite: {
       configured: boolean;
       status: {

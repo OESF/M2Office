@@ -1,5 +1,5 @@
 /**
- * @file 社外の控え（仕様書 第8.6.5節）の確かめ。
+ * @file 別の置き場の控え（仕様書 第8.6.5節、ADR-0120）の確かめ。
  *
  * restic の代わりの台本で、渡す引数（相対の道・親の控え・印でまとめた残し方）と、合言葉と鍵を引数に出さず環境変数だけで渡すことを見る。
  * restic が入っている機械では、手元の置き場で本物の restic を使い、送って・残し方を当てて・確かめて・戻せることまで見る。
@@ -28,7 +28,7 @@ function fakeRestic(dir: string): { bin: string; log: string } {
   const bin = join(dir, 'restic');
   const log = join(dir, 'calls.log');
   writeFileSync(bin, `#!/bin/bash
-echo "$PWD|$*|$RESTIC_PASSWORD|$AWS_ACCESS_KEY_ID|$RESTIC_CACHE_DIR" >> "${log}"
+echo "$PWD|$*|$RESTIC_PASSWORD|$AWS_ACCESS_KEY_ID|$RESTIC_CACHE_DIR|$RESTIC_REST_USERNAME|$RESTIC_REST_PASSWORD|$RESTIC_CACERT" >> "${log}"
 [ -f "${join(dir, 'FAIL')}" ] && { echo 'Fatal: unable to open repository' >&2; exit 1; }
 if [ "$1" = backup ]; then
   echo '{"message_type":"status","percent_done":1}'
@@ -47,6 +47,15 @@ test('設定: S3 互換の置き場と合言葉と鍵がそろったときだけ
   const cfg = offsiteConfigFromEnv({ ...env, M2O_OFFSITE_REGION: 'ap-northeast-1' }, '/m')!;
   assert.equal(cfg.cacheDir, '/m/restic-cache');
   assert.equal(cfg.region, 'ap-northeast-1');
+});
+
+test('設定: NAS の rest-server は利用者と合言葉がそろったときだけ。S3 の鍵は要らない', () => {
+  const env = { M2O_OFFSITE_REPOSITORY: 'rest:https://nas.example:8000/m2office/', M2O_OFFSITE_PASSWORD: 'pw', M2O_OFFSITE_REST_USER: 'm2o', M2O_OFFSITE_REST_PASSWORD: 'rp' };
+  assert.equal(offsiteConfigFromEnv({ ...env, M2O_OFFSITE_REST_PASSWORD: '' }, '/m'), null);
+  const cfg = offsiteConfigFromEnv({ ...env, M2O_OFFSITE_CACERT: '/Library/M2Office/nas.pem' }, '/m')!;
+  assert.equal(cfg.accessKeyId, null);
+  assert.equal(cfg.restUser, 'm2o');
+  assert.equal(cfg.cacert, '/Library/M2Office/nas.pem');
 });
 
 test('要約: restic の backup --json の最後の行から控えの番号と送った量を取る', () => {
@@ -75,6 +84,20 @@ test('送る: 1 回分の中から相対の道で送り、2 回目は前の控�
   assert.equal(calls[2]![1], `backup --json --tag m2office --host m2office --parent ${r1.snapshot} db.dump files`);
   for (const c of calls) assert.doesNotMatch(c[1]!, /secret-pass|SK/);
   assert.equal((await readOffsiteStatus(dir)).lastOkSnapshot, r2.snapshot);
+});
+
+test('NAS へ送る: 足せるが消せない置き場では古い控えを消さない。利用者と合言葉は環境変数だけで渡す', async () => {
+  const { dir, name } = backupDir();
+  const { bin, log } = fakeRestic(dir);
+  const cfg: OffsiteConfig = { repository: 'rest:https://nas.example:8000/m2office/', password: 'secret-pass', accessKeyId: null, secretAccessKey: null, restUser: 'm2o', restPassword: 'rest-pass', cacert: '/x/nas.pem', region: null, resticBin: bin, cacheDir: join(dir, 'cache') };
+  const r = await runOffsite(dir, name, cfg);
+  assert.equal(r.ok, true, r.error ?? '');
+  const calls = readFileSync(log, 'utf8').trim().split('\n').map((l) => l.split('|'));
+  assert.equal(calls.length, 1, 'forget を走らせない');
+  const [, args, , ak, , user, pass, cacert] = calls[0]!;
+  assert.match(args!, /^backup /);
+  assert.deepEqual([ak, user, pass, cacert], ['', 'm2o', 'rest-pass', '/x/nas.pem']);
+  assert.doesNotMatch(args!, /rest-pass/);
 });
 
 test('失敗: 理由を残し、親は前のうまくいった控えのまま。確かめの失敗も残す', async () => {

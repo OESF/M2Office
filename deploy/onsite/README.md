@@ -11,7 +11,7 @@
 | Mac | macOS。管理者の利用者でログインできること。ローカル AI を使うなら、メモリーの多い Mac Studio など（Q-159） |
 | Homebrew | https://brew.sh の手順で入れておく。Node.js 22・PostgreSQL 17 と pgvector・Caddy・ffmpeg（ナレーション付きスライドを MP4 にまとめる。M2Office には同梱しない）は、セットアップのスクリプトが尋ねてから入れる。前に入れた機械は、`setup.sh` を走らせ直すと ffmpeg が入り、`FFMPEG_PATH` が設定のファイルに入る |
 | ディスク | データの置き場（RAID など）と、**RAID とは別の**控えの置き場（外付けのディスクか社内の別の機械。第8.6.5節） |
-| 社外の控え | 会社が選んだときだけ。**会社が自分で契約した** S3 互換の置き場（Amazon S3・Cloudflare R2・Wasabi・Backblaze B2 など）のバケットと、そのバケットだけを読み書きできるアクセスキー。置き場の側で版の保持（消されても前の版に戻せる設定）を入れておくことを勧める |
+| 別の置き場の控え | 会社が選んだときだけ。(a) **社内の NAS** で restic の rest-server を足せるが消せない形（`--append-only`）で動かす。NAS の変更できないスナップショットと、NAS から持ち運べるディスクへのコピーを合わせることを勧める（下の「別の置き場の控え」）。(b) **会社が自分で契約した** S3 互換の置き場（Amazon S3・Wasabi・Backblaze B2 など）のバケットと、そのバケットだけを読み書きできるアクセスキー。置き場の側で版の保持（消されても前の版に戻せる設定）を入れておくことを勧める |
 | 名前 | 会社のドメインの名前（例 `office.<会社のドメイン>`）。公開の DNS に、機械の社内の IP を返す A レコードを書く（第8.6.2節） |
 | DNS の鍵 | 公的な証明書を DNS で取るための、DNS の事業者の API の鍵（Cloudflare・Route 53 など。caddy-dns に対応しているもの） |
 | Google | 会社の Google Workspace の管理者の協力。会社の OAuth クライアント（「内部」）を作る。後から管理者ページの「接続」でも入れられる |
@@ -35,7 +35,7 @@ git clone --branch v0.18.0 https://github.com/OESF/M2Office.git /Library/M2Offic
 |---|---|
 | 会社と名前 | 会社の名前・会社の短い名前（サブドメイン）・Google Workspace のドメイン・最初の管理者のメールアドレス・M2Office を開く名前 |
 | 証明書 | 形（`name`: DNS で公的な証明書。標準 ／ `ip`: 機械の認証局。Google を使わない会社だけ）・DNS の事業者と鍵・連絡先 |
-| 置き場 | データの置き場・控えの置き場・社外の控えを送るか（送るなら置き場の `s3:https://<口>/<バケット>/<道>`・地域・アクセスキー）・API とデータベースのポート |
+| 置き場 | データの置き場・控えの置き場・別の置き場へ控えを送るか（送るなら置き場。NAS は `rest:https://<NAS>:<ポート>/<道>/` と rest-server の利用者・合言葉・証明書、S3 互換は `s3:https://<口>/<バケット>/<道>` と地域・アクセスキー）・API とデータベースのポート |
 | AI | ローカル AI の口とモデル・埋め込みのモデル・Gemini の鍵（外部の AI を使う会社だけ） |
 | Google のログイン | 会社の OAuth クライアントの ID とシークレット（後でもよい） |
 | 更新 | 署名を確かめる鍵のファイル（`allowed_signers`）・夜に自動で更新するか・時刻 |
@@ -64,7 +64,7 @@ launchd で動かし、共通の入口（`/Library/M2Front`。無ければ作る
 | `/Library/M2Office/allowed_signers` | 更新のタグの署名を確かめる鍵（入れたときのものに固定する） |
 | `/Library/M2Front/` | 機械に 1 つの共通の入口（Caddy）。M2Office の名前の設定は `sites/m2office.caddy`（DNS の鍵を含むため root だけが読める）。起動のログは `logs/caddy-run.log`。M2Medical と分け合う（`deploy/front/README.md`） |
 | `<データの置き場>/` | `postgres/`・`files/`・`logs/`・`caddy/`・`machine/`（`_m2office` のもの）。`logs/` の標準出力のファイルは、週に 1 回（日曜の 3 時 15 分）`jp.m2office.logrotate` が写して空にして 4 世代を残し、入口のアクセスログは Caddy が 28 日分を残す。会社の管理者は「機械」で見てダウンロードできる（仕様書 第16.10節） |
-| `<控えの置き場>/` | 毎晩の控え（`YYYYMMDD-HHMMSS/`）・`status.json`（社内の控えの結果）・`offsite.json`（社外の控えの結果） |
+| `<控えの置き場>/` | 毎晩の控え（`YYYYMMDD-HHMMSS/`）・`status.json`（社内の控えの結果）・`offsite.json`（別の置き場の控えの結果） |
 | `/Library/LaunchDaemons/jp.m2office.*.plist` | 起動の設定（`launchd/` の雛形から作る。api・worker・postgres と、自動の更新の update） |
 | `/Library/LaunchDaemons/jp.m2front.caddy.plist` | 共通の入口の起動の設定（`deploy/front/front.sh` が書く） |
 
@@ -91,16 +91,36 @@ sudo /Library/M2Office/app/deploy/onsite/update.sh --tag v0.19.0
 - 結果は管理者ページの「機械」の「更新」に出る。失敗したら会社の管理者に知らせが届く。会社の管理者は「機械」で自動の更新を延ばせる。
 - `update.sh` は入口（Caddy）に触れない。`brew upgrade caddy` をすると、Caddy に足した DNS の事業者のつなぎが外れる。そのときは `setup.sh` を走らせ直す（足し直して入口を動かし直す。M2Medical と同じ機械なら、M2Medical のつなぎも足し直す）。
 
-## 社外の控え
+## 別の置き場の控え
 
-- 毎晩の控えがうまくいったら、ワーカーがその回を restic で暗号化して社外の置き場へ送る。前回と同じ部分は送らない（最初の回だけ量が多い）。残す数は社内と同じ（毎日 14 回・毎週 8 回・毎月 12 回）。毎月 1 回、置き場の中身の一部を読み戻して確かめる。
-- 暗号化の合言葉は `setup.sh` が機械の上で作り、初めてのときに置き場を作る（`restic init`）。最後に「紙の『戻すための控え』」を出すと答えると、置き場と合言葉が画面に出る。**紙に書き写して会社に渡す。合言葉を失うと、社外の控えは誰にも開けない。** 運営は控えない。
+- 毎晩の控えがうまくいったら、ワーカーがその回を restic で暗号化して別の置き場（社内の NAS か社外の S3 互換の置き場）へ送る。前回と同じ部分は送らない（最初の回だけ量が多い）。毎月 1 回、置き場の中身の一部を読み戻して確かめる。
+- 残す数: S3 互換の置き場は社内と同じ（毎日 14 回・毎週 8 回・毎月 12 回）に間引く。**NAS（`rest:`）は足せるが消せない形で受ける前提なので、機械は古い控えを消さない**（ADR-0120）。
+- 暗号化の合言葉は `setup.sh` が機械の上で作り、初めてのときに置き場を作る（`restic init`）。最後に「紙の『戻すための控え』」を出すと答えると、置き場と合言葉が画面に出る。**紙に書き写して会社に渡す。合言葉を失うと、別の置き場の控えも、そこからコピーしたディスクも誰にも開けない。** 運営は控えない。
 - 結果は管理者ページの「機械」の「控え」に出る。送れなかったとき・確かめに失敗したときは会社の管理者に知らせが届く。
+
+### NAS を置き場にするとき
+
+機械が乗っ取られても NAS の控えを消させないため、次の 3 つを合わせる。
+
+| 備え | 行うこと |
+|---|---|
+| 足せるが消せない受け方 | NAS で restic の rest-server（https://github.com/restic/rest-server 。NAS のコンテナの機能などで動かす）を `--append-only` で動かす。利用者と合言葉（`.htpasswd`）を作り、TLS を有効にする（NAS が自分で作った証明書なら、その証明書のファイルを機械に置き、`setup.sh` で答える。`_m2office` が読めるようにする）。`setup.sh` では置き場に `rest:https://<NAS>:<ポート>/<道>/` と答える |
+| 変更できないスナップショット | NAS の側で、rest-server の置き場のフォルダのスナップショットを毎日取り、変更・削除できない設定にする（機種の機能による） |
+| 持ち出すディスク | NAS の機能で、rest-server の置き場のフォルダを持ち運べるディスク（USB など）へ定期的にコピーする。**2 台を交互に使い、1 台はいつも別の場所に保管する**。中身は restic で暗号化されたままなので、ディスクをなくしても読めない。合言葉の紙は、ディスクと別の場所に保管する |
+
+- 間引くとき（NAS の空きが足りなくなったとき）は、NAS の管理者が NAS の上で、置き場を直接 restic で開いて `restic forget --tag m2office --group-by host,tags --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune` を行う（足せるが消せない形の rest-server を通しては消せない）。
+- 持ち出すディスクから別の機械に戻す練習を、年に 1〜2 回行うことを勧める。
 
 戻すとき（機械をなくしたときなど。新しい機械に `setup.sh` で入れたあと、M2Office を止めてから）:
 
 ```bash
+# S3 互換の置き場から
 export RESTIC_REPOSITORY='s3:https://<口>/<バケット>/<道>' AWS_ACCESS_KEY_ID='<アクセスキー>' AWS_SECRET_ACCESS_KEY='<シークレット>'
+# NAS から（rest-server）
+export RESTIC_REPOSITORY='rest:https://<NAS>:<ポート>/<道>/' RESTIC_REST_USERNAME='<利用者>' RESTIC_REST_PASSWORD='<合言葉>'
+# 持ち出したディスクから（コピーした置き場のフォルダをそのまま開く）
+export RESTIC_REPOSITORY='/Volumes/<ディスク>/<コピーした置き場のフォルダ>'
+
 read -rs RESTIC_PASSWORD && export RESTIC_PASSWORD     # 紙の「戻すための控え」の合言葉を打つ
 restic snapshots --tag m2office                          # 戻せる回の一覧
 restic restore latest --tag m2office --target /tmp/m2o-restore   # db.dump と files/ が戻る
