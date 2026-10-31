@@ -44,7 +44,9 @@ attachLogSink(new SystemLogSink(store.query).start().accept);
 const { box } = secretBoxFromEnv(env);
 // 社外の控えの結果（第20.4.6節「控え」）。毎晩の控えが機械の置き場に書く
 const cloudBackupFile = join(machineDir(env), 'cloud-backup.json');
-const app = opsApp({ store, config, log, cloudBackupFile, platformAi: { box, env: { key: env['GEMINI_API_KEY']?.trim() || null, tenantCapJpy: envTenantCapJpy(env) } } });
+// 更新の前の戻す点（第23.8.7節「控えの様子」）。update.sh が書く
+const restorePointsFile = join(machineDir(env), 'restore-points.json');
+const app = opsApp({ store, config, log, cloudBackupFile, restorePointsFile, platformAi: { box, env: { key: env['GEMINI_API_KEY']?.trim() || null, tenantCapJpy: envTenantCapJpy(env) } } });
 
 const hostname = listenHost();
 serve({ fetch: app.fetch, port, hostname }, (info) => {

@@ -133,12 +133,24 @@ export interface CloudBackupViewRow {
     database: { ok: boolean; error: string | null };
     files: { ok: boolean; error: string | null; snapshot: string | null };
     check: { at: string; ok: boolean; error: string | null } | null;
+    /** 置き場にあるもの（第 0.504.0 版より前の結果には無い）。 */
+    inventory?: {
+      location: { kind: 'gcs'; bucket: string; project: string | null } | null;
+      database: { count: number; oldest: string | null; newest: string | null; bytes: number } | null;
+      files: { count: number; oldest: string | null; newest: string | null; bytes: number | null } | null;
+    } | null;
   } | null;
   /** 最後の結果が 26 時間より古い。 */
   stale: boolean;
   archive: { enabled: boolean; lastArchivedAt: string | null; lastFailedAt: string | null; failedCount: number } | null;
   /** いま変更の記録を送れていない。 */
   archiveFailing: boolean;
+  /** データベースを戻せる範囲。 */
+  recoverable: { from: string | null; to: string | null };
+  /** 更新の前の戻す点（新しい順）。`restorable` は戻せる範囲の中にあるか。 */
+  restorePoints: { name: string; at: string; lsn: string | null; restorable: boolean }[];
+  /** 次の毎晩の控えの予定。 */
+  nextRunAt: string;
 }
 
 /** 運営の AI の設定（鍵の値は持たない）。 */

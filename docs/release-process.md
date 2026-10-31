@@ -1,9 +1,9 @@
 ---
 title: M2Office リリース規定
-version: 1.4.0
+version: 1.5.0
 status: draft
 created: 2026-09-21
-updated: 2026-10-17
+updated: 2026-10-31
 owner: 三浦
 tags: [M2Office, release, versioning, changelog]
 ---
@@ -127,6 +127,7 @@ Claude Code の `/release` スキル（[.claude/skills/release/SKILL.md](../.cla
 | 版を持つファイル | ルートと各ワークスペース（`packages/*`）の `package.json`、`package-lock.json`。**すべて同じ番号にそろえる** |
 | コミット | 1 行目を `release: Version X.Y.Z — <概要>` とする |
 | タグ | 注釈付きタグ `vX.Y.Z`。**署名の鍵（SSH）があれば署名する**（`git tag -s`）。ローカルの形の機械は、署名を確かめられたタグだけを自動で入れる（仕様書 第8.6.4節） |
+| 印刷する手順書 | リリースのたびに運営者マニュアルの PDF（`npm run docs:ops-manual-pdf`）と、控えと復旧の手順書（`npm run docs:ops-recovery-pdf`）を作り直す。運営者マニュアルの第 12 章・第 13 章・第 17 章が変わった版では、手順書を刷り直して古い印刷を捨てる（仕様書 第23.8.16節「印刷した控え」） |
 | 画面の版 | 画面はビルドのときにルートの `package.json` の版を埋め込み、上の帯に出す（仕様書 第6.1.1.1節）。**リリースのコミットの後に `npm run build -w packages/web` で作り直し、埋め込まれた版を確かめる**。作り直しを省くと、画面の版が古いまま残る |
 
 ### 6.1 事前の確認

@@ -480,6 +480,8 @@ if [ -n "$BACKUP_GCS_BUCKET" ]; then
     info "バケット: ${BACKUP_GCS_BUCKET}（プロジェクト ${BACKUP_GCS_PROJECT}）"
     info "データベースの控えの合言葉（pgBackRest）: $PGBR_PASS"
     info "ファイルの控えの合言葉（restic）: $RESTIC_PASS"
+    # 戻したデータベースの中の預かった鍵（Google の接続など）は、この鍵で開く（第 17 章「新しい VPS に戻す」）
+    info "預かった鍵を開ける鍵（M2OFFICE_SECRET_KEY）: $SECRET_KEY"
     info 'これが無いと、機械をなくしたときに控えを開けません。運営が紙に書き写して保管し、画面を消してください。提携先には渡しません'
   fi
 else

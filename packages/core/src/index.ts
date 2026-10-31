@@ -239,7 +239,7 @@ export {
   proxyAllowed, ProxyAccessStore, PROXY_HOURS, PROXY_DEFAULT_HOURS, type ProxyScope, type ProxyGrant, type ProxySessionInfo,
   serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport, type OpsIncident,
   loadOpsManual, searchOpsManual, linkChapters, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry,
-  readCloudBackupRun, cloudBackupView, CLOUD_BACKUP_STALE_MS, type CloudBackupRun, type CloudBackupView, type WalArchiveStatus,
+  readCloudBackupRun, readRestorePoints, nextNightlyRun, cloudBackupView, CLOUD_BACKUP_STALE_MS, type CloudBackupRun, type CloudBackupInventory, type CloudBackupView, type RestorePoint, type WalArchiveStatus,
 } from './ops/index.js';
 export * from './demo/index.js';
 export { scoreEval, CONTRACT_REVIEW_AVOID, CONTRACT_REVIEW_MUST, type EvalScore } from './evals/score.js';

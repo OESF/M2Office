@@ -5,6 +5,7 @@ Markdown は章ごとに分けたまま保守し、配布と通読のときだ�
 
 使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF] [--owner=作成の法人 --company=会社名 --contact=担当者 --to=宛先]
   マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・ops（運営者。docs/ops-manual/）・
+    ops-recovery（運営者マニュアルのうち控えと復旧の章と、新しい VPS を用意して入れる章だけ。サーバーが止まったときに読む印刷用）・
     hr-review（人事・給与の監修のお願い。docs/review/hr-payroll/）
   既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
   前との互換のため、最初の引数が .pdf で終われば開発者マニュアルの出力先とみなす
@@ -34,6 +35,13 @@ MANUALS = {
         'dir': os.path.join(ROOT, 'docs', 'ops-manual'), 'pdf': 'ops-manual.pdf',
         'title': 'M2Office マスター管理画面 運営者マニュアル', 'subtitle': '会社の作成・見守り・停止と再開・代理アクセス',
     },
+    # 画面のヘルプはサーバーが動いているときしか読めないため、復旧に要る章だけを印刷して手元に置く（仕様書 第23.8.16節「印刷した控え」）。
+    # chapters に並べた順に載せ、はじめに（README）は載せない
+    'ops-recovery': {
+        'dir': os.path.join(ROOT, 'docs', 'ops-manual'), 'pdf': 'ops-recovery.pdf',
+        'title': 'M2Office 控えと復旧の手順書', 'subtitle': 'サーバーが止まったときに読む印刷用の控え',
+        'chapters': ['17-backup-recovery.md', '12-vps-setup.md', '13-vps-m2office-setup.md'], 'intro': False,
+    },
     'hr-payroll': {
         'dir': os.path.join(ROOT, 'docs', 'manual', 'hr-payroll'), 'pdf': 'hr-payroll-manual.pdf',
         'title': 'M2Office 人事・給与 ユーザーマニュアル', 'subtitle': '担当者の手引きと研修の教材',
@@ -57,6 +65,8 @@ OUT = os.path.abspath(args[0]) if args else os.path.join(DOC_DIR, MANUAL['pdf'])
 CHROME = os.environ.get('CHROME', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
 
 chapters = sorted(f for f in os.listdir(DOC_DIR) if re.match(r'^\d{2}-.+\.md$', f))
+if MANUAL.get('chapters'):
+    chapters = [f for f in MANUAL['chapters'] if f in chapters]
 anchor = {f: f'ch{f[:2]}' for f in chapters}
 anchor['README.md'] = 'intro'
 
@@ -108,8 +118,10 @@ def fix_links(line):
 
 
 def main():
-    readme = io.open(os.path.join(DOC_DIR, 'README.md'), encoding='utf-8').read()
-    parts = [convert('README.md', readme, 'はじめに')]
+    parts = []
+    if MANUAL.get('intro', True):
+        readme = io.open(os.path.join(DOC_DIR, 'README.md'), encoding='utf-8').read()
+        parts.append(convert('README.md', readme, 'はじめに'))
     for f in chapters:
         parts.append(convert(f, io.open(os.path.join(DOC_DIR, f), encoding='utf-8').read(), None))
 

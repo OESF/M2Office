@@ -84,7 +84,15 @@ log "控えを取りました: $DUMP"
 # 社外の控えを入れていれば、戻す点に名前を付けて変更の記録を区切って送る（第20.4.6節「控え」の「更新の前」。pgBackRest の --type=name で、この時点に戻せる）
 if [ -f /etc/pgbackrest/pgbackrest.conf ]; then
   if (cd / && sudo -u postgres psql -qtA -d m2office -c "select pg_create_restore_point('update-$TO')" -c 'select pg_switch_wal()' >/dev/null 2>&1); then
-    log "戻す点を記録しました: update-${TO}（$(cd / && sudo -u postgres psql -qtA -c 'select pg_current_wal_lsn()' 2>/dev/null)）"
+    lsn=$(cd / && sudo -u postgres psql -qtA -c 'select pg_current_wal_lsn()' 2>/dev/null)
+    log "戻す点を記録しました: update-${TO}（${lsn}）"
+    # 運営の画面の「社外の控え」に出す（第23.8.7節「控えの様子」。直近の 20 件）
+    node -e '
+      const fs = require("fs"); const [f, name, lsn] = process.argv.slice(1);
+      let a = []; try { a = JSON.parse(fs.readFileSync(f, "utf8")); } catch {}
+      a.push({ name, at: new Date().toISOString(), lsn: lsn || null });
+      fs.writeFileSync(f + ".tmp", JSON.stringify(a.slice(-20)) + "\n"); fs.chmodSync(f + ".tmp", 0o644); fs.renameSync(f + ".tmp", f);
+    ' /var/lib/m2office/machine/restore-points.json "update-$TO" "$lsn" || log '注意: 戻す点を運営の画面に出すファイルに書けませんでした'
   else
     log '注意: 戻す点を記録できませんでした（社外の控えの変更の記録は送り続けます）'
   fi

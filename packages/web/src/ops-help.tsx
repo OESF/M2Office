@@ -27,6 +27,16 @@ export function OpsTitle({ title, help }: { title: string; help: OpsPageHelp }) 
   );
 }
 
+/** 画面の中の欄の見出しと、その横の「？」（「稼働状況」の「社外の控え」のように、別の章を指す欄に使う）。 */
+export function OpsSubTitle({ title, help }: { title: string; help: OpsPageHelp }) {
+  return (
+    <h3>
+      {title}
+      {' '}<HelpTip article={help.chapter}>{help.text}</HelpTip>
+    </h3>
+  );
+}
+
 /**
  * 運営者のヘルプ。
  *

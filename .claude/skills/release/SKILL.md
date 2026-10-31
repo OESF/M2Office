@@ -228,12 +228,16 @@ git config --get user.signingkey >/dev/null && git tag -s vX.Y.Z -m "Version X.Y
 
 ```bash
 npm run docs:manual-pdf     # 開発者マニュアル → docs/developer/developer-manual.pdf
+npm run docs:ops-manual-pdf      # 運営者マニュアル → docs/ops-manual/ops-manual.pdf
+npm run docs:ops-recovery-pdf    # 控えと復旧の手順書（印刷用）→ docs/ops-manual/ops-recovery.pdf
 python3 tools/pdf/build.py specification.md <scratchpad>/specification.html
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --no-sandbox \
   --no-pdf-header-footer --run-all-compositor-stages-before-draw --virtual-time-budget=25000 \
   --print-to-pdf=specification.pdf "file://<scratchpad>/specification.html"
 pdftotext -f 1 -l 1 specification.pdf - | grep draft    # 表紙の版が仕様書の版と合うか
 ```
+
+運営者マニュアルの第 12 章・第 13 章・第 17 章が前のリリースから変わっていれば（`git diff <直近のタグ>..HEAD --stat -- docs/ops-manual`）、**控えと復旧の手順書を刷り直す必要がある**ことを報告に書く（サーバーが止まったときに読む印刷。仕様書 第23.8.16節「印刷した控え」）。
 
 画面は、ビルドのときにルートの `package.json` の版を埋め込み、上の帯の「M2Office」の右に出す（仕様書 第6.1.1.1節）。
 **リリースのコミットの後に必ず作り直し、埋め込まれた値が新しい版か確かめること**

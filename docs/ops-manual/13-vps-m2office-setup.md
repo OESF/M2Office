@@ -242,43 +242,14 @@ sudo m2office-backup --status
 ```
 
 - `setup.sh` は PostgreSQL に変更の記録（WAL）を送る設定を入れて、**一度だけ PostgreSQL を起動し直します**（数秒止まります）。送れないときは設定を外して戻し、止まります
-- 最後に「紙の控えに書き写す社外の控えの合言葉」を出すかを尋ねます。**運営が紙に書き写して保管します。** 提携先には渡しません。合言葉が無いと、機械をなくしたときに控えを開けません
+- 最後に「紙の控えに書き写す社外の控えの合言葉」を出すかを尋ねます。データベースの控えとファイルの控えの合言葉、預かった鍵を開ける鍵（`M2OFFICE_SECRET_KEY`）、バケットの名前とプロジェクトの ID が出ます。**運営が紙に書き写して保管します。** 提携先には渡しません。これが無いと、機械をなくしたときに控えを開けません
 - 毎晩 2 時すぎに、データベースのまるごとの控え（14 日分を残す）とファイル（30 日分を残す）を送ります。変更の記録は絶えず送り、5 分ごとに区切ります。月に 1 回、壊れていないかを確かめます
 - 結果はマスター管理画面の「稼働状況」の「社外の控え」に出ます。見張りの道具からは `sudo m2office-backup --status`（失敗か 26 時間より古いと 1 で終わる）で確かめます
 - 更新（手順 8）のときは、`update.sh` が戻す点（`update-<版>`）を記録します
 
 ### 控えから戻す
 
-戻すときは、運営に連絡し、合言葉の紙を用意してから行います。
-
-**データベース**（pgBackRest。止めてから戻す）
-
-```bash
-sudo systemctl stop m2office-api m2office-worker m2office-ops
-sudo systemctl stop postgresql
-sudo -u postgres pgbackrest --stanza=m2office --delta restore                                        # いちばん新しい時点へ
-sudo -u postgres pgbackrest --stanza=m2office --delta --type=time --target="2026-11-01 10:00:00+09" restore   # 決めた時刻へ
-sudo -u postgres pgbackrest --stanza=m2office --delta --type=name --target=update-<版> restore        # 更新の前へ
-sudo systemctl start postgresql
-sudo systemctl start m2office-api m2office-worker m2office-ops
-```
-
-**ファイル**（restic）
-
-```bash
-sudo bash -c 'set -a; . /etc/m2office/backup.env; restic snapshots'
-sudo bash -c 'set -a; . /etc/m2office/backup.env; restic restore latest --target /tmp/m2o-restore'
-sudo rsync -a /tmp/m2o-restore/var/lib/m2office/files/ /var/lib/m2office/files/ && sudo chown -R m2office:m2office /var/lib/m2office/files
-```
-
-**VPS をなくしたとき**は、新しい VPS に手順 1〜3 で入れ、同じバケットと新しい鍵を答え、`/etc/pgbackrest/pgbackrest.conf` の `repo1-cipher-pass` と `/etc/m2office/backup.env` の `RESTIC_PASSWORD` を紙の合言葉に書き換えてから、上の手順で戻します。`M2OFFICE_SECRET_KEY` も前の値に戻します（預かった鍵を開けるため）。
-
-**控えを消されたとき**（乗っ取りを疑うとき）は、まず Google Cloud の画面でそのサービスアカウントの鍵を無効にします。消されたものは 30 日のうちなら戻せます（運営の管理者のアカウントで行う）。
-
-```bash
-gcloud storage ls --soft-deleted --recursive gs://<バケットの名前>/ | head
-gcloud storage restore gs://<バケットの名前>/** --async      # 消されたものをまとめて戻す
-```
+戻し方と、いざというときの手順（控えの失敗・更新の失敗・VPS をなくしたとき・乗っ取りを疑うとき）は、[第 17 章](17-backup-recovery.md) にまとめています。**サーバーが止まると画面のヘルプは読めないので、第 17 章の印刷を手元に置きます**（第 17 章「8. 印刷して保管する」）。
 
 ### まだこの章に無いもの
 

@@ -31,6 +31,9 @@ status() {
     const age = (Date.now() - Date.parse(s.at)) / 3600000;
     console.log(`社外の控え: ${s.ok ? "取れました" : "失敗しました"}（${s.at}。データベース ${s.database.ok ? "済み" : "失敗"}・ファイル ${s.files.ok ? "済み" : "失敗"}）`);
     if (s.check) console.log(`壊れていないかの確かめ: ${s.check.ok ? "通りました" : "失敗しました"}（${s.check.at}）`);
+    const inv = s.inventory;
+    if (inv && inv.database) console.log(`データベース: まるごとの控え ${inv.database.count} 回。${inv.database.oldest ?? "—"} から後に戻せる`);
+    if (inv && inv.files) console.log(`ファイル: ${inv.files.count} 回（${inv.files.oldest ?? "—"} 〜 ${inv.files.newest ?? "—"}）`);
     process.exit(s.ok && age < 26 ? 0 : 1);
   ' "$STATUS_FILE"
 }
@@ -99,9 +102,29 @@ elif $db_ok && $files_ok; then
   check_json=$(check)
 fi
 
+# 置き場にあるもの（運営の画面の「戻せる範囲」と控えの数。第23.8.7節「控えの様子」）。読めなければその分を null にする
+sudo -u postgres pgbackrest --stanza="$STANZA" info --output=json >"$work/pi" 2>/dev/null || : >"$work/pi"
+restic snapshots --json --tag m2office >"$work/rs" 2>/dev/null || : >"$work/rs"
+restic stats --mode raw-data --json >"$work/rst" 2>/dev/null || : >"$work/rst"
+inventory=$(node -e '
+  const fs = require("fs");
+  const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
+  const iso = (s) => new Date(s * 1000).toISOString();
+  const [pi, rs, rst, repo, project] = [rd(process.argv[1]), rd(process.argv[2]), rd(process.argv[3]), process.argv[4], process.argv[5]];
+  const st = Array.isArray(pi) ? pi.find((s) => s.name === "m2office") : null;
+  const b = st && Array.isArray(st.backup) ? st.backup : [];
+  // いちばん古いまるごとの控えが終わった時刻から後に戻せる
+  const database = st ? { count: b.length, oldest: b.length ? iso(b[0].timestamp.stop) : null, newest: b.length ? iso(b[b.length - 1].timestamp.stop) : null,
+    bytes: b.reduce((n, x) => n + ((x.info && x.info.repository && x.info.repository.delta) || 0), 0) } : null;
+  const snaps = Array.isArray(rs) ? rs.map((s) => new Date(s.time).toISOString()).sort() : null;
+  const files = snaps ? { count: snaps.length, oldest: snaps[0] || null, newest: snaps[snaps.length - 1] || null, bytes: rst && typeof rst.total_size === "number" ? rst.total_size : null } : null;
+  const m = /^gs:([^:]+):/.exec(repo || "");
+  process.stdout.write(JSON.stringify({ location: m ? { kind: "gcs", bucket: m[1], project: project || null } : null, database, files }));
+' "$work/pi" "$work/rs" "$work/rst" "${RESTIC_REPOSITORY:-}" "${GOOGLE_PROJECT_ID:-}" 2>/dev/null || echo null)
+
 ok=false; $db_ok && $files_ok && ok=true
-write_status "$(printf '{"at":"%s","startedAt":"%s","ok":%s,"database":{"ok":%s,"error":%s},"files":{"ok":%s,"error":%s,"snapshot":%s},"check":%s}' \
-  "$(now)" "$started" "$ok" "$db_ok" "$db_err" "$files_ok" "$files_err" "$snapshot" "$check_json")"
+write_status "$(printf '{"at":"%s","startedAt":"%s","ok":%s,"database":{"ok":%s,"error":%s},"files":{"ok":%s,"error":%s,"snapshot":%s},"check":%s,"inventory":%s}' \
+  "$(now)" "$started" "$ok" "$db_ok" "$db_err" "$files_ok" "$files_err" "$snapshot" "$check_json" "$inventory")"
 if $ok; then echo '社外の控えを取りました'; exit 0; fi
 echo '社外の控えに失敗しました' >&2
 cat "$STATUS_FILE" >&2

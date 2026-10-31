@@ -17,7 +17,7 @@ import {
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
 import { RuntimeCard } from './runtime-card.js';
-import { OpsHelp, OpsTitle } from './ops-help.js';
+import { OpsHelp, OpsSubTitle, OpsTitle } from './ops-help.js';
 import { DemoDefaultsCard, OpsDemos } from './ops-demos.js';
 import { useOpenHelp } from './help.js';
 
@@ -620,6 +620,7 @@ function Server() {
             {backup && <BackupStat b={backup} />}
             <div className="stat"><span>AI の費用（今日 ／ 今月）</span><strong>{yen(Number(s.ai.today))} ／ {yen(Number(s.ai.month))}</strong><span>前の月の同じ時期 {yen(Number(s.ai.lastMonthSamePeriod))}</span></div>
           </div>
+          {backup?.configured && <BackupDetail b={backup} />}
           <h3>外部の接続（24 時間）</h3>
           {s.targets.length === 0 ? <p className="muted">まだありません</p> : <div className="table-scroll"><table className="table">
             <thead><tr><th>接続先</th><th className="num">成功</th><th className="num">失敗</th><th className="num">失敗の割合</th><th className="num">平均の速さ</th></tr></thead>
@@ -663,6 +664,42 @@ function BackupStat({ b }: { b: CloudBackupViewRow }) {
         {errors && <><br />{errors}</>}
       </span>
     </div>
+  );
+}
+
+/**
+ * 社外の控えの様子（仕様書 第23.8.7節「控えの様子」）。いざというときに「どこまで戻せるか」「どの名前で戻すか」を、ここで確かめる。
+ * 中身は VPS の毎晩の控えと `update.sh` が書いたファイルで、画面から Google Cloud へは見に行かない。
+ */
+function BackupDetail({ b }: { b: CloudBackupViewRow }) {
+  const last = b.last;
+  const inv = last?.inventory ?? null;
+  const done = (ok: boolean) => (ok ? '済み' : '失敗');
+  const loc = inv?.location ?? null;
+  return (
+    <>
+      <OpsSubTitle title="社外の控え" help={{ chapter: '17-backup-recovery', text: '控えのいまの状態と、戻せる範囲です。いざというときの手順は「詳しく見る」から開きます。' }} />
+      <div className="table-scroll"><table className="table">
+        <tbody>
+          <tr><th>毎晩の控え</th><td>{last ? <>{when(last.at)}・データベース {done(last.database.ok)}・ファイル {done(last.files.ok)}</> : 'まだ取っていません'}</td></tr>
+          <tr><th>次の控え</th><td>{when(b.nextRunAt)} すぎ</td></tr>
+          <tr><th>データベースを戻せる範囲</th><td>{b.recoverable.from ? `${when(b.recoverable.from)} 〜 ${when(b.recoverable.to)}` : '—'}</td></tr>
+          <tr><th>データベースの控え</th><td>{inv?.database ? `まるごと ${inv.database.count} 回・いちばん新しい ${when(inv.database.newest)}・${bytes(inv.database.bytes)}` : '—'}</td></tr>
+          <tr><th>変更の記録</th><td>
+            最後に送った {when(b.archive?.lastArchivedAt ?? null)}
+            {b.archiveFailing && <> <span className="badge warn">いま送れていません</span> 最後に失敗 {when(b.archive?.lastFailedAt ?? null)}</>}
+          </td></tr>
+          <tr><th>ファイルの控え</th><td>{inv?.files ? `${inv.files.count} 回（${when(inv.files.oldest)} 〜 ${when(inv.files.newest)}）・${bytes(inv.files.bytes)}` : '—'}</td></tr>
+          <tr><th>壊れていないかの確かめ</th><td>{last?.check ? <>{last.check.ok ? '通りました' : <span className="badge warn">失敗しました</span>}（{when(last.check.at)}）</> : 'まだしていません'}</td></tr>
+          <tr><th>更新の前の戻す点</th><td>
+            {b.restorePoints.length === 0 ? 'まだありません' : b.restorePoints.slice(0, 5).map((p) => (
+              <div key={p.name + p.at}><code>{p.name}</code>（{when(p.at)}）{!p.restorable && <> <span className="badge warn">戻せる範囲の外</span></>}</div>
+            ))}
+          </td></tr>
+          <tr><th>置き場</th><td>{loc ? <>Google Cloud Storage・<code>{loc.bucket}</code>{loc.project && <>（{loc.project}）</>}</> : '—'}</td></tr>
+        </tbody>
+      </table></div>
+    </>
   );
 }
 

@@ -12,7 +12,7 @@ import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploym
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, operatorCan, opsDomainAllowed, OPERATOR_ROLES,
   tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, OpsRuleError,
   OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual,
-  checkGeminiText, defaultGeminiModels, jstMonth, readCloudBackupRun, cloudBackupView, type CheckResult, type SecretBox,
+  checkGeminiText, defaultGeminiModels, jstMonth, readCloudBackupRun, readRestorePoints, cloudBackupView, type CheckResult, type SecretBox,
   checkNewDemo, demoSubdomain, demoWelcomeText, hashMachinePassword, newGuestLoginId, newGuestPassword, DEMO_COMPANY_NAME, DEMO_EXTEND_MAX_DAYS, DEMO_MAX_DAYS,
   type SystemLogLine,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
@@ -61,6 +61,8 @@ export interface OpsDeps {
   demoSubdomain?: string | null;
   /** 社外の控えの結果のファイル（第20.4.6節「控え」）。省けば「稼働状況」に社外の控えを出さない */
   cloudBackupFile?: string | null;
+  /** 更新の前の戻す点のファイル（`update.sh` が書く。第23.8.7節「控えの様子」）。省けば戻す点を出さない */
+  restorePointsFile?: string | null;
 }
 
 type OpsEnv = { Variables: { operator: Operator; session: OpsSession } };
@@ -483,13 +485,14 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
 
   // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）
   app.get('/v1/ops/server', async (c) => {
-    const [status, last, archive] = await Promise.all([
+    const [status, last, archive, points] = await Promise.all([
       store.serverStatus(),
       deps.cloudBackupFile ? readCloudBackupRun(deps.cloudBackupFile) : Promise.resolve(null),
       deps.cloudBackupFile ? store.walArchiveStatus() : Promise.resolve(null),
+      deps.restorePointsFile ? readRestorePoints(deps.restorePointsFile) : Promise.resolve([]),
     ]);
-    // 社外の控え（第20.4.6節「控え」）。毎晩の控えの結果と、変更の記録を送った様子
-    return c.json({ status, backup: deps.cloudBackupFile ? cloudBackupView(last, archive) : null });
+    // 社外の控え（第20.4.6節「控え」・第23.8.7節「控えの様子」）。毎晩の控えの結果、変更の記録を送った様子、更新の前の戻す点
+    return c.json({ status, backup: deps.cloudBackupFile ? cloudBackupView(last, archive, Date.now(), points) : null });
   });
   /**
    * 動いている環境（第8.6.7.1節）。クラウドの形では、OS・メモリー・CPU・Node.js の版は運営の機械の情報なので、運営の画面だけに出す（2026-10-22 に三浦さんが決めた）。

@@ -25,6 +25,7 @@ docs/manual/inventory/inventory-manual.pdf
 docs/review/hr-payroll/hr-payroll-review.pdf
 # マスター管理画面の運営者マニュアルの PDF は docs/ops-manual/*.md から作る（npm run docs:ops-manual-pdf）
 docs/ops-manual/ops-manual.pdf
+docs/ops-manual/ops-recovery.pdf
 *.log
 
 # エディタと OS

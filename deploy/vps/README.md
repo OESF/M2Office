@@ -10,6 +10,7 @@
 |---|---|
 | [第 12 章 VPS の用意](../../docs/ops-manual/12-vps-setup.md) | OS の固め・スワップ・WireGuard（`setup.sh` の前に終える） |
 | [第 13 章 M2Office のセットアップ](../../docs/ops-manual/13-vps-m2office-setup.md) | 入口の守りの考え方と、`setup.sh` の走らせ方 |
+| [第 17 章 控えと復旧](../../docs/ops-manual/17-backup-recovery.md) | 控えの見方と、いざというときに戻す手順（印刷して手元に置く。`npm run docs:ops-recovery-pdf`） |
 
 ## 入れる
 
@@ -53,7 +54,7 @@ deploy/vps/setup.sh --render-only <出力先> --answers <KEY=値 のファイル
 | `/etc/m2office/` | 環境変数（`m2office.env`）と答え（`setup.conf`）。社外の控えの設定（`backup.env`。root だけ）と鍵（`backup/gcs-key.json`） |
 | `/etc/pgbackrest/pgbackrest.conf` | データベースの控えの設定（暗号化の合言葉を含む。root と postgres だけ） |
 | `/etc/postgresql/17/main/conf.d/m2office-archive.conf` | 変更の記録（WAL）を絶えず送る設定 |
-| `/var/lib/m2office/` | ファイル（`files/`）・機械の様子（`machine/`） |
+| `/var/lib/m2office/` | ファイル（`files/`）・機械の様子（`machine/`。社外の控えの結果 `cloud-backup.json` と更新の前の戻す点 `restore-points.json` を含む） |
 | `/var/www/m2office-site/` | 紹介のページ（`m2office.net`・`www`） |
 | `/var/backups/m2office/pre-update/` | 更新の前の控え（直近の 3 回。root だけが読める） |
 | `/var/log/m2office/` | アプリのログと更新の記録（`update.log`） |
@@ -71,7 +72,7 @@ sudo /opt/m2office/app/deploy/vps/update.sh --tag <リリースのタグ> --allo
 
 ## 社外の控え
 
-Google Cloud Storage の東京に送ります。用意と戻し方は運営のマニュアル 第 13 章 手順 9 と「控えから戻す」です。`setup.sh` でバケットの名前を空のままにすると入れません。
+Google Cloud Storage の東京に送ります。用意は運営のマニュアル 第 13 章 手順 9、戻し方といざというときの手順は第 17 章「控えと復旧」です。結果と戻せる範囲は、マスター管理画面の「稼働状況」の「社外の控え」に出ます。`setup.sh` でバケットの名前を空のままにすると入れません。
 
 ## まだ入れていないもの
 
