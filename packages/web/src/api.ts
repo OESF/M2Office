@@ -14,7 +14,7 @@ import type { RuntimeEnvironment, RuntimeSampleDays, RuntimeSamplePoint, NodeSec
   HrEmployee, HrEmployeeView, HrSettings, HrTask, HrTerms,
   AttClose, AttDay, AttPeriod, AttPunchKind, AttTotals, LeaveBalance, LeaveGrant, LeaveTake,
   HrFamilyMember, HrPayrollProfile, HrStandardPay, PayRun, PaySlip, PayCheck, HrNoticeSettings, HrDeadline, PayAdjustment, BonusPlan,
-  YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, HrShiftSettings, HrShift, HrAnnualSettings, HrFlexSettings, HrTerminalSettings,
+  YeaDeclaration, YeaDeclarationView, YeaResult, SocialDetermination, SocialEvent, InsuranceEligibility, LaborInsuranceData, LaborInsuranceView, ShiftView, ShiftBoard, HrShiftSettings, HrShift, HrAnnualSettings, HrFlexSettings, HrTerminalSettings,
   InventoryCount, InventoryCountRow, InventoryCountScope, InventoryCountView, InventorySupplier,
   InventoryBooking, InventoryBookingMapping, InventoryBookingSource, InventoryPublication, InventoryPublicationScope, InventoryPublicSnapshot,
   InventoryCatalogScope, InventorySaleUnmatched, ExternalApp, AppFunctionId, AppFunctionInfo, AppSettings, AppSettingOptions, AppBindingView,
@@ -2409,6 +2409,14 @@ export const api = {
       shiftCell: (month: string, employeeId: string, date: string, patternId: string | null) =>
         call<ShiftView>('/hr/shifts/cell', { method: 'PUT', body: JSON.stringify({ month, employeeId, date, patternId }) }),
       shiftPublish: (month: string) => call<ShiftView>('/hr/shifts/publish', { method: 'POST', body: JSON.stringify({ month }) }),
+      /** 日ごとのシフト（時間の帯。仕様書 第30.6.2節）。`span` は day・week・period。 */
+      shiftBoard: (date: string, span: 'day' | 'week' | 'period' = 'day') => call<ShiftBoard>(`/hr/shifts/board?date=${date}&span=${span}`),
+      /** 張り出し用の PDF をダウンロードする（A4 横・1 日 1 枚）。 */
+      shiftBoardPdf: async (date: string, span: 'day' | 'week' | 'period') => {
+        const blob = await fetchBlob(`/hr/shifts/board/pdf?date=${date}&span=${span}`);
+        if (!blob) throw new ApiError('シフト表の PDF を作れませんでした', 404);
+        saveBlob(blob, `シフト表-${date}${span === 'day' ? '' : span === 'week' ? '-週' : '-期間'}.pdf`);
+      },
       /** 1 年単位の変形労働時間制・フレックスタイム制・共有の端末（仕様書 第30.6.3節）。 */
       workSystems: () => call<WorkSystemsView>('/hr/work-systems'),
       saveWorkSystems: (patch: { annual?: Partial<HrAnnualSettings>; flex?: Partial<HrFlexSettings>; terminal?: Partial<HrTerminalSettings> }) =>

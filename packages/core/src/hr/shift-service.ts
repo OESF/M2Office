@@ -6,13 +6,14 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AuditEvent, HrAnnualSettings, HrEmployee, HrFlexSettings, HrSettings, HrShift, HrShiftSettings, HrTerminalSettings, HrTerms, ShiftView } from '@m2office/shared';
+import type { AuditEvent, HrAnnualSettings, HrEmployee, HrFlexSettings, HrSettings, HrShift, HrShiftSettings, HrTerminalSettings, HrTerms, ShiftBoard, ShiftView } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { HrStore } from './store.js';
 import type { ShiftStore } from './shift-store.js';
 import { byShifts, termsOn } from './attendance-service.js';
 import { annualPeriodOf } from './work-systems.js';
-import { periodContaining, periodOf, scheduledMinutes, shiftDate, jstDate } from './attendance.js';
+import { periodContaining, periodOf, scheduledMinutes, shiftDate, jstDate, weekday } from './attendance.js';
+import { buildShiftBoard, renderShiftBoardPdf, type ShiftBoardInput } from './shift-board.js';
 import { checkPlan, generatePlan, variableCap, type PlanInput, type PlanMember } from './shift-plan.js';
 
 /** シフトの処理に要るもの。 */
@@ -109,6 +110,52 @@ export class ShiftService {
       })),
       shifts: mine, requests: requests.filter((r) => ids.has(r.employeeId)), settings, issues,
     };
+  }
+
+  /**
+   * 日ごとのシフトの範囲（`day` はその日、`week` は会社の週の起算日から 7 日、`period` はその日を含む締めの期間）。
+   */
+  async boardRange(tenantId: string, date: string, span: 'day' | 'week' | 'period'): Promise<{ from: string; to: string }> {
+    if (span === 'day') return { from: date, to: date };
+    const s = (await this.deps.repo.getTenantSettings(tenantId)).hr;
+    if (span === 'period') { const p = periodContaining(date, s.pay.closingDay); return { from: p.start, to: p.end }; }
+    const from = shiftDate(date, -((weekday(date) - s.work.weekStart + 7) % 7));
+    return { from, to: shiftDate(from, 6) };
+  }
+
+  /**
+   * 日ごとのシフト（時間の帯。仕様書 第30.6.2節「日ごとの表示」）。期間をまたぐ範囲は、日ごとにその日を含む期間のシフトを使う。
+   *
+   * @param from 始めの日
+   * @param to 終わりの日（`from` から 62 日まで）
+   */
+  async board(tenantId: string, from: string, to: string): Promise<ShiftBoard | { error: string }> {
+    if (to < from || shiftDate(from, 62) < to) return { error: '日の範囲は 62 日までにしてください' };
+    const closing = (await this.deps.repo.getTenantSettings(tenantId)).hr.pay.closingDay;
+    const views = new Map<string, ShiftView>();
+    const days: ShiftBoardInput[] = [];
+    for (let d = from; d <= to; d = shiftDate(d, 1)) {
+      const month = periodContaining(d, closing).end.slice(0, 7);
+      let v = views.get(month);
+      if (!v) { v = await this.view(tenantId, month); views.set(month, v); }
+      days.push({ date: d, status: v.plan.status, shifts: v.shifts.filter((s) => s.date === d), members: v.members, settings: v.settings });
+    }
+    return buildShiftBoard(days);
+  }
+
+  /**
+   * 張り出し用の PDF（A4 横・1 日 1 枚。仕様書 第30.6.2節「張り出し用の PDF」）。作ったことを監査ログに残す。
+   */
+  async boardPdf(tenantId: string, userId: string, from: string, to: string): Promise<{ bytes: Uint8Array; filename: string } | { error: string }> {
+    const board = await this.board(tenantId, from, to);
+    if ('error' in board) return board;
+    const settings = (await this.deps.repo.getTenantSettings(tenantId)).hr;
+    const tenant = await this.deps.repo.findTenantById(tenantId);
+    const now = this.deps.now ? this.deps.now() : new Date();
+    const createdAt = new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ');
+    const bytes = await renderShiftBoardPdf({ board, company: settings.office.name || tenant?.name || '', createdAt });
+    await this.audit(tenantId, userId, 'hr.shift.board_pdf', from, { from, to });
+    return { bytes, filename: from === to ? `shift-${from}.pdf` : `shift-${from}_${to}.pdf` };
   }
 
   /** 今日を含む期間の次の期間。 */

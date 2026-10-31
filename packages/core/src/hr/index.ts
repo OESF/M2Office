@@ -37,6 +37,7 @@ export { renderWithholdingPdf, type WithholdingPdfInput } from './withholding-pd
 export { PostgresLaborStore, type LaborStore, type LaborRecord } from './labor-store.js';
 export { PostgresShiftStore, type ShiftStore } from './shift-store.js';
 export { ShiftService, type ShiftServiceDeps } from './shift-service.js';
+export { buildShiftBoard, renderShiftBoardPdf, boardDateLabel, type ShiftBoardInput, type ShiftBoardPdfInput } from './shift-board.js';
 export { generatePlan, checkPlan, variableCap, needsOn, patternMinutes, MAX_STREAK, type PlanInput, type PlanMember } from './shift-plan.js';
 export { HrBooksExport, type BooksExportDeps, type BooksExportSummary } from './books-export.js';
 export { LaborInsuranceService, type LaborServiceDeps } from './labor-service.js';

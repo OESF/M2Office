@@ -681,6 +681,34 @@ export function hrRoute(deps: AppDeps) {
     return m ? shiftResult(c, await shifts.publish(tenant.id, user.id, m)) : c.json({ error: '月を YYYY-MM で入れてください' }, 400);
   });
 
+  /** 日ごとのシフトの範囲（`date` と `span`: day・week・period）。形が違えば `null`。 */
+  const boardRange = async (tenantId: string, c: Context<AppEnv>) => {
+    const date = c.req.query('date') ?? '';
+    const span = c.req.query('span') ?? 'day';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !['day', 'week', 'period'].includes(span)) return null;
+    return shifts.boardRange(tenantId, date, span as 'day' | 'week' | 'period');
+  };
+
+  /** 日ごとのシフト（時間の帯。第30.6.2節「日ごとの表示」）。 */
+  app.get('/shifts/board', async (c) => {
+    const { tenant } = c.get('ctx');
+    const range = await boardRange(tenant.id, c);
+    if (!range) return c.json({ error: '日を YYYY-MM-DD で、範囲を day・week・period で入れてください' }, 400);
+    return shiftResult(c, await shifts.board(tenant.id, range.from, range.to));
+  });
+
+  /** 張り出し用の PDF（A4 横・1 日 1 枚。作ったことを監査ログに残す）。 */
+  app.get('/shifts/board/pdf', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const range = await boardRange(tenant.id, c);
+    if (!range) return c.json({ error: '日を YYYY-MM-DD で、範囲を day・week・period で入れてください' }, 400);
+    const r = await shifts.boardPdf(tenant.id, user.id, range.from, range.to);
+    if ('error' in r) return c.json(r, 400);
+    c.header('Content-Type', 'application/pdf');
+    c.header('Content-Disposition', `attachment; filename="${r.filename}"`);
+    return c.body(r.bytes as unknown as ArrayBuffer);
+  });
+
   // ---- 1 年単位の変形労働時間制・フレックスタイム制・共有の端末（第30.6.3節） ----
 
   /** 会社の決まりと、登録した端末。 */

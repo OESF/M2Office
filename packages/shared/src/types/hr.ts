@@ -973,3 +973,39 @@ export interface ShiftView {
   settings: HrShiftSettings;
   issues: ShiftIssue[];
 }
+
+/** 日ごとのシフトの 1 人分（時間の帯の 1 行）。 */
+export interface ShiftBoardRow {
+  employeeId: string;
+  name: string;
+  /** 勤務の型の名前（型を消していれば `null`）。 */
+  patternName: string | null;
+  start: string;
+  end: string;
+  breakMinutes: number;
+}
+
+/** 1 時間ごとの人数と要る人数（`hour` は 0〜47。日をまたぐ勤務は 24 以上）。 */
+export interface ShiftBoardHour {
+  hour: number;
+  count: number;
+  need: number;
+}
+
+/** 1 日のシフト（日ごとの表示と張り出し用の PDF。仕様書 第30.6.2節）。 */
+export interface ShiftBoardDay {
+  date: string;
+  /** その日を含む期間のシフトの状態（公開の前は「案」と示す）。 */
+  status: HrShiftPlan['status'];
+  rows: ShiftBoardRow[];
+  /** シフトの人のうち、その日は休みの人の名前。 */
+  off: string[];
+  hours: ShiftBoardHour[];
+}
+
+/** 日ごとのシフトの並び。時刻の軸（`fromHour`〜`toHour`）はすべての日でそろえる。 */
+export interface ShiftBoard {
+  days: ShiftBoardDay[];
+  fromHour: number;
+  toHour: number;
+}

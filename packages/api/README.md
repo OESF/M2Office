@@ -278,6 +278,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/me/hr/leave` ／ `DELETE /v1/me/hr/leave/:id` | 本人が有給を取る（`date`・`days`: 1 か 0.5。承認の段は挟まず、人事区画の人に知らせる）／ 取り消す |
 | `GET /v1/me/hr/payslips` ／ `GET .../payslips/:id` ／ `GET .../payslips/:id/pdf` | 本人の確定した給与明細（**同意が無ければ出さない**）／ 1 つと前の回からの差の説明 ／ PDF |
 | `PUT /v1/me/hr/payslip-consent` | 明細を画面で受け取る同意（`consent`: true・false。いつでも取り消せる） |
+| `GET /v1/hr/shifts/board` ／ `GET .../shifts/board/pdf` | 日ごとのシフト（第30.6.2節「日ごとの表示」「張り出し用の PDF」。`date`: YYYY-MM-DD・`span`: `day`・`week`（会社の週の起算日から 7 日）・`period`（締めの期間））: 時間の帯（行・休みの人・1 時間ごとの人数と要る人数。62 日まで）／ A4 横の PDF（1 日 1 枚。監査ログに残す） |
 | `GET /v1/me/hr/shifts` ／ `PUT /v1/me/hr/shift-requests` | 本人のシフト（公開した期間）と休みの希望（シフトの人でなければ空）／ 休みの希望を入れるか外す（`date`・`on`。公開の前の、始まっていない期間の日だけ） |
 | `GET /v1/me/hr/yea` ／ `PUT /v1/me/hr/yea` | 本人の年末調整（`year`。申告・対象か・直せるか・不備・結果）／ 申告を残す・出す（`year`・`data`・`submit`。出すと人事区画の人に知らせる。確かめた後は 400） |
 | `POST /v1/me/hr/yea/certificate` ／ `GET /v1/me/hr/yea/withholding.pdf` | 控除証明書か前の勤め先の源泉徴収票を読む（`file`。申告には入れず、ファイルも残さない）／ 自分の源泉徴収票（確定した結果・明細の同意がある人） |

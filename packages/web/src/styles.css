@@ -1692,6 +1692,29 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .shift-grid td.wish { background: var(--warn-soft); }
 .shift-grid select { font-size: calc(12px * var(--font-scale)); padding: 1px; }
 .shift-issues { margin: 4px 0 8px; padding-left: 1.2em; }
+/* 日ごとのシフト（時間の帯。仕様書 第30.6.2節）。名前・帯・時刻の 3 列。帯の背景の縦線が 1 時間の目盛り */
+.shift-mode { gap: 4px; }
+.shift-day input[type=date] { width: auto; flex: none; }
+.shift-day select.shift-pdf { width: auto; flex: none; }
+.shift-board { display: grid; gap: 2px; overflow-x: auto; }
+.shift-board-row { display: grid; grid-template-columns: 8em minmax(320px, 1fr) 14em; gap: 10px; align-items: center; min-height: 30px; }
+.shift-board-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shift-board-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.shift-board-lane { position: relative; height: 22px; background-image: linear-gradient(to right, var(--line) 1px, transparent 1px); border-right: 1px solid var(--line); }
+.shift-board-bar { position: absolute; top: 3px; bottom: 3px; border-radius: 4px; border: 1px solid var(--accent); background: var(--accent-soft); }
+.shift-board-bar.p1 { border-color: var(--warn); background: var(--warn-soft); }
+.shift-board-bar.p2 { border-color: var(--ok, var(--accent)); background: var(--ok-soft, var(--accent-soft)); }
+.shift-board-bar.p3 { border-color: var(--muted); background: var(--neutral-soft); }
+.shift-board-bar.p4 { border-color: var(--danger); background: var(--danger-soft, var(--warn-soft)); }
+.shift-board-bar.p5 { border-color: var(--accent); border-style: dashed; background: var(--neutral-soft); }
+.shift-board-head { min-height: 18px; }
+.shift-board-axis { position: relative; height: 16px; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
+.shift-board-axis span { position: absolute; transform: translateX(-50%); }
+.shift-board-axis span:first-child { transform: none; }
+.shift-board-count { min-height: 24px; border-top: 1px solid var(--line); }
+.shift-board-cells { display: flex; font-variant-numeric: tabular-nums; }
+.shift-board-cells span { flex: 1 1 0; text-align: center; }
+.shift-board-cells span.short { color: var(--danger); font-weight: 600; background: var(--danger-soft, var(--warn-soft)); border-radius: 3px; }
 .myhr-shift-days { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0; font-size: calc(13px * var(--font-scale)); }
 .myhr-shift-days .off { color: var(--muted); }
 .myhr-shift-days .wish { color: var(--warn); }

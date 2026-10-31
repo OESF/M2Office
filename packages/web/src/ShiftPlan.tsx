@@ -1,16 +1,21 @@
 /**
  * @file 人事の担当者の「シフト」（仕様書 第30.6.2節）。勤務の型と日ごとに要る人数・締めの期間のシフトの案・直す・公開と、点検の指摘。
+ * 日ごとの表示（時間の帯）と、張り出し用の PDF のダウンロードもここに置く。
  *
  * 説明文は常に出さない（原則 u11）。分からなければ秘書に聞く。
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { HrShiftPattern, HrShiftSettings, ShiftView } from '@m2office/shared';
+import type { HrShiftPattern, HrShiftSettings, ShiftBoard, ShiftView } from '@m2office/shared';
 import { api, describeError, type WorkSystemsView } from './api.js';
 
 const WEEK = ['日', '月', '火', '水', '木', '金', '土', '祝'];
 const wd = (d: string) => new Date(`${d}T00:00:00Z`).getUTCDay();
 const hours = (m: number) => Math.round((m / 60) * 10) / 10;
+const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+/** 日本時間の今日（YYYY-MM-DD）。 */
+const todayJst = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+const dateLabel = (d: string) => `${Number(d.slice(5, 7))}月${Number(d.slice(8))}日（${WEEK[wd(d)]}）`;
 const shiftMonth = (ym: string, n: number) => {
   const [y, m] = ym.split('-').map(Number) as [number, number];
   const t = y * 12 + (m - 1) + n;
@@ -133,9 +138,98 @@ function WorkSystemsForm() {
 }
 
 /**
+ * 日ごとのシフト（時間の帯。仕様書 第30.6.2節「日ごとの表示」）。行が人・横の軸が時刻で、下に 1 時間ごとの人数と要る人数を並べる。
+ */
+function DayBoard({ initialDate }: { initialDate: string }) {
+  const [date, setDate] = useState(initialDate);
+  const [board, setBoard] = useState<ShiftBoard | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setBoard(null);
+    api.hr.payroll.shiftBoard(date).then((b) => { setBoard(b); setError(null); }).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, [date]);
+  const download = (span: 'day' | 'week' | 'period') => {
+    setSaving(true); setError(null);
+    void api.hr.payroll.shiftBoardPdf(date, span).catch((e) => setError(describeError(e, 'ダウンロードできませんでした'))).finally(() => setSaving(false));
+  };
+  const day = board?.days[0];
+  const span = board ? board.toHour - board.fromHour : 1;
+  const pos = (t: string) => {
+    const [h = 0, m = 0] = t.split(':').map(Number);
+    return ((h * 60 + m - (board?.fromHour ?? 0) * 60) / (span * 60)) * 100;
+  };
+  const barOf = (start: string, end: string) => {
+    const a = pos(start);
+    let b = pos(end);
+    if (b <= a) b += (24 * 60) / (span * 60) * 100;
+    return { left: `${a}%`, width: `${Math.max(b - a, 0.5)}%` };
+  };
+  const patterns = [...new Set(day?.rows.map((r) => r.patternName ?? '') ?? [])];
+  const hourList = board ? Array.from({ length: span }, (_, i) => board.fromHour + i) : [];
+  return (
+    <div className="shift-day">
+      <div className="row wrap hr-toolbar">
+        <button className="btn ghost small" onClick={() => setDate(addDays(date, -1))}>← 前の日</button>
+        <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="日" />
+        <strong>{dateLabel(date)}</strong>
+        <button className="btn ghost small" onClick={() => setDate(addDays(date, 1))}>次の日 →</button>
+        {day && day.status !== 'published' && <span className="badge warn">{day.status === 'draft' ? '案（未公開）' : '未作成'}</span>}
+        <span className="grow" />
+        <select className="shift-pdf" value="" disabled={saving} aria-label="PDF をダウンロード"
+          onChange={(e) => { const v = e.target.value as 'day' | 'week' | 'period' | ''; e.target.value = ''; if (v) download(v); }}>
+          <option value="">{saving ? '作っています…' : 'PDF をダウンロード…'}</option>
+          <option value="day">この日</option>
+          <option value="week">この週（7 日）</option>
+          <option value="period">期間すべて</option>
+        </select>
+      </div>
+      {error && <p className="error small">{error}</p>}
+      {!board || !day ? (!error && <p className="muted">読み込んでいます…</p>) : (
+        <div className="shift-board">
+          <div className="shift-board-row shift-board-head">
+            <span />
+            <span className="shift-board-axis">
+              {hourList.map((h) => <span key={h} style={{ left: `${((h - board.fromHour) / span) * 100}%` }}>{h % 24}</span>)}
+            </span>
+            <span />
+          </div>
+          {day.rows.length === 0 && <p className="muted small">この日にシフトに入る人はいません</p>}
+          {day.rows.map((r) => (
+            <div key={r.employeeId} className="shift-board-row">
+              <span className="shift-board-name">{r.name}</span>
+              <span className="shift-board-lane" style={{ backgroundSize: `${100 / span}% 100%` }}>
+                <span className={`shift-board-bar p${patterns.indexOf(r.patternName ?? '') % 6}`} style={barOf(r.start, r.end)} title={`${r.start}〜${r.end}`} />
+              </span>
+              <span className="shift-board-time small">{r.patternName && <>{r.patternName} </>}{r.start}〜{r.end}{r.breakMinutes > 0 && <span className="muted">（休憩 {r.breakMinutes} 分）</span>}</span>
+            </div>
+          ))}
+          <div className="shift-board-row shift-board-count">
+            <span>人数</span>
+            <span className="shift-board-cells">
+              {day.hours.map((h) => <span key={h.hour} className={h.count < h.need ? 'short' : ''}>{h.count}</span>)}
+            </span>
+            <span />
+          </div>
+          {day.hours.some((h) => h.need > 0) && (
+            <div className="shift-board-row shift-board-count muted">
+              <span>要る人数</span>
+              <span className="shift-board-cells">{day.hours.map((h) => <span key={h.hour}>{h.need}</span>)}</span>
+              <span />
+            </div>
+          )}
+          {day.off.length > 0 && <p className="small"><span className="muted">休み</span> {day.off.join('、')}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * シフトの担当者の画面。
  */
 export function ShiftTab() {
+  const [mode, setMode] = useState<'month' | 'day'>('month');
   const [month, setMonth] = useState<string | undefined>(undefined);
   const [data, setData] = useState<ShiftView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -154,8 +248,19 @@ export function ShiftTab() {
   const wished = new Set(data.requests.map((r) => `${r.employeeId}|${r.date}`));
   const pattern = new Map(data.settings.patterns.map((p) => [p.id, p]));
   const published = data.plan.status === 'published';
+  const switcher = (
+    <div className="row hr-toolbar shift-mode" role="group" aria-label="シフトの見せ方">
+      <button className={mode === 'month' ? 'btn small' : 'btn ghost small'} aria-pressed={mode === 'month'} onClick={() => setMode('month')}>月の表</button>
+      <button className={mode === 'day' ? 'btn small' : 'btn ghost small'} aria-pressed={mode === 'day'} onClick={() => setMode('day')}>日ごと</button>
+    </div>
+  );
+  if (mode === 'day') {
+    const t = todayJst();
+    return <div className="hr">{switcher}<DayBoard initialDate={t >= data.period.start && t <= data.period.end ? t : data.period.start} /></div>;
+  }
   return (
     <div className="hr">
+      {switcher}
       <div className="row wrap hr-toolbar">
         <button className="btn ghost small" onClick={() => setMonth(shiftMonth(ym, -1))}>← 前</button>
         <strong>{data.period.label}</strong>
