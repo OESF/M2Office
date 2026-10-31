@@ -124,6 +124,23 @@ export interface ServerStatusView {
   ai: { today: number; month: number; lastMonthSamePeriod: number };
 }
 
+/** 社外の控えの様子（仕様書 第20.4.6節「控え」）。 */
+export interface CloudBackupViewRow {
+  /** 入れてあるか（結果のファイルか、変更の記録を送る設定がある）。 */
+  configured: boolean;
+  last: {
+    at: string; ok: boolean;
+    database: { ok: boolean; error: string | null };
+    files: { ok: boolean; error: string | null; snapshot: string | null };
+    check: { at: string; ok: boolean; error: string | null } | null;
+  } | null;
+  /** 最後の結果が 26 時間より古い。 */
+  stale: boolean;
+  archive: { enabled: boolean; lastArchivedAt: string | null; lastFailedAt: string | null; failedCount: number } | null;
+  /** いま変更の記録を送れていない。 */
+  archiveFailing: boolean;
+}
+
 /** 運営の AI の設定（鍵の値は持たない）。 */
 export interface OpsAiSettingsView {
   /** いま効いている鍵: 画面で入れたもの・配備の設定のもの・無し。`tail` は末尾 4 文字。 */
@@ -239,7 +256,7 @@ export const opsApi = {
     call<{ id: string; loginUrl: string; welcome: string }>('/tenants', send('POST', b)),
   setTenantStatus: (id: string, status: 'trial' | 'active') => call<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/status`, send('PUT', { status })),
   tenantDetail: (id: string) => call<{ detail: TenantDetailView; opsHistory: OpsAuditRow[] }>(`/tenants/${encodeURIComponent(id)}`),
-  server: () => call<{ status: ServerStatusView }>('/server'),
+  server: () => call<{ status: ServerStatusView; backup: CloudBackupViewRow | null }>('/server'),
   /** 動いている環境（仕様書 第8.6.7.1節。クラウドの形では運営だけが見る）。 */
   runtime: () => call<RuntimeEnvironment>('/runtime'),
   /** 運営者のヘルプの章の一覧（仕様書 第23.8.16節）。`q` で題と本文を絞り込む。 */

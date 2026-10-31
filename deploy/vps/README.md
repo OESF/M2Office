@@ -35,7 +35,9 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | `crowdsec/acquis-m2office.yaml` | CrowdSec に Caddy のアクセスのログを読ませる設定 |
 | `geo/m2office-geo-update.sh` | 国で通信を止める（既定は中国・ロシア・北朝鮮）。地域インターネットレジストリの一覧から nftables の表 `m2office_geo` を作り、入ってくる通信と出ていく通信を断る。`setup.sh` が `/usr/local/sbin/m2office-geo-update` に入れる |
 | `geo/*.service`・`geo/*.timer` | 起動のときに表を入れる（`m2office-geo`）・週に 1 回一覧を取り直す（`m2office-geo-update`） |
-| `update.sh` | リリースのタグを入れる更新。控え（`pg_dump`）→ 止める → 切り替えて組み立て直す → 移行 → 動かす → 確かめる。失敗したら前の版と控えに戻す |
+| `update.sh` | リリースのタグを入れる更新。控え（`pg_dump`）→ 社外の控えに戻す点を記録 → 止める → 切り替えて組み立て直す → 移行 → 動かす → 確かめる。失敗したら前の版と控えに戻す |
+| `backup/m2office-backup.sh` | 社外の控え（Google Cloud Storage の東京。仕様書 第20.4.6節「控え」、ADR-0120）。データベースを pgBackRest で（まるごと。14 日分）、ファイルを restic で（30 日分）送り、月に 1 回壊れていないかを確かめる。結果は `/var/lib/m2office/machine/cloud-backup.json`（運営の画面の「稼働状況」）。`--status` で最後の結果、`--check` で確かめだけ。`setup.sh` が `/usr/local/sbin/m2office-backup` に入れる |
+| `backup/*.service`・`backup/*.timer` | 毎晩 2 時すぎに社外の控えを取る（`m2office-backup`） |
 
 雛形の埋め方は、ローカルの形と同じ `deploy/onsite/render.mjs` を使います。機械を変えずに埋めた結果だけを見るときは、次のようにします。
 
@@ -48,7 +50,9 @@ deploy/vps/setup.sh --render-only <出力先> --answers <KEY=値 のファイル
 | 道 | 中身 |
 |---|---|
 | `/opt/m2office/app` | 取ってきたリリースのタグ。組み立ては `dist-release/` |
-| `/etc/m2office/` | 環境変数（`m2office.env`）と答え（`setup.conf`） |
+| `/etc/m2office/` | 環境変数（`m2office.env`）と答え（`setup.conf`）。社外の控えの設定（`backup.env`。root だけ）と鍵（`backup/gcs-key.json`） |
+| `/etc/pgbackrest/pgbackrest.conf` | データベースの控えの設定（暗号化の合言葉を含む。root と postgres だけ） |
+| `/etc/postgresql/17/main/conf.d/m2office-archive.conf` | 変更の記録（WAL）を絶えず送る設定 |
 | `/var/lib/m2office/` | ファイル（`files/`）・機械の様子（`machine/`） |
 | `/var/www/m2office-site/` | 紹介のページ（`m2office.net`・`www`） |
 | `/var/backups/m2office/pre-update/` | 更新の前の控え（直近の 3 回。root だけが読める） |
@@ -65,6 +69,10 @@ sudo /opt/m2office/app/deploy/vps/update.sh --tag <リリースのタグ> --allo
 - タグへの署名を始める v1.0 までは、`--allow-unsigned` を付けて技術者が手で入れる。v1.0 からは `/etc/m2office/allowed_signers` の鍵で署名を確かめ、夜の自動の更新も入れる。
 - 雛形（`deploy/vps/`）が変わった版では、入れた後に `setup.sh` を走らせ直すよう示す。
 
+## 社外の控え
+
+Google Cloud Storage の東京に送ります。用意と戻し方は運営のマニュアル 第 13 章 手順 9 と「控えから戻す」です。`setup.sh` でバケットの名前を空のままにすると入れません。
+
 ## まだ入れていないもの
 
-社外の控え（pgBackRest・restic）は、置き場の事業者を運用を始めるときに決めてから足します（仕様書 第20.4.6節「控え」）。夜の自動の更新は v1.0 から入れます。
+夜の自動の更新は v1.0 から入れます。

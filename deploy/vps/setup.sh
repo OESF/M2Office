@@ -37,6 +37,12 @@ API_PORT=3101
 OPS_PORT=3102
 WG_NETWORK_DEFAULT=10.66.0.0/24
 WG_PORT=51820
+# 社外の控え（第20.4.6節「控え」）。鍵と合言葉は root だけ（pgBackRest の設定と鍵は postgres も読む）
+BACKUP_DIR_ETC="$ETC_DIR/backup"
+GCS_KEY="$BACKUP_DIR_ETC/gcs-key.json"
+BACKUP_ENV="$ETC_DIR/backup.env"
+PGBR_CONF=/etc/pgbackrest/pgbackrest.conf
+PG_ARCHIVE_CONF="/etc/postgresql/17/main/conf.d/m2office-archive.conf"
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
@@ -156,6 +162,12 @@ ask GEO_ALLOW '国で止めずに通す相手（アドレスか範囲をカン�
 ask DEMO_SUBDOMAIN '体験版の入口の名前（例 demo。使わないなら空のまま。外すなら -）' "${DEMO_SUBDOMAIN:-}"
 ask SITE_PREVIEW_USER '紹介のページの公開前の確認の利用者の名前（公開しているなら空のまま。外すなら -）' "${SITE_PREVIEW_USER:-}"
 ask SITE_PREVIEW_HASH 'そのパスワードのハッシュ（bcrypt。M2Office-site の scripts/basic-auth-hash.sh で作る。外すなら -）' "${SITE_PREVIEW_HASH:-}"
+ask BACKUP_GCS_BUCKET '社外の控えの Google Cloud Storage のバケットの名前（運営のマニュアル 第 13 章。まだなら空のまま。外すなら -）' "${BACKUP_GCS_BUCKET:-}"
+if [ -n "$BACKUP_GCS_BUCKET" ]; then
+  ask BACKUP_GCS_PROJECT 'そのバケットのある Google Cloud のプロジェクトの ID' "${BACKUP_GCS_PROJECT:-}"
+  sudo test -f "$GCS_KEY" && key_def='（入っています。変えないなら Enter）' || key_def=''
+  ask BACKUP_GCS_KEY_SOURCE "控え用のサービスアカウントの鍵（JSON）を VPS に置いた場所${key_def}" ''
+fi
 GEMINI_API_KEY=$(env_value GEMINI_API_KEY)
 ask GEMINI_API_KEY 'Gemini の API の鍵（後でもよい。マスター管理画面でも入れられる）' "$GEMINI_API_KEY" secret
 GOOGLE_LOGIN_CLIENT_ID=$(env_value GOOGLE_LOGIN_CLIENT_ID)
@@ -170,6 +182,19 @@ OPS_GOOGLE_DOMAIN=$(printf '%s' "$OPS_GOOGLE_DOMAIN" | tr -d '[:space:]' | tr '[
 IFS=, read -ra ops_domains <<< "$OPS_GOOGLE_DOMAIN"
 for d in "${ops_domains[@]}"; do [[ "$d" =~ ^[a-z0-9.-]+\.[a-z]+$ ]] || die "マスター管理画面に入れるドメインの形が違います: $d"; done
 [ "$WAF_ENGINE" = DetectionOnly ] || [ "$WAF_ENGINE" = On ] || die 'WAF の動きは DetectionOnly か On です'
+# 社外の控え（第20.4.6節「控え」）。バケットとプロジェクトの名前の形と、鍵のファイルを確かめる
+if [ -n "$BACKUP_GCS_BUCKET" ]; then
+  [[ "$BACKUP_GCS_BUCKET" =~ ^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$ ]] || die "バケットの名前の形が違います: $BACKUP_GCS_BUCKET"
+  [[ "${BACKUP_GCS_PROJECT:-}" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || die "プロジェクトの ID の形が違います: ${BACKUP_GCS_PROJECT:-}"
+  if [ -n "${BACKUP_GCS_KEY_SOURCE:-}" ]; then
+    [ -f "$BACKUP_GCS_KEY_SOURCE" ] || die "鍵のファイルがありません: $BACKUP_GCS_KEY_SOURCE"
+    grep -q '"type": *"service_account"' "$BACKUP_GCS_KEY_SOURCE" || die 'サービスアカウントの鍵（JSON）ではありません'
+  else
+    sudo test -f "$GCS_KEY" || die '控え用のサービスアカウントの鍵（JSON）の場所を入れてください'
+  fi
+else
+  BACKUP_GCS_PROJECT=''
+fi
 [ "$CLOUDFLARE_FRONT" = no ] || [ "$CLOUDFLARE_FRONT" = yes ] || die 'Cloudflare を前に置くかは yes か no です'
 # 国で通信を止める（仕様書 第20.4.6節「国で通信を止める」）。国の 2 文字（ISO 3166）にそろえる
 BLOCK_COUNTRIES=$(printf '%s' "$BLOCK_COUNTRIES" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]' | sed -e 's/^,*//' -e 's/,*$//' -e 's/,,*/,/g')
@@ -195,8 +220,8 @@ if [ -n "$SITE_PREVIEW_USER" ] || [ -n "$SITE_PREVIEW_HASH" ]; then
   [[ "$SITE_PREVIEW_HASH" =~ ^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$ ]] || die '公開前の確認のハッシュが bcrypt の形ではありません（パスワードそのものではなく、ハッシュを入れます）'
 fi
 # 秘密の値でない答えだけを残す（次の既定。公開前の確認のハッシュはパスワードではないので残す）
-printf "BASE_DOMAIN='%s'\nACME_EMAIL='%s'\nOPS_GOOGLE_DOMAIN='%s'\nWG_NETWORK='%s'\nWAF_ENGINE='%s'\nCLOUDFLARE_FRONT='%s'\nBLOCK_COUNTRIES='%s'\nGEO_ALLOW='%s'\nDEMO_SUBDOMAIN='%s'\nSITE_PREVIEW_USER='%s'\nSITE_PREVIEW_HASH='%s'\n" \
-  "$BASE_DOMAIN" "$ACME_EMAIL" "$OPS_GOOGLE_DOMAIN" "$WG_NETWORK" "$WAF_ENGINE" "$CLOUDFLARE_FRONT" "$BLOCK_COUNTRIES" "$GEO_ALLOW" "$DEMO_SUBDOMAIN" "$SITE_PREVIEW_USER" "$SITE_PREVIEW_HASH" | sudo tee "$CONF" >/dev/null
+printf "BASE_DOMAIN='%s'\nACME_EMAIL='%s'\nOPS_GOOGLE_DOMAIN='%s'\nWG_NETWORK='%s'\nWAF_ENGINE='%s'\nCLOUDFLARE_FRONT='%s'\nBLOCK_COUNTRIES='%s'\nGEO_ALLOW='%s'\nDEMO_SUBDOMAIN='%s'\nSITE_PREVIEW_USER='%s'\nSITE_PREVIEW_HASH='%s'\nBACKUP_GCS_BUCKET='%s'\nBACKUP_GCS_PROJECT='%s'\n" \
+  "$BASE_DOMAIN" "$ACME_EMAIL" "$OPS_GOOGLE_DOMAIN" "$WG_NETWORK" "$WAF_ENGINE" "$CLOUDFLARE_FRONT" "$BLOCK_COUNTRIES" "$GEO_ALLOW" "$DEMO_SUBDOMAIN" "$SITE_PREVIEW_USER" "$SITE_PREVIEW_HASH" "$BACKUP_GCS_BUCKET" "$BACKUP_GCS_PROJECT" | sudo tee "$CONF" >/dev/null
 sudo chmod 600 "$CONF"
 
 # ---- 3. ソフトを入れる（公式の置き場から。版の大きな数を固定する） ----
@@ -318,6 +343,59 @@ info "組み立てました: $RELEASE_DIR"
 say 'データベースの形を最新にします'
 (cd / && sudo -u "$SERVICE_USER" node --env-file="$ENV_FILE" "$REPO_DIR/scripts/migrate.mjs" | tail -1)
 
+# ---- 8.5 社外の控え（Google Cloud Storage。第20.4.6節「控え」、ADR-0120） ----
+backup_secret() { sudo grep -E "^$1=" "$2" 2>/dev/null | head -1 | cut -d= -f2- || true; }
+if [ -n "$BACKUP_GCS_BUCKET" ]; then
+  say '社外の控え（Google Cloud Storage）を用意します'
+  sudo install -d -m 750 -o root -g postgres "$BACKUP_DIR_ETC"
+  if [ -n "${BACKUP_GCS_KEY_SOURCE:-}" ]; then
+    sudo install -m 640 -o root -g postgres "$BACKUP_GCS_KEY_SOURCE" "$GCS_KEY"
+    info "鍵を入れました: ${GCS_KEY}（置いた $BACKUP_GCS_KEY_SOURCE は消してください）"
+  fi
+  # 暗号化の合言葉は、初めてのときだけ機械の上で作る（変えると前の控えを開けなくなる）
+  RESTIC_PASS=$(backup_secret RESTIC_PASSWORD "$BACKUP_ENV"); [ -n "$RESTIC_PASS" ] || RESTIC_PASS=$(rand_hex 32)
+  PGBR_PASS=$(backup_secret repo1-cipher-pass "$PGBR_CONF"); [ -n "$PGBR_PASS" ] || PGBR_PASS=$(rand_hex 32)
+  umask 077
+  printf '# 社外の控え（setup.sh が作る。root だけが読める。仕様書 第20.4.6節）\nRESTIC_REPOSITORY=gs:%s:/restic\nRESTIC_PASSWORD=%s\nRESTIC_CACHE_DIR=/var/cache/m2office-restic\nGOOGLE_PROJECT_ID=%s\nGOOGLE_APPLICATION_CREDENTIALS=%s\nM2O_FILES_DIR=%s/files\n' \
+    "$BACKUP_GCS_BUCKET" "$RESTIC_PASS" "$BACKUP_GCS_PROJECT" "$GCS_KEY" "$DATA_DIR" > "$work/backup.env"
+  printf '[global]\nrepo1-type=gcs\nrepo1-gcs-bucket=%s\nrepo1-gcs-key=%s\nrepo1-gcs-key-type=service\nrepo1-path=/pgbackrest\nrepo1-cipher-type=aes-256-cbc\nrepo1-cipher-pass=%s\nrepo1-retention-full-type=time\nrepo1-retention-full=14\ncompress-type=zst\nstart-fast=y\nprocess-max=2\nlog-level-console=warn\nlog-level-file=info\n\n[m2office]\npg1-path=/var/lib/postgresql/17/main\n' \
+    "$BACKUP_GCS_BUCKET" "$GCS_KEY" "$PGBR_PASS" > "$work/pgbackrest.conf"
+  umask 022
+  sudo install -m 600 -o root -g root "$work/backup.env" "$BACKUP_ENV"
+  sudo install -d -m 750 -o root -g postgres /etc/pgbackrest
+  sudo install -m 640 -o root -g postgres "$work/pgbackrest.conf" "$PGBR_CONF"
+  sudo install -d -m 770 -o postgres -g postgres /var/log/pgbackrest /var/spool/pgbackrest
+  # 変更の記録（WAL）を絶えず送る。5 分ごとに区切って送るので、失うのは直前の数分まで。初めて入れたときだけ PostgreSQL を起動し直す
+  printf "# 社外の控え（setup.sh が作る。仕様書 第20.4.6節「控え」）\narchive_mode = on\narchive_command = 'pgbackrest --stanza=m2office archive-push %%p'\narchive_timeout = 300\nwal_level = replica\n" > "$work/archive.conf"
+  if ! sudo cmp -s "$work/archive.conf" "$PG_ARCHIVE_CONF"; then
+    sudo install -m 644 -o postgres -g postgres "$work/archive.conf" "$PG_ARCHIVE_CONF"
+    info 'PostgreSQL を起動し直します（変更の記録を送る設定を入れるため。数秒止まります）'
+    sudo systemctl restart postgresql
+    for _ in $(seq 1 30); do (cd / && sudo -u postgres pg_isready -q) && break; sleep 1; done
+  fi
+  # 置き場を作り（何度走らせてもよい）、送れることを確かめる。送れないまま archive_mode を入れておくと、
+  # 送れなかった変更の記録が機械の中にたまり続けてディスクを埋めるので、送る設定を外して戻す
+  if (cd / && sudo -u postgres pgbackrest --stanza=m2office stanza-create >/dev/null 2>&1 && sudo -u postgres pgbackrest --stanza=m2office check >/dev/null 2>&1); then
+    info 'データベースの変更の記録を送れることを確かめました'
+  else
+    sudo rm -f "$PG_ARCHIVE_CONF"
+    sudo systemctl restart postgresql
+    die 'データベースの控えを Google Cloud Storage へ送れません。送る設定を外して戻しました。バケットの名前・鍵・権限を確かめて走らせ直してください（理由: sudo -u postgres pgbackrest --stanza=m2office stanza-create）'
+  fi
+  sudo install -d -m 700 /var/cache/m2office-restic
+  if sudo bash -c "set -a; . '$BACKUP_ENV'; restic cat config" >/dev/null 2>&1; then
+    info 'ファイルの控えの置き場はできています'
+  else
+    sudo bash -c "set -a; . '$BACKUP_ENV'; restic init" >/dev/null 2>&1 && info 'ファイルの控えの暗号化した置き場を作りました' \
+      || warn 'ファイルの控えの置き場を作れませんでした（バケットの名前と鍵の権限を確かめてください）'
+  fi
+  sudo install -m 755 "$SCRIPT_DIR/backup/m2office-backup.sh" /usr/local/sbin/m2office-backup
+  for u in m2office-backup.service m2office-backup.timer; do sudo install -m 644 "$SCRIPT_DIR/backup/$u" "/etc/systemd/system/$u"; done
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now m2office-backup.timer >/dev/null 2>&1
+  info '毎晩 2 時すぎに取ります。いま取るなら: sudo systemctl start m2office-backup（結果は sudo m2office-backup --status）'
+fi
+
 # ---- 9. 動かす ----
 say 'M2Office を動かします'
 for f in "$work"/out/systemd/*.service; do sudo install -m 644 "$f" "/etc/systemd/system/$(basename "$f")"; done
@@ -395,4 +473,16 @@ info '4. Google のログインの OAuth クライアントに、戻り先（m2o
 info "   最初の運営管理者を作る: cd / && sudo -u $SERVICE_USER node --env-file=$ENV_FILE $REPO_DIR/scripts/create-operator.mjs --email <アドレス> --name <名前> --role admin"
 [ -n "$SITE_PREVIEW_HASH" ] && info "紹介のページは公開前の確認の BASIC 認証で守っています（利用者 ${SITE_PREVIEW_USER}）。公開するときは、利用者の名前とハッシュを - で外して走らせ直す"
 [ "$WAF_ENGINE" = DetectionOnly ] && info '5. WAF は記録だけです。誤りが無いことを確かめたら、WAF の動きを On にして走らせ直す'
-info '更新は update.sh で入れます。社外の控え（pgBackRest・restic）と夜の自動の更新は、まだ入れません（運営のマニュアル 第 13 章）'
+if [ -n "$BACKUP_GCS_BUCKET" ]; then
+  printf '  紙の控えに書き写す社外の控えの合言葉を、いま画面に出しますか [y/N]: '
+  IFS= read -r show
+  if [ "$show" = y ] || [ "$show" = Y ]; then
+    info "バケット: ${BACKUP_GCS_BUCKET}（プロジェクト ${BACKUP_GCS_PROJECT}）"
+    info "データベースの控えの合言葉（pgBackRest）: $PGBR_PASS"
+    info "ファイルの控えの合言葉（restic）: $RESTIC_PASS"
+    info 'これが無いと、機械をなくしたときに控えを開けません。運営が紙に書き写して保管し、画面を消してください。提携先には渡しません'
+  fi
+else
+  info '社外の控えはまだ入れていません。運営のマニュアル 第 13 章で Google Cloud を用意し、バケットの名前を答えて走らせ直してください'
+fi
+info '更新は update.sh で入れます。夜の自動の更新は、まだ入れません（タグへの署名を始める v1.0 から）'

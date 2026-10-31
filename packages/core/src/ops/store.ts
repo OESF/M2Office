@@ -12,6 +12,7 @@ import type { RuntimeBeat, RuntimeEnvironment, RuntimeSampleDays, RuntimeSampleP
 import { beatFromRow, databaseFromRow, DATABASE_USAGE_SQL, samplePointFromRow } from '../machine/runtime.js';
 import type { NewTenantInput, OperatorRole } from './rules.js';
 import type { IncidentImpact, ServiceIncident } from './incidents.js';
+import type { WalArchiveStatus } from './cloud-backup.js';
 
 /** 運営者。 */
 export interface Operator {
@@ -537,6 +538,24 @@ export class OpsStore {
   async serverStatus(): Promise<ServerStatus> {
     const { rows } = await this.pool.query('select ops.server_status() as s');
     return rows[0].s as ServerStatus;
+  }
+
+  /**
+   * 変更の記録（WAL）を社外の控えへ送った様子（第20.4.6節「控え」）。`pg_stat_archiver` と `archive_mode` を読む。
+   *
+   * @returns 読めなければ `null`
+   */
+  async walArchiveStatus(): Promise<WalArchiveStatus | null> {
+    try {
+      const { rows } = await this.pool.query(
+        `select current_setting('archive_mode') = 'on' as enabled, last_archived_time, last_failed_time, failed_count from pg_stat_archiver`,
+      );
+      const r = rows[0];
+      if (!r) return null;
+      return { enabled: r.enabled, lastArchivedAt: iso(r.last_archived_time), lastFailedAt: iso(r.last_failed_time), failedCount: Number(r.failed_count ?? 0) };
+    } catch {
+      return null;
+    }
   }
 
   /**

@@ -130,7 +130,7 @@ test('紹介のページ: 公開前の確認の答えがあるときだけ BASIC
 test('setup.sh: 公開前の確認の名前とハッシュは両方か空で、ハッシュは bcrypt の形に限る。「-」で答えを外せる', () => {
   const body = readFileSync(setup, 'utf8');
   assert.match(body, /\[ "\$reply" = - \] && reply=''/);
-  assert.match(body, /SITE_PREVIEW_HASH='%s'\\n" \\\n/);
+  assert.match(body, /SITE_PREVIEW_HASH='%s'\\n/, '答えの控えに残す');
   const at = body.indexOf('[[ "$SITE_PREVIEW_HASH" =~');
   const check = body.slice(at, body.indexOf(' || die', at));
   const ok = (h: string) => { try { execFileSync('bash', ['-c', `SITE_PREVIEW_HASH=$1; ${check}`, '_', h]); return true; } catch { return false; } };
@@ -223,4 +223,24 @@ test('国で通信を止める: 止める国の範囲だけを取り出し、表
   // 検査の値が合わない一覧は使わない
   writeFileSync(join(rir, 'delegated-apnic-extended-latest.md5'), 'MD5 (delegated-apnic-extended-latest) = 00000000000000000000000000000000\n');
   assert.throws(() => run('CN'));
+});
+
+test('社外の控え（第20.4.6節「控え」）: 台本の文法。送れないときは送る設定を外して戻し、合言葉は初めてだけ作る。更新の前に戻す点を記録する', () => {
+  const backup = join(root, 'deploy/vps/backup/m2office-backup.sh');
+  execFileSync('bash', ['-n', backup]);
+  const body = readFileSync(setup, 'utf8');
+  assert.match(body, /repo1-type=gcs/);
+  assert.match(body, /repo1-cipher-type=aes-256-cbc/);
+  assert.match(body, /RESTIC_REPOSITORY=gs:%s:\/restic/);
+  // 送れないまま archive_mode を残すと、変更の記録がたまってディスクを埋める
+  assert.match(body, /stanza-create[\s\S]*check[\s\S]*else\n\s+sudo rm -f "\$PG_ARCHIVE_CONF"/);
+  assert.match(body, /RESTIC_PASS=\$\(backup_secret RESTIC_PASSWORD "\$BACKUP_ENV"\); \[ -n "\$RESTIC_PASS" \] \|\| RESTIC_PASS=/);
+  const update = readFileSync(join(root, 'deploy/vps/update.sh'), 'utf8');
+  assert.ok(update.indexOf('pg_create_restore_point') > update.indexOf('pg_dump') && update.indexOf('pg_create_restore_point') < update.indexOf('stop_app\nlog'), '控えの後、止める前');
+  const b = readFileSync(backup, 'utf8');
+  assert.match(b, /--type=full backup/);
+  assert.match(b, /--keep-daily 30/);
+  assert.doesNotMatch(b, /echo .*\$RESTIC_PASSWORD/);
+  const timer = readFileSync(join(root, 'deploy/vps/backup/m2office-backup.timer'), 'utf8');
+  assert.match(timer, /OnCalendar=\*-\*-\* 02:00:00 Asia\/Tokyo/);
 });

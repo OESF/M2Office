@@ -443,9 +443,9 @@ Xserver の VPS（Ubuntu 26.04 LTS）
 
 ##### 控え
 
-**案（第 0.502.0 版。ADR-0120）: 社外の置き場を Google Cloud Storage（東京）にする。** 契約の数を増やさないため（Gemini と Google のログインで、すでに Google Cloud を使っている）。Xserver ドライブで動くことは確かめたが、同じ ID で控えも消せてしまうため代わりの案に回した（2026-10-31 に三浦さんが決めた）。
+**決定（第 0.502.0 版で案、2026-10-31 に三浦さんが合意し、第 0.503.0 版で実装。ADR-0120）: 社外の置き場を Google Cloud Storage（東京）にする。** 契約の数を増やさないため（Gemini と Google のログインで、すでに Google Cloud を使っている）。Xserver ドライブで動くことは確かめたが、同じ ID で控えも消せてしまうため代わりの案に回した（2026-10-31 に三浦さんが決めた）。
 
-| 項目 | 規定（案） |
+| 項目 | 規定 |
 |---|---|
 | 置き場 | **Google Cloud Storage**。リージョンは**東京（asia-northeast1）だけ**（デュアルリージョン・マルチリージョンにしない。国内に固定する。第20.1節の条件）。ストレージのクラスは **Standard**（控えは間引くときに消して作り直し、毎月の確かめで読むため。ほかのクラスは早く消したときと読んだときの料金がかかる）。従量の課金 |
 | プロジェクトとバケット | 控えだけのための**専用のプロジェクト**を作り、Gemini や Google のログインのプロジェクトと分ける（請求先は同じでよい）。バケットは 1 つ。公開を禁じる設定（公開アクセスの防止）と、バケット単位の権限（均一なバケットレベルのアクセス）を入れる。中は `pgbackrest/`（データベース）と `restic/`（ファイル）に分ける |
@@ -459,6 +459,8 @@ Xserver の VPS（Ubuntu 26.04 LTS）
 | 戻す練習 | **3 か月に 1 回、別の機械（使い捨ての VPS）に戻して動くことを確かめる**。提携先が行い、結果を記録する。ソフト削除から戻す練習も、年に 1 回行う |
 | 料金の目安 | 東京の Standard は 1 GB あたり月 0.023 ドル。ソフト削除の分を 2 割足して、控えが 100 GB なら月 約 3 ドル、500 GB なら 約 14 ドル、1 TB なら 約 28 ドル。書き込みなどの操作は月 1 ドルに届かない。全部を戻すときだけ、取り出しの料金（1 GB あたり 0.12 ドル）がかかる（2026-10-31 に Google の料金のページで確かめた） |
 | 代わりの案 | (a) **Xserver ドライブ**（WebDAV。restic を rclone の WebDAV 経由で使う。rclone の種類は `other`）。2026-10-31 に開発の機械で、取る・戻す・全部を読み戻す確かめが通った（225 MB を 46 秒で送り、19 秒で戻せた）。消したファイルはごみ箱から戻せたが、同じ ID でごみ箱も空にできる作りのため、乗っ取りの備えには、運営の機械が別のユーザーへ取りに行く仕組みが要る。中身のソフトが古い版（Nextcloud 16）。(b) 日本国内のリージョンを選べる S3 互換の置き場。Cloudflare R2 は置き場所を日本に固定できないため使わない（第20.1節の条件） |
+
+**実装（第 0.503.0 版）**: `deploy/vps/backup/m2office-backup.sh`（毎晩 2 時すぎに `m2office-backup.timer` が呼ぶ。pgBackRest のまるごとの控えと restic のファイルの控え、月が変わって初めての回の後に restic の 5% の読み戻しと pgBackRest の `verify`）。`setup.sh` がバケットの名前・プロジェクトの ID・サービスアカウントの鍵を尋ね、合言葉を初めてだけ作り（`/etc/m2office/backup.env`・`/etc/pgbackrest/pgbackrest.conf`）、PostgreSQL に WAL を送る設定（`archive_timeout = 300`）を入れて一度だけ起動し直す。送れないときは送る設定を外して戻す（送れない WAL がたまってディスクを埋めないように）。`update.sh` は更新の前に戻す点（`update-<版>`）を記録する。結果は `/var/lib/m2office/machine/cloud-backup.json` に書き、マスター管理画面の「稼働状況」に「社外の控え」として、WAL を送った様子（`pg_stat_archiver`）と合わせて出す（`GET /v1/ops/server` の `backup`。`packages/core/src/ops/cloud-backup.ts`）。見張りの道具は `m2office-backup --status`（失敗か 26 時間より古いと 1 で終わる）で確かめる。Google Cloud の用意（プロジェクト・バケット・`roles/storage.objectUser` と `roles/storage.legacyBucketReader` だけのサービスアカウント）と戻し方は運営のマニュアル 第 13 章 手順 9。**本物の Google Cloud Storage と VPS では、まだ確かめていない**
 
 ##### 見張りと知らせ
 

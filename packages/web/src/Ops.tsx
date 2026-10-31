@@ -13,7 +13,7 @@ import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import {
   opsApi, OpsApiError, TENANTS_CSV_URL, type OperatorProfileView, type OpsAiSettingsView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
-  type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
+  type CloudBackupViewRow, type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
 import { RuntimeCard } from './runtime-card.js';
@@ -593,8 +593,9 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
 /** サーバー全体の稼働状況。1 分ごとに読み直す。 */
 function Server() {
   const [s, setS] = useState<ServerStatusView | null>(null);
+  const [backup, setBackup] = useState<CloudBackupViewRow | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => { opsApi.server().then((r) => setS(r.status)).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
+  const load = useCallback(() => { opsApi.server().then((r) => { setS(r.status); setBackup(r.backup); }).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
   useEffect(() => { load(); const t = window.setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
   const rate = (f: number, n: number) => (n ? `${Math.round((f / n) * 1000) / 10}%` : '—');
   const lastWorker = s?.workers[0]?.at ?? null;
@@ -616,6 +617,7 @@ function Server() {
             <div className="stat"><span>実行（1 時間 ／ 今日）</span><strong>{s.runs.hour} ／ {s.runs.today}</strong><span>失敗 {rate(s.runs.hourFailed, s.runs.hour)} ／ {rate(s.runs.todayFailed, s.runs.today)}</span></div>
             <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '動いています' : '応答がありません'}</span></strong><span>最後の応答 {when(lastWorker)}{liveWorkers.length > 1 ? `・${liveWorkers.length} 台` : ''}</span></div>
             <div className="stat"><span>遅れている定時実行</span><strong>{s.schedulesLate}</strong></div>
+            {backup && <BackupStat b={backup} />}
             <div className="stat"><span>AI の費用（今日 ／ 今月）</span><strong>{yen(Number(s.ai.today))} ／ {yen(Number(s.ai.month))}</strong><span>前の月の同じ時期 {yen(Number(s.ai.lastMonthSamePeriod))}</span></div>
           </div>
           <h3>外部の接続（24 時間）</h3>
@@ -637,6 +639,30 @@ function Server() {
         </>
       )}
     </>
+  );
+}
+
+/**
+ * 社外の控え（仕様書 第20.4.6節「控え」）。毎晩の控え（データベースとファイル）と、変更の記録を絶えず送れているか。
+ * 失敗・止まっている・送れていないときは、理由を添えて目立たせる。
+ */
+function BackupStat({ b }: { b: CloudBackupViewRow }) {
+  if (!b.configured) return <div className="stat"><span>社外の控え</span><strong><span className="badge warn">入れていません</span></strong><span>運営のマニュアル 第 13 章</span></div>;
+  const last = b.last;
+  const bad = !last || !last.ok || b.stale || b.archiveFailing || (last.check !== null && !last.check.ok);
+  const label = !last ? 'まだ取っていません' : !last.ok ? '失敗しました' : b.stale ? '止まっています' : b.archiveFailing ? '変更の記録を送れていません' : '取れています';
+  const errors = [last?.database.error && `データベース: ${last.database.error}`, last?.files.error && `ファイル: ${last.files.error}`,
+    last?.check && !last.check.ok && `確かめ: ${last.check.error ?? ''}`].filter(Boolean).join(' ／ ');
+  return (
+    <div className="stat">
+      <span>社外の控え</span>
+      <strong><span className={`badge ${bad ? 'warn' : 'ok'}`}>{label}</span></strong>
+      <span>
+        最後 {when(last?.at ?? null)}・変更の記録 {when(b.archive?.lastArchivedAt ?? null)}
+        {last?.check && `・確かめ ${when(last.check.at)}`}
+        {errors && <><br />{errors}</>}
+      </span>
+    </div>
   );
 }
 

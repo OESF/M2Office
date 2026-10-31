@@ -199,6 +199,87 @@ sudo /opt/m2office/app/deploy/vps/update.sh --tag <リリースのタグ> --allo
 - 最後に「deploy/vps の雛形が変わっています」と出たら、`setup.sh` を走らせ直します（前の答えのまま Enter で進めます）
 - 記録は `/var/log/m2office/update.log` に残ります
 
+### 手順 9. 社外の控えを入れる（Google Cloud Storage）
+
+データベースとファイルの控えを、Google Cloud Storage の東京へ送ります（仕様書 第20.4.6節「控え」、ADR-0120）。**顧客を入れる前に入れます。** Google Cloud の用意は運営の管理者のアカウント（2 段階の認証）で行い、VPS には読み書きだけの鍵を置きます。
+
+**1. Google Cloud で用意する（運営）**
+
+Google Cloud の画面（console.cloud.google.com）か、運営の端末の `gcloud` で行います。`<…>` は決めた名前に置き換えます。
+
+```bash
+# 控えだけのプロジェクト（請求先は Gemini と Google のログインと同じでよい）
+gcloud projects create <プロジェクトの ID>
+gcloud billing projects link <プロジェクトの ID> --billing-account <請求先の ID>
+gcloud config set project <プロジェクトの ID>
+
+# バケット: 東京だけ・Standard・公開を禁じる・バケット単位の権限・消したものを 30 日戻せる
+gcloud storage buckets create gs://<バケットの名前> --location=asia-northeast1 --default-storage-class=STANDARD \
+  --uniform-bucket-level-access --public-access-prevention --soft-delete-duration=30d
+
+# VPS 用のサービスアカウント: そのバケットのオブジェクトを読み書きする権限と、バケットの名前を読む権限だけ
+gcloud iam service-accounts create m2office-backup --display-name="M2Office の控え（VPS）"
+gcloud storage buckets add-iam-policy-binding gs://<バケットの名前> \
+  --member=serviceAccount:m2office-backup@<プロジェクトの ID>.iam.gserviceaccount.com --role=roles/storage.objectUser
+gcloud storage buckets add-iam-policy-binding gs://<バケットの名前> \
+  --member=serviceAccount:m2office-backup@<プロジェクトの ID>.iam.gserviceaccount.com --role=roles/storage.legacyBucketReader
+gcloud iam service-accounts keys create m2office-backup-key.json \
+  --iam-account=m2office-backup@<プロジェクトの ID>.iam.gserviceaccount.com
+```
+
+- サービスアカウントに、バケットの設定を変える権限（ストレージ管理者など）は**渡しません**。VPS が乗っ取られても、消したものを戻せる期間を縮められないようにするためです
+- 予算の知らせ（お支払い → 予算とアラート）を、そのプロジェクトに月の上限の目安で入れます
+- 鍵のファイル（`m2office-backup-key.json`）は、VPS に送ったら運営の端末から消します
+
+**2. VPS に入れる（技術者）**
+
+```bash
+scp m2office-backup-key.json <VPS>:~/          # WireGuard の網から
+/opt/m2office/app/deploy/vps/setup.sh           # 前の答えのまま Enter で進め、バケットの名前・プロジェクトの ID・鍵の場所を答える
+rm ~/m2office-backup-key.json
+sudo systemctl start m2office-backup            # 初めての控えをいま取る
+sudo m2office-backup --status
+```
+
+- `setup.sh` は PostgreSQL に変更の記録（WAL）を送る設定を入れて、**一度だけ PostgreSQL を起動し直します**（数秒止まります）。送れないときは設定を外して戻し、止まります
+- 最後に「紙の控えに書き写す社外の控えの合言葉」を出すかを尋ねます。**運営が紙に書き写して保管します。** 提携先には渡しません。合言葉が無いと、機械をなくしたときに控えを開けません
+- 毎晩 2 時すぎに、データベースのまるごとの控え（14 日分を残す）とファイル（30 日分を残す）を送ります。変更の記録は絶えず送り、5 分ごとに区切ります。月に 1 回、壊れていないかを確かめます
+- 結果はマスター管理画面の「稼働状況」の「社外の控え」に出ます。見張りの道具からは `sudo m2office-backup --status`（失敗か 26 時間より古いと 1 で終わる）で確かめます
+- 更新（手順 8）のときは、`update.sh` が戻す点（`update-<版>`）を記録します
+
+### 控えから戻す
+
+戻すときは、運営に連絡し、合言葉の紙を用意してから行います。
+
+**データベース**（pgBackRest。止めてから戻す）
+
+```bash
+sudo systemctl stop m2office-api m2office-worker m2office-ops
+sudo systemctl stop postgresql
+sudo -u postgres pgbackrest --stanza=m2office --delta restore                                        # いちばん新しい時点へ
+sudo -u postgres pgbackrest --stanza=m2office --delta --type=time --target="2026-11-01 10:00:00+09" restore   # 決めた時刻へ
+sudo -u postgres pgbackrest --stanza=m2office --delta --type=name --target=update-<版> restore        # 更新の前へ
+sudo systemctl start postgresql
+sudo systemctl start m2office-api m2office-worker m2office-ops
+```
+
+**ファイル**（restic）
+
+```bash
+sudo bash -c 'set -a; . /etc/m2office/backup.env; restic snapshots'
+sudo bash -c 'set -a; . /etc/m2office/backup.env; restic restore latest --target /tmp/m2o-restore'
+sudo rsync -a /tmp/m2o-restore/var/lib/m2office/files/ /var/lib/m2office/files/ && sudo chown -R m2office:m2office /var/lib/m2office/files
+```
+
+**VPS をなくしたとき**は、新しい VPS に手順 1〜3 で入れ、同じバケットと新しい鍵を答え、`/etc/pgbackrest/pgbackrest.conf` の `repo1-cipher-pass` と `/etc/m2office/backup.env` の `RESTIC_PASSWORD` を紙の合言葉に書き換えてから、上の手順で戻します。`M2OFFICE_SECRET_KEY` も前の値に戻します（預かった鍵を開けるため）。
+
+**控えを消されたとき**（乗っ取りを疑うとき）は、まず Google Cloud の画面でそのサービスアカウントの鍵を無効にします。消されたものは 30 日のうちなら戻せます（運営の管理者のアカウントで行う）。
+
+```bash
+gcloud storage ls --soft-deleted --recursive gs://<バケットの名前>/ | head
+gcloud storage restore gs://<バケットの名前>/** --async      # 消されたものをまとめて戻す
+```
+
 ### まだこの章に無いもの
 
-社外の控え（pgBackRest・restic）は、Google Cloud Storage の東京を案にし、仕様の合意の後に足します（仕様書 第20.4.6節「控え」、ADR-0120）。顧客を入れる前に入れます。夜の自動の更新は、タグへの署名を始める v1.0 から入れます。
+夜の自動の更新は、タグへの署名を始める v1.0 から入れます。

@@ -81,6 +81,14 @@ PGPASSWORD="$OWNER_PASS" "$PG_BIN/pg_dump" -Fc -f "$DUMP" "$OWNER_NOPASS" || { l
 ls -1t "$BACKUP_DIR"/*.dump 2>/dev/null | tail -n +4 | xargs -r rm -f
 umask 022
 log "控えを取りました: $DUMP"
+# 社外の控えを入れていれば、戻す点に名前を付けて変更の記録を区切って送る（第20.4.6節「控え」の「更新の前」。pgBackRest の --type=name で、この時点に戻せる）
+if [ -f /etc/pgbackrest/pgbackrest.conf ]; then
+  if (cd / && sudo -u postgres psql -qtA -d m2office -c "select pg_create_restore_point('update-$TO')" -c 'select pg_switch_wal()' >/dev/null 2>&1); then
+    log "戻す点を記録しました: update-${TO}（$(cd / && sudo -u postgres psql -qtA -c 'select pg_current_wal_lsn()' 2>/dev/null)）"
+  else
+    log '注意: 戻す点を記録できませんでした（社外の控えの変更の記録は送り続けます）'
+  fi
+fi
 
 stop_app() { systemctl stop $SERVICES; }
 start_app() { systemctl start $SERVICES; }

@@ -6,7 +6,8 @@
  */
 
 import { serve } from '@hono/node-server';
-import { attachLogSink, createLoggerFromEnv, createPool, envTenantCapJpy, installPoolLogger, OpsStore, parseOpsDomains, secretBoxFromEnv, SystemLogSink } from '@m2office/core';
+import { join } from 'node:path';
+import { attachLogSink, createLoggerFromEnv, createPool, envTenantCapJpy, installPoolLogger, machineDir, OpsStore, parseOpsDomains, secretBoxFromEnv, SystemLogSink } from '@m2office/core';
 import { loadAuthConfig } from '../auth/config.js';
 import { opsApp, type OpsConfig } from './app.js';
 import { listenHost } from '../listen.js';
@@ -41,7 +42,9 @@ const store = new OpsStore(createPool(dbUrl, { max: 5, name: 'ops' }));
 attachLogSink(new SystemLogSink(store.query).start().accept);
 // 運営の AI の設定（第23.8.14節）。鍵はアプリと同じ暗号の鍵で暗号化する。本番で暗号の鍵が無ければ起動しない（secretBoxFromEnv）
 const { box } = secretBoxFromEnv(env);
-const app = opsApp({ store, config, log, platformAi: { box, env: { key: env['GEMINI_API_KEY']?.trim() || null, tenantCapJpy: envTenantCapJpy(env) } } });
+// 社外の控えの結果（第20.4.6節「控え」）。毎晩の控えが機械の置き場に書く
+const cloudBackupFile = join(machineDir(env), 'cloud-backup.json');
+const app = opsApp({ store, config, log, cloudBackupFile, platformAi: { box, env: { key: env['GEMINI_API_KEY']?.trim() || null, tenantCapJpy: envTenantCapJpy(env) } } });
 
 const hostname = listenHost();
 serve({ fetch: app.fetch, port, hostname }, (info) => {

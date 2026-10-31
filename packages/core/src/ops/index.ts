@@ -16,3 +16,4 @@ export { OpsAppSide } from './app-side.js';
 export { loadOpsManual, searchOpsManual, linkChapters, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry } from './manual.js';
 export { serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport } from './incidents.js';
 export { proxyAllowed, ProxyAccessStore, PROXY_HOURS, PROXY_DEFAULT_HOURS, type ProxyScope, type ProxyGrant, type ProxySessionInfo } from './proxy.js';
+export { readCloudBackupRun, cloudBackupView, CLOUD_BACKUP_STALE_MS, type CloudBackupRun, type CloudBackupView, type WalArchiveStatus } from './cloud-backup.js';

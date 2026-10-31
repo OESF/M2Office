@@ -1,0 +1,12 @@
+# 社外の控え（仕様書 第20.4.6節「控え」、ADR-0120）。データベースのまるごとの控えとファイルを Google Cloud Storage へ送る。
+# m2office-backup.timer が毎晩 1 回呼ぶ。記録は journalctl -u m2office-backup、結果は sudo m2office-backup --status。
+[Unit]
+Description=M2Office: 社外の控え（Google Cloud Storage）
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/m2office-backup
+Nice=10
+IOSchedulingClass=idle

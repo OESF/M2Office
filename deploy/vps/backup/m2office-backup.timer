@@ -1,0 +1,11 @@
+# 社外の控えを毎晩 2 時（日本時間）すぎに取る（仕様書 第20.4.6節「控え」）。止まっていた間の分は、起動の後に行う。
+[Unit]
+Description=M2Office: 社外の控えを毎晩取る
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 Asia/Tokyo
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
