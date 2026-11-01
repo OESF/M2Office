@@ -13,11 +13,13 @@ import {
 } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { statusLabel } from './components.js';
-import { SecretaryAvatar } from './nav.js';
+import { Icon, SecretaryAvatar } from './nav.js';
+import { shrinkPhoto } from './photo.js';
 import { KEY_BINDINGS, isTouchOnly, keyLabel } from './keys.js';
 import { SaveButton } from './save.js';
 import { SortableList } from './Sortable.js';
 import { HelpTip, Markdown } from './help.js';
+import { profileSections } from './profile-sections.js';
 import { playSample } from './voice.js';
 
 /** 通知の種類（個人設定で切れるもの）。 */
@@ -64,11 +66,15 @@ export function rememberedSection(): SettingsSection {
   return 'profile';
 }
 
-export function Settings({ me, agents, onChanged, section }: {
+export function Settings({ me, agents, onChanged, section, photo, onPhoto }: {
   /** メニューの並びと表示に使う業務（名刺も業務の 1 つとして入る。第6.1.1節）。 */
   me: Me; agents: { id: string; name: string }[]; onChanged: () => void;
   /** 出す区分（仕様書 第6.5.0節）。 */
   section: SettingsSection;
+  /** いまの本人のアバター（URL と出どころ。第6.5.1.2節）。 */
+  photo: { url: string | null; source: Me['photoSource'] };
+  /** アバターを入れた・削除したとき。左のメニューの本人の表示も変える */
+  onPhoto: (photo: { url: string | null; source: Me['photoSource'] }) => void;
 }) {
   const [s, setS] = useState<UserSettings | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
@@ -98,20 +104,11 @@ export function Settings({ me, agents, onChanged, section }: {
       {msg.error && <p className="error">{msg.error}</p>}
 
       {on('profile') && <>
-      <div className="card">
-        <h3>利用状況</h3>
-        <dl className="kv">
-          <dt>区分</dt><dd>{usage?.seat ?? '—'}</dd>
-          <dt>使える業務</dt><dd>{usage ? `${usage.availableAgents} 件` : '—'}</dd>
-          <dt>今月の実行</dt><dd>{usage ? `${usage.thisMonth.runs} 件` : '—'}</dd>
-          {usage?.ai && <><dt>今月の AI の利用</dt><dd>{`${Math.round(usage.ai.usedJpy).toLocaleString('ja-JP')} 円`}{usage.ai.limitJpy !== null ? `（1 人の上限 ${usage.ai.limitJpy.toLocaleString('ja-JP')} 円）` : ''}</dd></>}
-          <dt>グループ</dt><dd>{usage?.groups?.length ? usage.groups.join('、') : '所属なし'}</dd>
-          <dt>権限区画</dt><dd>{usage?.compartments.length ? usage.compartments.join('、') : '所属なし'}</dd>
-        </dl>
-      </div>
+      <UsageCard usage={usage} />
 
       <div className="card">
         <h3>プロフィール</h3>
+        <AvatarField photo={photo} onPhoto={onPhoto} />
         <div className="grid2">
           <div className="field"><label>表示名</label><input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="field"><label>ふりがな</label>
@@ -286,8 +283,6 @@ export function Settings({ me, agents, onChanged, section }: {
       </>}
 
       {on('memory') && <>
-      <PresenceNotice />
-
       <MemorySettings settings={s} onChange={(v) => set('memory', v)}
         onSave={() => api.saveMySettings('memory', { ...s.memory }).then(onChanged)} />
 
@@ -353,6 +348,90 @@ export function Settings({ me, agents, onChanged, section }: {
  * **割り当ての表（`keys.ts`）から作る。** ここに書き写すと、一覧と実際がずれる。
  * 外付けのキーボードが無さそうな端末では、割り当ての代わりにその旨を出す。
  */
+/** アバターの出どころの言い方（第6.5.1.2節）。入れた画像には付けない。 */
+const PHOTO_SOURCE: Record<string, string> = { google: 'Google の写真', hr: '人事の顔写真' };
+
+/**
+ * 本人のアバター（仕様書 第6.5.1.2節）。画像を選ぶと、向きを直して縮めた JPEG を送る。
+ *
+ * @remarks 入れた画像があるときだけ「削除」を出す。削除すると Google の写真（無ければ人事の顔写真）に戻る
+ */
+function AvatarField({ photo, onPhoto }: {
+  photo: { url: string | null; source: Me['photoSource'] };
+  onPhoto: (photo: { url: string | null; source: Me['photoSource'] }) => void;
+}) {
+  const pick = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [photo.url]);
+  const run = async (work: () => Promise<{ url: string | null; source: Me['photoSource'] }>, fallback: string) => {
+    setBusy(true);
+    try {
+      onPhoto(await work());
+      setError(null);
+    } catch (e) {
+      setError(describeError(e, fallback));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const put = (f: File) => run(async () => ({ url: (await api.setMyPhoto(await shrinkPhoto(f, 512))).photo, source: 'upload' }), '画像を入れられませんでした');
+  const remove = () => run(async () => {
+    await api.deleteMyPhoto();
+    const m = await api.me();
+    return { url: m.photo, source: m.photoSource ?? null };
+  }, '削除できませんでした');
+  return (
+    <div className="field">
+      <label>アバター</label>
+      <div className="profile-avatar">
+        <span className="profile-avatar-img">
+          {photo.url && !broken ? <img src={photo.url} alt="" onError={() => setBroken(true)} /> : <Icon name="user" />}
+        </span>
+        <button className="btn ghost small" disabled={busy} onClick={() => pick.current?.click()}>画像を選ぶ</button>
+        {photo.source === 'upload' && <button className="btn danger small" disabled={busy} onClick={() => void remove()}>削除</button>}
+        {photo.source && PHOTO_SOURCE[photo.source] && <span className="muted small">{PHOTO_SOURCE[photo.source]}</span>}
+        <input ref={pick} type="file" accept="image/png,image/jpeg,image/*" hidden
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void put(f); }} />
+      </div>
+      {error && <p className="error small">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * 利用状況（仕様書 第6.5.7節）。数の枠の下に、区分・グループ・権限区画も枠で並べる（中身は札）。
+ *
+ * @remarks 区画は管理者が付けた説明（「人事・労務」など）で出す。説明が無ければ名前のまま
+ */
+function UsageCard({ usage }: { usage: Awaited<ReturnType<typeof api.myUsage>> | null }) {
+  const tags = (names: string[] | undefined) => names?.length
+    ? <span className="usage-tags">{names.map((n) => <span key={n} className="badge">{n}</span>)}</span>
+    : <span className="usage-none">所属なし</span>;
+  return (
+    <div className="card">
+      <h3>利用状況</h3>
+      <div className="tiles">
+        <div className="tile"><span>使える業務</span><strong>{usage ? usage.availableAgents.toLocaleString() : '—'}<small> 件</small></strong></div>
+        <div className="tile"><span>今月の実行</span><strong>{usage ? usage.thisMonth.runs.toLocaleString() : '—'}<small> 件</small></strong></div>
+        {usage?.ai && (
+          <div className="tile">
+            <span>今月の AI の利用</span>
+            <strong>{Math.round(usage.ai.usedJpy).toLocaleString('ja-JP')}<small> 円</small></strong>
+            {usage.ai.limitJpy !== null && <span>上限 {usage.ai.limitJpy.toLocaleString('ja-JP')} 円</span>}
+          </div>
+        )}
+      </div>
+      <div className="tiles usage-tiles">
+        <div className="tile"><span>区分</span>{usage ? <span className="usage-tags"><span className="badge">{usage.seat}</span></span> : '—'}</div>
+        <div className="tile"><span>グループ</span>{tags(usage?.groups)}</div>
+        <div className="tile"><span>権限区画</span>{tags(usage?.compartmentLabels ?? usage?.compartments)}</div>
+      </div>
+    </div>
+  );
+}
+
 function KeyboardSettings() {
   const groups = ['秘書', '画面', '業務'] as const;
   return (
@@ -432,7 +511,7 @@ function ConversationSettings({ settings, onChange, onSave }: {
       {items.length === 0 ? (
         <p className="muted small">会話はありません。</p>
       ) : (
-        <table className="table">
+        <table className="table conversation-log">
           <tbody>
             {items.map((c) => (
               <tr key={c.id}>
@@ -467,53 +546,23 @@ function PromotionHistory() {
   useEffect(() => { api.myPromotions().then((r) => setItems(r.items.filter((p) => p.status === 'approved'))).catch(() => setItems([])); }, []);
   if (items.length === 0) return null;
   return (
-    <>
-      <h4>会社の知識になったこと（{items.length} 件）</h4>
+    <details className="fold memory-fold">
+      <summary>会社の知識になったこと（{items.length} 件）</summary>
       <ul className="plain-list">
         {items.map((p) => <li key={p.id}>{p.text}</li>)}
       </ul>
-    </>
-  );
-}
-
-/**
- * 管理者のダッシュボードでの自分の見え方（仕様書 第6.7.10節 規定 4）。
- *
- * @remarks
- * 「見られているかもしれない」に実物で答えるための区画である。
- * いまの自分の状態と、示される項目・示されない項目を並べる。
- */
-function PresenceNotice() {
-  const [data, setData] = useState<Awaited<ReturnType<typeof api.myPresence>> | null>(null);
-  useEffect(() => { api.myPresence().then(setData).catch(() => setData(null)); }, []);
-  if (!data) return null;
-  return (
-    <div className="card">
-      <h3>管理者のダッシュボードでの見え方</h3>
-      <p>
-        管理者の画面には、いまのあなたは
-        <strong>「{data.presence.detail}」</strong>
-        と表示されています
-        {data.granularity === 'counts' && <>（この会社は個人名を出さず、人数と業務だけを表示する設定です）</>}
-        。
-        {/* 本人と秘書は 1 組で出る（仕様書 第6.7.4.4節）。個人名の会社だけ */}
-        {data.granularity === 'names' && <>あなたの秘書は<strong>「{data.presence.secretary.detail}」</strong>と表示されています。</>}
-      </p>
-      {/* 何が見えて何が見えないかは、知りたい人が開く（原則 u11） */}
-      <details className="small">
-        <summary className="muted">表示されるもの・されないもの</summary>
-        <p className="muted small">表示されるもの: {data.shown.join('、')}</p>
-        <p className="muted small">表示されないもの: {data.hidden.join('、')}。状態の履歴は残しません</p>
-      </details>
-    </div>
+    </details>
   );
 }
 
 /** しまった理由の言い方（仕様書 第11.11.4節）。 */
 const ARCHIVE_REASON: Record<string, string> = { merged: 'まとめた', stale: '新しい事実で古くなった', unused: '半年使われていない' };
 
+/** 日本時間の今日（`YYYY-MM-DD`）。案件の期限が過ぎたかを見る。 */
+const jstToday = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+
 /**
- * 記憶とデータ（仕様書 第6.5.4節）。秘書が自分について覚えていることを、見たいときに見る場所。
+ * 記憶とデータ（仕様書 第6.5.4節・第6.5.4.2節）。秘書の成長を先に出し、細かい一覧は畳んで置く。
  *
  * @remarks
  * 秘書は会話から自分で覚え、違っていれば本人が会話で指摘すると自分で直す（第11.5.2節・第11.5.3節、ADR-0028）。
@@ -526,13 +575,16 @@ function MemorySettings({ settings, onChange, onSave }: {
   onSave: () => Promise<unknown>;
 }) {
   const [items, setItems] = useState<MemoryView[]>([]);
-  // 整理でしまったもの（仕様書 第11.11.4節）。見たいときに開く
+  // 進んでいる案件ノート（仕様書 第11.13.5節）
+  const [cases, setCases] = useState<Awaited<ReturnType<typeof api.myCases>>['items']>([]);
+  // 整理でしまったもの（仕様書 第11.11.4節）。開いたときに読む
   const [archived, setArchived] = useState<MemoryView[] | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   // 直している 1 件（ID と書きかけの文）
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const load = () => api.myMemories().then((r) => setItems(r.items)).catch((e) => setMsg(describeError(e)));
-  useEffect(() => { void load(); }, []);
+  const loadCases = () => api.myCases().then((r) => setCases(r.items)).catch(() => setCases([]));
+  useEffect(() => { void load(); void loadCases(); }, []);
 
   const saveEdit = async () => {
     if (!editing) return;
@@ -545,8 +597,12 @@ function MemorySettings({ settings, onChange, onSave }: {
       setMsg(describeError(e));
     }
   };
+  const today = jstToday();
 
   return (
+    <>
+    <SecretaryGrowth reloadKey={items.length} />
+
     <div className="card">
       <h3>記憶とデータ</h3>
       <p className="muted small">違っていれば、秘書に「それは違う、〇〇だよ」と話すだけで直ります。</p>
@@ -564,121 +620,148 @@ function MemorySettings({ settings, onChange, onSave }: {
         <SaveButton run={onSave} />
       </div>
 
-      <SecretaryGrowth reloadKey={items.length} />
-
-      <h4>覚えていること（{items.length} 件）</h4>
-      {items.length === 0 ? (
-        <p className="muted small">まだ何も覚えていません。</p>
-      ) : (
-        <table className="table">
-          <tbody>
-            {items.map((m) => (
-              <tr key={m.id}>
-                <td>
-                  {editing?.id === m.id ? (
-                    <textarea rows={2} value={editing.text} aria-label="覚えていることを直す"
-                      onChange={(e) => setEditing({ id: m.id, text: e.target.value })} />
-                  ) : <>{m.kind === 'preference' && <span className="badge">好み</span>} {m.text}</>}
-                </td>
-                <td className="num">
-                  {editing?.id === m.id ? (
-                    <>
-                      <button className="btn small" disabled={!editing.text.trim()} onClick={() => void saveEdit()}>保存</button>{' '}
-                      <button className="btn ghost small" onClick={() => setEditing(null)}>キャンセル</button>
-                    </>
-                  ) : (
-                    <>
-                      <button className="btn ghost small" onClick={() => setEditing({ id: m.id, text: m.text })}>直す</button>{' '}
-                      <button className="btn danger small"
-                        onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('削除しました')).catch((e) => setMsg(describeError(e)))}>
-                        削除
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {items.length > 0 && (
-        <div className="row">
-          <button className="btn danger ghost small"
-            onClick={() => {
-              if (!confirm('覚えていることをすべて削除しますか。元に戻せません。')) return;
-              void api.clearMemories().then((r) => setMsg(`${r.removed} 件を削除しました`)).then(load).catch((e) => setMsg(describeError(e)));
-            }}>すべて削除</button>
-        </div>
-      )}
-      <button className="link-btn small" onClick={() => {
-        if (archived) { setArchived(null); return; }
-        void api.myArchivedMemories().then((r) => setArchived(r.items)).catch((e) => setMsg(describeError(e)));
-      }}>{archived ? 'しまったものを閉じる' : 'しまったもの'}</button>
-      {archived && (archived.length === 0 ? <p className="muted small">ありません。</p> : (
-        <table className="table">
-          <tbody>
-            {archived.map((m) => (
-              <tr key={m.id}>
-                <td>{m.text}</td>
-                <td className="muted small">{m.archivedAt?.slice(0, 10)}・{ARCHIVE_REASON[m.archiveReason ?? ''] ?? ''}</td>
-                <td className="num">
-                  <button className="btn ghost small" onClick={() => void api.restoreMemory(m.id)
-                    .then(() => Promise.all([load(), api.myArchivedMemories().then((r) => setArchived(r.items))]))
-                    .then(() => setMsg('戻しました')).catch((e) => setMsg(describeError(e)))}>戻す</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ))}
-      {msg && <p className="muted small">{msg}</p>}
-      <PromotionHistory />
-    </div>
-  );
-}
-
-/**
- * 秘書の成長（仕様書 第11.13.3節、ADR-0095）。秘書から見たあなた（本人の像）と、覚えた数・好み・この 7 日・会社の知識になった数。
- *
- * @remarks 本人にだけ見える。像が違っていれば、秘書に「それは違う」と話すか、もとの記憶を直す・消す（次の見回りで作り直す）
- */
-function SecretaryGrowth({ reloadKey }: { reloadKey: number }) {
-  const [g, setG] = useState<Awaited<ReturnType<typeof api.myGrowth>> | null>(null);
-  const [open, setOpen] = useState(false);
-  // 進んでいる案件ノート（仕様書 第11.13.5節）
-  const [cases, setCases] = useState<Awaited<ReturnType<typeof api.myCases>>['items']>([]);
-  const loadCases = () => api.myCases().then((r) => setCases(r.items)).catch(() => setCases([]));
-  useEffect(() => { api.myGrowth().then(setG).catch(() => setG(null)); void loadCases(); }, [reloadKey]);
-  if (!g) return null;
-  return (
-    <div className="growth">
-      <h4>秘書の成長</h4>
-      <p className="small">
-        覚えていること {g.memories.toLocaleString()} 件（うち仕事のやり方の好み {g.preferences} 件）・この 7 日に覚えたこと {g.learnedThisWeek} 件・会社の知識になったもの {g.promoted} 件
-      </p>
-      {g.profile ? (
-        <>
-          <button className="link-btn small" onClick={() => setOpen(!open)}>{open ? '秘書から見たあなたを閉じる' : '秘書から見たあなた'}</button>
-          <span className="muted small"> {new Date(g.profile.updatedAt).toLocaleDateString('ja-JP')} にまとめました</span>
-          {open && <div className="growth-profile"><Markdown text={g.profile.body} /></div>}
-        </>
-      ) : <p className="muted small">秘書から見たあなたは、まだまとめていません</p>}
       {cases.length > 0 && (
-        <>
-          <h4>進んでいる案件（{cases.length}）</h4>
+        <details className="fold memory-fold">
+          <summary>進んでいる案件（{cases.length}）</summary>
           <table className="table small">
+            <thead><tr><th>案件</th><th className="nowrap">期限</th><th className="nowrap">最後に動いた日</th><th /></tr></thead>
             <tbody>
               {cases.map((c) => (
                 <tr key={c.id}>
                   <td><strong>{c.title}</strong><br />{c.state}{c.nextStep && <><br /><span className="muted">次: {c.nextStep}</span></>}</td>
-                  <td className="nowrap">{c.dueOn && <>期限 {c.dueOn}<br /></>}<span className="muted">{c.lastDay}</span></td>
-                  <td className="num"><button className="btn ghost small" onClick={() => void api.deleteCase(c.id).then(loadCases)}>削除</button></td>
+                  <td className="nowrap">
+                    {c.dueOn ? (c.dueOn < today ? <span className="error-inline">{c.dueOn}<br />過ぎています</span> : c.dueOn) : <span className="muted">—</span>}
+                  </td>
+                  <td className="nowrap muted">{c.lastDay}</td>
+                  <td className="num">
+                    <button className="btn danger small"
+                      onClick={() => void api.deleteCase(c.id).then(loadCases).then(() => setMsg('削除しました')).catch((e) => setMsg(describeError(e)))}>
+                      削除
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </>
+        </details>
       )}
+
+      <details className="fold memory-fold">
+        <summary>覚えていること（{items.length} 件）</summary>
+        {items.length === 0 ? (
+          <p className="muted small">まだ何も覚えていません。</p>
+        ) : (
+          <table className="table">
+            <tbody>
+              {items.map((m) => (
+                <tr key={m.id}>
+                  {editing?.id === m.id ? (
+                    <td colSpan={3}>
+                      <textarea rows={2} value={editing.text} aria-label="覚えていることを直す"
+                        onChange={(e) => setEditing({ id: m.id, text: e.target.value })} />
+                      <div className="row">
+                        <button className="btn small" disabled={!editing.text.trim()} onClick={() => void saveEdit()}>保存</button>
+                        <button className="btn ghost small" onClick={() => setEditing(null)}>キャンセル</button>
+                      </div>
+                    </td>
+                  ) : (
+                    <>
+                      <td>{m.kind === 'preference' && <span className="badge">好み</span>} {m.text}</td>
+                      <td className="num">
+                        <button className="btn ghost small" onClick={() => setEditing({ id: m.id, text: m.text })}>直す</button>
+                      </td>
+                      <td className="num">
+                        <button className="btn danger small"
+                          onClick={() => void api.deleteMemory(m.id).then(load).then(() => setMsg('削除しました')).catch((e) => setMsg(describeError(e)))}>
+                          削除
+                        </button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {items.length > 0 && (
+          <div className="row">
+            <button className="btn danger ghost small"
+              onClick={() => {
+                if (!confirm('覚えていることをすべて削除しますか。元に戻せません。')) return;
+                void api.clearMemories().then((r) => setMsg(`${r.removed} 件を削除しました`)).then(load).then(loadCases).catch((e) => setMsg(describeError(e)));
+              }}>すべて削除</button>
+          </div>
+        )}
+      </details>
+
+      <details className="fold memory-fold" onToggle={(e) => {
+        if (!(e.currentTarget as HTMLDetailsElement).open || archived) return;
+        void api.myArchivedMemories().then((r) => setArchived(r.items)).catch((err) => setMsg(describeError(err)));
+      }}>
+        <summary>しまったもの</summary>
+        {archived && (archived.length === 0 ? <p className="muted small">ありません。</p> : (
+          <table className="table">
+            <tbody>
+              {archived.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.text}</td>
+                  <td className="muted small">{m.archivedAt?.slice(0, 10)}・{ARCHIVE_REASON[m.archiveReason ?? ''] ?? ''}</td>
+                  <td className="num">
+                    <button className="btn ghost small" onClick={() => void api.restoreMemory(m.id)
+                      .then(() => Promise.all([load(), api.myArchivedMemories().then((r) => setArchived(r.items))]))
+                      .then(() => setMsg('戻しました')).catch((e) => setMsg(describeError(e)))}>戻す</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ))}
+      </details>
+
+      <PromotionHistory />
+      {msg && <p className="muted small">{msg}</p>}
+    </div>
+    </>
+  );
+}
+
+/**
+ * 秘書の成長（仕様書 第11.13.3節・第6.5.4.2節、ADR-0095）。「記憶とデータ」のいちばん上に置く。
+ *
+ * @remarks
+ * 覚えた数・好み・この 7 日・会社の知識になった数を数の枠で並べ、秘書から見たあなた（本人の像）を開いたまま見出しごとに出す。
+ * 本人にだけ見える。像が違っていれば、秘書に「それは違う」と話すか、もとの記憶を直す・消す（次の見回りで作り直す）
+ */
+function SecretaryGrowth({ reloadKey }: { reloadKey: number }) {
+  const [g, setG] = useState<Awaited<ReturnType<typeof api.myGrowth>> | null>(null);
+  useEffect(() => { api.myGrowth().then(setG).catch(() => setG(null)); }, [reloadKey]);
+  if (!g) return null;
+  const sections = g.profile ? profileSections(g.profile.body) : [];
+  return (
+    <div className="card growth">
+      <h3>秘書の成長</h3>
+      <div className="tiles">
+        <div className="tile"><span>覚えていること</span><strong>{g.memories.toLocaleString()}<small> 件</small></strong></div>
+        <div className="tile"><span>この 7 日に覚えたこと</span><strong>{g.learnedThisWeek.toLocaleString()}<small> 件</small></strong></div>
+        <div className="tile"><span>直して覚えた好み</span><strong>{g.preferences.toLocaleString()}<small> 件</small></strong></div>
+        <div className="tile"><span>会社の知識になったもの</span><strong>{g.promoted.toLocaleString()}<small> 件</small></strong></div>
+      </div>
+      <div className="growth-head">
+        <h4>秘書から見たあなた</h4>
+        {g.profile && <span className="muted small">{new Date(g.profile.updatedAt).toLocaleDateString('ja-JP')} にまとめました</span>}
+      </div>
+      {!g.profile ? <p className="muted small">まだまとめていません</p>
+        : sections.length === 0 ? <div className="growth-section"><Markdown text={g.profile.body} /></div>
+        : (
+          <div className="growth-profile">
+            {sections.map((s) => (
+              <section key={s.heading} className={s.unknown ? 'growth-section unknown' : 'growth-section'}>
+                <h5>{s.heading}</h5>
+                {s.unknown ? <p className="muted small">まだ分かりません</p> : <Markdown text={s.body} />}
+              </section>
+            ))}
+          </div>
+        )}
     </div>
   );
 }

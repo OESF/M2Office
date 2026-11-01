@@ -194,6 +194,8 @@ function viewOf(r: Route): View | null {
  */
 export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  // 本人のアバター（個人設定で入れ直すと、左のメニューの本人の表示もすぐ変える。第6.5.1.2節）
+  const [photo, setPhoto] = useState<{ url: string | null; source: Me['photoSource'] }>({ url: me.photo, source: me.photoSource ?? null });
   const [moreOpen, setMoreOpen] = useRemembered('m2office.nav-more-agents', false);
   // 開いているカテゴリー（端末ごとに覚える。仕様書 第6.1.1節「たたみ方」）
   const [openCategories, setCategoryOpen] = useRememberedSet('m2office.nav-open-categories');
@@ -688,7 +690,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         )}
         navFooter={(
           <NavUserCard
-            name={me.user.displayName} role={primaryRole(me.user.roles)} photo={me.photo}
+            name={me.user.displayName} role={primaryRole(me.user.roles)} photo={photo.url}
             active={view.kind === 'settings'} sections={settingsSections}
             current={view.kind === 'settings' ? view.section : undefined}
             onOpenSettings={openSettings}
@@ -936,7 +938,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               {googleReturn && GOOGLE_RETURN_TEXT[googleReturn] && (
                 <p className={GOOGLE_RETURN_TEXT[googleReturn]!.ok ? 'ok-msg' : 'error'}>{GOOGLE_RETURN_TEXT[googleReturn]!.text}</p>
               )}
-              <Settings me={me} agents={menuItems} onChanged={loadMenu} section={view.section} />
+              <Settings me={me} agents={menuItems} onChanged={loadMenu} section={view.section} photo={photo} onPhoto={setPhoto} />
             </>
           )}
           {view.kind === 'help' && (

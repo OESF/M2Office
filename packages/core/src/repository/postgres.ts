@@ -2239,20 +2239,43 @@ export class PostgresRepository implements Repository {
   }
 
   async getUserPhoto(tenantId: string, userId: string): Promise<UserPhoto | null> {
-    const rows = await this.q<{ mime: UserPhoto['mime']; bytes: Buffer; fetchedAt: Date }>(tenantId,
-      `select mime, bytes, fetched_at as "fetchedAt" from user_photos where tenant_id = $1 and user_id = $2`,
+    // 本人が入れた画像を先に、無ければ Google の写真（第6.5.1.2節）
+    const rows = await this.q<{ mime: UserPhoto['mime']; bytes: Buffer; fetchedAt: Date; source: UserPhoto['source'] }>(tenantId,
+      `select mime, bytes, uploaded_at as "fetchedAt", 'upload' as source from user_uploaded_photos where tenant_id = $1 and user_id = $2
+       union all
+       select mime, bytes, fetched_at as "fetchedAt", 'google' as source from user_photos where tenant_id = $1 and user_id = $2`,
       [tenantId, userId]);
-    const r = rows[0];
-    return r ? { tenantId, userId, mime: r.mime, bytes: new Uint8Array(r.bytes), fetchedAt: new Date(r.fetchedAt).toISOString() } : null;
+    const r = rows.find((x) => x.source === 'upload') ?? rows[0];
+    return r ? { tenantId, userId, mime: r.mime, bytes: new Uint8Array(r.bytes), fetchedAt: new Date(r.fetchedAt).toISOString(), source: r.source } : null;
   }
 
   async listUserPhotoStamps(tenantId: string): Promise<Map<string, string>> {
-    const rows = await this.q<{ userId: string; fetchedAt: Date }>(tenantId,
-      `select user_id as "userId", fetched_at as "fetchedAt" from user_photos where tenant_id = $1`, [tenantId]);
-    return new Map(rows.map((r) => [r.userId, new Date(r.fetchedAt).toISOString()]));
+    const rows = await this.q<{ userId: string; fetchedAt: Date; upload: boolean }>(tenantId,
+      `select user_id as "userId", fetched_at as "fetchedAt", false as upload from user_photos where tenant_id = $1
+       union all
+       select user_id, uploaded_at, true from user_uploaded_photos where tenant_id = $1`, [tenantId]);
+    // 本人が入れた画像があれば、その時刻を使う（入れ直したら画面が読み直す）
+    const stamps = new Map<string, string>();
+    for (const r of [...rows.filter((x) => !x.upload), ...rows.filter((x) => x.upload)]) stamps.set(r.userId, new Date(r.fetchedAt).toISOString());
+    return stamps;
   }
 
-  async saveUserPhoto(photo: UserPhoto): Promise<void> {
+  async saveUploadedUserPhoto(photo: Omit<UserPhoto, 'source'>): Promise<void> {
+    // 1 人 1 枚。上書きして、古いものを残さない（第6.5.1.2節）
+    await this.q(photo.tenantId,
+      `insert into user_uploaded_photos (tenant_id, user_id, mime, bytes, uploaded_at) values ($1, $2, $3, $4, $5)
+       on conflict (tenant_id, user_id) do update
+         set mime = excluded.mime, bytes = excluded.bytes, uploaded_at = excluded.uploaded_at`,
+      [photo.tenantId, photo.userId, photo.mime, Buffer.from(photo.bytes), photo.fetchedAt]);
+  }
+
+  async deleteUploadedUserPhoto(tenantId: string, userId: string): Promise<boolean> {
+    const rows = await this.q<{ userId: string }>(tenantId,
+      `delete from user_uploaded_photos where tenant_id = $1 and user_id = $2 returning user_id as "userId"`, [tenantId, userId]);
+    return rows.length > 0;
+  }
+
+  async saveUserPhoto(photo: Omit<UserPhoto, 'source'>): Promise<void> {
     // 1 人 1 枚。上書きして、古い写真を残さない
     await this.q(photo.tenantId,
       `insert into user_photos (tenant_id, user_id, mime, bytes, fetched_at) values ($1, $2, $3, $4, $5)

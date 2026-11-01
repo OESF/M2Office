@@ -141,8 +141,10 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/slide-themes/:id/thumbnail`・`/access`・`GET /v1/slide-themes/picker` | テーマの見本の縮小の絵、本人がファイルを開けるか（会社のテーマを初めて使うとき）、Google のファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン） |
 | `POST /v1/slide-decks/:id/share`・`DELETE /v1/slide-decks/:id` | 共有の範囲の切り替え（`sharing`: `private`・`company`。会社の Workspace のドメインへの閲覧だけ）と削除（ファイルはドライブのごみ箱へ）。作った人だけ。作り直しは業務「スライドの作成」の実行（`deckId`） |
 | `GET /v1/public/slide-images/:token` | ログイン不要: スライドの画像の使い捨ての道。Google スライドが画像を貼るときに 1 度だけ読む。鍵（32 バイトの乱数）が違う・5 分を過ぎた・貼り終えたものは 404（仕様書 第9.4.2節「段 2」） |
-| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節）。呼ばれたとき、まだなら朝のブリーフの定時実行（平日 7:30）を秘書が用意する（`secretary/morning.ts`。第9.5.5.1節） |
-| `GET /v1/me/photo` | 本人のアバター（Google のプロフィール写真）。**本人の写真だけ**を返し、利用者の ID は受け取らない。`nosniff` と読み込みを禁じる CSP を付ける（仕様書 第6.5.1.1節） |
+| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）とその出どころ（`photoSource`: `upload`・`google`・`hr`・`null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節）。呼ばれたとき、まだなら朝のブリーフの定時実行（平日 7:30）を秘書が用意する（`secretary/morning.ts`。第9.5.5.1節） |
+| `GET /v1/me/photo` | 本人のアバター（本人が入れた画像を先に、無ければ Google のプロフィール写真）。**本人の写真だけ**を返し、利用者の ID は受け取らない。`nosniff` と読み込みを禁じる CSP を付ける（仕様書 第6.5.1.1節・第6.5.1.2節） |
+| `PUT /v1/me/photo` | 本人のアバターを入れる（`file`。中身で PNG・JPEG を確かめる。1 MB まで。上書き）。`{ photo }` に新しい URL を返す（仕様書 第6.5.1.2節） |
+| `DELETE /v1/me/photo` | 本人が入れたアバターを削除する（Google の写真に戻る）。入れていなければ 404 |
 | `POST /v1/jobs` | ジョブを作成し待ち行列へ入れる。実行はワーカーが担う |
 | `GET /v1/jobs` | **本人が依頼した**実行の一覧。`agentId`（業務）・`before`（時刻。続き）・`limit`（1〜50）で絞れる（社内ナレッジ Q&A のこれまでの質問。仕様書 第9.5.4節） |
 | `GET /v1/briefs?agent=…&before=…` | 本人の朝のブリーフ・週次ブリーフの一覧（新しい順・30 件ずつ・本文なし）と、いままとめている実行（仕様書 第9.5.5.1.2節） |
@@ -527,7 +529,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PATCH /v1/me/profile` | 表示名の変更 |
 | `GET /v1/me/sessions` | ログイン中の端末 |
 | `DELETE /v1/me/sessions/:id` | 端末を個別にログアウト |
-| `GET /v1/me/usage` | 本人の利用状況 |
+| `GET /v1/me/usage` | 本人の利用状況（区画は名前 `compartments` と、画面に出す説明 `compartmentLabels`） |
 | `GET /v1/me/memories` | 本人が秘書に覚えられていること（`source` が `learned` なら秘書が会話から自分で覚えたもの。仕様書 第11.5.2節。`kind` が `preference` なら仕事のやり方の好み。第11.13.2節） |
 | `GET /v1/me/cases` | 本人の進んでいる案件ノート（題名・状態・次にやること・期限・最後に動いた日。仕様書 第11.13.5節） |
 | `DELETE /v1/me/cases/:id` | 案件ノートを 1 つ消す（本人だけ） |

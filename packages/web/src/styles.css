@@ -2518,8 +2518,30 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .effect-report { margin-top: 8px; }
 
 /* 秘書の成長（個人設定の「記憶とデータ」。仕様書 第11.13.3節） */
-.growth { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; }
-.growth-profile { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 6px 0; }
+.growth .tiles { margin-top: calc(6px * var(--space-scale)); }
+.growth-head { display: flex; align-items: baseline; gap: calc(10px * var(--space-scale)); flex-wrap: wrap; }
+.growth-head h4 { margin-bottom: 0; }
+.growth-profile { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: calc(10px * var(--space-scale)); margin-top: calc(8px * var(--space-scale)); }
+.growth-section { border: 1px solid var(--line); border-radius: 8px; padding: calc(10px * var(--space-scale)) calc(14px * var(--space-scale)); background: var(--panel); min-width: 0; overflow-wrap: anywhere; }
+.growth-section h5 { margin: 0 0 calc(6px * var(--space-scale)); color: var(--accent); font-size: calc(14px * var(--font-scale)); }
+.growth-section.unknown h5 { color: var(--muted); }
+.growth-section ul { margin: 0; padding-left: 1.2em; }
+/* 本人のアバター（個人設定の「プロフィール」。仕様書 第6.5.1.2節） */
+.profile-avatar { display: flex; align-items: center; gap: calc(10px * var(--space-scale)); flex-wrap: wrap; }
+.profile-avatar-img { width: 64px; height: 64px; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; background: var(--neutral-soft); color: var(--muted); flex-shrink: 0; }
+.profile-avatar-img img { width: 100%; height: 100%; object-fit: cover; }
+.profile-avatar-img svg { width: 32px; height: 32px; }
+/* 利用状況（個人設定の「プロフィール」。仕様書 第6.5.7節） */
+.usage-tiles .tile { gap: calc(6px * var(--space-scale)); }
+.usage-tags { display: flex; flex-wrap: wrap; justify-content: center; gap: calc(6px * var(--space-scale)); min-height: 24px; align-items: center; }
+.usage-tiles .usage-tags .badge { font-size: calc(13px * var(--font-scale)); }
+.usage-none { color: var(--muted); font-size: calc(13px * var(--font-scale)); min-height: 24px; display: flex; align-items: center; }
+/* 記憶とデータの畳んだ一覧（仕様書 第6.5.4.2節） */
+.memory-fold { border-top: 1px solid var(--line); margin-top: calc(12px * var(--space-scale)); padding-top: calc(8px * var(--space-scale)); }
+.memory-fold > summary { font-size: calc(14px * var(--font-scale)); color: var(--ink); font-weight: 600; }
+.memory-fold[open] > summary { margin-bottom: calc(8px * var(--space-scale)); }
+/* 日付とボタンの列は中身の幅だけにし、折り返さない */
+.memory-fold td.nowrap, .memory-fold th.nowrap, .memory-fold td.num, .conversation-log td.num { white-space: nowrap; width: 1%; }
 
 /* システムログと証拠保全（仕様書 第16.10.4節・第16.10.5節） */
 .log-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: calc(8px * var(--space-scale)); margin-bottom: calc(10px * var(--space-scale)); }

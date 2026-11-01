@@ -400,14 +400,22 @@ export interface Repository {
   claimLookupDelivery(tenantId: string, runId: string): Promise<boolean>;
   /** すでに伝えた調べものの実行の ID（仕様書 第10.11.7節）。 */
   listToldLookups(tenantId: string, runIds: string[]): Promise<string[]>;
-  /** 本人のアバター（Google のプロフィール写真。仕様書 第6.5.1.1節）。無ければ `null`。 */
+  /**
+   * 本人のアバター。本人が入れた画像（第6.5.1.2節）を先に、無ければ Google のプロフィール写真（第6.5.1.1節）を返す。
+   *
+   * @returns どちらも無ければ `null`。`source` でどちらかが分かる
+   */
   getUserPhoto(tenantId: string, userId: string): Promise<UserPhoto | null>;
-  /** 本人のアバターを上書きする。1 人 1 枚で、古い写真は残さない。 */
-  saveUserPhoto(photo: UserPhoto): Promise<void>;
+  /** Google のプロフィール写真を上書きする。1 人 1 枚で、古い写真は残さない。本人が入れた画像には触れない。 */
+  saveUserPhoto(photo: Omit<UserPhoto, 'source'>): Promise<void>;
+  /** 本人が入れたアバターを上書きする（第6.5.1.2節）。1 人 1 枚で、古いものは残さない。 */
+  saveUploadedUserPhoto(photo: Omit<UserPhoto, 'source'>): Promise<void>;
+  /** 本人が入れたアバターを消す（Google の写真に戻る）。消したら `true`。 */
+  deleteUploadedUserPhoto(tenantId: string, userId: string): Promise<boolean>;
   /**
    * 写真を持っている人と、取り込んだ時刻（仕様書 第6.7.4.4節）。画像そのものは読まない。
    *
-   * @returns 利用者の ID → 取り込んだ時刻。画面の URL に添え、取り込み直したら読み直させる
+   * @returns 利用者の ID → 取り込んだ時刻（本人が入れた画像があれば、その時刻）。画面の URL に添え、入れ直したら読み直させる
    */
   listUserPhotoStamps(tenantId: string): Promise<Map<string, string>>;
   /**
@@ -1108,13 +1116,16 @@ export interface TenantCredential {
 }
 
 /** 利用者の Google の接続。`refreshTokenEnc` は暗号化したリフレッシュ トークン。 */
-/** 本人のアバターの画像（仕様書 第6.5.1.1節）。 */
+/** 本人のアバターの画像（仕様書 第6.5.1.1節・第6.5.1.2節）。 */
 export interface UserPhoto {
   tenantId: string;
   userId: string;
   mime: 'image/png' | 'image/jpeg';
   bytes: Uint8Array;
+  /** 取り込んだ・入れた時刻 */
   fetchedAt: string;
+  /** 本人が入れた画像（`upload`）か、Google のプロフィール写真（`google`）か */
+  source: 'upload' | 'google';
 }
 
 /** 判断した承認 1 件と、その実行の要点（仕様書 第6.2.5節）。 */

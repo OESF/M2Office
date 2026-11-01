@@ -8870,5 +8870,51 @@ console.log('\n■ 133. 体験版（ゲストの表はアプリが読めない�
   }
 }
 
+console.log('\n■ 134. 本人が入れるアバター（入れた画像を先に・Google の写真に戻る・中身で種類を確かめる・会社の境界。第6.5.1.2節）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const google = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 1, 1, 1]);
+  const mine = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
+  const who = { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' };
+  const { rows: [m] } = await owner.query(`select id, tenant_id from users where email = 'member@alpha.example.jp'`);
+  const put = async (bytes, type, headers = who) => {
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type }), 'avatar.jpg');
+    return fetch(`${API}/v1/me/photo`, { method: 'PUT', headers, body: form });
+  };
+  const photoBytes = async (headers = who) => Buffer.from(await (await fetch(`${API}/v1/me/photo`, { headers })).arrayBuffer());
+  try {
+    await owner.query(`delete from user_uploaded_photos where tenant_id = $1 and user_id = $2`, [m.tenant_id, m.id]);
+    await owner.query(`delete from user_photos where tenant_id = $1 and user_id = $2`, [m.tenant_id, m.id]);
+    await owner.query(`insert into user_photos (tenant_id, user_id, mime, bytes) values ($1, $2, 'image/png', $3)`, [m.tenant_id, m.id, google]);
+
+    const fake = await put(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'image/jpeg');
+    fake.status === 400 ? ok('PNG・JPEG でないものは、申告の種類に関わらず断る（400）') : ng(`種類を確かめていない（${fake.status}）`);
+
+    const up = await put(mine, 'image/jpeg');
+    const { body: me1 } = await call('a', '/v1/me', {}, 'member');
+    up.status === 200 && me1.photoSource === 'upload' && (await photoBytes()).equals(mine)
+      ? ok('入れた画像を、Google の写真より先に使う') : ng('入れた画像が使われない', JSON.stringify({ status: up.status, source: me1.photoSource }));
+
+    const bBytes = await photoBytes({ 'x-tenant': 'b', 'x-user': 'admin@beta.example.jp' });
+    const adminBytes = await photoBytes({ 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' });
+    !bBytes.equals(mine) && !adminBytes.equals(mine) ? ok('入れた画像は、ほかの人・ほかの会社の「本人の写真」に出ない') : ng('入れた画像が他人に見える');
+
+    const del = await fetch(`${API}/v1/me/photo`, { method: 'DELETE', headers: who });
+    const { body: me2 } = await call('a', '/v1/me', {}, 'member');
+    const again = await fetch(`${API}/v1/me/photo`, { method: 'DELETE', headers: who });
+    del.status === 200 && me2.photoSource === 'google' && (await photoBytes()).equals(google) && again.status === 404
+      ? ok('削除すると Google の写真に戻り、2 度目は 404') : ng('削除のあとが違う', JSON.stringify({ del: del.status, source: me2.photoSource, again: again.status }));
+  } catch (err) {
+    ng('アバターの確認が途中で止まった', String(err));
+  } finally {
+    await owner.query(`delete from user_uploaded_photos where tenant_id = $1 and user_id = $2`, [m.tenant_id, m.id]);
+    await owner.query(`delete from user_photos where tenant_id = $1 and user_id = $2`, [m.tenant_id, m.id]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

@@ -199,12 +199,12 @@ app.get('/v1/me', async (c) => {
     return c.json({
       tenant: { ...ctx.tenant, ...(await companyView(deps, ctx.tenant)) },
       user: { ...ctx.user, displayName: `運営のサポート（${auth.operatorLabel}）` },
-      photo: null, serverVersion: SERVER_VERSION, deployment: deps.ai.deployment(), auth: { method: 'proxy' }, csrfToken: auth.csrfToken,
+      photo: null, photoSource: null, serverVersion: SERVER_VERSION, deployment: deps.ai.deployment(), auth: { method: 'proxy' }, csrfToken: auth.csrfToken,
       workspaceSource: deps.connector.sourceFor(ctx.tenant.id), debug: false,
       proxy: { scope: auth.scope, expiresAt: auth.expiresAt, operator: auth.operatorLabel },
     });
   }
-  // 本人のアバター（第6.5.1.1節）。取り込み直すと URL が変わり、画面が新しい写真を読む
+  // 本人のアバター（第6.5.1.1節・第6.5.1.2節）。本人が入れた画像を先に、無ければ Google の写真。入れ直すと URL が変わり、画面が新しい写真を読む
   const photo = await deps.repo.getUserPhoto(ctx.tenant.id, ctx.user.id);
   // Google の写真が無ければ、人事の台帳の顔写真を使う（第30.5.4節）
   const hrPhoto = photo ? null : await deps.hr.service.photoOfUser(ctx.tenant.id, ctx.user.id);
@@ -228,6 +228,8 @@ app.get('/v1/me', async (c) => {
     user: ctx.user,
     photo: photo ? `/v1/me/photo?v=${encodeURIComponent(photo.fetchedAt)}`
       : hrPhoto ? `/v1/hr-photos/${encodeURIComponent(hrPhoto.employeeId)}?v=${encodeURIComponent(hrPhoto.photoAt)}` : null,
+    // いま出しているアバターの出どころ（個人設定で「削除」を出すか決める。第6.5.1.2節）
+    photoSource: photo ? photo.source : hrPhoto ? 'hr' : null,
     // サーバーの版。画面の版と違えば、画面が再読み込みを促す（第6.1.1.1節）
     serverVersion: SERVER_VERSION,
     // 配備の形（ローカルの形なら、管理者ページに「機械」を出す。第8.6.7節）

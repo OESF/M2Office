@@ -12,7 +12,7 @@ import {
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
   GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink,
 } from '@m2office/shared';
-import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE } from '@m2office/core';
+import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE, photoMime, HR_PHOTO_MAX_BYTES } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 import { speakSample } from '../voice/sample.js';
@@ -61,7 +61,33 @@ export function meRoute(deps: AppDeps) {
   });
 
   /**
-   * 本人のアバター（Google のプロフィール写真）を、画面に埋め込める形で返す（仕様書 第6.5.1.1節）。
+   * 本人のアバターを入れる（`file`。仕様書 第6.5.1.2節）。画面で縮めた JPEG か PNG。前のものは残さない。
+   *
+   * @remarks
+   * **本人の分だけ。** 利用者の ID を受け取らない。種類は申告ではなく中身のバイト列で確かめる（PNG・JPEG だけ。1 MB まで）。
+   * 危険度: write-internal（本人の見た目の設定。社外に出ない）
+   */
+  app.put('/photo', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const f = (await c.req.parseBody())['file'];
+    if (!(f instanceof File)) return c.json({ error: '画像を選んでください' }, 400);
+    if (f.size > HR_PHOTO_MAX_BYTES) return c.json({ error: '画像が大きすぎます（1 MB まで）' }, 413);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const mime = photoMime(bytes);
+    if (!mime) return c.json({ error: 'PNG か JPEG の画像を選んでください' }, 400);
+    const fetchedAt = new Date().toISOString();
+    await deps.repo.saveUploadedUserPhoto({ tenantId: tenant.id, userId: user.id, mime, bytes, fetchedAt });
+    return c.json({ photo: `/v1/me/photo?v=${encodeURIComponent(fetchedAt)}` });
+  });
+
+  /** 本人が入れたアバターを削除する（Google の写真に戻る。仕様書 第6.5.1.2節）。 */
+  app.delete('/photo', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    return (await deps.repo.deleteUploadedUserPhoto(tenant.id, user.id)) ? c.json({ ok: true }) : c.json({ error: '入れた画像はありません' }, 404);
+  });
+
+  /**
+   * 本人のアバター（入れた画像か、Google のプロフィール写真）を、画面に埋め込める形で返す（仕様書 第6.5.1.1節・第6.5.1.2節）。
    *
    * @remarks
    * **本人の写真だけを返す。** 利用者の ID を受け取らない（他人の写真を出させない）。
@@ -470,10 +496,11 @@ export function meRoute(deps: AppDeps) {
       new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date()).slice(0, 8) +
         '01T00:00:00+09:00',
     ).toISOString();
-    const [usage, settings, compartments, agents, groups, groupIds] = await Promise.all([
+    const [usage, settings, compartments, allCompartments, agents, groups, groupIds] = await Promise.all([
       deps.repo.usageForUser(tenant.id, user.id, monthStart),
       deps.repo.getTenantSettings(tenant.id),
       deps.repo.listUserCompartments(tenant.id, user.id),
+      deps.repo.listCompartments(tenant.id),
       deps.agentsFor(tenant.id, user.id),
       deps.repo.listGroups(tenant.id),
       deps.repo.listUserGroupIds(tenant.id, user.id),
@@ -483,6 +510,8 @@ export function meRoute(deps: AppDeps) {
       thisMonth: { runs: usage.runs, costJpy: Math.round(usage.costJpy * 100) / 100 },
       availableAgents: agents.filter((a) => !settings.agents.disabled.includes(a.id)).length,
       compartments,
+      // 画面に出す区画の名前（説明があれば説明。「hr」ではなく「人事・労務」。第6.5.7節）
+      compartmentLabels: compartments.map((n) => allCompartments.find((x) => x.name === n)?.description?.trim() || n),
       // 本人が所属するグループ（第16.7.7節）。他の人の所属は返さない
       groups: groups.filter((g) => groupIds.includes(g.id)).map((g) => g.name),
       // プランと標準利用量は課金の実装とあわせて出す（第21章）

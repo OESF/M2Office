@@ -386,8 +386,10 @@ export interface Me {
   csrfToken: string | null;
   /** 予定やメールの出どころ。`mock` の間は画面にダミーであることを示す。 */
   workspaceSource: 'mock' | 'google';
-  /** 本人のアバター（Google のプロフィール写真。仕様書 第6.5.1.1節）の URL。まだ無ければ `null`。 */
+  /** 本人のアバターの URL（入れた画像か Google のプロフィール写真。仕様書 第6.5.1.1節・第6.5.1.2節）。まだ無ければ `null`。 */
   photo: string | null;
+  /** いま出しているアバターの出どころ（入れた画像・Google の写真・人事の台帳の顔写真。第6.5.1.2節）。 */
+  photoSource?: 'upload' | 'google' | 'hr' | null;
   /** サーバーの版（仕様書 第6.1.1.1節）。読めなければ `null`。 */
   serverVersion: string | null;
   /** 配備の形（ローカルの形なら管理者ページに「機械」を出す。仕様書 第8.6.7節）。 */
@@ -2523,10 +2525,6 @@ export const api = {
     call<{ items: ConversationView[] }>(`/me/conversations${query ? `?q=${encodeURIComponent(query)}` : ''}`),
   deleteConversation: (id: string) => call(`/me/conversations/${id}`, { method: 'DELETE' }),
   clearConversations: () => call<{ removed: number }>('/me/conversations', { method: 'DELETE' }),
-  /** 管理者のダッシュボードでの自分の見え方（仕様書 第6.7.10節 規定 4）。 */
-  myPresence: () => call<{
-    presence: PresenceView; granularity: 'names' | 'counts'; shown: string[]; hidden: string[];
-  }>('/me/presence'),
   /** 記憶とデータ（仕様書 第6.5.4節）。本人の記憶だけが返る。 */
   myMemories: () => call<{ items: MemoryView[] }>('/me/memories'),
   /** 秘書の成長（本人の像と数。仕様書 第11.13.3節）。 */
@@ -2562,11 +2560,21 @@ export const api = {
   disconnectGoogle: () => call<{ ok: true; revokedAtGoogle: boolean; stoppedRuns: number; purgedRuns: number }>('/me/google', { method: 'DELETE' }),
   /** 取り消すと止まる業務と、飛ばす定時実行の数（仕様書 第6.5.2.1節）。 */
   googleImpact: () => call<{ runs: { runId: string; agentName: string; status: string }[]; schedules: number }>('/me/google/impact'),
+  /** 本人のアバターを入れる（縮めた JPEG。仕様書 第6.5.1.2節）。 */
+  setMyPhoto: (photo: Blob) => {
+    const form = new FormData();
+    form.append('file', photo, 'avatar.jpg');
+    return postForm<{ photo: string }>('/me/photo', form, 'PUT');
+  },
+  /** 本人が入れたアバターを削除する（Google の写真に戻る）。 */
+  deleteMyPhoto: () => call<{ ok: true }>('/me/photo', { method: 'DELETE' }),
   myUsage: () => call<{
     seat: string; thisMonth: { runs: number; costJpy: number }; availableAgents: number;
     /** 今月の本人の AI の利用（円・概算）と 1 人の上限（第6.6.2節）。 */
     ai?: { usedJpy: number; limitJpy: number | null } | null;
     compartments: string[]; groups: string[]; plan: null;
+    /** 画面に出す区画の名前（説明があれば説明。第6.5.7節）。 */
+    compartmentLabels?: string[];
   }>('/me/usage'),
   readNotification: (id: string) => call(`/notifications/${id}/read`, { method: 'POST' }),
   /** お知らせを消す（本人の分だけ。仕様書 第6.5.5節）。 */
