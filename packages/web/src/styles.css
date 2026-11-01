@@ -2526,6 +2526,18 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .growth-section h5 { margin: 0 0 calc(6px * var(--space-scale)); color: var(--accent); font-size: calc(14px * var(--font-scale)); }
 .growth-section.unknown h5 { color: var(--muted); }
 .growth-section ul { margin: 0; padding-left: 1.2em; }
+/* 通知の種類（個人設定の「通知」。仕様書 第6.5.5節）。種類ごとの枠を並べ、入れているものに色を付ける */
+.notify-group h4 { margin-bottom: calc(6px * var(--space-scale)); }
+.notify-kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: calc(8px * var(--space-scale)); }
+.notify-kind { display: flex; align-items: flex-start; gap: calc(10px * var(--space-scale)); padding: calc(10px * var(--space-scale)) calc(12px * var(--space-scale)); border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer; min-width: 0; }
+.notify-kind:hover { border-color: var(--accent); }
+.notify-kind.on { border-color: var(--accent); background: var(--accent-soft); }
+.notify-kind input { margin-top: 3px; flex-shrink: 0; }
+.notify-kind > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.notify-kind strong { font-size: calc(14px * var(--font-scale)); }
+.quiet-hours { align-items: center; }
+.quiet-hours input[type=time] { width: 9em; flex: none; }
+.notify-kind small { font-size: calc(12px * var(--font-scale)); color: var(--muted); line-height: 1.4; }
 /* 本人のアバター（個人設定の「プロフィール」。仕様書 第6.5.1.2節） */
 .profile-avatar { display: flex; align-items: center; gap: calc(10px * var(--space-scale)); flex-wrap: wrap; }
 .profile-avatar-img { width: 64px; height: 64px; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; background: var(--neutral-soft); color: var(--muted); flex-shrink: 0; }
