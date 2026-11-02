@@ -303,7 +303,7 @@ sudo ls -lt /var/backups/m2office/pre-update/
 
 | 印刷するもの | 作り方 | 中身 |
 |---|---|---|
-| 控えと復旧の手順書（薄い） | `npm run docs:ops-recovery-pdf`（`docs/ops-manual/ops-recovery.pdf`） | この章と、第 12 章・第 13 章（新しい VPS を用意して入れる手順） |
+| 控えと復旧の手順書（薄い） | `npm run docs:ops-recovery-pdf`（`docs/ops-manual/ops-recovery.pdf`） | 第 18 章（全体の構成）・この章と、第 12 章・第 13 章（新しい VPS を用意して入れる手順） |
 | 運営者マニュアル（全部） | `npm run docs:ops-manual-pdf`（`docs/ops-manual/ops-manual.pdf`） | すべての章 |
 
 - 表紙に、対応する仕様書の版と作った日が入ります。**リリースのたびに作り直し**、この章・第 12 章・第 13 章が変わった版では刷り直して、古い印刷は捨てます

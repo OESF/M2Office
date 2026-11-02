@@ -171,3 +171,12 @@ test('出典の並び: 答えの【】で引用したものだけを先に出す
   assert.deepEqual(citedSources([{ label: base, value: '' }, { label: `${base} › 議事・報告事項`, value: '' }], reply).map((e) => e.label),
     [`${base} › 議事・報告事項`]);
 });
+
+test('同じ置き場の図（images/名前.svg）は図のまとまりにし、書いたままの行も持つ。名前の決まりに合わなければ段落のまま（仕様書 第23.8.16節「図」）', () => {
+  assert.deepEqual(parseMarkdown('![構成の図](images/cloud-architecture.svg)'), [
+    { kind: 'doc-image', alt: '構成の図', name: 'cloud-architecture.svg', line: '![構成の図](images/cloud-architecture.svg)' },
+  ]);
+  for (const line of ['![外](images/../secret.svg)', '![大文字](images/Cloud.svg)', '![別の形](images/a.png)', '![外の画像](https://example.com/a.svg)']) {
+    assert.equal(parseMarkdown(line)[0]?.kind, 'p', line);
+  }
+});

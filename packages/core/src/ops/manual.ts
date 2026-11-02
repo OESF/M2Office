@@ -4,10 +4,16 @@
  * 画面のヘルプ用に別の文章は持たず、マニュアルをそのまま使う（二重に持つと食い違うため）。
  * `README.md` を「はじめに」、`NN-名前.md` を章とし、ファイルの名前の順に並べる。本文の「第 N 章」は、その章を開くリンクにする。
  * 外へは見に行かない。読めない章があっても飛ばして、残りを出す。
+ * 図は `images/` の SVG を本文から `![説明](images/名前.svg)` で指し、運営の API が配る（第23.8.16節「図」）。
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+/** 図のファイルの名前（`images/` の中の SVG だけ。置き場の外は指せない）。 */
+const IMAGE_NAME = /^[a-z0-9][a-z0-9-]{0,63}\.svg$/;
+/** 本文の 1 行だけの図（`![説明](images/名前.svg)`）。画面の Markdown と同じ形。 */
+const IMAGE_LINE = /^!\[([^\]]*)\]\(images\/([^)]+)\)$/;
 
 /** 運営者マニュアルの 1 章。 */
 export interface OpsManualChapter {
@@ -75,4 +81,37 @@ export function searchOpsManual(chapters: readonly OpsManualChapter[], q: string
   return chapters
     .filter((c) => words.every((w) => c.title.toLowerCase().includes(w) || c.body.toLowerCase().includes(w)))
     .map(({ id, title }) => ({ id, title }));
+}
+
+/** 本文が指す図。 */
+export interface OpsManualImageRef {
+  /** 図の説明（代わりの文字）。 */
+  alt: string;
+  /** `images/` の中のファイルの名前。 */
+  name: string;
+}
+
+/**
+ * 本文が指す図を拾う（`npm test` で、図が実在し説明があることを確かめるため）。コードの囲みの中は見ない。
+ */
+export function opsManualImageRefs(body: string): OpsManualImageRef[] {
+  let inCode = false;
+  return body.split('\n').flatMap((line) => {
+    if (line.startsWith('```')) { inCode = !inCode; return []; }
+    const m = inCode ? null : IMAGE_LINE.exec(line.trim());
+    return m ? [{ alt: m[1]!.trim(), name: m[2]! }] : [];
+  });
+}
+
+/**
+ * 運営者マニュアルの図を読む。
+ *
+ * @param dir マニュアルの置き場
+ * @param name `images/` の中のファイルの名前（`cloud-architecture.svg`）
+ * @returns SVG の中身。名前が決まりに合わないとき・無いときは null
+ * @remarks 読むだけ。`images/` の外と SVG 以外は名前の決まりで断る（`../` などで置き場の外を読ませない）
+ */
+export function readOpsManualImage(dir: string, name: string): string | null {
+  if (!IMAGE_NAME.test(name)) return null;
+  try { return readFileSync(join(dir, 'images', name), 'utf8'); } catch { return null; }
 }

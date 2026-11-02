@@ -5,7 +5,7 @@ Markdown は章ごとに分けたまま保守し、配布と通読のときだ�
 
 使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF] [--owner=作成の法人 --company=会社名 --contact=担当者 --to=宛先]
   マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・ops（運営者。docs/ops-manual/）・
-    ops-recovery（運営者マニュアルのうち控えと復旧の章と、新しい VPS を用意して入れる章だけ。サーバーが止まったときに読む印刷用）・
+    ops-recovery（運営者マニュアルのうち全体の構成・控えと復旧の章と、新しい VPS を用意して入れる章だけ。サーバーが止まったときに読む印刷用）・
     hr-review（人事・給与の監修のお願い。docs/review/hr-payroll/）
   既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
   前との互換のため、最初の引数が .pdf で終われば開発者マニュアルの出力先とみなす
@@ -13,7 +13,7 @@ Markdown は章ごとに分けたまま保守し、配布と通読のときだ�
 行うこと:
   1. README（はじめに）と各章を番号順につなぐ
   2. 見出しを 1 段下げる（章 = H2。build.py は H2 ごとに改ページする）
-  3. 章どうしのリンクを PDF の中のリンクに、リポジトリのファイルへのリンクをパスの表記に直す
+  3. 章どうしのリンクを PDF の中のリンクに、リポジトリのファイルへのリンクをパスの表記に直す。図（`images/名前.svg`）は置き場の絶対パスにして埋め込む
   4. build.py で印刷用 HTML にし、Google Chrome で PDF に書き出す
 """
 import io, os, re, subprocess, sys, tempfile
@@ -36,11 +36,11 @@ MANUALS = {
         'title': 'M2Office マスター管理画面 運営者マニュアル', 'subtitle': '会社の作成・見守り・停止と再開・代理アクセス',
     },
     # 画面のヘルプはサーバーが動いているときしか読めないため、復旧に要る章だけを印刷して手元に置く（仕様書 第23.8.16節「印刷した控え」）。
-    # chapters に並べた順に載せ、はじめに（README）は載せない
+    # chapters に並べた順に載せ、はじめに（README）は載せない。全体の構成（第 18 章）を先に置き、何を戻すのかの見通しを立てられるようにする
     'ops-recovery': {
         'dir': os.path.join(ROOT, 'docs', 'ops-manual'), 'pdf': 'ops-recovery.pdf',
         'title': 'M2Office 控えと復旧の手順書', 'subtitle': 'サーバーが止まったときに読む印刷用の控え',
-        'chapters': ['17-backup-recovery.md', '12-vps-setup.md', '13-vps-m2office-setup.md'], 'intro': False,
+        'chapters': ['18-architecture.md', '17-backup-recovery.md', '12-vps-setup.md', '13-vps-m2office-setup.md'], 'intro': False,
     },
     'hr-payroll': {
         'dir': os.path.join(ROOT, 'docs', 'manual', 'hr-payroll'), 'pdf': 'hr-payroll-manual.pdf',
@@ -98,8 +98,18 @@ def convert(name, text, first_heading):
                 continue
             out.append('#' * min(level + 1, 6) + ' ' + title)
             continue
-        out.append(fix_links(line))
+        out.append(fix_links(fix_images(line)))
     return '\n'.join(out)
+
+
+def fix_images(line):
+    """図（`![説明](images/名前.svg)`）を、置き場の絶対パスにする（印刷用 HTML は別の場所で作るため。仕様書 第23.8.16節「図」）。"""
+    def repl(m):
+        path = os.path.join(DOC_DIR, m.group(2))
+        if not os.path.exists(path):
+            sys.exit(f'図がありません: {os.path.relpath(path, ROOT)}')
+        return f'![{m.group(1)}](file://{path})'
+    return re.sub(r'!\[([^\]]*)\]\((images/[^)\s]+)\)', repl, line)
 
 
 def fix_links(line):

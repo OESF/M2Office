@@ -11,7 +11,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploymentFromEnv,
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, operatorCan, opsDomainAllowed, OPERATOR_ROLES,
   tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, OpsRuleError,
-  OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual,
+  OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual, readOpsManualImage,
   checkGeminiText, defaultGeminiModels, jstMonth, readCloudBackupRun, readRestorePoints, cloudBackupView, type CheckResult, type SecretBox,
   checkNewDemo, demoSubdomain, demoWelcomeText, hashMachinePassword, newGuestLoginId, newGuestPassword, DEMO_COMPANY_NAME, DEMO_EXTEND_MAX_DAYS, DEMO_MAX_DAYS,
   type SystemLogLine,
@@ -515,6 +515,21 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
    * @remarks 読むだけ。マニュアルは要求のたびに読む（小さいので、直したらすぐ出る）
    */
   app.get('/v1/ops/help', (c) => c.json({ chapters: searchOpsManual(loadOpsManual(opsManualDir()), c.req.query('q') ?? '') }));
+  /**
+   * 運営者マニュアルの図（第23.8.16節「図」）。`images/` の中の SVG だけを返す。
+   *
+   * @remarks 読むだけ。画面は `<img>` で出すので SVG の中のスクリプトは動かないが、開かれたときに備えて、配るときにもスクリプトと外の読み込みを止める
+   */
+  app.get('/v1/ops/help/images/:name', (c) => {
+    const svg = readOpsManualImage(opsManualDir(), c.req.param('name'));
+    if (svg === null) return c.json({ error: '見つかりません' }, 404);
+    return c.body(svg, 200, {
+      'content-type': 'image/svg+xml; charset=utf-8',
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'private, max-age=300',
+    });
+  });
   /** 運営者のヘルプの 1 章（本文は Markdown）。 */
   app.get('/v1/ops/help/:id', (c) => {
     const chapter = loadOpsManual(opsManualDir()).find((x) => x.id === c.req.param('id'));

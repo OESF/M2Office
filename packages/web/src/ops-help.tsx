@@ -2,14 +2,17 @@
  * @file 運営者のヘルプ（仕様書 第23.8.16節、Q-282）。マスター管理画面の左のメニューの「ヘルプ」と、各画面の題名の横の「？」。
  *
  * 中身は運営者マニュアル（`docs/ops-manual/`）をそのまま使い、運営の API（`/v1/ops/help`）から読む。
- * 左に章の一覧と絞り込み、右に本文。本文の中の章へのリンク（`NN-名前.md`）は、その章を開く。
+ * 左に章の一覧と絞り込み、右に本文。本文の中の章へのリンク（`NN-名前.md`）は、その章を開き、図（`images/名前.svg`）は運営の API から出す。
  * 「？」は会社の画面と同じ部品（`HelpTip`）で、押すと短い説明を出し、「詳しく見る」でその画面の章を開く（第6.10.4.4節）。
  * 説明を画面に常に出すことはしない（原則 u11）。マスター管理画面には秘書が無いので、AI に尋ねる口は置かない。
  */
 
 import { useEffect, useState } from 'react';
 import { opsApi } from './ops-api.js';
-import { HelpTip, Markdown, MdRefContext } from './help.js';
+import { HelpTip, Markdown, MdImageContext, MdRefContext } from './help.js';
+
+/** 本文の図（`images/名前.svg`）の置き場。運営の API が配る（第23.8.16節「図」）。 */
+const imageUrl = (name: string) => `/v1/ops/help/images/${encodeURIComponent(name)}`;
 
 /** 画面の題名に添える説明。`chapter` は運営者マニュアルの章の ID（`03-tenants`）。`npm test` が実在を確かめる。 */
 export interface OpsPageHelp {
@@ -91,7 +94,9 @@ export function OpsHelp({ chapter, onChapter }: { chapter: string | null; onChap
         {doc && (
           <article className="card article">
             <h1>{doc.title}</h1>
-            <MdRefContext.Provider value={follow}><Markdown text={doc.body} /></MdRefContext.Provider>
+            <MdRefContext.Provider value={follow}>
+              <MdImageContext.Provider value={imageUrl}><Markdown text={doc.body} /></MdImageContext.Provider>
+            </MdRefContext.Provider>
             {(prev || next) && (
               <div className="help-pager">
                 {prev ? <button className="btn ghost small" onClick={() => open(prev.id)}>‹ {prev.title}</button> : <span />}

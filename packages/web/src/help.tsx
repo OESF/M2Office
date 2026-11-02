@@ -454,6 +454,7 @@ export function Markdown({ text, lineBreaks = false }: {
           );
           case 'code': return <pre key={i} className="md-pre"><code>{b.text}</code></pre>;
           case 'image': return <img key={i} className="md-img" src={b.src} alt={b.alt} loading="lazy" />;
+          case 'doc-image': return <MdDocImage key={i} alt={b.alt} name={b.name} line={b.line} />;
           // 引用の中も書式として読み、改行を保つ（送る本文を、読める形で見せる。仕様書 第9.3.3節）
           case 'quote': return (
             <blockquote key={i} className="md-quote"><Markdown text={b.lines.join('\n')} lineBreaks /></blockquote>
@@ -487,6 +488,19 @@ function MdRef({ text, href }: { text: string; href: string }) {
   const open = useContext(MdRefContext);
   if (!open) return <>{text}</>;
   return <a className="link" href={href} onClick={(e) => { e.preventDefault(); open(href); }}>{text}</a>;
+}
+
+/**
+ * 本文の中の、同じ置き場の図（`images/名前.svg`）の URL を返す口。
+ * 与えた画面（運営者のヘルプ。仕様書 第23.8.16節「図」）でだけ図を出し、ほかの画面では書いたままの行を文字で出す。
+ */
+export const MdImageContext = createContext<((name: string) => string) | null>(null);
+
+/** 同じ置き場の図を、出す口があれば `<img>` で出す（SVG の中のスクリプトは動かない）。無ければ文字にする。 */
+function MdDocImage({ alt, name, line }: { alt: string; name: string; line: string }) {
+  const url = useContext(MdImageContext);
+  if (!url) return <p>{line}</p>;
+  return <img className="md-img md-figure" src={url(name)} alt={alt} loading="lazy" />;
 }
 
 /** 行の中の書式（コード・リンク・太字）を React の要素にする。HTML としては解釈しない。 */

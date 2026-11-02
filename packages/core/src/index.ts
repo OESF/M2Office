@@ -238,7 +238,7 @@ export {
   type OperatorProfile, type OpsPlatformAiSettings, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsPasskey, type OpsDemo, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS, OpsAppSide,
   proxyAllowed, ProxyAccessStore, PROXY_HOURS, PROXY_DEFAULT_HOURS, type ProxyScope, type ProxyGrant, type ProxySessionInfo,
   serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport, type OpsIncident,
-  loadOpsManual, searchOpsManual, linkChapters, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry,
+  loadOpsManual, searchOpsManual, linkChapters, opsManualImageRefs, readOpsManualImage, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry, type OpsManualImageRef,
   readCloudBackupRun, readRestorePoints, nextNightlyRun, cloudBackupView, CLOUD_BACKUP_STALE_MS, type CloudBackupRun, type CloudBackupInventory, type CloudBackupView, type RestorePoint, type WalArchiveStatus,
 } from './ops/index.js';
 export * from './demo/index.js';

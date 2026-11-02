@@ -356,3 +356,19 @@ test('運営の AI の設定: 鍵は試して通ったときだけ暗号化し�
   assert.equal(saved.enc, null);
   for (const a of ['settings.ai_key_rejected', 'settings.ai_key', 'settings.ai_test', 'settings.ai_limits', 'settings.ai_key_delete']) assert.ok(audits.includes(a), `${a} を記録する`);
 });
+
+test('運営者マニュアルの図: ログインした運営者にだけ SVG を返し、スクリプトを止める見出しを付ける。置き場の外と SVG 以外は返さない（第23.8.16節「図」）', async () => {
+  const { store } = fakeStore();
+  const app = opsApp({ store, config, log });
+  assert.equal((await app.request('/v1/ops/help/images/cloud-architecture.svg', { headers: OPS })).status, 401);
+  const { cookie } = await login(app, 'admin@ops.example');
+  const res = await app.request('/v1/ops/help/images/cloud-architecture.svg', { headers: { ...OPS, cookie } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') ?? '', /^image\/svg\+xml/);
+  assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'none'/);
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(await res.text(), /^<svg /);
+  for (const name of ['..%2F18-architecture.md', 'CLOUD.svg', 'cloud-architecture.png', 'none.svg']) {
+    assert.equal((await app.request(`/v1/ops/help/images/${name}`, { headers: { ...OPS, cookie } })).status, 404, name);
+  }
+});

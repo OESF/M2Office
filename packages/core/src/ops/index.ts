@@ -13,7 +13,7 @@ export {
   type OperatorProfile, type OpsPlatformAiSettings, type TenantDetail, type ServerStatus, type StatusRequest, type OpsProxyGrant, type OpsIncident, type OpsPasskey, type OpsDemo, type OpsDemoDefaults, OPS_PASSKEY_MAX, OPS_ENROLL_CODE_HOURS,
 } from './store.js';
 export { OpsAppSide } from './app-side.js';
-export { loadOpsManual, searchOpsManual, linkChapters, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry } from './manual.js';
+export { loadOpsManual, searchOpsManual, linkChapters, opsManualImageRefs, readOpsManualImage, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry, type OpsManualImageRef } from './manual.js';
 export { serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport } from './incidents.js';
 export { proxyAllowed, ProxyAccessStore, PROXY_HOURS, PROXY_DEFAULT_HOURS, type ProxyScope, type ProxyGrant, type ProxySessionInfo } from './proxy.js';
 export { readCloudBackupRun, readRestorePoints, nextNightlyRun, cloudBackupView, CLOUD_BACKUP_STALE_MS, type CloudBackupRun, type CloudBackupInventory, type CloudBackupView, type RestorePoint, type WalArchiveStatus } from './cloud-backup.js';

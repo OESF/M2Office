@@ -26,7 +26,12 @@ export type MdBlock =
   /** 引用（`>` で始まる行の並び）。**改行を保つ**。承認の画面で、送る本文をそのまま見せるのに使う（仕様書 第9.3.3節）。 */
   | { kind: 'quote'; lines: string[] }
   /** M2Office の画像（承認の画面のカバー画像など）。`/v1/files/{ID}/view` だけを出し、外の画像は読まない。 */
-  | { kind: 'image'; alt: string; src: string };
+  | { kind: 'image'; alt: string; src: string }
+  /**
+   * 同じ置き場の図（`![説明](images/名前.svg)`）。出せるかは、表示する画面が決める（運営者のヘルプ。仕様書 第23.8.16節「図」）。
+   * 出せない画面では、書いたままの行（`line`）を文字で出す。
+   */
+  | { kind: 'doc-image'; alt: string; name: string; line: string };
 
 /** 行の中の書式。 */
 export type MdInline =
@@ -60,6 +65,8 @@ export function splitTableRow(line: string): string[] {
 
 /** 画像の行（`![代わりの文](/v1/files/{ID}/view)`）。 */
 const IMAGE_LINE = /^!\[([^\]]*)\]\((\/v1\/files\/[A-Za-z0-9_-]{1,128}\/view)\)$/;
+/** 同じ置き場の図の行（`![説明](images/名前.svg)`）。名前は小文字・数字・ハイフンだけ（置き場の外を指させない）。 */
+const DOC_IMAGE_LINE = /^!\[([^\]]*)\]\(images\/([a-z0-9][a-z0-9-]{0,63}\.svg)\)$/;
 
 /**
  * Markdown を、表示のまとまりに分ける。
@@ -110,6 +117,12 @@ export function parseMarkdown(text: string, opts: { lineBreaks?: boolean } = {})
     if (img) {
       flush();
       blocks.push({ kind: 'image', alt: img[1]!, src: img[2]! });
+      continue;
+    }
+    const doc = DOC_IMAGE_LINE.exec(line.trim());
+    if (doc) {
+      flush();
+      blocks.push({ kind: 'doc-image', alt: doc[1]!, name: doc[2]!, line: line.trim() });
       continue;
     }
     // 引用。続く行も `>` で始まるかぎり 1 つのまとまりにし、行の区切りを保つ

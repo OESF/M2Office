@@ -8,6 +8,7 @@
  * 5. 業務のマニュアル（`docs/manual/<名前>/`）が `manual.json`（title・extension）を持ち、章が `#` の見出しで始まる。記事の `business` がマニュアルの名前か、要点の記事だけの業務を指す（仕様書 第6.10.7.3節）
  * 6. 開発者向けの記事の `api` が、`docs/api/<名前>.openapi.yaml` を指す（仕様書 第6.10.7.4節）
  * 7. マスター管理画面の「？」（`chapter: '…'`）が、運営者マニュアル（`docs/ops-manual/`）の実在する章を指す（仕様書 第23.8.16節）
+ * 8. 運営者マニュアルの本文が指す図が、`images/` の中に実在する SVG で、説明（代わりの文字）がある（仕様書 第23.8.16節「図」）
  *
  * 業務の記事（`agent-<ID>`）は定義から自動で作るため、公式エージェントの ID と照合する。
  *
@@ -80,6 +81,19 @@ for (const f of ['Ops.tsx', 'ops-help.tsx']) {
   const text = readFileSync(join(webDir, f), 'utf8');
   for (const m of text.matchAll(/\bchapter: '([^']+)'/g)) {
     if (!opsChapters.has(m[1])) problems.push(`packages/web/src/${f}: 運営者マニュアルの章 ${m[1]} が見つかりません`);
+  }
+}
+// 運営者マニュアルの本文が指す図（仕様書 第23.8.16節「図」）。図が実在し、説明（代わりの文字）があること
+for (const f of readdirSync(join(root, 'docs', 'ops-manual')).filter((f) => f === 'README.md' || /^\d{2}-.+\.md$/.test(f))) {
+  let inCode = false;
+  for (const [i, line] of readFileSync(join(root, 'docs', 'ops-manual', f), 'utf8').split('\n').entries()) {
+    if (line.startsWith('```')) { inCode = !inCode; continue; }
+    const m = inCode ? null : /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(line.trim());
+    if (!m) continue;
+    const at = `docs/ops-manual/${f}:${i + 1}`;
+    if (!/^images\/[a-z0-9][a-z0-9-]{0,63}\.svg$/.test(m[2])) problems.push(`${at}: 図は images/ の中の SVG（小文字・数字・ハイフンの名前）だけを指せます: ${m[2]}`);
+    else if (!existsSync(join(root, 'docs', 'ops-manual', m[2]))) problems.push(`${at}: 図 ${m[2]} が見つかりません`);
+    if (!m[1].trim()) problems.push(`${at}: 図の説明（代わりの文字）がありません`);
   }
 }
 // API のチェックリストが指す記事

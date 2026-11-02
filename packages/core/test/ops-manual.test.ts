@@ -1,12 +1,12 @@
 /**
  * @file 運営者のヘルプ（仕様書 第23.8.16節）のテスト。運営者マニュアル（`docs/ops-manual/`）を章として読むこと、
- * 本文の「第 N 章」をその章へのリンクにすること（コード・リンクの中と自分の章は変えない）、文字での絞り込みを見る。
+ * 本文の「第 N 章」をその章へのリンクにすること（コード・リンクの中と自分の章は変えない）、文字での絞り込み、図の拾い方と読み方を見る。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { linkChapters, loadOpsManual, searchOpsManual, OPS_MANUAL_INTRO } from '../src/index.js';
+import { linkChapters, loadOpsManual, searchOpsManual, opsManualImageRefs, readOpsManualImage, OPS_MANUAL_INTRO } from '../src/index.js';
 
 const dir = fileURLToPath(new URL('../../../docs/ops-manual', import.meta.url));
 
@@ -38,4 +38,16 @@ test('絞り込み: 題と本文に、すべての語を含む章だけ。空な
   assert.deepEqual(searchOpsManual(chapters, 'パスキー ロール').map((c) => c.id), ['b']);
   assert.deepEqual(searchOpsManual(chapters, '  ').map((c) => c.id), ['a', 'b']);
   assert.deepEqual(searchOpsManual(chapters, 'ログイン')[0], { id: 'a', title: '第 1 章 ログイン' }, '本文は返さない');
+});
+
+test('図: 本文が指す図を拾い（コードの囲みの中は除く）、images/ の中の SVG だけを読む（第23.8.16節「図」）', () => {
+  const body = '前の文\n![構成の図](images/cloud-architecture.svg)\n```\n![見本](images/sample.svg)\n```\n![説明なし](images/x.svg) の後ろに文';
+  assert.deepEqual(opsManualImageRefs(body), [{ alt: '構成の図', name: 'cloud-architecture.svg' }]);
+  assert.match(readOpsManualImage(dir, 'cloud-architecture.svg') ?? '', /^<svg /);
+  for (const name of ['../18-architecture.md', '..%2FREADME.md', 'Cloud.svg', 'cloud-architecture.png', 'none.svg', '']) {
+    assert.equal(readOpsManualImage(dir, name), null, name);
+  }
+  const arch = loadOpsManual(dir).find((c) => c.id === '18-architecture');
+  assert.equal(arch?.title, '第 18 章 全体の構成');
+  assert.deepEqual(opsManualImageRefs(arch?.body ?? '').map((r) => r.name), ['cloud-architecture.svg']);
 });

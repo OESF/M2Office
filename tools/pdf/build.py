@@ -92,6 +92,8 @@ h4 { font-size: 10.5pt; margin: 16px 0 7px; color: #0f766e; page-break-after: av
 h5 { font-size: 10pt; margin: 14px 0 6px; color: #334155; page-break-after: avoid; }
 p { margin: 8px 0; orphans: 2; widows: 2; }
 strong { font-weight: 600; }
+/* 図（運営者マニュアルの構成図など）。本文の幅に合わせ、ページの途中で切らない */
+p > img { display: block; width: 100%; height: auto; margin: 10px 0; break-inside: avoid; }
 /* 表 */
 table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 8.5pt;
         page-break-inside: auto; }
