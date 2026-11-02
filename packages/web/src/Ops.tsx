@@ -841,18 +841,19 @@ function LawTables({ me }: { me: OpsMe }) {
 
 /** 設定（仕様書 第23.8.14節）。運営主体・運営の AI・表示。変えられるのは運営管理者だけ（表示は自分の端末のもの）。 */
 function Settings({ me }: { me: OpsMe }) {
+  // 欄が画面の幅いっぱいに伸びないよう、枠の幅に上限を置き、欄は中身の長さに合わせて並べる（form-grid）
   return (
-    <>
+    <div className="ops-settings">
       <OpsTitle title="設定" help={{ chapter: '08-settings-audit', text: '運営主体・運営の AI の鍵と上限・体験版の既定・表示を決めます。' }} />
       <OperatorProfileCard me={me} />
       <AiSettingsCard me={me} />
       <DemoDefaultsCard me={me} />
       <DisplayCard />
-    </>
+    </div>
   );
 }
 
-/** 運営主体（法人名・所在地・Web・問い合わせの窓口）。 */
+/** 運営主体（法人名・郵便番号・所在地・Web・問い合わせの窓口）。 */
 function OperatorProfileCard({ me }: { me: OpsMe }) {
   const [p, setP] = useState<OperatorProfileView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -864,8 +865,8 @@ function OperatorProfileCard({ me }: { me: OpsMe }) {
     setError(null); setSaved(false);
     opsApi.setOperatorProfile(p).then((r) => { setP(r.profile); setSaved(true); }).catch((e) => setError(errText(e, '保存できませんでした')));
   };
-  const field = (k: keyof OperatorProfileView, label: string) => (
-    <div className="field"><label>{label}</label><input value={p?.[k] ?? ''} disabled={!edit} onChange={(e) => p && setP({ ...p, [k]: e.target.value })} /></div>
+  const field = (k: keyof OperatorProfileView, label: string, span: string) => (
+    <div className={`field ${span}`}><label htmlFor={`op-${k}`}>{label}</label><input id={`op-${k}`} value={p?.[k] ?? ''} disabled={!edit} onChange={(e) => p && setP({ ...p, [k]: e.target.value })} /></div>
   );
   return (
     <div className="card">
@@ -873,11 +874,14 @@ function OperatorProfileCard({ me }: { me: OpsMe }) {
       {error && <p className="error">{error}</p>}
       {p && (
         <>
-          {field('nameJa', '法人名')}
-          {field('nameEn', '法人名（英語）')}
-          {field('address', '所在地')}
-          {field('web', 'Web')}
-          {field('contact', '問い合わせの窓口')}
+          <div className="form-grid">
+            {field('nameJa', '法人名', 'span-6')}
+            {field('nameEn', '法人名（英語）', 'span-6')}
+            {field('postalCode', '郵便番号', 'span-3')}
+            {field('address', '所在地', 'span-9')}
+            {field('web', 'Web', 'span-6')}
+            {field('contact', '問い合わせの窓口', 'span-6')}
+          </div>
           {edit && <button className="btn small" onClick={save}>保存</button>}
           {saved && <p className="ok-msg small">保存しました</p>}
         </>
@@ -942,29 +946,35 @@ function AiSettingsCard({ me }: { me: OpsMe }) {
           </div>
           {edit && (
             <>
-              <div className="field">
-                <label>{s.key.source === 'screen' ? '新しい鍵に入れ替える' : '鍵を入れる'}</label>
-                <div className="row">
-                  <input type="password" aria-label="運営の鍵" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} style={{ flex: 1 }} />
-                  <button className="btn small" disabled={busy || !key.trim()} onClick={() => void run(async () => {
-                    const r = await opsApi.setAiKey(key.trim()); setKey('');
-                    return `試して通ったので保存しました（${r.ms} ms）。1 分以内にすべての処理で替わります`;
-                  }, '保存できませんでした')}>試して保存</button>
+              <div className="form-grid">
+                <div className="field span-8">
+                  <label>{s.key.source === 'screen' ? '新しい鍵に入れ替える' : '鍵を入れる'}</label>
+                  <div className="row">
+                    <input type="password" aria-label="運営の鍵" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} style={{ flex: 1 }} />
+                    <button className="btn small" disabled={busy || !key.trim()} onClick={() => void run(async () => {
+                      const r = await opsApi.setAiKey(key.trim()); setKey('');
+                      return `試して通ったので保存しました（${r.ms} ms）。1 分以内にすべての処理で替わります`;
+                    }, '保存できませんでした')}>試して保存</button>
+                  </div>
                 </div>
               </div>
-              <div className="field">
-                <label>会社ごとの月の上限の既定（円）</label>
-                <input type="number" aria-label="会社ごとの月の上限の既定（円）" min={1} step={1} className="num-input" value={caps.tenant} placeholder={s.envTenantCapJpy ? `配備の設定 ${s.envTenantCapJpy}` : '上限なし'}
-                  onChange={(e) => setCaps({ ...caps, tenant: e.target.value })} />
+              <div className="form-grid">
+                <div className="field span-4">
+                  <label>会社ごとの月の上限の既定（円）</label>
+                  <input type="number" aria-label="会社ごとの月の上限の既定（円）" min={1} step={1} className="num-input" value={caps.tenant} placeholder={s.envTenantCapJpy ? `配備の設定 ${s.envTenantCapJpy}` : '上限なし'}
+                    onChange={(e) => setCaps({ ...caps, tenant: e.target.value })} />
+                </div>
+                <div className="field span-4">
+                  <label>運営の鍵の全体の月の上限（円）</label>
+                  <input type="number" aria-label="運営の鍵の全体の月の上限（円）" min={1} step={1} className="num-input" value={caps.platform} placeholder="上限なし" onChange={(e) => setCaps({ ...caps, platform: e.target.value })} />
+                </div>
+                <div className="field span-12">
+                  <button className="btn small" disabled={busy} onClick={() => void run(async () => {
+                    await opsApi.setAiLimits({ tenantCapJpy: caps.tenant.trim() ? Number(caps.tenant) : null, platformCapJpy: caps.platform.trim() ? Number(caps.platform) : null });
+                    return '保存しました';
+                  }, '保存できませんでした')}>上限を保存</button>
+                </div>
               </div>
-              <div className="field">
-                <label>運営の鍵の全体の月の上限（円）</label>
-                <input type="number" aria-label="運営の鍵の全体の月の上限（円）" min={1} step={1} className="num-input" value={caps.platform} placeholder="上限なし" onChange={(e) => setCaps({ ...caps, platform: e.target.value })} />
-              </div>
-              <button className="btn small" disabled={busy} onClick={() => void run(async () => {
-                await opsApi.setAiLimits({ tenantCapJpy: caps.tenant.trim() ? Number(caps.tenant) : null, platformCapJpy: caps.platform.trim() ? Number(caps.platform) : null });
-                return '保存しました';
-              }, '保存できませんでした')}>上限を保存</button>
             </>
           )}
         </>

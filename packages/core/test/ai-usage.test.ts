@@ -142,6 +142,11 @@ test('包み: 呼び出しごとに用途と人と費用を残す。上限なら
   const last = s.rows[s.rows.length - 1]!;
   assert.equal(last.local, true);
   assert.equal(last.costJpy, 0);
+  // 自動テスト用のスタブは推論しないので、0 円で残して運営の鍵の費用に数えない
+  const stub = meterLlm('t1', { ...inner, name: 'stub' }, s.meter);
+  await withAiUsage({ userId: 'u1', purpose: 'secretary' }, () => stub.complete({ tier: 'fast', messages: [] }));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual([s.rows.at(-1)!.local, s.rows.at(-1)!.costJpy], [true, 0]);
 });
 
 test('運営の鍵の全体の上限: 運営の鍵の会社だけを止め、管理者に月に 1 度知らせる。記録に運営の鍵の印を付ける（第23.8.14節）', async () => {

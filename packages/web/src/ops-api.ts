@@ -166,7 +166,7 @@ export interface OpsAiSettingsView {
   month: { month: string; usedJpy: number };
 }
 
-export interface OperatorProfileView { nameJa: string; nameEn: string; address: string; web: string; contact: string }
+export interface OperatorProfileView { nameJa: string; nameEn: string; postalCode: string; address: string; web: string; contact: string }
 
 /** 運営の税率の表の 1 行（仕様書 第15.1.1.1節）。 */
 export interface TaxRateRow {

@@ -102,7 +102,7 @@ export class OpsAppSide {
     if (this.profile && now - this.profile.at < PROFILE_TTL_MS) return this.profile.value;
     const { rows } = await this.pool.query('select * from m2o_operator_profile()');
     const r = rows[0];
-    const value = r && r.name_ja ? { nameJa: r.name_ja, nameEn: r.name_en, address: r.address, web: r.web, contact: r.contact } : null;
+    const value = r && r.name_ja ? { nameJa: r.name_ja, nameEn: r.name_en, postalCode: r.postal_code ?? '', address: r.address, web: r.web, contact: r.contact } : null;
     this.profile = { at: now, value };
     return value;
   }

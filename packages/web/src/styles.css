@@ -1347,6 +1347,7 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 .form-grid > .span-6 { grid-column: span 6; }
 .form-grid > .span-7 { grid-column: span 7; }
 .form-grid > .span-8 { grid-column: span 8; }
+.form-grid > .span-9 { grid-column: span 9; }
 .form-grid label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 900px) {
   .form-grid > .field { grid-column: span 6; }
@@ -2024,6 +2025,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .md-img { display: block; max-width: min(100%, 600px); height: auto; border-radius: 6px; border: 1px solid var(--line); margin: calc(6px * var(--space-scale)) 0; }
 /* 運営者マニュアルの図（仕様書 第23.8.16節「図」）。本文の幅いっぱいに出し、枠と角の丸めは付けない（図の中に枠がある） */
 .md-img.md-figure { max-width: 100%; width: 100%; border: 0; border-radius: 0; }
+/* マスター管理画面の設定。広い画面でも枠が伸びすぎないよう、幅に上限を置く */
+.ops-settings { max-width: 1080px; }
 .columns-cover { display: flex; flex-wrap: wrap; gap: calc(12px * var(--space-scale)); align-items: flex-start; }
 .columns-cover img, .columns-cover-empty { width: min(100%, 480px); aspect-ratio: 1200 / 630; border-radius: 8px; border: 1px solid var(--line); object-fit: cover; }
 .columns-cover-empty { display: flex; align-items: center; justify-content: center; }

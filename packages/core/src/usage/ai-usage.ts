@@ -525,11 +525,12 @@ function responseCost(res: LlmResponse, fallbackModel: string | null, local: boo
 /**
  * 会社の推論を包み、呼び出しの前に上限を確かめ、呼び出しの後に記録する。
  *
- * @param local ローカル AI か（費用 0 円で残し、上限で止めない）
+ * @param local ローカル AI か（費用 0 円で残し、上限で止めない）。自動テスト用のスタブ（`stub`）も同じ扱いにする（推論しないので費用はかからず、運営の鍵の費用に数えない）
  * @remarks 業務の実行の中の呼び出し（`runId` がある）は止めない。始まった実行を途中で切らないため（第21.2.3節）
  */
 export function meterLlm(tenantId: string, inner: LlmProvider, meter: AiUsageMeter, local = false): LlmProvider {
   if (inner.name === 'unconfigured') return inner;
+  local = local || inner.name === 'stub';
   const scope = () => currentAiUsage() ?? { purpose: 'other' };
   const guard = async () => {
     const s = scope();

@@ -130,6 +130,11 @@ test('会社の詳細と CSV は開いたことを残す。運営主体の設定
   });
   assert.equal((await put(admin, { nameJa: '運営', web: 'http://x' })).status, 400);
   assert.equal((await put(admin, { nameJa: '運営', web: 'https://ops.example' })).status, 200);
+  // 郵便番号は 123-4567 の形にそろえ、合わなければ断る
+  const zip = await put(admin, { nameJa: '運営', postalCode: '１０００００１' });
+  assert.equal(zip.status, 200);
+  assert.equal(((await zip.json()) as { profile: { postalCode: string } }).profile.postalCode, '100-0001');
+  assert.equal((await put(admin, { nameJa: '運営', postalCode: '100-001' })).status, 400);
   const mon = await login(app, 'mon@ops.example');
   assert.equal((await put(mon, { nameJa: 'x' })).status, 403);
 });

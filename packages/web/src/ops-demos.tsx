@@ -177,11 +177,13 @@ export function DemoDefaultsCard({ me }: { me: OpsMe }) {
     <div className="card">
       <h3>体験版</h3>
       {f && <>
-        <div className="field"><label htmlFor="demo-default-days">日数の既定</label><input id="demo-default-days" type="number" min={1} value={f.days} disabled={!manage} onChange={(e) => setF({ ...f, days: e.target.value })} style={{ maxWidth: 120 }} /></div>
-        <div className="field"><label htmlFor="demo-default-cap">AI の上限の既定（円・期間を通して）</label><input id="demo-default-cap" type="number" min={1} value={f.aiCapJpy} disabled={!manage} onChange={(e) => setF({ ...f, aiCapJpy: e.target.value })} style={{ maxWidth: 160 }} /></div>
-        <div className="field"><label><input type="checkbox" checked={f.selfSignup} disabled={!manage} onChange={(e) => setF({ ...f, selfSignup: e.target.checked })} /> 紹介のページから自分で申し込める</label></div>
-        <div className="field"><label htmlFor="demo-daily">申し込み画面から作成する 1 日の数</label><input id="demo-daily" type="number" min={0} value={f.dailyLimit} disabled={!manage} onChange={(e) => setF({ ...f, dailyLimit: e.target.value })} style={{ maxWidth: 120 }} /></div>
-        <div className="field"><label htmlFor="demo-monthly">体験版全体の月の AI の上限（円）</label><input id="demo-monthly" type="number" min={0} value={f.monthlyAiCapJpy} disabled={!manage} onChange={(e) => setF({ ...f, monthlyAiCapJpy: e.target.value })} style={{ maxWidth: 160 }} /></div>
+        <div className="form-grid">
+          <div className="field span-3"><label htmlFor="demo-default-days">日数の既定</label><input id="demo-default-days" type="number" min={1} value={f.days} disabled={!manage} onChange={(e) => setF({ ...f, days: e.target.value })} /></div>
+          <div className="field span-3"><label htmlFor="demo-default-cap">AI の上限の既定（円・期間を通して）</label><input id="demo-default-cap" type="number" min={1} value={f.aiCapJpy} disabled={!manage} onChange={(e) => setF({ ...f, aiCapJpy: e.target.value })} /></div>
+          <div className="field"><label><input type="checkbox" checked={f.selfSignup} disabled={!manage} onChange={(e) => setF({ ...f, selfSignup: e.target.checked })} /> 紹介のページから自分で申し込める</label></div>
+          <div className="field span-3"><label htmlFor="demo-daily">申し込み画面から作成する 1 日の数</label><input id="demo-daily" type="number" min={0} value={f.dailyLimit} disabled={!manage} onChange={(e) => setF({ ...f, dailyLimit: e.target.value })} /></div>
+          <div className="field span-3"><label htmlFor="demo-monthly">体験版全体の月の AI の上限（円）</label><input id="demo-monthly" type="number" min={0} value={f.monthlyAiCapJpy} disabled={!manage} onChange={(e) => setF({ ...f, monthlyAiCapJpy: e.target.value })} /></div>
+        </div>
         {manage && <button className="btn small" onClick={save}>保存</button>}
       </>}
       {msg && <p className="small">{msg}</p>}

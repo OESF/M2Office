@@ -796,7 +796,11 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     if (!can(c, 'settings.manage')) return denied(c);
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const s = (k: string, max: number) => (typeof b[k] === 'string' ? (b[k] as string).trim().slice(0, max) : '');
-    const profile = { nameJa: s('nameJa', 200), nameEn: s('nameEn', 200), address: s('address', 300), web: s('web', 300), contact: s('contact', 300) };
+    // 郵便番号は全角の数字とハイフンも受け、123-4567 の形にそろえる
+    const postal = s('postalCode', 20).replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0)).replace(/[－ー‐−]/g, '-');
+    const pm = /^(\d{3})-?(\d{4})$/.exec(postal);
+    if (postal && !pm) return c.json({ error: '郵便番号は 123-4567 の形で入れてください' }, 400);
+    const profile = { nameJa: s('nameJa', 200), nameEn: s('nameEn', 200), postalCode: pm ? `${pm[1]}-${pm[2]}` : '', address: s('address', 300), web: s('web', 300), contact: s('contact', 300) };
     if (profile.web && !/^https:\/\//.test(profile.web)) return c.json({ error: 'Web は https:// で始めてください' }, 400);
     await store.setOperatorProfile(profile, c.get('operator').id);
     await store.audit(c.get('operator').id, 'settings.operator', 'settings', 'operator', profile);

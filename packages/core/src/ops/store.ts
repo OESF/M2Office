@@ -144,6 +144,8 @@ export interface OpsPlatformAiSettings {
 export interface OperatorProfile {
   nameJa: string;
   nameEn: string;
+  /** 郵便番号（`123-4567`。入れていなければ空）。 */
+  postalCode: string;
   address: string;
   web: string;
   contact: string;
@@ -617,15 +619,15 @@ export class OpsStore {
   async operatorProfile(): Promise<OperatorProfile> {
     const { rows } = await this.pool.query('select * from ops.operator_profile where id = 1');
     const r = rows[0];
-    return { nameJa: r?.name_ja ?? '', nameEn: r?.name_en ?? '', address: r?.address ?? '', web: r?.web ?? '', contact: r?.contact ?? '' };
+    return { nameJa: r?.name_ja ?? '', nameEn: r?.name_en ?? '', postalCode: r?.postal_code ?? '', address: r?.address ?? '', web: r?.web ?? '', contact: r?.contact ?? '' };
   }
 
   async setOperatorProfile(p: OperatorProfile, by: string): Promise<void> {
     await this.pool.query(
-      `insert into ops.operator_profile (id, name_ja, name_en, address, web, contact, updated_by, updated_at) values (1,$1,$2,$3,$4,$5,$6,now())
-       on conflict (id) do update set name_ja = excluded.name_ja, name_en = excluded.name_en, address = excluded.address, web = excluded.web,
-         contact = excluded.contact, updated_by = excluded.updated_by, updated_at = now()`,
-      [p.nameJa, p.nameEn, p.address, p.web, p.contact, by],
+      `insert into ops.operator_profile (id, name_ja, name_en, postal_code, address, web, contact, updated_by, updated_at) values (1,$1,$2,$3,$4,$5,$6,$7,now())
+       on conflict (id) do update set name_ja = excluded.name_ja, name_en = excluded.name_en, postal_code = excluded.postal_code, address = excluded.address,
+         web = excluded.web, contact = excluded.contact, updated_by = excluded.updated_by, updated_at = now()`,
+      [p.nameJa, p.nameEn, p.postalCode, p.address, p.web, p.contact, by],
     );
   }
 
