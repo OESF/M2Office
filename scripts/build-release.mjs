@@ -91,6 +91,8 @@ writeFileSync(join(out, 'package.json'), `${JSON.stringify({
     'secrets:rotate': 'node --env-file-if-exists=m2office.env scripts/rotate-secrets.mjs',
   },
   dependencies: Object.fromEntries([...external.entries()].sort()),
+  // 依存の依存の差し替え（exceljs の uuid など）。開発と同じ版を本番にも入れるため、ルートのものをそのまま写す
+  ...(rootPkg.overrides ? { overrides: rootPkg.overrides } : {}),
 }, null, 2)}\n`);
 writeFileSync(join(out, 'VERSION'), `${rootPkg.version}\n`);
 

@@ -39,7 +39,7 @@
 |---|---|---|
 | 合言葉の紙（データベースの控え・ファイルの控え・預かった鍵を開ける鍵・バケットの名前とプロジェクトの ID） | 運営 | 金庫など。**この手順書の印刷とは別の場所** |
 | Google Cloud の管理者のアカウント（2 段階の認証） | 運営 | バックアップコードも紙で保管する |
-| VPS 用のサービスアカウントの鍵 | VPS の中だけ（`/etc/m2office/backup/gcs-key.json`） | 運営の端末には残さない |
+| VPS 用のサービスアカウントの鍵 | VPS の中だけ（`/etc/pgbackrest/gcs-key.json`） | 運営の端末には残さない |
 | この手順書の印刷 | 運営と提携先の技術者 | すぐ手に取れる場所 |
 
 ## 3. 起きたことごとの手順
@@ -126,8 +126,8 @@ gcloud iam service-accounts keys create m2office-backup-key.json --iam-account=m
 
 ```bash
 sudo systemctl stop m2office-api m2office-worker m2office-ops
-sudo install -d -m 750 -o root -g postgres /etc/m2office/backup /etc/pgbackrest
-sudo install -m 640 -o root -g postgres ~/m2office-backup-key.json /etc/m2office/backup/gcs-key.json && rm ~/m2office-backup-key.json
+sudo install -d -m 750 -o root -g postgres /etc/pgbackrest
+sudo install -m 640 -o root -g postgres ~/m2office-backup-key.json /etc/pgbackrest/gcs-key.json && rm ~/m2office-backup-key.json
 sudo install -d -m 770 -o postgres -g postgres /var/log/pgbackrest /var/spool/pgbackrest
 sudo nano /etc/pgbackrest/pgbackrest.conf
 ```
@@ -138,7 +138,7 @@ sudo nano /etc/pgbackrest/pgbackrest.conf
 [global]
 repo1-type=gcs
 repo1-gcs-bucket=<バケットの名前>
-repo1-gcs-key=/etc/m2office/backup/gcs-key.json
+repo1-gcs-key=/etc/pgbackrest/gcs-key.json
 repo1-gcs-key-type=service
 repo1-path=/pgbackrest
 repo1-cipher-type=aes-256-cbc
@@ -177,7 +177,7 @@ RESTIC_REPOSITORY=gs:<バケットの名前>:/restic
 RESTIC_PASSWORD=<ファイルの控えの合言葉>
 RESTIC_CACHE_DIR=/var/cache/m2office-restic
 GOOGLE_PROJECT_ID=<プロジェクトの ID>
-GOOGLE_APPLICATION_CREDENTIALS=/etc/m2office/backup/gcs-key.json
+GOOGLE_APPLICATION_CREDENTIALS=/etc/pgbackrest/gcs-key.json
 M2O_FILES_DIR=/var/lib/m2office/files
 ```
 

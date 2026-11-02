@@ -37,9 +37,10 @@ API_PORT=3101
 OPS_PORT=3102
 WG_NETWORK_DEFAULT=10.66.0.0/24
 WG_PORT=51820
-# 社外の控え（第20.4.6節「控え」）。鍵と合言葉は root だけ（pgBackRest の設定と鍵は postgres も読む）
-BACKUP_DIR_ETC="$ETC_DIR/backup"
-GCS_KEY="$BACKUP_DIR_ETC/gcs-key.json"
+# 社外の控え（第20.4.6節「控え」）。鍵と合言葉は root だけ（pgBackRest の設定と鍵は postgres も読む）。
+# 鍵は postgres が入れる /etc/pgbackrest に置く（/etc/m2office は M2Office の利用者だけが入れるため、postgres は中の鍵を読めない）
+GCS_KEY=/etc/pgbackrest/gcs-key.json
+OLD_GCS_KEY="$ETC_DIR/backup/gcs-key.json"
 BACKUP_ENV="$ETC_DIR/backup.env"
 PGBR_CONF=/etc/pgbackrest/pgbackrest.conf
 PG_ARCHIVE_CONF="/etc/postgresql/17/main/conf.d/m2office-archive.conf"
@@ -165,7 +166,7 @@ ask SITE_PREVIEW_HASH 'そのパスワードのハッシュ（bcrypt。M2Office-
 ask BACKUP_GCS_BUCKET '社外の控えの Google Cloud Storage のバケットの名前（運営のマニュアル 第 13 章。まだなら空のまま。外すなら -）' "${BACKUP_GCS_BUCKET:-}"
 if [ -n "$BACKUP_GCS_BUCKET" ]; then
   ask BACKUP_GCS_PROJECT 'そのバケットのある Google Cloud のプロジェクトの ID' "${BACKUP_GCS_PROJECT:-}"
-  sudo test -f "$GCS_KEY" && key_def='（入っています。変えないなら Enter）' || key_def=''
+  { sudo test -f "$GCS_KEY" || sudo test -f "$OLD_GCS_KEY"; } && key_def='（入っています。変えないなら Enter）' || key_def=''
   ask BACKUP_GCS_KEY_SOURCE "控え用のサービスアカウントの鍵（JSON）を VPS に置いた場所${key_def}" ''
 fi
 GEMINI_API_KEY=$(env_value GEMINI_API_KEY)
@@ -190,7 +191,7 @@ if [ -n "$BACKUP_GCS_BUCKET" ]; then
     [ -f "$BACKUP_GCS_KEY_SOURCE" ] || die "鍵のファイルがありません: $BACKUP_GCS_KEY_SOURCE"
     grep -q '"type": *"service_account"' "$BACKUP_GCS_KEY_SOURCE" || die 'サービスアカウントの鍵（JSON）ではありません'
   else
-    sudo test -f "$GCS_KEY" || die '控え用のサービスアカウントの鍵（JSON）の場所を入れてください'
+    sudo test -f "$GCS_KEY" || sudo test -f "$OLD_GCS_KEY" || die '控え用のサービスアカウントの鍵（JSON）の場所を入れてください'
   fi
 else
   BACKUP_GCS_PROJECT=''
@@ -347,10 +348,17 @@ say 'データベースの形を最新にします'
 backup_secret() { sudo grep -E "^$1=" "$2" 2>/dev/null | head -1 | cut -d= -f2- || true; }
 if [ -n "$BACKUP_GCS_BUCKET" ]; then
   say '社外の控え（Google Cloud Storage）を用意します'
-  sudo install -d -m 750 -o root -g postgres "$BACKUP_DIR_ETC"
+  sudo install -d -m 750 -o root -g postgres /etc/pgbackrest
   if [ -n "${BACKUP_GCS_KEY_SOURCE:-}" ]; then
     sudo install -m 640 -o root -g postgres "$BACKUP_GCS_KEY_SOURCE" "$GCS_KEY"
     info "鍵を入れました: ${GCS_KEY}（置いた $BACKUP_GCS_KEY_SOURCE は消してください）"
+  fi
+  # v0.28.0 までの置き場（postgres が読めない）に鍵があれば移す。当座のしのぎで postgres に /etc/m2office を通らせていれば外す
+  if sudo test -f "$OLD_GCS_KEY"; then
+    sudo test -f "$GCS_KEY" || sudo install -m 640 -o root -g postgres "$OLD_GCS_KEY" "$GCS_KEY"
+    sudo rm -f "$OLD_GCS_KEY"; sudo rmdir "$ETC_DIR/backup" 2>/dev/null || true
+    sudo setfacl -x u:postgres "$ETC_DIR" 2>/dev/null || true
+    info "鍵を移しました: ${GCS_KEY}"
   fi
   # 暗号化の合言葉は、初めてのときだけ機械の上で作る（変えると前の控えを開けなくなる）
   RESTIC_PASS=$(backup_secret RESTIC_PASSWORD "$BACKUP_ENV"); [ -n "$RESTIC_PASS" ] || RESTIC_PASS=$(rand_hex 32)
@@ -362,7 +370,6 @@ if [ -n "$BACKUP_GCS_BUCKET" ]; then
     "$BACKUP_GCS_BUCKET" "$GCS_KEY" "$PGBR_PASS" > "$work/pgbackrest.conf"
   umask 022
   sudo install -m 600 -o root -g root "$work/backup.env" "$BACKUP_ENV"
-  sudo install -d -m 750 -o root -g postgres /etc/pgbackrest
   sudo install -m 640 -o root -g postgres "$work/pgbackrest.conf" "$PGBR_CONF"
   sudo install -d -m 770 -o postgres -g postgres /var/log/pgbackrest /var/spool/pgbackrest
   # 変更の記録（WAL）を絶えず送る。5 分ごとに区切って送るので、失うのは直前の数分まで。初めて入れたときだけ PostgreSQL を起動し直す
@@ -375,12 +382,14 @@ if [ -n "$BACKUP_GCS_BUCKET" ]; then
   fi
   # 置き場を作り（何度走らせてもよい）、送れることを確かめる。送れないまま archive_mode を入れておくと、
   # 送れなかった変更の記録が機械の中にたまり続けてディスクを埋めるので、送る設定を外して戻す
-  if (cd / && sudo -u postgres pgbackrest --stanza=m2office stanza-create >/dev/null 2>&1 && sudo -u postgres pgbackrest --stanza=m2office check >/dev/null 2>&1); then
+  # 失敗したら pgBackRest の言う理由を出す（合言葉と鍵は pgBackRest が伏せる）
+  if pgbr_out=$(cd / && sudo -u postgres pgbackrest --stanza=m2office stanza-create 2>&1 && sudo -u postgres pgbackrest --stanza=m2office check 2>&1); then
     info 'データベースの変更の記録を送れることを確かめました'
   else
     sudo rm -f "$PG_ARCHIVE_CONF"
     sudo systemctl restart postgresql
-    die 'データベースの控えを Google Cloud Storage へ送れません。送る設定を外して戻しました。バケットの名前・鍵・権限を確かめて走らせ直してください（理由: sudo -u postgres pgbackrest --stanza=m2office stanza-create）'
+    pgbr_why=$(printf '%s\n' "$pgbr_out" | { grep -E 'ERROR|WARN' || true; } | tail -3 | sed -E 's/^[0-9-]+ [0-9:.]+ P[0-9]+ +//')
+    die "データベースの控えを Google Cloud Storage へ送れません。送る設定を外して戻しました。バケットの名前・鍵・権限を確かめて走らせ直してください（理由: ${pgbr_why:-pgBackRest が理由を出しませんでした。/var/log/pgbackrest を見てください}）"
   fi
   sudo install -d -m 700 /var/cache/m2office-restic
   if sudo bash -c "set -a; . '$BACKUP_ENV'; restic cat config" >/dev/null 2>&1; then

@@ -234,6 +234,9 @@ test('社外の控え（第20.4.6節「控え」）: 台本の文法。送れな
   assert.match(body, /RESTIC_REPOSITORY=gs:%s:\/restic/);
   // 送れないまま archive_mode を残すと、変更の記録がたまってディスクを埋める
   assert.match(body, /stanza-create[\s\S]*check[\s\S]*else\n\s+sudo rm -f "\$PG_ARCHIVE_CONF"/);
+  // 鍵は postgres が入れる場所に置く（/etc/m2office は 750 で M2Office の利用者のものなので、postgres は中を読めない）。失敗の理由は pgBackRest の言葉で出す
+  assert.match(body, /^GCS_KEY=\/etc\/pgbackrest\/gcs-key\.json$/m);
+  assert.match(body, /pgbr_why=[^\n]*ERROR/);
   assert.match(body, /RESTIC_PASS=\$\(backup_secret RESTIC_PASSWORD "\$BACKUP_ENV"\); \[ -n "\$RESTIC_PASS" \] \|\| RESTIC_PASS=/);
   const update = readFileSync(join(root, 'deploy/vps/update.sh'), 'utf8');
   assert.ok(update.indexOf('pg_create_restore_point') > update.indexOf('pg_dump') && update.indexOf('pg_create_restore_point') < update.indexOf('stop_app\nlog'), '控えの後、止める前');

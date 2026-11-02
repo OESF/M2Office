@@ -51,8 +51,8 @@ deploy/vps/setup.sh --render-only <出力先> --answers <KEY=値 のファイル
 | 道 | 中身 |
 |---|---|
 | `/opt/m2office/app` | 取ってきたリリースのタグ。組み立ては `dist-release/` |
-| `/etc/m2office/` | 環境変数（`m2office.env`）と答え（`setup.conf`）。社外の控えの設定（`backup.env`。root だけ）と鍵（`backup/gcs-key.json`） |
-| `/etc/pgbackrest/pgbackrest.conf` | データベースの控えの設定（暗号化の合言葉を含む。root と postgres だけ） |
+| `/etc/m2office/` | 環境変数（`m2office.env`）と答え（`setup.conf`）。社外の控えの設定（`backup.env`。root だけ） |
+| `/etc/pgbackrest/` | データベースの控えの設定（`pgbackrest.conf`。暗号化の合言葉を含む）と、控え用のサービスアカウントの鍵（`gcs-key.json`）。root と postgres だけ |
 | `/etc/postgresql/17/main/conf.d/m2office-archive.conf` | 変更の記録（WAL）を絶えず送る設定 |
 | `/var/lib/m2office/` | ファイル（`files/`）・機械の様子（`machine/`。社外の控えの結果 `cloud-backup.json` と更新の前の戻す点 `restore-points.json` を含む） |
 | `/var/www/m2office-site/` | 紹介のページ（`m2office.net`・`www`） |
