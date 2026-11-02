@@ -8,6 +8,18 @@ M2Office のサービス本体の版ごとの変更を、開発者と拡張機�
 
 仕様書・エージェント定義スキーマ・公開 API・拡張機能の版は、サービス本体の版とは独立しています（リリース規定 第2章）。
 
+## v0.28.1 控えの鍵の置き場と依存の差し替え（2026-11-02）
+
+### 配備で行うこと
+- 移行・環境変数・Google の権限の変更はなし
+- クラウドの形（VPS）: `update.sh` の後に `setup.sh` を走らせ直す。社外の控えを v0.28.0 で入れていれば、鍵を `/etc/m2office/backup/gcs-key.json` から `/etc/pgbackrest/gcs-key.json` へ移し、当座に付けた postgres の ACL（`setfacl -m u:postgres:x /etc/m2office`）を外す。まだ入れていなければ、最初から新しい置き場に入れる
+- 本番の組み立て（`npm run build:release -- --install`）を作り直すと、依存の依存が開発と同じ版になる（VPS とローカルの形の `setup.sh`・`update.sh` が行う）
+- 巻き戻し: v0.28.0 に戻せば動く。ただし v0.28.0 の `setup.sh` は鍵を `/etc/m2office/backup/` に探すので、戻すときは鍵をそこへ写し、postgres の ACL を付け直す。巻き戻せない変更はなし
+
+### 修正
+- **社外の控えの鍵を postgres が読めなかった** — `setup.sh` が鍵を `/etc/m2office/backup/` に置いていたが、`/etc/m2office` は M2Office の利用者だけが入れる（750）ため、pgBackRest（postgres で動く）が鍵を開けず、社外の控えの段が `stanza-create` で失敗していた。鍵を `/etc/pgbackrest/gcs-key.json`（root と postgres だけ）に置き、前の置き場の鍵は移す。失敗したときは pgBackRest の ERROR・WARN の行を理由として出す（これまでは出力を捨てていた）（`deploy/vps/setup.sh`、運営者マニュアル 第 17 章）。2026-11-02 に VPS の上で、当座の ACL を付けて pgBackRest のまるごとの控えと WAL の送り・restic のファイルの控え・確かめが通り、`m2office-backup --status` に戻せる範囲が出ることを確かめた（仕様書 第20.4.6節・0.506.2）。新しい VPS への戻し（第 17 章 3.6）はまだ通していない
+- **本番の組み立てで依存の差し替えが外れていた** — `scripts/build-release.mjs` が作る `dist-release/package.json` にルートの `overrides` を写しておらず、本番では exceljs の `uuid@8.3.2`（既知の注意喚起・中）と `unzipper@0.10.14` が入っていた。ルートの `overrides` をそのまま写すようにし、本番の依存の点検の結果が開発と同じ（中 8）になった
+
 ## v0.28.0 控えの置き場と秘書の成長の見え方（2026-11-02）
 
 ### 配備で行うこと
