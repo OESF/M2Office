@@ -219,7 +219,7 @@ export { appRoot, appPath } from './app-root.js';
 export {
   runBackup, restoreTest, readBackupStatus, requestBackup, takeBackupRequest, backupsToKeep, backupName, diskSpace,
   machineStatus, writeWorkerBeat, machineDir, backupConfigFromEnv, machineConfigFromEnv,
-  availableMemoryOf, linuxSwapOf, macSwapOf, currentMachine, inferenceText, beatFromRow, samplePointFromRow, sampleDays, databaseFromRow, DATABASE_USAGE_SQL,
+  availableMemoryOf, linuxSwapOf, macSwapOf, linuxNetOf, macNetOf, currentMachine, inferenceText, beatFromRow, samplePointFromRow, netTotalFromRow, sampleDays, databaseFromRow, DATABASE_USAGE_SQL,
   PostgresRuntimeBeatStore, writeRuntimeBeat, runtimeEnvironment, RUNTIME_SAMPLE_KEEP_DAYS,
   RUNTIME_BEAT_INTERVAL_MS, RUNTIME_BEAT_STALE_MS, WORKER_BEAT_INTERVAL_MS, WORKER_DOWN_MS, workerDown, type RuntimeBeatStore,
   type BackupConfig, type BackupRecord, type BackupStatus, type MachineConfig, type MachineStatus,
@@ -240,6 +240,7 @@ export {
   serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport, type OpsIncident,
   loadOpsManual, searchOpsManual, linkChapters, opsManualImageRefs, readOpsManualImage, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry, type OpsManualImageRef,
   readCloudBackupRun, readRestorePoints, nextNightlyRun, cloudBackupView, CLOUD_BACKUP_STALE_MS, type CloudBackupRun, type CloudBackupInventory, type CloudBackupView, type RestorePoint, type WalArchiveStatus,
+  readEdgeStatus, edgeStatusView, EDGE_STATUS_STALE_MS, EDGE_CERT_SOON_MS, EDGE_PEER_ONLINE_MS, type EdgeStatus, type EdgeStatusView,
 } from './ops/index.js';
 export * from './demo/index.js';
 export { scoreEval, CONTRACT_REVIEW_AVOID, CONTRACT_REVIEW_MUST, type EvalScore } from './evals/score.js';

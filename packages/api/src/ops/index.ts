@@ -46,7 +46,9 @@ const { box } = secretBoxFromEnv(env);
 const cloudBackupFile = join(machineDir(env), 'cloud-backup.json');
 // 更新の前の戻す点（第23.8.7節「控えの様子」）。update.sh が書く
 const restorePointsFile = join(machineDir(env), 'restore-points.json');
-const app = opsApp({ store, config, log, cloudBackupFile, restorePointsFile, platformAi: { box, env: { key: env['GEMINI_API_KEY']?.trim() || null, tenantCapJpy: envTenantCapJpy(env) } } });
+// 入口の守りと VPN の様子（第23.8.7節「ネットワークの様子」）。root で動く m2office-edge-status が書く
+const edgeStatusFile = join(machineDir(env), 'edge-status.json');
+const app = opsApp({ store, config, log, cloudBackupFile, restorePointsFile, edgeStatusFile, platformAi: { box, env: { key: env['GEMINI_API_KEY']?.trim() || null, tenantCapJpy: envTenantCapJpy(env) } } });
 
 const hostname = listenHost();
 serve({ fetch: app.fetch, port, hostname }, (info) => {

@@ -17,7 +17,7 @@ export {
 } from './offsite.js';
 export { machineStatus, writeWorkerBeat, type MachineConfig, type MachineStatus } from './status.js';
 export {
-  availableMemoryOf, linuxSwapOf, macSwapOf, currentMachine, inferenceText, beatFromRow, samplePointFromRow, sampleDays, databaseFromRow, DATABASE_USAGE_SQL,
+  availableMemoryOf, linuxSwapOf, macSwapOf, linuxNetOf, macNetOf, currentMachine, inferenceText, beatFromRow, samplePointFromRow, netTotalFromRow, sampleDays, databaseFromRow, DATABASE_USAGE_SQL,
   PostgresRuntimeBeatStore, writeRuntimeBeat, runtimeEnvironment, RUNTIME_SAMPLE_KEEP_DAYS,
   RUNTIME_BEAT_INTERVAL_MS, RUNTIME_BEAT_STALE_MS, WORKER_BEAT_INTERVAL_MS, WORKER_DOWN_MS, workerDown, type RuntimeBeatStore,
 } from './runtime.js';

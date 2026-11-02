@@ -7,6 +7,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import type { EvidenceView, SystemLogDigestView, SystemLogLineView, SystemLogPage, SystemLogQuery } from './api.js';
+import { logSummary } from './log-summary.js';
 
 /** 読み書きの口。 */
 export interface LogSource {
@@ -35,6 +36,9 @@ const STATUS_LABEL: Record<EvidenceView['status'], string> = { pending: '待っ�
 const KIND_LABEL: Record<EvidenceView['createdKind'], string> = { user: '管理者', operator: '運営', system: '自動（不正の兆しの見張り）' };
 
 const when = (iso: string) => new Date(iso).toLocaleString('ja-JP', { hour12: false });
+/** 表の時刻（年を省いた月日と秒までの時刻。年まで含めた時刻は、指したときに出す）。 */
+const shortWhen = (iso: string) => new Date(iso).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
 const bytes = (n: number | null) => (n === null ? '—' : n < 1024 * 1024 ? `${Math.ceil(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 const YEAR_MS = 365 * 86_400_000;
 
@@ -96,7 +100,8 @@ export function SystemLogs({ source }: { source: LogSource }) {
     setError(null);
     try { await source.exportLogs(query(), format); } catch (e) { setError(source.describe(e, 'ダウンロードできませんでした')); }
   };
-  const tenantName = (id: string | null) => (id ? source.tenants?.find((t) => t.id === id)?.name ?? id : '仕組み');
+  // 会社に属さない記録（起動・見回りなど）は「—」で出す
+  const tenantName = (id: string | null) => (id ? source.tenants?.find((t) => t.id === id)?.name ?? id : '—');
 
   return (
     <>
@@ -117,7 +122,7 @@ export function SystemLogs({ source }: { source: LogSource }) {
           {source.tenants && (
             <label className="log-filter">会社
               <select value={tenant} onChange={(e) => setTenant(e.target.value)}>
-                <option value="">すべて</option><option value="system">仕組み（会社に属さない）</option>
+                <option value="">すべて</option><option value="system">会社に属さない記録</option>
                 {source.tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </label>
@@ -135,17 +140,17 @@ export function SystemLogs({ source }: { source: LogSource }) {
             改ざんの確かめ: {digests.map((d) => <span key={d.day} className={`badge ${d.intact === false ? 'warn' : 'ok'}`} title={`${d.rows} 行 / ${d.sha256}`}>{d.day.slice(5)} {d.intact === false ? '合いません' : '合っています'}</span>)}
           </p>
         )}
-        <div className="table-scroll"><table className="table">
-          <thead><tr><th>時刻</th><th>レベル</th><th>プロセス</th>{source.tenants && <th>会社</th>}<th>文</th></tr></thead>
+        <div className="table-scroll"><table className="table log-table">
+          <thead><tr><th className="fit">時刻</th><th className="fit">レベル</th><th className="fit">プロセス</th>{source.tenants && <th className="fit">会社</th>}<th>文</th></tr></thead>
           <tbody>
             {rows.map((l) => (
               <Fragment key={l.id}>
                 <tr className="clickable" onClick={() => setOpen(open === l.id ? null : l.id)}>
-                  <td className="nowrap">{when(l.at)}</td>
-                  <td><span className={`badge ${l.level === 'error' ? 'warn' : l.level === 'warn' ? 'caution' : ''}`}>{LEVEL_LABEL[l.level] ?? l.level}</span></td>
-                  <td>{l.service}</td>
-                  {source.tenants && <td>{tenantName(l.tenantId)}</td>}
-                  <td>{l.msg}</td>
+                  <td className="fit" title={when(l.at)}>{shortWhen(l.at)}</td>
+                  <td className="fit"><span className={`badge ${l.level === 'error' ? 'warn' : l.level === 'warn' ? 'caution' : ''}`}>{LEVEL_LABEL[l.level] ?? l.level}</span></td>
+                  <td className="fit">{l.service}</td>
+                  {source.tenants && <td className="fit" title={l.tenantId ? undefined : '会社に属さない記録'}>{tenantName(l.tenantId)}</td>}
+                  <td className="log-msg">{logSummary(l)}</td>
                 </tr>
                 {open === l.id && (
                   <tr><td colSpan={source.tenants ? 5 : 4}>

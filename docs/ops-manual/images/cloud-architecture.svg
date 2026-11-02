@@ -1,6 +1,6 @@
 <svg viewBox="0 0 960 900" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
   <title id="t">クラウドの形の全体の構成</title>
-  <desc id="d">外から順に、Xserver のパケットフィルター、機械のファイアウォール（ufw・国の遮断・CrowdSec の止める役）、入口の Caddy（証明書と WAF）と WireGuard を通る。奥に API・ワーカー・運営の API・SSH と update.sh があり、PostgreSQL とファイルを毎晩 m2office-backup が Google Cloud Storage へ送る。土台は Ubuntu 26.04 LTS。外部に Google・Gemini・Let's Encrypt・Cloud Storage・GitHub・地域の登録機関・CrowdSec の中央がある。</desc>
+  <desc id="d">外から順に、Xserver のパケットフィルター、機械のファイアウォール（ufw・国の遮断・CrowdSec の止める役）、入口の Caddy（証明書と WAF）と WireGuard を通る。奥に API・ワーカー・運営の API・SSH と update.sh があり、PostgreSQL とファイルを毎晩 m2office-backup が Google Cloud Storage へ送り、入口の守りと VPN の数は m2office-edge-status が 5 分ごとに集める。土台は Ubuntu 26.04 LTS。外部に Google・Gemini・Let's Encrypt・Cloud Storage・GitHub・地域の登録機関・CrowdSec の中央がある。</desc>
   <!-- 運営者マニュアル 第 18 章の図（仕様書 第23.8.16節「図」）。画面のヘルプでは <img> で出すので、スクリプトと外の読み込みは使わない -->
   <style>
     svg { --fg: #1d2430; --muted: #5a6475; --line: #c9cfd8; --surface: #ffffff; --ext: #eef0f3;
@@ -143,10 +143,12 @@
   <text class="ttl" x="380" y="605" text-anchor="middle">社外の控え: m2office-backup（毎晩 2 時すぎ）</text>
   <text class="sub" x="380" y="625" text-anchor="middle">データベース: pgBackRest（まるごとを 14 日分・変更の記録を 5 分ごと）</text>
   <text class="sub" x="380" y="644" text-anchor="middle">ファイル: restic（30 日分）・月に 1 回、壊れていないかを確かめる</text>
-  <rect class="b-guard" x="740" y="582" width="170" height="78" rx="8"/>
-  <text class="ttl" x="825" y="605" text-anchor="middle">国の一覧の更新</text>
-  <text class="mono" x="825" y="625" text-anchor="middle">m2office-geo-update</text>
-  <text class="sub" x="825" y="644" text-anchor="middle">週に 1 回取り直す</text>
+  <rect class="b-guard" x="740" y="582" width="170" height="36" rx="8"/>
+  <text class="ttl" x="825" y="597" text-anchor="middle" style="font-size:12px">国の一覧の更新</text>
+  <text class="mono" x="825" y="611" text-anchor="middle" style="font-size:10px">m2office-geo-update・週 1</text>
+  <rect class="b-guard" x="740" y="624" width="170" height="36" rx="8"/>
+  <text class="ttl" x="825" y="639" text-anchor="middle" style="font-size:12px">守りと VPN の様子</text>
+  <text class="mono" x="825" y="653" text-anchor="middle" style="font-size:10px">m2office-edge-status・5 分</text>
 
   <!-- OS の土台 -->
   <rect class="b-ext" x="50" y="678" width="860" height="62" rx="8"/>

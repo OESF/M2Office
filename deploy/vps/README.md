@@ -39,6 +39,8 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | `update.sh` | リリースのタグを入れる更新。控え（`pg_dump`）→ 社外の控えに戻す点を記録 → 止める → 切り替えて組み立て直す → 移行 → 動かす → 確かめる。失敗したら前の版と控えに戻す |
 | `backup/m2office-backup.sh` | 社外の控え（Google Cloud Storage の東京。仕様書 第20.4.6節「控え」、ADR-0120）。データベースを pgBackRest で（まるごと。14 日分）、ファイルを restic で（30 日分）送り、月に 1 回壊れていないかを確かめる。結果は `/var/lib/m2office/machine/cloud-backup.json`（運営の画面の「稼働状況」）。`--status` で最後の結果、`--check` で確かめだけ。`setup.sh` が `/usr/local/sbin/m2office-backup` に入れる |
 | `backup/*.service`・`backup/*.timer` | 毎晩 2 時すぎに社外の控えを取る（`m2office-backup`） |
+| `edge/m2office-edge-status.mjs` | 入口の守りと VPN の様子を集める（仕様書 第23.8.7節「ネットワークの様子」）。CrowdSec・国の遮断・WAF・証明書・WireGuard の数だけを `/var/lib/m2office/machine/edge-status.json` に書き、運営の画面の「稼働状況」の「ネットワーク」に出す。相手の IP アドレス・鍵・WAF の記録の中身は書かない。`setup.sh` が `/usr/local/lib/m2office/` に入れる |
+| `edge/*.service`・`edge/*.timer` | 5 分ごとに root で集める（`m2office-edge-status`。記録は `journalctl -u m2office-edge-status`） |
 
 雛形の埋め方は、ローカルの形と同じ `deploy/onsite/render.mjs` を使います。機械を変えずに埋めた結果だけを見るときは、次のようにします。
 
@@ -54,7 +56,7 @@ deploy/vps/setup.sh --render-only <出力先> --answers <KEY=値 のファイル
 | `/etc/m2office/` | 環境変数（`m2office.env`）と答え（`setup.conf`）。社外の控えの設定（`backup.env`。root だけ） |
 | `/etc/pgbackrest/` | データベースの控えの設定（`pgbackrest.conf`。暗号化の合言葉を含む）と、控え用のサービスアカウントの鍵（`gcs-key.json`）。root と postgres だけ |
 | `/etc/postgresql/17/main/conf.d/m2office-archive.conf` | 変更の記録（WAL）を絶えず送る設定 |
-| `/var/lib/m2office/` | ファイル（`files/`）・機械の様子（`machine/`。社外の控えの結果 `cloud-backup.json` と更新の前の戻す点 `restore-points.json` を含む） |
+| `/var/lib/m2office/` | ファイル（`files/`）・機械の様子（`machine/`。社外の控えの結果 `cloud-backup.json`・更新の前の戻す点 `restore-points.json`・入口の守りと VPN の様子 `edge-status.json` を含む） |
 | `/var/www/m2office-site/` | 紹介のページ（`m2office.net`・`www`） |
 | `/var/backups/m2office/pre-update/` | 更新の前の控え（直近の 3 回。root だけが読める） |
 | `/var/log/m2office/` | アプリのログと更新の記録（`update.log`） |

@@ -1,0 +1,11 @@
+# 入口の守りと VPN の様子を 5 分ごとに集める（仕様書 第23.8.7節「ネットワークの様子」）。
+[Unit]
+Description=M2Office: 入口の守りと VPN の様子を 5 分ごとに集める
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

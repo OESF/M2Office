@@ -113,6 +113,12 @@ export interface RuntimeMachine {
   /** ファイルの置き場があるディスク（バイト。`free` は使える量）。 */
   diskTotal: number | null;
   diskFree: number | null;
+  /**
+   * 外とつながる口の、受けた量と送った量の積み上がった数（バイト。第23.8.7節「ネットワークの様子」）。
+   * 機械を起動してからの数で、速さは標本の差から出す。読めない OS は `null`。
+   */
+  netRx: number | null;
+  netTx: number | null;
 }
 
 /** API・ワーカーが置く、動いている知らせ（`runtime_beats`）。 */
@@ -175,6 +181,15 @@ export interface RuntimeSamplePoint {
   memory: number | null;
   swap: number | null;
   disk: number | null;
+  /** 受けた速さと送った速さ（Mbps。第23.8.7節「ネットワークの様子」）。記録が無い・途切れた区間は `null`。 */
+  rxMbps: number | null;
+  txMbps: number | null;
+}
+
+/** 直近 24 時間の通信量の合計（バイト）。記録が無ければ `null`。 */
+export interface RuntimeNetTotal {
+  rx: number | null;
+  tx: number | null;
 }
 
 /** 推移を見る長さ（日）。 */

@@ -2565,6 +2565,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .log-filter { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
 .log-filter select, .log-filter input { font: inherit; font-size: 14px; color: var(--ink); padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); }
 .log-filter.grow { flex: 1 1 160px; }
+/* システムログの表。時刻・レベル・プロセス・会社は中身の幅に縮め、残りを文に回す。文は長くても折り返す */
+.log-table th.fit, .log-table td.fit { width: 1%; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.log-table td.log-msg { overflow-wrap: anywhere; }
 .log-form { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); max-width: 560px; margin-bottom: calc(10px * var(--space-scale)); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .badge.caution { background: var(--neutral-soft); color: var(--warn); }
@@ -2896,10 +2899,10 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .qa-answer .card { box-shadow: none; }
 
 /* 機械の資源（仕様書 第23.8.7節「機械の資源の図」）。80% で注意・90% で危険の色。割合の数も必ず出す */
-.resource-card { --rc-cpu: var(--accent); --rc-memory: #4f46e5; --rc-swap: #c026d3; --rc-disk: #64748b; }
-:root[data-theme="dark"] .resource-card { --rc-memory: #818cf8; --rc-swap: #e879f9; --rc-disk: #94a3b8; }
+.resource-card { --rc-cpu: var(--accent); --rc-memory: #4f46e5; --rc-swap: #c026d3; --rc-disk: #64748b; --rc-rx: #0284c7; --rc-tx: #ea580c; }
+:root[data-theme="dark"] .resource-card { --rc-memory: #818cf8; --rc-swap: #e879f9; --rc-disk: #94a3b8; --rc-rx: #38bdf8; --rc-tx: #fb923c; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .resource-card { --rc-memory: #818cf8; --rc-swap: #e879f9; --rc-disk: #94a3b8; }
+  :root:not([data-theme="light"]) .resource-card { --rc-memory: #818cf8; --rc-swap: #e879f9; --rc-disk: #94a3b8; --rc-rx: #38bdf8; --rc-tx: #fb923c; }
 }
 .rc-meters { display: grid; gap: calc(8px * var(--space-scale)); }
 .rc-row { display: grid; grid-template-columns: 9em minmax(80px, 1fr) minmax(0, 1.4fr); align-items: center; gap: calc(10px * var(--space-scale)); }
@@ -2923,18 +2926,24 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .rc-swatch.memory { background: var(--rc-memory); }
 .rc-swatch.swap { background: var(--rc-swap); }
 .rc-swatch.disk { background: var(--rc-disk); }
+.rc-swatch.rxMbps { background: var(--rc-rx); }
+.rc-swatch.txMbps { background: var(--rc-tx); }
+.rc-net { margin-top: calc(6px * var(--space-scale)); }
 .rc-svg { width: 100%; height: auto; display: block; overflow: visible; touch-action: pan-y; }
-.rc-grid { stroke: var(--line); stroke-width: 1; }
-.rc-limit { stroke-width: 1; stroke-dasharray: 4 3; }
+.rc-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.rc-limit { stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
 .rc-limit.warn { stroke: var(--warn); }
 .rc-limit.danger { stroke: var(--danger); }
 .rc-axis { font-size: 10px; fill: var(--muted); }
-.rc-line { fill: none; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+/* 図は画面の幅に合わせて伸びるので、線の太さは画面の上の太さで決める（伸ばすと線まで太くなり、読みにくい） */
+.rc-line { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .rc-line.cpu { stroke: var(--rc-cpu); }
 .rc-line.memory { stroke: var(--rc-memory); }
 .rc-line.swap { stroke: var(--rc-swap); }
 .rc-line.disk { stroke: var(--rc-disk); }
-.rc-cursor { stroke: var(--muted); stroke-width: 1; }
+.rc-line.rxMbps { stroke: var(--rc-rx); }
+.rc-line.txMbps { stroke: var(--rc-tx); }
+.rc-cursor { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
 @media (max-width: 640px) {
   .rc-row { grid-template-columns: 1fr; gap: 2px; }
   .rc-none { grid-column: auto; }

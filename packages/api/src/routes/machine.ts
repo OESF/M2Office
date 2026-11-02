@@ -52,11 +52,12 @@ export function machineRoute(deps: AppDeps) {
   /**
    * 機械の資源の推移（第23.8.7節「機械の資源の図」）。`?days=1`（既定。5 分ごと）か `?days=7`（30 分ごと）。クラウドの形では 404。
    *
-   * @remarks 使っている割合（%）だけを返す。秘密の値・業務の中身・個人の情報は返さない
+   * @remarks 使っている割合（%）と通信の速さ・直近 24 時間の通信量の合計（`net`。第23.8.7節「ネットワークの様子」）だけを返す。秘密の値・業務の中身・個人の情報は返さない
    */
   app.get('/runtime/samples', async (c) => {
     if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
-    return c.json({ samples: await deps.runtime.store.samples(sampleDays(c.req.query('days'))) });
+    const [samples, net] = await Promise.all([deps.runtime.store.samples(sampleDays(c.req.query('days'))), deps.runtime.store.netTotal()]);
+    return c.json({ samples, net });
   });
 
   /**

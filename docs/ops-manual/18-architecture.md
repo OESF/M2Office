@@ -5,7 +5,7 @@ VPS の用意（第 12 章）・セットアップ（第 13 章）・控えと�
 
 この章はクラウドの形（運営が動かす VPS）だけを扱います。会社が自分の機械で動かすローカルの形には運営の画面が無く、構成は `deploy/onsite/README.md` にあります。
 
-![クラウドの形の全体の構成。外から順に、Xserver のパケットフィルター、機械のファイアウォール（ufw・国の遮断・CrowdSec の止める役）、入口の Caddy（証明書と WAF）と WireGuard を通る。奥に API・ワーカー・運営の API・SSH と update.sh があり、PostgreSQL とファイルを毎晩 m2office-backup が Google Cloud Storage へ送る。土台は Ubuntu 26.04 LTS。外部に Google・Gemini・Let's Encrypt・Cloud Storage・GitHub・地域の登録機関・CrowdSec の中央がある](images/cloud-architecture.svg)
+![クラウドの形の全体の構成。外から順に、Xserver のパケットフィルター、機械のファイアウォール（ufw・国の遮断・CrowdSec の止める役）、入口の Caddy（証明書と WAF）と WireGuard を通る。奥に API・ワーカー・運営の API・SSH と update.sh があり、PostgreSQL とファイルを毎晩 m2office-backup が Google Cloud Storage へ送る。入口の守りと VPN の数は m2office-edge-status が 5 分ごとに集める。土台は Ubuntu 26.04 LTS。外部に Google・Gemini・Let's Encrypt・Cloud Storage・GitHub・地域の登録機関・CrowdSec の中央がある](images/cloud-architecture.svg)
 
 ## 1. 図の読み方
 
@@ -73,6 +73,7 @@ VPN を通らずに入れる管理の道はありません。運営者の端末�
 | CrowdSec | `crowdsec`・`crowdsec-firewall-bouncer` | なし | 攻撃する相手を決めて、ファイアウォールで止める |
 | 国の遮断 | `m2office-geo`・`m2office-geo-update.timer` | なし | 起動のときに国の表を入れ、毎週月曜の朝 5 時に一覧を取り直す |
 | 社外の控え | `m2office-backup.timer` | なし | 毎晩 2 時に社外の控えを取る |
+| 入口の守りと VPN の様子 | `m2office-edge-status.timer` | なし | 5 分ごとに、CrowdSec・国の遮断・WAF・証明書・WireGuard の数だけを集め、「稼働状況」の「ネットワーク」に出す（第 7 章） |
 
 M2Office の 3 つのプログラムは、専用の利用者 `m2office` で動き、Node.js のメモリの上限を付けています。動いているかどうかは、マスター管理画面の「稼働状況」（第 7 章）で見られます。
 
@@ -130,6 +131,7 @@ M2Office の 3 つのプログラムは、専用の利用者 `m2office` で動�
 |---|---|---|
 | パケットフィルター・ufw・WireGuard・SSH | 第 12 章 | なし（手で設定する） |
 | Caddy・WAF・CrowdSec・国の遮断 | 第 13 章 | `deploy/vps/Caddyfile.template`・`deploy/vps/crowdsec/`・`deploy/vps/geo/` |
+| 入口の守りと VPN の様子を集める仕組み | 第 13 章 | `deploy/vps/edge/` |
 | M2Office の 3 つのプログラムとデータベース | 第 13 章 | `deploy/vps/setup.sh`・`deploy/vps/systemd/`・`deploy/vps/m2office.env.template` |
 | 更新 | 第 13 章 手順 8 | `deploy/vps/update.sh` |
 | 社外の控え | 第 13 章 手順 9・第 17 章 | `deploy/vps/backup/` |

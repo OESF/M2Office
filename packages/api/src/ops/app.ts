@@ -12,7 +12,7 @@ import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploym
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, operatorCan, opsDomainAllowed, OPERATOR_ROLES,
   tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, OpsRuleError,
   OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual, readOpsManualImage,
-  checkGeminiText, defaultGeminiModels, jstMonth, readCloudBackupRun, readRestorePoints, cloudBackupView, type CheckResult, type SecretBox,
+  checkGeminiText, defaultGeminiModels, jstMonth, readCloudBackupRun, readRestorePoints, cloudBackupView, readEdgeStatus, edgeStatusView, type CheckResult, type SecretBox,
   checkNewDemo, demoSubdomain, demoWelcomeText, hashMachinePassword, newGuestLoginId, newGuestPassword, DEMO_COMPANY_NAME, DEMO_EXTEND_MAX_DAYS, DEMO_MAX_DAYS,
   type SystemLogLine,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
@@ -63,6 +63,8 @@ export interface OpsDeps {
   cloudBackupFile?: string | null;
   /** 更新の前の戻す点のファイル（`update.sh` が書く。第23.8.7節「控えの様子」）。省けば戻す点を出さない */
   restorePointsFile?: string | null;
+  /** 入口の守りと VPN の様子のファイル（`m2office-edge-status` が書く。第23.8.7節「ネットワークの様子」）。省けば「ネットワーク」の表を出さない */
+  edgeStatusFile?: string | null;
 }
 
 type OpsEnv = { Variables: { operator: Operator; session: OpsSession } };
@@ -485,14 +487,20 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
 
   // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）
   app.get('/v1/ops/server', async (c) => {
-    const [status, last, archive, points] = await Promise.all([
+    const [status, last, archive, points, edge] = await Promise.all([
       store.serverStatus(),
       deps.cloudBackupFile ? readCloudBackupRun(deps.cloudBackupFile) : Promise.resolve(null),
       deps.cloudBackupFile ? store.walArchiveStatus() : Promise.resolve(null),
       deps.restorePointsFile ? readRestorePoints(deps.restorePointsFile) : Promise.resolve([]),
+      deps.edgeStatusFile ? readEdgeStatus(deps.edgeStatusFile) : Promise.resolve(null),
     ]);
-    // 社外の控え（第20.4.6節「控え」・第23.8.7節「控えの様子」）。毎晩の控えの結果、変更の記録を送った様子、更新の前の戻す点
-    return c.json({ status, backup: deps.cloudBackupFile ? cloudBackupView(last, archive, Date.now(), points) : null });
+    // 社外の控え（第20.4.6節「控え」・第23.8.7節「控えの様子」）。毎晩の控えの結果、変更の記録を送った様子、更新の前の戻す点。
+    // 入口の守りと VPN（第23.8.7節「ネットワークの様子」）。root の仕組みが書いた数を読むだけ
+    return c.json({
+      status,
+      backup: deps.cloudBackupFile ? cloudBackupView(last, archive, Date.now(), points) : null,
+      edge: deps.edgeStatusFile ? edgeStatusView(edge) : null,
+    });
   });
   /**
    * 動いている環境（第8.6.7.1節）。クラウドの形では、OS・メモリー・CPU・Node.js の版は運営の機械の情報なので、運営の画面だけに出す（2026-10-22 に三浦さんが決めた）。
@@ -539,9 +547,12 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
   /**
    * 機械の資源の推移（第23.8.7節「機械の資源の図」）。`?days=1`（既定。5 分ごと）か `?days=7`（30 分ごと）。
    *
-   * @remarks 使っている割合（%）だけを返す。秘密の値・業務の中身・個人の情報は返さない
+   * @remarks 使っている割合（%）と通信の速さ・直近 24 時間の通信量の合計（`net`。第23.8.7節「ネットワークの様子」）だけを返す。秘密の値・業務の中身・個人の情報は返さない
    */
-  app.get('/v1/ops/runtime/samples', async (c) => c.json({ samples: await store.runtimeSamples(sampleDays(c.req.query('days'))) }));
+  app.get('/v1/ops/runtime/samples', async (c) => {
+    const [samples, net] = await Promise.all([store.runtimeSamples(sampleDays(c.req.query('days'))), store.runtimeNetTotal()]);
+    return c.json({ samples, net });
+  });
 
   // 障害・計画停止の知らせ（第16.11.3節 G-9）。運営者なら誰でも出せる（急ぐため）。対象の会社の管理者に知らせ、会社の監査ログに残す
   app.get('/v1/ops/incidents', async (c) => c.json({ incidents: await store.listIncidents(Number(c.req.query('limit') ?? 100)) }));

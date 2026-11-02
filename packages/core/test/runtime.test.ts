@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { NODE_RELEASE_LINES, compareNodeVersions, nodeSupport, type RuntimeBeat } from '@m2office/shared';
 import {
   availableMemoryOf, inferenceText, runtimeEnvironment, workerDown, WORKER_BEAT_INTERVAL_MS, WORKER_DOWN_MS, isTransientDbError,
-  linuxSwapOf, macSwapOf, beatFromRow, samplePointFromRow, sampleDays, databaseFromRow,
+  linuxSwapOf, macSwapOf, linuxNetOf, macNetOf, beatFromRow, samplePointFromRow, sampleDays, databaseFromRow,
 } from '../src/index.js';
 
 test('段階: Current → LTS → 保守の段階 → サポートの終わり', () => {
@@ -156,8 +156,35 @@ test('行から知らせへ: 負荷は 3 つそろったときだけ。前の版
 
 test('推移の点: 割合は小数 1 桁に丸め、取れなかった値は null のまま。長さは 1 日か 7 日だけ', () => {
   assert.deepEqual(samplePointFromRow({ at: new Date('2026-10-29T01:05:00Z'), cpu: 12.345, memory: '45.67', swap: null, disk: 21 }),
-    { at: '2026-10-29T01:05:00.000Z', cpu: 12.3, memory: 45.7, swap: null, disk: 21 });
+    { at: '2026-10-29T01:05:00.000Z', cpu: 12.3, memory: 45.7, swap: null, disk: 21, rxMbps: null, txMbps: null });
+  // 通信の速さは Mbps を小数 3 桁に丸める
+  const net = samplePointFromRow({ at: '2026-10-29T01:05:00Z', cpu: null, memory: null, swap: null, disk: null, rx_mbps: '1.23456', tx_mbps: 0.0004 });
+  assert.deepEqual([net.rxMbps, net.txMbps], [1.235, 0]);
   assert.deepEqual([sampleDays('7'), sampleDays('1'), sampleDays('30'), sampleDays(undefined)], [7, 1, 1, 1]);
   assert.deepEqual(databaseFromRow({ bytes: '1048576', connections: '12', max: 100 }), { bytes: 1048576, connections: 12, max: 100 });
   assert.equal(databaseFromRow(undefined), null);
+});
+
+test('通信量: 外とつながる口だけを足す（機械の中・VPN・コンテナの口は数えない。第23.8.7節「ネットワークの様子」）', () => {
+  const dev = [
+    'Inter-|   Receive                                                |  Transmit',
+    ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+    '    lo: 5000 10 0 0 0 0 0 0 5000 10 0 0 0 0 0 0',
+    '  eth0: 1000000 900 0 0 0 0 0 0 250000 800 0 0 0 0 0 0',
+    '   wg0: 7000 10 0 0 0 0 0 0 9000 10 0 0 0 0 0 0',
+    'docker0: 300 1 0 0 0 0 0 0 400 1 0 0 0 0 0 0',
+    '  ens4: 10 1 0 0 0 0 0 0 20 1 0 0 0 0 0 0',
+  ].join('\n');
+  assert.deepEqual(linuxNetOf(dev), { rx: 1000010, tx: 250020 });
+  assert.equal(linuxNetOf(''), null);
+  const netstat = [
+    'Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll',
+    'lo0        16384 <Link#1>                      100     0 900000 100     0 900000     0',
+    'en0        1500  <Link#6>    5e:b5:67:2f:e0:93   2000     0 3000000 1500     0 400000     0',
+    'en0        1500  192.168.1     192.168.1.10       2000     - 3000000 1500     - 400000     -',
+    'utun0      1380  <Link#14>                      50     0 7000 50     0 8000     0',
+    'en1        1500  <Link#8>    36:66:e7:b6:8d:80      0     0 0 0     0 0     0',
+  ].join('\n');
+  assert.deepEqual(macNetOf(netstat), { rx: 3000000, tx: 400000 });
+  assert.equal(macNetOf('壊れた出力'), null);
 });

@@ -8,6 +8,9 @@
 import type pg from 'pg';
 import { effectiveTaxTable, type TaxRateEntry } from '@m2office/shared';
 import type { OperatorProfile } from './store.js';
+
+/** 顧客の側が読む運営主体（郵便番号は運営の画面だけが使うので、顧客の側の関数は返さない。移行 178）。 */
+export type AppOperatorProfile = Omit<OperatorProfile, 'postalCode'>;
 import type { ServiceIncident } from './incidents.js';
 
 /** 運営主体の設定を覚えておく長さ（5 分）。 */
@@ -19,7 +22,7 @@ const PROFILE_TTL_MS = 5 * 60_000;
  * @remarks 運営の表を直接は触らない。所有者の権限で動く決めた関数と、会社を持たない `worker_beats` だけ
  */
 export class OpsAppSide {
-  private profile: { at: number; value: OperatorProfile | null } | null = null;
+  private profile: { at: number; value: AppOperatorProfile | null } | null = null;
   private taxes: { at: number; value: TaxRateEntry[] } | null = null;
 
   constructor(private readonly pool: pg.Pool) {}
@@ -98,11 +101,11 @@ export class OpsAppSide {
   }
 
   /** 運営主体の設定（法人名が入っていなければ `null`）。5 分覚えておく。 */
-  async operatorProfile(now = Date.now()): Promise<OperatorProfile | null> {
+  async operatorProfile(now = Date.now()): Promise<AppOperatorProfile | null> {
     if (this.profile && now - this.profile.at < PROFILE_TTL_MS) return this.profile.value;
     const { rows } = await this.pool.query('select * from m2o_operator_profile()');
     const r = rows[0];
-    const value = r && r.name_ja ? { nameJa: r.name_ja, nameEn: r.name_en, postalCode: r.postal_code ?? '', address: r.address, web: r.web, contact: r.contact } : null;
+    const value = r && r.name_ja ? { nameJa: r.name_ja, nameEn: r.name_en, address: r.address, web: r.web, contact: r.contact } : null;
     this.profile = { at: now, value };
     return value;
   }

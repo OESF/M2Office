@@ -2,7 +2,7 @@
  * @file マスター管理画面（仕様書 第23.8.15節）が呼ぶ運営の API（`/v1/ops`）。顧客の API（`api.ts`）とは別の口と別のログイン状態を使う。
  */
 
-import type { RuntimeEnvironment, RuntimeSampleDays, RuntimeSamplePoint } from '@m2office/shared';
+import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint } from '@m2office/shared';
 import { logQuery, type EvidenceView, type SystemLogDigestView, type SystemLogPage, type SystemLogQuery } from './api.js';
 
 /** 運営の API の失敗。 */
@@ -122,6 +122,26 @@ export interface ServerStatusView {
   database: { bytes: number; connections: number };
   filesBytes: number;
   ai: { today: number; month: number; lastMonthSamePeriod: number };
+}
+
+/** 入口の守りと VPN の様子（仕様書 第23.8.7節「ネットワークの様子」）。読めなかった部分は `null`。 */
+export interface EdgeStatusViewRow {
+  /** 集める仕組みを入れてあるか（結果のファイルがあるか）。 */
+  configured: boolean;
+  last: {
+    at: string;
+    crowdsec: { local: number | null; shared: number | null; alerts24h: number | null } | null;
+    geo: { countries: string; inBlocked: number | null; outBlocked: number | null; listAt: string | null } | null;
+    waf: { engine: string | null; hits24h: number | null } | null;
+    certs: { count: number; nearest: string | null } | null;
+    errors: string[];
+  } | null;
+  /** 最後に集めたのが 15 分より前。 */
+  stale: boolean;
+  /** 証明書のいちばん近い期限が 30 日を切った。 */
+  certSoon: boolean;
+  /** VPN の端末ごとの、網の中のアドレスと最後の接続。 */
+  peers: { address: string; lastHandshake: string | null; connected: boolean }[];
 }
 
 /** 社外の控えの様子（仕様書 第20.4.6節「控え」）。 */
@@ -268,15 +288,15 @@ export const opsApi = {
     call<{ id: string; loginUrl: string; welcome: string }>('/tenants', send('POST', b)),
   setTenantStatus: (id: string, status: 'trial' | 'active') => call<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/status`, send('PUT', { status })),
   tenantDetail: (id: string) => call<{ detail: TenantDetailView; opsHistory: OpsAuditRow[] }>(`/tenants/${encodeURIComponent(id)}`),
-  server: () => call<{ status: ServerStatusView; backup: CloudBackupViewRow | null }>('/server'),
+  server: () => call<{ status: ServerStatusView; backup: CloudBackupViewRow | null; edge: EdgeStatusViewRow | null }>('/server'),
   /** 動いている環境（仕様書 第8.6.7.1節。クラウドの形では運営だけが見る）。 */
   runtime: () => call<RuntimeEnvironment>('/runtime'),
   /** 運営者のヘルプの章の一覧（仕様書 第23.8.16節）。`q` で題と本文を絞り込む。 */
   help: (q = '') => call<{ chapters: { id: string; title: string }[] }>(`/help${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`),
   /** 運営者のヘルプの 1 章（本文は Markdown）。 */
   helpChapter: (id: string) => call<{ chapter: { id: string; title: string; body: string } }>(`/help/${encodeURIComponent(id)}`),
-  /** 機械の資源の推移（仕様書 第23.8.7節「機械の資源の図」）。 */
-  runtimeSamples: (days: RuntimeSampleDays) => call<{ samples: RuntimeSamplePoint[] }>(`/runtime/samples?days=${days}`),
+  /** 機械の資源の推移と直近 24 時間の通信量（仕様書 第23.8.7節「機械の資源の図」「ネットワークの様子」）。 */
+  runtimeSamples: (days: RuntimeSampleDays) => call<{ samples: RuntimeSamplePoint[]; net: RuntimeNetTotal }>(`/runtime/samples?days=${days}`),
   /** 障害・計画停止の知らせ（仕様書 第16.11.3節 G-9）。 */
   incidents: () => call<{ incidents: IncidentRow[] }>('/incidents'),
   openIncident: (b: { title: string; impact: IncidentRow['impact']; body: string; tenants: string[] | null; startedAt: string | null }) =>

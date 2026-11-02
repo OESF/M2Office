@@ -17,3 +17,4 @@ export { loadOpsManual, searchOpsManual, linkChapters, opsManualImageRefs, readO
 export { serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport } from './incidents.js';
 export { proxyAllowed, ProxyAccessStore, PROXY_HOURS, PROXY_DEFAULT_HOURS, type ProxyScope, type ProxyGrant, type ProxySessionInfo } from './proxy.js';
 export { readCloudBackupRun, readRestorePoints, nextNightlyRun, cloudBackupView, CLOUD_BACKUP_STALE_MS, type CloudBackupRun, type CloudBackupInventory, type CloudBackupView, type RestorePoint, type WalArchiveStatus } from './cloud-backup.js';
+export { readEdgeStatus, edgeStatusView, EDGE_STATUS_STALE_MS, EDGE_CERT_SOON_MS, EDGE_PEER_ONLINE_MS, type EdgeStatus, type EdgeStatusView } from './edge-status.js';

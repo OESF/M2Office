@@ -13,7 +13,7 @@ import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import {
   opsApi, OpsApiError, TENANTS_CSV_URL, type OperatorProfileView, type OpsAiSettingsView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
-  type CloudBackupViewRow, type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
+  type CloudBackupViewRow, type EdgeStatusViewRow, type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
 import { RuntimeCard } from './runtime-card.js';
@@ -594,8 +594,9 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
 function Server() {
   const [s, setS] = useState<ServerStatusView | null>(null);
   const [backup, setBackup] = useState<CloudBackupViewRow | null>(null);
+  const [edge, setEdge] = useState<EdgeStatusViewRow | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => { opsApi.server().then((r) => { setS(r.status); setBackup(r.backup); }).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
+  const load = useCallback(() => { opsApi.server().then((r) => { setS(r.status); setBackup(r.backup); setEdge(r.edge); }).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
   useEffect(() => { load(); const t = window.setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
   const rate = (f: number, n: number) => (n ? `${Math.round((f / n) * 1000) / 10}%` : '—');
   const lastWorker = s?.workers[0]?.at ?? null;
@@ -621,6 +622,7 @@ function Server() {
             <div className="stat"><span>AI の費用（今日 ／ 今月）</span><strong>{yen(Number(s.ai.today))} ／ {yen(Number(s.ai.month))}</strong><span>前の月の同じ時期 {yen(Number(s.ai.lastMonthSamePeriod))}</span></div>
           </div>
           {backup?.configured && <BackupDetail b={backup} />}
+          {edge && <EdgeDetail e={edge} />}
           <h3>外部の接続（24 時間）</h3>
           {s.targets.length === 0 ? <p className="muted">まだありません</p> : <div className="table-scroll"><table className="table">
             <thead><tr><th>接続先</th><th className="num">成功</th><th className="num">失敗</th><th className="num">失敗の割合</th><th className="num">平均の速さ</th></tr></thead>
@@ -664,6 +666,46 @@ function BackupStat({ b }: { b: CloudBackupViewRow }) {
         {errors && <><br />{errors}</>}
       </span>
     </div>
+  );
+}
+
+/**
+ * 入口の守りと VPN の様子（仕様書 第23.8.7節「ネットワークの様子」）。VPS の上で root の仕組みが 5 分ごとに書いた数を出す。
+ * 相手の IP アドレス・鍵・WAF の記録の中身は出さない。読めなかった値は「取得できなかった」と出す（推測で埋めない）。
+ */
+function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
+  const title = <OpsSubTitle title="ネットワーク" help={{ chapter: '18-architecture', text: '入口の守り（CrowdSec・国の遮断・WAF・証明書）と VPN の様子です。仕組みの全体は「詳しく見る」から開きます。' }} />;
+  if (!e.configured || !e.last) return <>{title}<p className="muted"><span className="badge warn">入れていません</span> 運営者マニュアル 第 13 章</p></>;
+  const l = e.last;
+  const NONE = <span className="muted">取得できなかった</span>;
+  const n = (v: number | null | undefined) => (v === null || v === undefined ? null : v.toLocaleString('ja-JP'));
+  const engine: Record<string, string> = { DetectionOnly: '記録だけ', On: '止める' };
+  return (
+    <>
+      {title}
+      <p className="small muted">
+        最後に集めた時刻 {e.stale ? <span className="badge warn">{when(l.at)}（止まっています）</span> : when(l.at)}
+      </p>
+      <div className="table-scroll"><table className="table">
+        <tbody>
+          <tr><th>CrowdSec</th><td>{l.crowdsec ? <>
+            いま止めている相手 この機械で見つけた {n(l.crowdsec.local) ?? '—'}・世界中で分け合う一覧 {n(l.crowdsec.shared) ?? '—'}・直近 24 時間に見つけた攻撃 {n(l.crowdsec.alerts24h) ?? '—'}
+          </> : NONE}</td></tr>
+          <tr><th>国の遮断</th><td>{l.geo ? (l.geo.countries ? <>
+            {l.geo.countries}・止めた通信 入ってくる {n(l.geo.inBlocked) ?? '—'}・出ていく {n(l.geo.outBlocked) ?? '—'}（表を入れてから）・一覧 {when(l.geo.listAt)}
+          </> : '止めていません') : NONE}</td></tr>
+          <tr><th>WAF</th><td>{l.waf ? <>
+            {l.waf.engine ? engine[l.waf.engine] ?? l.waf.engine : '—'}・直近 24 時間に規則に当たった要求 {n(l.waf.hits24h) ?? '—'}
+          </> : NONE}</td></tr>
+          <tr><th>証明書</th><td>{l.certs ? <>
+            {l.certs.count} 枚・いちばん近い期限 {e.certSoon ? <span className="badge warn">{when(l.certs.nearest)}</span> : when(l.certs.nearest)}
+          </> : NONE}</td></tr>
+          <tr><th>VPN</th><td>{e.peers.length === 0 ? NONE : e.peers.map((p) => (
+            <div key={p.address}><code>{p.address}</code> {p.connected ? <span className="badge ok">つながっています</span> : <>最後の接続 {p.lastHandshake ? when(p.lastHandshake) : 'まだありません'}</>}</div>
+          ))}</td></tr>
+        </tbody>
+      </table></div>
+    </>
   );
 }
 

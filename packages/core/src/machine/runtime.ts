@@ -15,7 +15,7 @@ import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import type pg from 'pg';
 import {
-  nodeSupport, type NodeSecurityNotice, type RuntimeBeat, type RuntimeEnvironment, type RuntimeMachine, type RuntimeProcess, type RuntimeSampleDays, type RuntimeSamplePoint,
+  nodeSupport, type NodeSecurityNotice, type RuntimeBeat, type RuntimeEnvironment, type RuntimeMachine, type RuntimeNetTotal, type RuntimeProcess, type RuntimeSampleDays, type RuntimeSamplePoint,
 } from '@m2office/shared';
 import { diskSpace } from './backup.js';
 import { createPool } from '../repository/pool.js';
@@ -89,6 +89,53 @@ export function macSwapOf(swapusage: string): { total: number; free: number } | 
   return total === null || free === null ? null : { total: Math.round(total), free: Math.round(free) };
 }
 
+/**
+ * 通信量を数えない口（第23.8.7節「ネットワークの様子」）。機械の中の口（`lo`）・VPN（WireGuard の `wg*`、macOS の `utun*`）・
+ * コンテナの口（`docker*`・`veth*`・`br-*`）と、macOS の端末どうしの口（`awdl*`・`llw*`・`bridge*`・`gif*`・`stf*`・`anpi*`・`ap*`）。
+ */
+const NET_SKIP = /^(lo\d*|wg|utun|docker|veth|br-|awdl|llw|bridge|gif|stf|anpi|ap\d)/;
+
+/** Linux の `/proc/net/dev` から、外とつながる口の受けた量と送った量（バイト）の合計を読む。読めなければ `null`。 */
+export function linuxNetOf(dev: string): { rx: number; tx: number } | null {
+  let rx = 0; let tx = 0; let seen = false;
+  for (const line of dev.split('\n')) {
+    const m = /^\s*([^:\s]+):\s*(.*)$/.exec(line);
+    if (!m || NET_SKIP.test(m[1]!)) continue;
+    const f = m[2]!.trim().split(/\s+/).map(Number);
+    // 受けた量は 1 つ目、送った量は 9 つ目の欄
+    if (f.length < 9 || !Number.isFinite(f[0]) || !Number.isFinite(f[8])) continue;
+    rx += f[0]!; tx += f[8]!; seen = true;
+  }
+  return seen ? { rx, tx } : null;
+}
+
+/** macOS の `netstat -ib` から、外とつながる口の受けた量と送った量（バイト）の合計を読む（口ごとの `<Link#…>` の行だけ）。読めなければ `null`。 */
+export function macNetOf(netstat: string): { rx: number; tx: number } | null {
+  const lines = netstat.split('\n');
+  const head = lines[0]?.trim().split(/\s+/) ?? [];
+  const ib = head.indexOf('Ibytes');
+  const ob = head.indexOf('Obytes');
+  if (ib < 0 || ob < 0) return null;
+  let rx = 0; let tx = 0; let seen = false;
+  for (const line of lines.slice(1)) {
+    const f = line.trim().split(/\s+/);
+    if (!f[0] || NET_SKIP.test(f[0]) || !f[2]?.startsWith('<Link#')) continue;
+    // 物理の口の行はアドレスの欄を持つ。持たない口（VPN など）は 1 つ欄が少ないので、末尾から数える
+    const shift = f.length < head.length ? head.length - f.length : 0;
+    const r = Number(f[ib - shift]); const t = Number(f[ob - shift]);
+    if (!Number.isFinite(r) || !Number.isFinite(t)) continue;
+    rx += r; tx += t; seen = true;
+  }
+  return seen ? { rx, tx } : null;
+}
+
+/** 通信量の積み上がった数（バイト）。Linux と macOS だけ読む。 */
+async function netCounters(): Promise<{ rx: number; tx: number } | null> {
+  if (process.platform === 'linux') return linuxNetOf(await readFile('/proc/net/dev', 'utf8').catch(() => ''));
+  if (process.platform === 'darwin') return macNetOf((await run('netstat', ['-ib'])) ?? '');
+  return null;
+}
+
 /** Swap（バイト）。Linux と macOS だけ読む。 */
 async function swapSpace(): Promise<{ total: number; free: number } | null> {
   if (process.platform === 'linux') return linuxSwapOf(await readFile('/proc/meminfo', 'utf8').catch(() => ''));
@@ -97,14 +144,14 @@ async function swapSpace(): Promise<{ total: number; free: number } | null> {
 }
 
 /**
- * いまの機械の様子（OS・CPU・メモリー・負荷・Swap・ディスク）。
+ * いまの機械の様子（OS・CPU・メモリー・負荷・Swap・ディスク・通信量）。
  *
  * @param diskPath ディスクの使用量を見る場所（ファイルの置き場）。無ければディスクは `null`
  */
 export async function currentMachine(diskPath?: string): Promise<RuntimeMachine> {
-  const [name, vm, swap, disk] = await Promise.all([
+  const [name, vm, swap, disk, net] = await Promise.all([
     osName().catch(() => null), process.platform === 'darwin' ? run('vm_stat', []) : Promise.resolve(null),
-    swapSpace().catch(() => null), diskPath ? diskSpace(diskPath) : Promise.resolve(null),
+    swapSpace().catch(() => null), diskPath ? diskSpace(diskPath) : Promise.resolve(null), netCounters().catch(() => null),
   ]);
   const cpus = os.cpus();
   // Windows は平均の負荷を持たない（いつも 0 を返す）
@@ -113,6 +160,7 @@ export async function currentMachine(diskPath?: string): Promise<RuntimeMachine>
     os: name, arch: process.arch, cpu: cpus[0]?.model?.trim() || null, cores: cpus.length || null,
     memTotal: os.totalmem(), memFree: (vm && availableMemoryOf(vm)) || os.freemem(),
     load, swapTotal: swap?.total ?? null, swapFree: swap?.free ?? null, diskTotal: disk?.total ?? null, diskFree: disk?.free ?? null,
+    netRx: net?.rx ?? null, netTx: net?.tx ?? null,
   };
 }
 
@@ -134,8 +182,10 @@ export interface RuntimeBeatStore {
   postgresVersion(): Promise<string | null>;
   /** 機械の資源の標本を置き、7 日より古いものを消す（API だけが呼ぶ）。 */
   writeSample(machine: RuntimeMachine): Promise<void>;
-  /** 機械の資源の推移（使っている割合 %）。 */
+  /** 機械の資源の推移（使っている割合 % と通信の速さ）。 */
   samples(days: RuntimeSampleDays): Promise<RuntimeSamplePoint[]>;
+  /** 直近 24 時間の通信量の合計（第23.8.7節「ネットワークの様子」）。 */
+  netTotal(): Promise<RuntimeNetTotal>;
   /** データベースの大きさと接続の数・上限（取れなければ `null`）。 */
   database(): Promise<RuntimeEnvironment['database']>;
 }
@@ -156,14 +206,22 @@ export function beatFromRow(r: BeatRow): RuntimeBeat {
       os: r.os_name, arch: r.arch, cpu: r.cpu, cores: r.cores, memTotal: numOrNull(r.mem_total), memFree: numOrNull(r.mem_free),
       load: load.every((x) => x !== null) ? (load as [number, number, number]) : null,
       swapTotal: numOrNull(r.swap_total), swapFree: numOrNull(r.swap_free), diskTotal: numOrNull(r.disk_total), diskFree: numOrNull(r.disk_free),
+      // 動いている知らせには通信量を置かない（標本だけに置く）
+      netRx: null, netTx: null,
     },
   };
 }
 
 /** 推移の行から点へ（運営の置き場からも使う）。 */
-export function samplePointFromRow(r: { at: Date | string; cpu: Num; memory: Num; swap: Num; disk: Num }): RuntimeSamplePoint {
+export function samplePointFromRow(r: { at: Date | string; cpu: Num; memory: Num; swap: Num; disk: Num; rx_mbps?: Num; tx_mbps?: Num }): RuntimeSamplePoint {
   const pct = (v: Num) => (v === null ? null : Math.round(Number(v) * 10) / 10);
-  return { at: new Date(r.at).toISOString(), cpu: pct(r.cpu), memory: pct(r.memory), swap: pct(r.swap), disk: pct(r.disk) };
+  const mbps = (v: Num | undefined) => (v === null || v === undefined ? null : Math.round(Number(v) * 1000) / 1000);
+  return { at: new Date(r.at).toISOString(), cpu: pct(r.cpu), memory: pct(r.memory), swap: pct(r.swap), disk: pct(r.disk), rxMbps: mbps(r.rx_mbps), txMbps: mbps(r.tx_mbps) };
+}
+
+/** 通信量の合計の行から（運営の置き場からも使う）。 */
+export function netTotalFromRow(r: { rx: Num; tx: Num } | undefined): RuntimeNetTotal {
+  return { rx: numOrNull(r?.rx), tx: numOrNull(r?.tx) };
 }
 
 /** 推移の長さを 1 日か 7 日にそろえる（画面から来た値をそのまま使わない）。 */
@@ -201,14 +259,19 @@ export class PostgresRuntimeBeatStore implements RuntimeBeatStore {
 
   async writeSample(m: RuntimeMachine): Promise<void> {
     await this.pool.query(
-      `insert into runtime_samples (load1, cores, mem_total, mem_free, swap_total, swap_free, disk_total, disk_free) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [m.load?.[0] ?? null, m.cores, m.memTotal, m.memFree, m.swapTotal, m.swapFree, m.diskTotal, m.diskFree]);
+      `insert into runtime_samples (load1, cores, mem_total, mem_free, swap_total, swap_free, disk_total, disk_free, net_rx, net_tx) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [m.load?.[0] ?? null, m.cores, m.memTotal, m.memFree, m.swapTotal, m.swapFree, m.diskTotal, m.diskFree, m.netRx, m.netTx]);
     await this.pool.query(`delete from runtime_samples where at < now() - interval '${RUNTIME_SAMPLE_KEEP_DAYS} days'`);
   }
 
   async samples(days: RuntimeSampleDays): Promise<RuntimeSamplePoint[]> {
-    const { rows } = await this.pool.query('select * from runtime_sample_series($1)', [days]);
+    const { rows } = await this.pool.query('select * from runtime_sample_points($1)', [days]);
     return rows.map(samplePointFromRow);
+  }
+
+  async netTotal(): Promise<RuntimeNetTotal> {
+    const { rows } = await this.pool.query('select * from runtime_net_total(24)').catch(() => ({ rows: [] }));
+    return netTotalFromRow(rows[0]);
   }
 
   async database(): Promise<RuntimeEnvironment['database']> {

@@ -8,8 +8,8 @@
 import type { EvidencePackage, SystemLogDigest, SystemLogFilter, SystemLogLine } from '../log/store.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import type { RuntimeBeat, RuntimeEnvironment, RuntimeSampleDays, RuntimeSamplePoint, TaxRateEntry } from '@m2office/shared';
-import { beatFromRow, databaseFromRow, DATABASE_USAGE_SQL, samplePointFromRow } from '../machine/runtime.js';
+import type { RuntimeBeat, RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, TaxRateEntry } from '@m2office/shared';
+import { beatFromRow, databaseFromRow, DATABASE_USAGE_SQL, netTotalFromRow, samplePointFromRow } from '../machine/runtime.js';
 import type { NewTenantInput, OperatorRole } from './rules.js';
 import type { IncidentImpact, ServiceIncident } from './incidents.js';
 import type { WalArchiveStatus } from './cloud-backup.js';
@@ -530,10 +530,16 @@ export class OpsStore {
     return databaseFromRow(rows[0]);
   }
 
-  /** 機械の資源の推移（使っている割合 %。決めた関数 ops.runtime_samples() で読む）。 */
+  /** 機械の資源の推移（使っている割合 % と通信の速さ。決めた関数 ops.runtime_sample_points() で読む）。 */
   async runtimeSamples(days: RuntimeSampleDays): Promise<RuntimeSamplePoint[]> {
-    const { rows } = await this.pool.query('select * from ops.runtime_samples($1)', [days]);
+    const { rows } = await this.pool.query('select * from ops.runtime_sample_points($1)', [days]);
     return rows.map(samplePointFromRow);
+  }
+
+  /** 直近 24 時間の通信量の合計（第23.8.7節「ネットワークの様子」。決めた関数 ops.runtime_net_total() で読む）。 */
+  async runtimeNetTotal(): Promise<RuntimeNetTotal> {
+    const { rows } = await this.pool.query('select * from ops.runtime_net_total(24)').catch(() => ({ rows: [] }));
+    return netTotalFromRow(rows[0]);
   }
 
   /** サーバー全体の稼働状況。 */

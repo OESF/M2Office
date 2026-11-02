@@ -247,3 +247,43 @@ test('社外の控え（第20.4.6節「控え」）: 台本の文法。送れな
   const timer = readFileSync(join(root, 'deploy/vps/backup/m2office-backup.timer'), 'utf8');
   assert.match(timer, /OnCalendar=\*-\*-\* 02:00:00 Asia\/Tokyo/);
 });
+
+test('入口の守りと VPN の様子（第23.8.7節「ネットワークの様子」）: 数だけを集め、鍵と相手のアドレスは捨てる。setup.sh が 5 分ごとの timer を入れる', async () => {
+  const edge = await import(join(root, 'deploy/vps/edge/m2office-edge-status.mjs')) as {
+    confValue(text: string, key: string): string | null;
+    countDecisions(json: string): { local: number; shared: number };
+    nftPackets(text: string): number | null;
+    countWafHits(text: string, since: number): number;
+    wgPeers(dump: string): { address: string; lastHandshake: string | null }[];
+    collect(now: number, run: (cmd: string, args: string[]) => string): { crowdsec: unknown; vpn: { peers: unknown[] } | null; errors: string[] };
+  };
+  assert.equal(edge.confValue("WAF_ENGINE='DetectionOnly'\nBASE_DOMAIN='m2office.net'\n", 'WAF_ENGINE'), 'DetectionOnly');
+  assert.deepEqual(edge.countDecisions(JSON.stringify([
+    { decisions: [{ origin: 'crowdsec', value: '192.0.2.1' }, { origin: 'cscli' }] },
+    { decisions: [{ origin: 'CAPI' }, { origin: 'lists' }, { origin: 'CAPI' }] },
+  ])), { local: 2, shared: 3 });
+  assert.deepEqual(edge.countDecisions('null'), { local: 0, shared: 0 });
+  assert.equal(edge.nftPackets('table inet m2office_geo {\n\tcounter in_blocked {\n\t\tpackets 87 bytes 4520\n\t}\n}'), 87);
+  const now = Date.parse('2026-11-03T12:00:00Z');
+  const waf = [
+    JSON.stringify({ transaction: { unix_timestamp: (now - 3_600_000) * 1e6, request: { uri: '/secret?x' } } }),
+    JSON.stringify({ transaction: { timestamp: new Date(now - 2 * 86_400_000).toISOString() } }),
+    '{"transaction": 途中で切れた行',
+  ].join('\n');
+  assert.equal(edge.countWafHits(waf, now - 86_400_000), 1);
+  const dump = 'PRIVKEY\tPUBKEY\t51820\toff\nPEERKEY1\t(none)\t203.0.113.5:61000\t10.66.0.2/32\t1762171000\t100\t200\t25\nPEERKEY2\t(none)\t(none)\t10.66.0.3/32\t0\t0\t0\toff\n';
+  const peers = edge.wgPeers(dump);
+  assert.deepEqual(peers, [{ address: '10.66.0.2', lastHandshake: new Date(1762171000 * 1000).toISOString() }, { address: '10.66.0.3', lastHandshake: null }]);
+  assert.ok(!JSON.stringify(peers).includes('PEERKEY') && !JSON.stringify(peers).includes('203.0.113.5'), '鍵と相手の場所は残さない');
+  // 命令が失敗した部分は null にし、理由を残して、ほかの部分は集める
+  const r = edge.collect(now, (cmd) => { if (cmd === 'cscli') throw new Error('cscli: command not found'); if (cmd === 'wg') return dump; return ''; });
+  assert.equal(r.crowdsec, null);
+  assert.equal(r.vpn?.peers.length, 2);
+  assert.ok(r.errors.some((e) => e.startsWith('CrowdSec:')));
+
+  const body = readFileSync(setup, 'utf8');
+  assert.match(body, /install -m 644 "\$SCRIPT_DIR\/edge\/m2office-edge-status\.mjs" \/usr\/local\/lib\/m2office\/m2office-edge-status\.mjs/);
+  assert.match(body, /enable --now m2office-edge-status\.timer/);
+  assert.match(readFileSync(join(root, 'deploy/vps/edge/m2office-edge-status.timer'), 'utf8'), /^OnUnitActiveSec=5min$/m);
+  assert.match(readFileSync(join(root, 'deploy/vps/edge/m2office-edge-status.service'), 'utf8'), /^ExecStart=\/usr\/bin\/node \/usr\/local\/lib\/m2office\/m2office-edge-status\.mjs$/m);
+});

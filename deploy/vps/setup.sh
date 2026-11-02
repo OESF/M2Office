@@ -446,6 +446,16 @@ sudo systemctl start m2office-geo-update.timer
 [ "$BLOCK_COUNTRIES" = NONE ] || info '国のアドレスの一覧を取ります（1〜2 分）'
 sudo /usr/local/sbin/m2office-geo-update >/dev/null || warn '国のアドレスの一覧を取れませんでした。前の一覧があれば、それで止め続けます。後で sudo m2office-geo-update で取り直してください'
 
+# 入口の守りと VPN の様子を集める（仕様書 第23.8.7節「ネットワークの様子」）。root でないと読めない数だけを 5 分ごとにファイルに書き、
+# 運営の画面の「稼働状況」の「ネットワーク」に出す（運営の API に root の権限を持たせない）
+say '入口の守りと VPN の様子を集める仕組みを入れます'
+sudo install -d -m 755 /usr/local/lib/m2office
+sudo install -m 644 "$SCRIPT_DIR/edge/m2office-edge-status.mjs" /usr/local/lib/m2office/m2office-edge-status.mjs
+for u in m2office-edge-status.service m2office-edge-status.timer; do sudo install -m 644 "$SCRIPT_DIR/edge/$u" "/etc/systemd/system/$u"; done
+sudo systemctl daemon-reload
+sudo systemctl enable --now m2office-edge-status.timer >/dev/null 2>&1
+sudo systemctl start m2office-edge-status.service || warn '入口の守りと VPN の様子を集められませんでした（journalctl -u m2office-edge-status -n 20）'
+
 # ---- 10. 確かめる ----
 say '動きを確かめます'
 ok=0
