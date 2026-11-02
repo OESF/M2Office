@@ -21,7 +21,7 @@ export const NODE_STAGE_LABELS: Record<NodeStage, string> = {
 
 /**
  * Node.js の系ごとの予定。日付は公式の予定（YYYY-MM-DD）。26 系までは偶数の系だけが LTS になり、27 系からはどの系も LTS になる。
- * `lts` は LTS になる日、`maintenance` は保守の段階になる日、`end` はサポートの終わる日。2026-10-22 に nodejs/Release の schedule.json と見比べた。
+ * `lts` は LTS になる日、`maintenance` は保守の段階になる日、`end` はサポートの終わる日。2026-11-02 に nodejs/Release の schedule.json と見比べた（26 系の名前 Lithium を足した）。
  * `secure` はセキュリティの修正の下限（その系で分かっている穴をすべて直した最も古い版）。サポートの終わった系とまだ出ていない系は `null`。
  * 2026-10-21 の発表（22 系 v22.23.4・24 系 v24.22.1・26 系 v26.12.1）で決めた（仕様書 第8.6.7.1節、Q-259）。
  */
@@ -30,7 +30,7 @@ export const NODE_RELEASE_LINES: { major: number; codename: string | null; relea
   { major: 22, codename: 'Jod', released: '2024-04-24', lts: '2024-10-29', maintenance: '2025-10-21', end: '2027-04-30', secure: 'v22.23.4' },
   { major: 24, codename: 'Krypton', released: '2025-05-06', lts: '2025-10-28', maintenance: '2026-10-20', end: '2028-04-30', secure: 'v24.22.1' },
   { major: 25, codename: null, released: '2025-10-15', lts: null, maintenance: '2026-04-01', end: '2026-06-01', secure: null },
-  { major: 26, codename: null, released: '2026-05-05', lts: '2026-10-28', maintenance: '2027-10-20', end: '2029-04-30', secure: 'v26.12.1' },
+  { major: 26, codename: 'Lithium', released: '2026-05-05', lts: '2026-10-28', maintenance: '2027-10-20', end: '2029-04-30', secure: 'v26.12.1' },
   { major: 27, codename: null, released: '2027-04-22', lts: '2027-10-20', maintenance: null, end: '2030-04-30', secure: null },
 ];
 

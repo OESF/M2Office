@@ -22,6 +22,7 @@ test('段階: Current → LTS → 保守の段階 → サポートの終わり',
   assert.equal(nodeSupport('v22.14.0', '2027-04-30').stage, 'eol');
   assert.equal(nodeSupport('v24.22.1', '2026-10-22').codename, 'Krypton');
   assert.equal(nodeSupport('v26.0.0', '2026-06-01').codename, null, 'LTS になる前は名前を出さない');
+  assert.equal(nodeSupport('v26.13.0', '2026-11-02').codename, 'Lithium');
 });
 
 test('奇数の系は LTS にならない。表に無い系は「表にない」で知らせない', () => {
