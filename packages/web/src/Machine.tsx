@@ -2,11 +2,13 @@
  * @file ローカルの形の「機械」の画面（仕様書 第8.6.7節）。管理者ページの「機械」と、機械の管理者の画面（第8.6.3節）で同じものを使う。
  *
  * 版と更新・各部の動き・ディスク・証明書・ローカル AI・控え・システムログと証拠保全。業務の中身は出さない。
+ * いちばん上に全体の状態・対応が要るもの・区分ごとの札を出す（仕様書 第23.8.7節「全体の状態」の「ローカルの形の判断の決まり」）。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { describeError, type MachineApi, type MachineView } from './api.js';
-import { PageTitle, type PageHelp } from './help.js';
+import { PageTitle, openHelp, type PageHelp } from './help.js';
+import { HealthNotes, HealthPanel, healthAnchor } from './health-panel.js';
 import { SystemLogs, type LogSource } from './SystemLogs.js';
 import { RuntimeCard } from './runtime-card.js';
 
@@ -25,8 +27,14 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
   const [data, setData] = useState<MachineView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const load = useCallback(() => { fns.machine().then(setData).catch((e) => setError(describeError(e, '読み込めませんでした'))); }, [fns]);
-  useEffect(() => { load(); const t = window.setInterval(load, 30_000); return () => clearInterval(t); }, [load]);
+  const [refresh, setRefresh] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => fns.machine().then((d) => { setData(d); setError(null); }).catch((e) => setError(describeError(e, '読み込めませんでした'))), [fns]);
+  useEffect(() => { void load(); const t = window.setInterval(() => void load(), 30_000); return () => clearInterval(t); }, [load]);
+  // 「更新」は、全体の状態と各欄に加えて、稼働環境とサーバーの資源の欄（`refresh` を渡す）も読み直す
+  const reload = () => { setBusy(true); setRefresh((n) => n + 1); void load().finally(() => setBusy(false)); };
+  // 手順はヘルプの記事「サーバー」。ヘルプを読めない機械の管理者の画面では、手順のリンクを出さない
+  const guide = help ? (id: string) => openHelp(id) : undefined;
   const backup = () => {
     setNote(null);
     fns.machineBackup().then(() => setNote('バックアップを取り始めました。1 分ほどで結果が出ます')).catch((e) => setError(describeError(e, '頼めませんでした')));
@@ -39,13 +47,19 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
   return (
     <>
       <PageTitle trail={['サーバー']} help={help ?? null} />
-      {/* 動いている環境（第8.6.7.1節）。いちばん上に置き、すぐ下に機械の資源（第23.8.7節「機械の資源の図」） */}
-      <RuntimeCard load={fns.runtime} loadSamples={fns.runtimeSamples} />
       {error && <p className="error">{error}</p>}
+      {data?.health && <HealthPanel health={data.health} onGuide={guide} checkedAt={`最終更新 ${whenText(data.checkedAt)}`}
+        tools={<button type="button" className="btn ghost small" disabled={busy} onClick={reload}>{busy ? '…' : '更新'}</button>} />}
+      {/* 動いている環境（第8.6.7.1節）と、すぐ下に機械の資源（第23.8.7節「機械の資源の図」） */}
+      <div id={healthAnchor('runtime')}>
+        <HealthNotes health={data?.health ?? null} areas={['runtime', 'resources']} onGuide={guide} />
+        <RuntimeCard load={fns.runtime} loadSamples={fns.runtimeSamples} refresh={refresh} />
+      </div>
       {data && (
         <>
-          <div className="card">
+          <div className="card" id={healthAnchor('parts')}>
             <h3>各部の動き</h3>
+            <HealthNotes health={data.health} areas={['parts']} onGuide={guide} />
             <dl className="kv">
               <dt>版</dt><dd>{data.version}</dd>
               <dt>データベース</dt><dd>{state(data.database.ok, '稼働中', '止まっています')} {data.database.ms !== null && <span className="small muted">{data.database.ms} ms</span>} {data.database.error && <span className="small muted">{data.database.error}</span>}</dd>
@@ -57,8 +71,9 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
               <dt>データのディスク</dt><dd>{space(data.disk.data)}</dd>
             </dl>
           </div>
-          <div className="card">
+          <div className="card" id={healthAnchor('backup')}>
             <h3>バックアップ</h3>
+            <HealthNotes health={data.health} areas={['backup']} onGuide={guide} />
             {!data.backup.configured ? <p className="muted">バックアップの置き場が設定されていません</p> : (
               <>
                 <dl className="kv">
@@ -75,7 +90,10 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
               </>
             )}
           </div>
-          <MachineUpdate fns={fns} data={data.update} onChanged={load} onError={setError} />
+          <div id={healthAnchor('update')}>
+            <HealthNotes health={data.health} areas={['update']} onGuide={guide} />
+            <MachineUpdate fns={fns} data={data.update} onChanged={() => void load()} onError={setError} />
+          </div>
         </>
       )}
       <SystemLogs source={logs} />

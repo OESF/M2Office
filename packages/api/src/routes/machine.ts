@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   holdUpdates, machineDir,
-  appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, requestBackup, runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv,
+  appPath, backupConfigFromEnv, machineConfigFromEnv, machineStatus, machineHealth, requestBackup, runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -24,15 +24,26 @@ import { systemLogsRoute } from './system-logs.js';
 export function machineRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
 
+  /** 動いている環境を作る（`/runtime` と全体の状態で使う）。 */
+  const readRuntime = async () => {
+    const [beats, postgres, database] = await Promise.all([
+      deps.runtime.store.read().catch(() => []), deps.runtime.store.postgresVersion().catch(() => null), deps.runtime.store.database().catch(() => null),
+    ]);
+    return runtimeEnvironment(beats, postgres, { deployment: 'onsite', debug: !!deps.debug, inference: inferenceText(localLlmFromEnv(process.env), 'onsite'), database });
+  };
+
   /**
-   * ローカルの形の「機械」の様子（仕様書 第8.6.7節）。版・各部の動き・ディスク・証明書・ローカル AI・控え。クラウドの形では 404。
+   * ローカルの形の「機械」の様子（仕様書 第8.6.7節）。版・各部の動き・ディスク・証明書・ローカル AI・控えと、
+   * 全体の状態（`health`。第23.8.7節「全体の状態」の「ローカルの形の判断の決まり」）。クラウドの形では 404。
    *
    * @remarks 業務のデータは返さない
    */
   app.get('/', async (c) => {
     if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
     const version = (() => { try { return (JSON.parse(readFileSync(appPath('package.json'), 'utf8')) as { version?: string }).version ?? '0'; } catch { return '0'; } })();
-    return c.json(await machineStatus(machineConfigFromEnv(process.env, version)));
+    // 稼働環境を読めなければ null にし、その区分を「読めませんでした」にする（推測しない）
+    const [status, runtime] = await Promise.all([machineStatus(machineConfigFromEnv(process.env, version)), readRuntime().catch(() => null)]);
+    return c.json({ ...status, health: machineHealth(status, runtime) });
   });
 
   /**
@@ -43,10 +54,7 @@ export function machineRoute(deps: AppDeps) {
    */
   app.get('/runtime', async (c) => {
     if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
-    const [beats, postgres, database] = await Promise.all([
-      deps.runtime.store.read().catch(() => []), deps.runtime.store.postgresVersion().catch(() => null), deps.runtime.store.database().catch(() => null),
-    ]);
-    return c.json(runtimeEnvironment(beats, postgres, { deployment: 'onsite', debug: !!deps.debug, inference: inferenceText(localLlmFromEnv(process.env), 'onsite'), database }));
+    return c.json(await readRuntime());
   });
 
   /**

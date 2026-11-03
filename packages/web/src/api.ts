@@ -28,6 +28,7 @@ import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSam
   EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckFormat, SlideDeckKind, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
+import type { HealthViewRow } from './health-panel.js';
 
 /**
  * API の呼び出し口。
@@ -3137,7 +3138,8 @@ export interface MachineView {
     last: { at: string; from: string; to: string; result: 'updated' | 'rolled-back' | 'failed' | 'none'; error?: string } | null;
     heldUntil: string | null;
   };
-
+  /** 全体の状態（仕様書 第23.8.7節「全体の状態」の「ローカルの形の判断の決まり」）。 */
+  health: HealthViewRow;
 }
 
 

@@ -1,7 +1,7 @@
 /**
  * @file 稼働状況の全体の状態（仕様書 第23.8.7節「全体の状態」）。いちばん上の「全体の状態」「対応が要るもの」「区分ごとの札」と、各表の上に置く区分の知らせ。
  *
- * 判断は API が行い（core の `opsHealth`）、ここは出すだけ。運営の画面の「稼働状況」と、ローカルの形の「サーバー」で同じものを使う。
+ * 判断は API が行い（core の `opsHealth`・ローカルの形は `machineHealth`）、ここは出すだけ。運営の画面の「稼働状況」と、ローカルの形の「サーバー」で同じものを使う。
  * 区分の札を押すと、同じ画面の詳しい表（`health-区分` の id）へ移る。手順は運営者マニュアルの章か、ほかの画面を開く（開き方は呼ぶ側が決める）。
  */
 
@@ -10,7 +10,7 @@ import type { ReactNode } from 'react';
 /** 状態（平常・注意・警戒）。 */
 export type HealthLevel = 'normal' | 'caution' | 'alert';
 /** 区分。 */
-export type HealthArea = 'jobs' | 'resources' | 'backup' | 'security' | 'external' | 'runtime' | 'tenants' | 'ai';
+export type HealthArea = 'jobs' | 'resources' | 'backup' | 'security' | 'external' | 'runtime' | 'tenants' | 'ai' | 'parts' | 'update';
 
 /** 対応が要るもの 1 件（API の `health.items`）。 */
 export interface HealthItemRow {
@@ -19,7 +19,7 @@ export interface HealthItemRow {
   title: string;
   detail: string | null;
   action: string;
-  /** 手順。マニュアルの章（`07-server`）か、ほかの画面（`page:tenants`）。 */
+  /** 手順。マニュアルの章（`07-server`）・ヘルプの記事（`admin-machine`）か、ほかの画面（`page:tenants`）。 */
   guide: string;
 }
 
@@ -41,8 +41,8 @@ export const healthAnchor = (area: HealthArea) => `health-${area}`;
 /** 手順の言葉（マニュアルの章か、ほかの画面か）。 */
 const guideLabel = (guide: string) => (guide === 'page:tenants' ? '会社一覧を開く' : guide === 'page:settings' ? '設定を開く' : '手順を見る');
 
-/** 対応が要るものの一覧（警戒が先。API が並べた順）。 */
-function HealthItems({ items, onGuide }: { items: HealthItemRow[]; onGuide: (guide: string) => void }) {
+/** 対応が要るものの一覧（警戒が先。API が並べた順）。手順を開けない画面（`onGuide` が無い）では、手順のリンクを出さない。 */
+function HealthItems({ items, onGuide }: { items: HealthItemRow[]; onGuide?: ((guide: string) => void) | undefined }) {
   return (
     <ul className="health-items">
       {items.map((it, i) => (
@@ -51,7 +51,7 @@ function HealthItems({ items, onGuide }: { items: HealthItemRow[]; onGuide: (gui
           <div className="health-body">
             <strong>{it.title}</strong>
             {it.detail && <span className="small muted">{it.detail}</span>}
-            <span className="health-action">すること: {it.action}{' '}<button type="button" className="link-btn" onClick={() => onGuide(it.guide)}>{guideLabel(it.guide)}</button></span>
+            <span className="health-action">すること: {it.action}{onGuide && <>{' '}<button type="button" className="link-btn" onClick={() => onGuide(it.guide)}>{guideLabel(it.guide)}</button></>}</span>
           </div>
         </li>
       ))}
@@ -63,16 +63,16 @@ function HealthItems({ items, onGuide }: { items: HealthItemRow[]; onGuide: (gui
  * いちばん上の 3 段（全体の状態・対応が要るもの・区分ごとの札）。
  *
  * @param health API が決めた全体の状態
- * @param onGuide 手順を開く（マニュアルの章 ID か `page:…`）
+ * @param onGuide 手順を開く（マニュアルの章・ヘルプの記事の ID か `page:…`）。無ければ手順のリンクを出さない
  * @param tools 帯の右に置く操作（「更新」など）
  * @param checkedAt 最後に読んだ時刻（帯に出す）
  */
-export function HealthPanel({ health, onGuide, tools, checkedAt }: { health: HealthViewRow; onGuide: (guide: string) => void; tools?: ReactNode; checkedAt?: string | null }) {
+export function HealthPanel({ health, onGuide, tools, checkedAt }: { health: HealthViewRow; onGuide?: ((guide: string) => void) | undefined; tools?: ReactNode; checkedAt?: string | null }) {
   const lv = HEALTH_LEVEL[health.level];
   const alerts = health.items.filter((i) => i.level === 'alert').length;
   const cautions = health.items.length - alerts;
   const go = (area: HealthArea, guide?: string) => {
-    if (guide) { onGuide(guide); return; }
+    if (guide) { onGuide?.(guide); return; }
     document.getElementById(healthAnchor(area))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   // 会社と AI の費用は、ほかの画面にある（会社一覧・設定）
@@ -104,7 +104,7 @@ export function HealthPanel({ health, onGuide, tools, checkedAt }: { health: Hea
  *
  * @param areas 出す区分（稼働環境とサーバーの資源のように、1 つの欄に 2 つの区分があるときは両方）
  */
-export function HealthNotes({ health, areas, onGuide }: { health: HealthViewRow | null; areas: HealthArea[]; onGuide: (guide: string) => void }) {
+export function HealthNotes({ health, areas, onGuide }: { health: HealthViewRow | null; areas: HealthArea[]; onGuide?: ((guide: string) => void) | undefined }) {
   const items = (health?.items ?? []).filter((i) => areas.includes(i.area));
   return items.length ? <HealthItems items={items} onGuide={onGuide} /> : null;
 }

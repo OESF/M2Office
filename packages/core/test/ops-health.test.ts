@@ -1,12 +1,12 @@
 /**
  * @file 稼働状況の全体の状態（仕様書 第23.8.7節「全体の状態」）の確かめ。区分ごとの判断の決まり、警戒を先に並べること、
- * 省いた区分は出さず読めなかった区分は注意にすることを見る。
+ * 省いた区分は出さず読めなかった区分は注意にすること、ローカルの形の判断（machineHealth）を見る。
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { RuntimeEnvironment } from '@m2office/shared';
-import { edgeStatusView, jstShort, opsHealth, type CloudBackupView, type EdgeStatus, type ServerStatus, type TenantOverview } from '../src/index.js';
+import { edgeStatusView, jstShort, machineHealth, opsHealth, type CloudBackupView, type EdgeStatus, type MachineStatus, type ServerStatus, type TenantOverview } from '../src/index.js';
 
 const now = Date.parse('2026-11-03T09:45:00.000Z');
 const ago = (ms: number) => new Date(now - ms).toISOString();
@@ -104,4 +104,49 @@ test('省いた区分は出さず、読めなかった区分（null）は平常�
   assert.deepEqual(h.areas.map((a) => a.area), ['jobs', 'resources', 'external', 'runtime', 'ai']);
   assert.equal(h.level, 'caution');
   assert.deepEqual(h.areas.filter((a) => a.level === 'caution').map((a) => a.summary), ['サーバーの資源を読めませんでした', '稼働環境を読めませんでした']);
+});
+
+const machine: MachineStatus = {
+  version: '0.29.0', checkedAt: ago(0),
+  database: { ok: true, ms: 3, error: null },
+  worker: { ok: true, lastSeen: ago(30_000), version: '0.29.0' },
+  entrance: { host: 'm2office.clinic.example', certExpires: ago(-60 * 86_400_000), certDaysLeft: 60, error: null },
+  localAi: { configured: true, ok: true, models: ['gemma'], error: null },
+  disk: { data: { free: 1e12, total: 2e12 }, backup: { free: 3e12, total: 4e12 } },
+  backup: {
+    configured: true,
+    status: { last: { name: '20261103-020000', at: ago(8 * 3_600_000), ok: true, dbBytes: 1e8, error: null }, lastOk: ago(8 * 3_600_000), restoreTest: { at: ago(86_400_000), ok: true, name: 'x', tables: 100, error: null } },
+    offsite: { configured: true, status: { last: { name: '20261103-020000', at: ago(7 * 3_600_000), ok: true, snapshot: 'abc', bytesAdded: 1e6, error: null }, lastOkSnapshot: 'abc', check: null } },
+  },
+  update: { settings: { auto: true, signed: true, hour: 3 }, last: { at: ago(30 * 3_600_000), from: 'v0.28.1', to: 'v0.29.0', result: 'updated' }, history: [], heldUntil: null },
+} as unknown as MachineStatus;
+
+test('ローカルの形: 区分は各部の動き・資源・バックアップ・更新・稼働環境。することは「保守の窓口」、手順はヘルプの記事「サーバー」', () => {
+  const calmLocal = machineHealth(machine, runtime, now);
+  assert.equal(calmLocal.level, 'normal');
+  assert.deepEqual(calmLocal.areas.map((a) => a.area), ['parts', 'resources', 'backup', 'update', 'runtime']);
+  const h = machineHealth({
+    ...machine,
+    worker: { ok: false, lastSeen: ago(10 * 60_000), version: '0.29.0' },
+    entrance: { ...machine.entrance, certDaysLeft: 5 },
+    backup: { ...machine.backup, offsite: { configured: true, status: { ...machine.backup.offsite.status!, last: { ...machine.backup.offsite.status!.last!, ok: false, error: 'NAS に届かない' } } } },
+    update: { ...machine.update, last: { at: ago(3_600_000), from: 'v0.28.1', to: 'v0.29.0', result: 'rolled-back' } },
+  }, runtime, now);
+  assert.equal(h.level, 'alert');
+  assert.deepEqual(h.items.map((i) => [i.level, i.title]), [
+    ['alert', 'ワーカーが止まっています'],
+    ['caution', '入口の証明書の期限が近づいています'],
+    ['caution', '別の置き場へバックアップを送れませんでした'],
+    ['caution', '更新を入れられず、前の版に戻しました'],
+  ]);
+  assert.ok(h.items.every((i) => i.guide === 'admin-machine' && !i.action.includes('技術者')));
+  assert.match(h.items[0]!.action, /保守の窓口に連絡する/);
+});
+
+test('ローカルの形: 社内のバックアップが 26 時間より前で止まっていれば警戒、読めなければ注意', () => {
+  const stale = machineHealth({ ...machine, backup: { ...machine.backup, status: { ...machine.backup.status!, lastOk: ago(30 * 3_600_000) } } }, runtime, now);
+  assert.equal(stale.items[0]?.title, 'バックアップが止まっています');
+  const none = machineHealth(null, null, now);
+  assert.equal(none.level, 'caution');
+  assert.ok(none.areas.every((a) => a.level === 'caution'));
 });

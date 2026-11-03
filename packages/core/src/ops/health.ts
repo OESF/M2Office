@@ -4,15 +4,17 @@
  * 画面が判断まで行い、上から「全体の状態」「対応が要るもの」「区分ごとの札」の 3 段で答えるための処理。
  * 判断の決まりは運営者マニュアル 第 7 章の「気にする目安」を決まりにしたもの。することは決まりごとに決めた文で、AI に作らせない
  * （いざというときに、毎回同じことが出るように）。材料を読めなかった区分は、平常とみなさず注意にする（推測しない）。
+ * 運営の画面は `opsHealth`、ローカルの形の管理者ページ「サーバー」は `machineHealth`（第 0.512.0 版）。
  */
 
 import type { RuntimeEnvironment } from '@m2office/shared';
+import type { MachineStatus } from '../machine/status.js';
 import type { CloudBackupView } from './cloud-backup.js';
 import type { EdgeStatusView } from './edge-status.js';
 import type { ServerStatus, TenantOverview } from './store.js';
 
 /** 区分。 */
-export type OpsHealthArea = 'jobs' | 'resources' | 'backup' | 'security' | 'external' | 'runtime' | 'tenants' | 'ai';
+export type OpsHealthArea = 'jobs' | 'resources' | 'backup' | 'security' | 'external' | 'runtime' | 'tenants' | 'ai' | 'parts' | 'update';
 
 /** 状態（平常・注意・警戒）。 */
 export type OpsHealthLevel = 'normal' | 'caution' | 'alert';
@@ -27,7 +29,7 @@ export interface OpsHealthItem {
   detail: string | null;
   /** すること（誰が何をするか）。 */
   action: string;
-  /** 手順。運営者マニュアルの章（`07-server`）か、運営の画面（`page:tenants`）。 */
+  /** 手順。運営者マニュアルの章（`07-server`）か、運営の画面（`page:tenants`）。ローカルの形はヘルプの記事（`admin-machine`）。 */
   guide: string;
 }
 
@@ -62,6 +64,15 @@ export interface OpsHealthInput {
   platformAi?: { usedJpy: number; capJpy: number | null } | null;
 }
 
+/** ローカルの形の区分の名前（札の順）。 */
+export const MACHINE_HEALTH_AREAS: { area: OpsHealthArea; label: string }[] = [
+  { area: 'parts', label: '各部の動き' },
+  { area: 'resources', label: 'サーバーの資源' },
+  { area: 'backup', label: 'バックアップ' },
+  { area: 'update', label: '更新' },
+  { area: 'runtime', label: '稼働環境' },
+];
+
 /** 区分の名前（札の順）。 */
 export const OPS_HEALTH_AREAS: { area: OpsHealthArea; label: string }[] = [
   { area: 'jobs', label: '業務の実行' },
@@ -93,6 +104,10 @@ export const OPS_HEALTH_RULES = {
   aiGrowthRatio: 2, aiGrowthMinJpy: 1000,
   /** 運営の鍵の全体の上限の注意（割合）。 */
   aiCapCaution: 0.8,
+  /** ローカルの形の入口の証明書の注意（残りの日数。自動の更新が 30 日前から延ばすので、14 日を切ったら止まっている）。 */
+  certCautionDays: 14,
+  /** 毎晩のバックアップが止まっているとみなす、最後に取れてからの長さ（26 時間）。 */
+  backupStaleMs: 26 * 3_600_000,
 } as const;
 
 const n = (v: number) => Math.round(v).toLocaleString('ja-JP');
@@ -228,7 +243,7 @@ function external(s: ServerStatus): Judge {
 }
 
 /** 稼働環境（Node.js のサポートとセキュリティの修正・版のずれ）。 */
-function runtime(env: RuntimeEnvironment): Judge {
+function runtimeJudge(env: RuntimeEnvironment): Judge {
   return (push) => {
     if (env.nodeSecurity) {
       const secure = env.nodeSecurity[0]?.secure ?? '';
@@ -278,23 +293,19 @@ function ai(s: ServerStatus | null, p: OpsHealthInput['platformAi']): Judge {
   };
 }
 
+/** 警戒を先に並べる（同じ状態の中は区分の順のまま）。 */
+const alertFirst = (a: OpsHealthItem, b: OpsHealthItem) => (a.level === b.level ? 0 : a.level === 'alert' ? -1 : 1);
+
 /**
- * 全体の状態を決める（第23.8.7節「全体の状態」）。
+ * 区分ごとの判断をまとめて、全体の状態にする。
  *
- * @param input 区分ごとの材料。省いた区分は札を出さず、`null`（読めなかった）は注意にする
- * @returns 全体の状態・対応が要るもの（警戒を先に）・区分ごとの札
+ * @param order 区分の札の順と名前
+ * @param judges 出す区分の判断（`null` は「読めなかった」で注意にする）。無い区分は札を出さない
  */
-export function opsHealth(input: OpsHealthInput, now: number = Date.now()): OpsHealthView {
+function combine(order: { area: OpsHealthArea; label: string }[], judges: Partial<Record<OpsHealthArea, Judge | null>>): OpsHealthView {
   const items: OpsHealthItem[] = [];
   const areas: OpsHealthAreaView[] = [];
-  const judges: Partial<Record<OpsHealthArea, Judge | null>> = {};
-  if ('status' in input) { judges.jobs = input.status ? jobs(input.status, now) : null; judges.external = input.status ? external(input.status) : null; }
-  if ('runtime' in input) { judges.resources = input.runtime ? resources(input.runtime) : null; judges.runtime = input.runtime ? runtime(input.runtime) : null; }
-  if ('backup' in input) judges.backup = input.backup ? backup(input.backup) : null;
-  if ('edge' in input) judges.security = input.edge ? security(input.edge) : null;
-  if ('tenants' in input) judges.tenants = input.tenants ? tenants(input.tenants) : null;
-  if ('status' in input || 'platformAi' in input) judges.ai = input.status === null && input.platformAi === null ? null : ai(input.status ?? null, input.platformAi);
-  for (const { area, label } of OPS_HEALTH_AREAS) {
+  for (const { area, label } of order) {
     if (!(area in judges)) continue;
     const judge = judges[area];
     const mine: OpsHealthItem[] = [];
@@ -302,11 +313,116 @@ export function opsHealth(input: OpsHealthInput, now: number = Date.now()): OpsH
     let summary: string;
     if (judge) summary = judge(push);
     else { push('caution', `${label}を読めませんでした`, null, '続くなら技術者に知らせる', '07-server'); summary = '読めませんでした'; }
-    mine.sort((a, b) => (a.level === b.level ? 0 : a.level === 'alert' ? -1 : 1));
+    mine.sort(alertFirst);
     const level: OpsHealthLevel = mine.some((i) => i.level === 'alert') ? 'alert' : mine.length ? 'caution' : 'normal';
     areas.push({ area, label, level, summary: mine[0]?.title ?? summary });
     items.push(...mine);
   }
-  items.sort((a, b) => (a.level === b.level ? 0 : a.level === 'alert' ? -1 : 1));
+  items.sort(alertFirst);
   return { level: items.some((i) => i.level === 'alert') ? 'alert' : items.length ? 'caution' : 'normal', items, areas };
+}
+
+/**
+ * 全体の状態を決める（第23.8.7節「全体の状態」）。
+ *
+ * @param input 区分ごとの材料。省いた区分は札を出さず、`null`（読めなかった）は注意にする
+ * @returns 全体の状態・対応が要るもの（警戒を先に）・区分ごとの札
+ */
+export function opsHealth(input: OpsHealthInput, now: number = Date.now()): OpsHealthView {
+  const judges: Partial<Record<OpsHealthArea, Judge | null>> = {};
+  if ('status' in input) { judges.jobs = input.status ? jobs(input.status, now) : null; judges.external = input.status ? external(input.status) : null; }
+  if ('runtime' in input) { judges.resources = input.runtime ? resources(input.runtime) : null; judges.runtime = input.runtime ? runtimeJudge(input.runtime) : null; }
+  if ('backup' in input) judges.backup = input.backup ? backup(input.backup) : null;
+  if ('edge' in input) judges.security = input.edge ? security(input.edge) : null;
+  if ('tenants' in input) judges.tenants = input.tenants ? tenants(input.tenants) : null;
+  if ('status' in input || 'platformAi' in input) judges.ai = input.status === null && input.platformAi === null ? null : ai(input.status ?? null, input.platformAi);
+  return combine(OPS_HEALTH_AREAS, judges);
+}
+
+/** ローカルの形の各部の動き（データベース・ワーカー・入口の証明書・ローカル AI）。 */
+function parts(m: MachineStatus): Judge {
+  return (push) => {
+    if (!m.database.ok) push('alert', 'データベースが応答しません', m.database.error, '業務が止まっています。サーバーの電源を確かめ、技術者に連絡する', '07-server');
+    if (!m.worker.ok) push('alert', 'ワーカーが止まっています', `最終応答 ${jstShort(m.worker.lastSeen)}`, '業務が止まっています。サーバーの電源を確かめ、技術者に連絡する', '07-server');
+    const e = m.entrance;
+    if (e.host) {
+      if (e.certDaysLeft !== null && e.certDaysLeft < 0) push('alert', '入口の証明書の期限が切れています', `期限 ${jstShort(e.certExpires)}`, '利用者が画面を開けません。すぐに技術者に連絡する（証明書の自動の更新が止まっている）', '07-server');
+      else if (e.certDaysLeft !== null && e.certDaysLeft < OPS_HEALTH_RULES.certCautionDays) push('caution', '入口の証明書の期限が近づいています', `あと ${e.certDaysLeft} 日`, '証明書の自動の更新が止まっているおそれがあります。技術者に知らせる', '07-server');
+      else if (!e.certExpires) push('caution', '入口を確かめられません', e.error, '利用者が画面を開けるかを確かめ、開けなければ技術者に連絡する', '07-server');
+    }
+    if (m.localAi.configured && !m.localAi.ok) push('caution', 'ローカル AI が答えません', m.localAi.error, 'AI を使う業務が止まります。技術者に連絡する', '07-server');
+    return `データベース・ワーカー稼働中${m.localAi.configured ? '・ローカル AI 稼働中' : ''}`;
+  };
+}
+
+/** ローカルの形のバックアップ（社内のバックアップと、別の置き場）。 */
+function machineBackup(m: MachineStatus, now: number): Judge {
+  return (push) => {
+    if (!m.backup.configured) {
+      push('caution', 'バックアップの置き場が設定されていません', null, '技術者に設定してもらう', '07-server');
+      return '未設定';
+    }
+    const st = m.backup.status;
+    if (!st?.last) {
+      push('caution', 'バックアップをまだ一度も取っていません', null, '毎晩 2 時ごろに取ります。翌朝も取れていなければ、技術者に連絡する', '07-server');
+      return 'まだ取っていません';
+    }
+    if (!st.last.ok) push('alert', '毎晩のバックアップに失敗しました', `${jstShort(st.last.at)}${st.last.error ? `・${st.last.error}` : ''}`, '技術者に連絡する。それまでのバックアップは残っています', '07-server');
+    else if (!st.lastOk || now - Date.parse(st.lastOk) > OPS_HEALTH_RULES.backupStaleMs) push('alert', 'バックアップが止まっています', `最終 ${jstShort(st.lastOk)}（26 時間より前）`, '技術者に連絡する', '07-server');
+    if (st.restoreTest && !st.restoreTest.ok) push('alert', '戻せるかの確認に失敗しました', `${jstShort(st.restoreTest.at)}${st.restoreTest.error ? `・${st.restoreTest.error}` : ''}`, 'バックアップから戻せないおそれがあります。技術者に連絡する', '07-server');
+    const off = m.backup.offsite;
+    if (off.configured && off.status?.last && !off.status.last.ok) {
+      push('caution', '別の置き場へバックアップを送れませんでした', `${jstShort(off.status.last.at)}${off.status.last.error ? `・${off.status.last.error}` : ''}`, '社内のバックアップは残っています。続くなら技術者に連絡する', '07-server');
+    }
+    if (off.configured && off.status?.check && !off.status.check.ok) {
+      push('caution', '別の置き場のバックアップの確認に失敗しました', jstShort(off.status.check.at), '社内のバックアップは残っています。技術者に連絡する', '07-server');
+    }
+    return `取得完了 ${jstShort(st.lastOk)}`;
+  };
+}
+
+/** ローカルの形のサーバーの資源（運営の画面と同じ決まりに、バックアップのディスクを足す）。 */
+function machineResources(env: RuntimeEnvironment | null, m: MachineStatus): Judge {
+  return (push) => {
+    let summary = '読めませんでした';
+    if (env) summary = resources(env)(push);
+    else push('caution', 'サーバーの資源を読めませんでした', null, '続くなら技術者に知らせる', '07-server');
+    const d = m.disk.backup;
+    if (d && d.total > 0 && (1 - d.free / d.total) * 100 >= OPS_HEALTH_RULES.diskCaution) {
+      push('caution', 'バックアップのディスクの使用量が 80% を超えました', `使用 ${pct((1 - d.free / d.total) * 100)}・空き ${(d.free / 1e9).toFixed(1)} GB`, '古いバックアップは自動で消えます。増え続けるなら、技術者とディスクを足す相談をする', '07-server');
+    }
+    return summary;
+  };
+}
+
+/** ローカルの形の更新（直近の更新が入らなかった）。 */
+function machineUpdate(m: MachineStatus): Judge {
+  return (push) => {
+    const last = m.update.last;
+    if (last && (last.result === 'rolled-back' || last.result === 'failed')) {
+      push('caution', last.result === 'rolled-back' ? '更新を入れられず、前の版に戻しました' : '更新を入れられませんでした', `${jstShort(last.at)}・${last.from} → ${last.to}${last.error ? `・${last.error}` : ''}`,
+        '前の版で稼働中です。次の夜にもう一度試します。続くなら技術者に連絡する', '07-server');
+    }
+    if (!m.update.settings?.auto) return '自動の更新は切っています';
+    return last ? `直近 ${jstShort(last.at)}` : 'まだありません';
+  };
+}
+
+/**
+ * ローカルの形の全体の状態を決める（第23.8.7節「全体の状態」の「ローカルの形の判断の決まり」）。
+ * 読み手は会社の管理者なので、することの「技術者」は「保守の窓口」と書き、手順はヘルプの記事「サーバー」（`admin-machine`）にする。
+ *
+ * @param machine 「サーバー」の様子（読めなければ `null`）
+ * @param runtime 動いている環境（読めなければ `null`）
+ */
+export function machineHealth(machine: MachineStatus | null, runtime: RuntimeEnvironment | null, now: number = Date.now()): OpsHealthView {
+  const v = combine(MACHINE_HEALTH_AREAS, {
+    parts: machine ? parts(machine) : null,
+    resources: machine ? machineResources(runtime, machine) : (runtime ? resources(runtime) : null),
+    backup: machine ? machineBackup(machine, now) : null,
+    update: machine ? machineUpdate(machine) : null,
+    runtime: runtime ? runtimeJudge(runtime) : null,
+  });
+  const local = (i: OpsHealthItem): OpsHealthItem => ({ ...i, action: i.action.replaceAll('技術者', '保守の窓口'), guide: 'admin-machine' });
+  return { ...v, items: v.items.map(local) };
 }
