@@ -60,7 +60,7 @@ deploy/vps/setup.sh --render-only <出力先> --answers <KEY=値 のファイル
 | `/var/www/m2office-site/` | 紹介のページ（`m2office.net`・`www`） |
 | `/var/backups/m2office/pre-update/` | 更新の前のバックアップ（直近の 3 回。root だけが読める） |
 | `/var/log/m2office/` | アプリのログと更新の記録（`update.log`） |
-| `/var/log/caddy/` | 入口のアクセスのログと WAF の記録（CrowdSec が読む） |
+| `/var/log/caddy/` | 入口のアクセスのログ（28 日）と WAF の記録（当たった規則まで。Cookie と中身は残さない。8 日）。CrowdSec が読む |
 
 ## 更新する
 

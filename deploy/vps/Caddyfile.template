@@ -28,6 +28,8 @@
 }
 
 # WAF（Coraza と OWASP の規則）。記録は {{CADDY_LOG_DIR}}/waf-audit.log
+# 記録に残すのは基本の情報（A）・締め（H）・当たった規則（K）だけ。おすすめの設定（ABIJDEFHZ）のままでは、Cookie を含む要求のヘッダー（B）・
+# 要求と応答の中身（I・J・E）が残り、当たった規則が残らない（仕様書 第20.4.6節「ログ」。2026-11-03 に VPS で確かめた）
 (waf) {
 	coraza_waf {
 		load_owasp_crs
@@ -39,6 +41,7 @@
 			SecAuditEngine RelevantOnly
 			SecAuditLog {{CADDY_LOG_DIR}}/waf-audit.log
 			SecAuditLogFormat JSON
+			SecAuditLogParts AHKZ
 		`
 	}
 }

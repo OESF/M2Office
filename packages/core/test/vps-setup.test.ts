@@ -139,12 +139,14 @@ test('setup.sh: 公開前の確認の名前とハッシュは両方か空で、�
   assert.ok(!ok(`$2a$14$${'A'.repeat(52)}`), '短いハッシュは断る');
 });
 
-test('ログ: アクセスのログは毎日入れ替えて 28 日、前のページの URL の問い合わせも残さない。WAF の記録も 28 日', () => {
+test('ログ: アクセスのログは毎日入れ替えて 28 日、前のページの URL の問い合わせも残さない。WAF の記録は当たった規則まで・Cookie と中身は残さず 8 日', () => {
   const file = readFileSync(join(render('no'), 'Caddyfile'), 'utf8');
   assert.match(file, /roll_interval 24h\n\t\t\troll_keep_for 672h/);
   assert.match(file, /request>headers>Referer regexp \\\?\.\*\$ \?\*\*\*/);
+  // おすすめの設定（ABIJDEFHZ）を読み込んだ後で、残す部分を基本の情報・締め・当たった規則に絞る（第20.4.6節「ログ」）
+  assert.match(file, /Include @coraza\.conf-recommended[\s\S]*SecAuditLogParts AHKZ\n/);
   const body = readFileSync(setup, 'utf8');
-  assert.match(body, /waf-audit\.log \{\\n\\tdaily\\n\\trotate 28\\n\\tmaxage 28/);
+  assert.match(body, /waf-audit\.log \{\\n\\tdaily\\n\\trotate 8\\n\\tmaxage 8/);
   assert.match(body, /\/etc\/logrotate\.d\/m2office-waf/);
 });
 

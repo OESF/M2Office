@@ -413,8 +413,9 @@ for s in m2office-api m2office-worker m2office-ops; do sudo systemctl enable "$s
 sudo install -m 644 "$work/out/Caddyfile" /etc/caddy/Caddyfile
 sudo -u caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || die 'Caddy の設定が通りません（sudo -u caddy caddy validate --config /etc/caddy/Caddyfile で理由を見てください）'
 sudo systemctl enable caddy >/dev/null 2>&1; sudo systemctl reload-or-restart caddy
-# WAF の記録は Caddy の入れ替えの外なので、logrotate で毎日入れ替えて 28 日分を残す（第20.4.6節「ログ」。WAF は開いたまま書くので、写して空にする）
-printf '%s/waf-audit.log {\n\tdaily\n\trotate 28\n\tmaxage 28\n\tcompress\n\tdelaycompress\n\tmissingok\n\tnotifempty\n\tcopytruncate\n\tsu caddy caddy\n}\n' "$CADDY_LOG_DIR" | sudo tee /etc/logrotate.d/m2office-waf >/dev/null
+# WAF の記録は Caddy の入れ替えの外なので、logrotate で毎日入れ替えて 8 日分を残す（第20.4.6節「ログ」。稼働状況の集める仕組みが 7 日分を読み、
+# 週に 1 回の見直しに足りる。道や問い合わせの部分が残りうるので長くは持たない。WAF は開いたまま書くので、写して空にする）
+printf '%s/waf-audit.log {\n\tdaily\n\trotate 8\n\tmaxage 8\n\tcompress\n\tdelaycompress\n\tmissingok\n\tnotifempty\n\tcopytruncate\n\tsu caddy caddy\n}\n' "$CADDY_LOG_DIR" | sudo tee /etc/logrotate.d/m2office-waf >/dev/null
 sudo install -d -m 755 /etc/crowdsec/acquis.d
 sudo install -m 644 "$work/out/acquis-m2office.yaml" /etc/crowdsec/acquis.d/m2office.yaml
 sudo systemctl restart crowdsec
