@@ -772,7 +772,7 @@ TBD: 推奨は A。ただし契約数を大きく超える場合（例: 1.5 倍�
 | 画面に置かないもの | WAF・国で通信を止める（Q-284）・WireGuard・証明書・Cloudflare の切り替えなど、**機械の守りの設定はマスター管理画面に置かない**。画面のログインが乗っ取られても、機械の守りは外せないようにするため（VPS の上の `setup.sh` で行う） |
 | ローカルの形 | ローカルの形にはマスター管理画面が無いので、いままでどおり会社の管理者ページと `setup.sh` で決める |
 
-**実装（第 0.483.0 版）**: 表 `ops.platform_settings` と、アプリのロールが読む関数 `m2o_platform_ai_settings`・全社の合計 `m2o_ai_platform_total`（運営は `ops.ai_platform_total`）・`ai_usage.platform_key`（移行 171）。API とワーカーは `PlatformAiSource`（`packages/core/src/secrets/platform-ai.ts`）で 1 分ごとに読み直し、推論と調べものは、いまの提供者に中継する代わり（いまの提供者が持たない機能は持たないように見せる）を渡す。全体の上限は `AiUsageMeter` が運営の鍵の会社だけに効かせ、止まった会社の管理者に月に 1 度知らせる（`AI_LIMIT_PLATFORM_MESSAGE`）。運営の API は `/v1/ops/settings/ai`（試して通ったときだけ保存）。自動テスト用のスタブ（`LLM_PROVIDER=stub`）の呼び出しは推論しないので、ローカル AI と同じく 0 円で残し、運営の鍵の費用と上限に数えない（第 0.508.0 版。開発の機械で、鍵が無いのに運営の鍵の費用が出ていたため）。画面は「設定」の運営主体・AI・表示と、全体の上限の 8 割・10 割の印。運営者マニュアル 第 8 章
+**実装（第 0.483.0 版）**: 表 `ops.platform_settings` と、アプリのロールが読む関数 `m2o_platform_ai_settings`・全社の合計 `m2o_ai_platform_total`（運営は `ops.ai_platform_total`）・`ai_usage.platform_key`（移行 171）。API とワーカーは `PlatformAiSource`（`packages/core/src/secrets/platform-ai.ts`）で 1 分ごとに読み直し、推論と調べものは、いまの提供者に中継する代わり（いまの提供者が持たない機能は持たないように見せる）を渡す。全体の上限は `AiUsageMeter` が運営の鍵の会社だけに効かせ、止まった会社の管理者に月に 1 度知らせる（`AI_LIMIT_PLATFORM_MESSAGE`）。運営の API は `/v1/ops/settings/ai`（試して通ったときだけ保存）。自動テスト用のスタブ（`LLM_PROVIDER=stub`）の呼び出しは推論しないので、ローカル AI と同じく 0 円で残し、運営の鍵の費用と上限に数えない（第 0.508.0 版。開発の機械で、鍵が無いのに運営の鍵の費用が出ていたため）。ただし会社の上限では、クラウドの推論と同じく止める（第 0.509.3 版。上限の働きを自動テストで確かめるため）。画面は「設定」の運営主体・AI・表示と、全体の上限の 8 割・10 割の印。運営者マニュアル 第 8 章
 
 #### 23.8.15 段 1: 会社の作成と稼働の見守り（第 0.296.0 版で案、第 0.308.0 版で確定。ADR-0078）
 

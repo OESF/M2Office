@@ -118,7 +118,7 @@ test('暴走の見張り: 前の 14 日の平均の 3 倍を超えた日を、�
   assert.equal(await s.meter.watchSpike('t1'), false, '同じ日は 1 度だけ');
 });
 
-test('包み: 呼び出しごとに用途と人と費用を残す。上限なら新しい呼び出しを止め、業務の実行の中とローカル AI は止めない', async () => {
+test('包み: 呼び出しごとに用途と人と費用を残す。上限なら新しい呼び出しを止め（スタブも止める）、業務の実行の中とローカル AI は止めない', async () => {
   const s = setup({ monthlyJpy: 100, perUserShare: 1 });
   const inner: LlmProvider = {
     name: 'fake',
@@ -142,9 +142,10 @@ test('包み: 呼び出しごとに用途と人と費用を残す。上限なら
   const last = s.rows[s.rows.length - 1]!;
   assert.equal(last.local, true);
   assert.equal(last.costJpy, 0);
-  // 自動テスト用のスタブは推論しないので、0 円で残して運営の鍵の費用に数えない
+  // 自動テスト用のスタブは推論しないので、0 円で残して運営の鍵の費用に数えない。上限では、クラウドの推論と同じく止める
   const stub = meterLlm('t1', { ...inner, name: 'stub' }, s.meter);
-  await withAiUsage({ userId: 'u1', purpose: 'secretary' }, () => stub.complete({ tier: 'fast', messages: [] }));
+  await assert.rejects(() => withAiUsage({ userId: 'u1', purpose: 'secretary' }, () => stub.complete({ tier: 'fast', messages: [] })), AiLimitError);
+  await withAiUsage({ userId: 'u1', purpose: 'agent:minutes', runId: 'r2' }, () => stub.complete({ tier: 'fast', messages: [] }));
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual([s.rows.at(-1)!.local, s.rows.at(-1)!.costJpy], [true, 0]);
 });

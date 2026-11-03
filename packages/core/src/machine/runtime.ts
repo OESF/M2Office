@@ -99,9 +99,12 @@ const NET_SKIP = /^(lo\d*|wg|utun|docker|veth|br-|awdl|llw|bridge|gif|stf|anpi|a
 export function linuxNetOf(dev: string): { rx: number; tx: number } | null {
   let rx = 0; let tx = 0; let seen = false;
   for (const line of dev.split('\n')) {
-    const m = /^\s*([^:\s]+):\s*(.*)$/.exec(line);
-    if (!m || NET_SKIP.test(m[1]!)) continue;
-    const f = m[2]!.trim().split(/\s+/).map(Number);
+    // 「口の名前: 数 数 …」。正規表現で分けると、空白の重なりで長い行に時間がかかりうるため、最初の「:」で分ける
+    const colon = line.indexOf(':');
+    if (colon < 0) continue;
+    const name = line.slice(0, colon).trim();
+    if (!name || /\s/.test(name) || NET_SKIP.test(name)) continue;
+    const f = line.slice(colon + 1).trim().split(/\s+/).map(Number);
     // 受けた量は 1 つ目、送った量は 9 つ目の欄
     if (f.length < 9 || !Number.isFinite(f[0]) || !Number.isFinite(f[8])) continue;
     rx += f[0]!; tx += f[8]!; seen = true;
