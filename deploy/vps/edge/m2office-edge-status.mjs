@@ -32,7 +32,7 @@ export function confValue(text, key) {
 }
 
 /**
- * CrowdSec のいま止めている相手を、この機械で見つけたものと、分け合う一覧のものに分けて数える。
+ * CrowdSec のいま止めている相手を、このサーバーで見つけたものと、分け合う一覧のものに分けて数える。
  *
  * @param decisionsJson `cscli decisions list --all --limit 0 -o json` の出力（止めている相手が無ければ `null`）
  */
@@ -41,7 +41,7 @@ export function countDecisions(decisionsJson) {
   let local = 0; let shared = 0;
   for (const a of alerts) {
     for (const d of a.decisions ?? []) {
-      // この機械の見張り（crowdsec）と手で足したもの（cscli）は自分の、それ以外（CAPI・lists）は分け合う一覧
+      // このサーバーの見張り（crowdsec）と手で足したもの（cscli）は自分の、それ以外（CAPI・lists）は分け合う一覧
       if (d.origin === 'crowdsec' || d.origin === 'cscli') local++; else shared++;
     }
   }

@@ -1,8 +1,8 @@
 #!/bin/bash
-# @file クラウドの形の社外の控え（仕様書 第20.4.6節「控え」、ADR-0120）。データベースを pgBackRest で、ファイルを restic で、Google Cloud Storage の東京へ送る。
+# @file クラウドの形の社外バックアップ（仕様書 第20.4.6節「控え」、ADR-0120）。データベースを pgBackRest で、ファイルを restic で、Google Cloud Storage の東京へ送る。
 #
 # setup.sh が /usr/local/sbin/m2office-backup に入れ、m2office-backup.timer が毎晩 1 回呼ぶ。管理者の権限で走らせる。
-#   m2office-backup            毎晩の控え（データベースのまるごと・ファイル）。月が変わって初めての回は、壊れていないかも確かめる
+#   m2office-backup            毎晩のバックアップ（データベースのまるごと・ファイル）。月が変わって初めての回は、壊れていないかも確かめる
 #   m2office-backup --check    壊れていないかだけを確かめる
 #   m2office-backup --status   最後の結果を表示する（失敗か 26 時間より古ければ 1 で終わる。見張りの道具から呼ぶ）
 #
@@ -25,14 +25,14 @@ now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 reason() { tail -n 2 "$1" | tr '\n"\\' '  ' | cut -c1-300; }
 
 status() {
-  if [ ! -f "$STATUS_FILE" ]; then echo '社外の控え: まだ取っていません'; exit 1; fi
+  if [ ! -f "$STATUS_FILE" ]; then echo '社外バックアップ: まだ取っていません'; exit 1; fi
   node -e '
     const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     const age = (Date.now() - Date.parse(s.at)) / 3600000;
-    console.log(`社外の控え: ${s.ok ? "取れました" : "失敗しました"}（${s.at}。データベース ${s.database.ok ? "済み" : "失敗"}・ファイル ${s.files.ok ? "済み" : "失敗"}）`);
+    console.log(`社外バックアップ: ${s.ok ? "取れました" : "失敗しました"}（${s.at}。データベース ${s.database.ok ? "済み" : "失敗"}・ファイル ${s.files.ok ? "済み" : "失敗"}）`);
     if (s.check) console.log(`壊れていないかの確かめ: ${s.check.ok ? "通りました" : "失敗しました"}（${s.check.at}）`);
     const inv = s.inventory;
-    if (inv && inv.database) console.log(`データベース: まるごとの控え ${inv.database.count} 回。${inv.database.oldest ?? "—"} から後に戻せる`);
+    if (inv && inv.database) console.log(`データベース: まるごとのバックアップ ${inv.database.count} 回。${inv.database.oldest ?? "—"} から後に戻せる`);
     if (inv && inv.files) console.log(`ファイル: ${inv.files.count} 回（${inv.files.oldest ?? "—"} 〜 ${inv.files.newest ?? "—"}）`);
     process.exit(s.ok && age < 26 ? 0 : 1);
   ' "$STATUS_FILE"
@@ -40,7 +40,7 @@ status() {
 
 [ "${1:-}" = --status ] && status
 
-[ -f "$BACKUP_ENV" ] || { echo "社外の控えの設定（${BACKUP_ENV}）がありません。setup.sh で入れてください" >&2; exit 1; }
+[ -f "$BACKUP_ENV" ] || { echo "社外バックアップの設定（${BACKUP_ENV}）がありません。setup.sh で入れてください" >&2; exit 1; }
 set -a
 # shellcheck disable=SC1090
 . "$BACKUP_ENV"
@@ -51,7 +51,7 @@ work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 prev_check=''
 [ -f "$STATUS_FILE" ] && prev_check=$(node -e 'const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(s.check ? s.check.at : "")' "$STATUS_FILE" 2>/dev/null || true)
 
-# 壊れていないかを確かめる（restic は中身の一部を読み戻し、pgBackRest は控えと WAL を読む）
+# 壊れていないかを確かめる（restic は中身の一部を読み戻し、pgBackRest はバックアップと WAL を読む）
 check() {
   local ok=true err=''
   restic check --read-data-subset="$CHECK_SUBSET" >"$work/rc" 2>&1 || { ok=false; err="ファイル: $(reason "$work/rc")"; }
@@ -75,7 +75,7 @@ if [ "${1:-}" = --check ]; then
 fi
 
 started=$(now)
-# データベース: まるごとの控え。残す長さ（14 日）を過ぎた古い控えと WAL は、pgBackRest が自分で消す
+# データベース: まるごとのバックアップ。残す長さ（14 日）を過ぎた古いバックアップと WAL は、pgBackRest が自分で消す
 db_ok=true; db_err=null
 if ! sudo -u postgres pgbackrest --stanza="$STANZA" --type=full backup >"$work/pb" 2>&1; then
   db_ok=false; db_err="\"$(reason "$work/pb")\""
@@ -88,7 +88,7 @@ if restic backup --json --tag m2office --host m2office "$M2O_FILES_DIR" >"$work/
     for (const l of lines) { try { const j = JSON.parse(l); if (j.message_type === "summary") { process.stdout.write(JSON.stringify(j.snapshot_id ?? null)); process.exit(0); } } catch {} }
     process.stdout.write("null");
   ' "$work/rb")
-  restic forget --tag m2office --group-by host,tags "${KEEP[@]}" --prune >"$work/rf" 2>&1 || { files_ok=false; files_err="\"古い控えを消せません: $(reason "$work/rf")\""; }
+  restic forget --tag m2office --group-by host,tags "${KEEP[@]}" --prune >"$work/rf" 2>&1 || { files_ok=false; files_err="\"古いバックアップを消せません: $(reason "$work/rf")\""; }
 else
   files_ok=false; files_err="\"$(reason "$work/rbe")\""
 fi
@@ -102,7 +102,7 @@ elif $db_ok && $files_ok; then
   check_json=$(check)
 fi
 
-# 置き場にあるもの（運営の画面の「戻せる範囲」と控えの数。第23.8.7節「控えの様子」）。読めなければその分を null にする
+# 置き場にあるもの（運営の画面の「戻せる範囲」とバックアップの数。第23.8.7節「控えの様子」）。読めなければその分を null にする
 sudo -u postgres pgbackrest --stanza="$STANZA" info --output=json >"$work/pi" 2>/dev/null || : >"$work/pi"
 restic snapshots --json --tag m2office >"$work/rs" 2>/dev/null || : >"$work/rs"
 restic stats --mode raw-data --json >"$work/rst" 2>/dev/null || : >"$work/rst"
@@ -113,7 +113,7 @@ inventory=$(node -e '
   const [pi, rs, rst, repo, project] = [rd(process.argv[1]), rd(process.argv[2]), rd(process.argv[3]), process.argv[4], process.argv[5]];
   const st = Array.isArray(pi) ? pi.find((s) => s.name === "m2office") : null;
   const b = st && Array.isArray(st.backup) ? st.backup : [];
-  // いちばん古いまるごとの控えが終わった時刻から後に戻せる
+  // いちばん古いまるごとのバックアップが終わった時刻から後に戻せる
   const database = st ? { count: b.length, oldest: b.length ? iso(b[0].timestamp.stop) : null, newest: b.length ? iso(b[b.length - 1].timestamp.stop) : null,
     bytes: b.reduce((n, x) => n + ((x.info && x.info.repository && x.info.repository.delta) || 0), 0) } : null;
   const snaps = Array.isArray(rs) ? rs.map((s) => new Date(s.time).toISOString()).sort() : null;
@@ -125,7 +125,7 @@ inventory=$(node -e '
 ok=false; $db_ok && $files_ok && ok=true
 write_status "$(printf '{"at":"%s","startedAt":"%s","ok":%s,"database":{"ok":%s,"error":%s},"files":{"ok":%s,"error":%s,"snapshot":%s},"check":%s,"inventory":%s}' \
   "$(now)" "$started" "$ok" "$db_ok" "$db_err" "$files_ok" "$files_err" "$snapshot" "$check_json" "$inventory")"
-if $ok; then echo '社外の控えを取りました'; exit 0; fi
-echo '社外の控えに失敗しました' >&2
+if $ok; then echo '社外バックアップを取りました'; exit 0; fi
+echo '社外バックアップに失敗しました' >&2
 cat "$STATUS_FILE" >&2
 exit 1

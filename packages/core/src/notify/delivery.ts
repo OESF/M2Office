@@ -42,7 +42,7 @@ const KIND_LABELS: Record<string, string> = {
   effect: '効果のレポート',
   knowledgeGap: '知識',
   notice: '社内のお知らせ',
-  machine: '機械',
+  machine: 'サーバー',
   service: 'ご利用',
   support: 'サポートの閲覧',
 };
@@ -116,7 +116,7 @@ export class NotificationDelivery {
         }
       } catch (err) {
         // 1 社の失敗で、ほかの会社の見回りを止めない
-        this.log.error('通知の控えの見回りで例外が発生しました', { tenantId, err });
+        this.log.error('通知の転送の見回りで例外が発生しました', { tenantId, err });
       }
     }
     return { sent, held };
@@ -158,7 +158,7 @@ export class NotificationDelivery {
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      this.log.warn('通知の控えを送れませんでした', { tenantId: tenant.id, notificationId: n.id, err });
+      this.log.warn('通知の転送を送れませんでした', { tenantId: tenant.id, notificationId: n.id, err });
       // あきらめる時刻を過ぎていなければ、届け終えたことにせず、次の見回りでもう一度試す
       const giveUp = Date.parse(n.createdAt) + GIVE_UP_HOURS * 3_600_000 <= now.getTime();
       await repo.markNotificationDelivered(

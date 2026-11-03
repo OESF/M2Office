@@ -55,7 +55,7 @@ function ProcessNode({ p, other }: { p: RuntimeProcess | null; other?: RuntimePr
 export function nodeSecurityText(n: NodeSecurityNotice): string {
   const name = { api: 'API', worker: 'ワーカー' } as const;
   const secure = [...new Set(n.map((x) => x.secure))].join('・');
-  return `セキュリティの修正があります（${secure} 以上に更新してください）。古い版で動いているもの: ${n.map((x) => `${name[x.role]}（${x.version}）`).join('・')}`;
+  return `セキュリティの修正があります（${secure} 以上に更新してください）。古い版で稼働中のもの: ${n.map((x) => `${name[x.role]}（${x.version}）`).join('・')}`;
 }
 
 /**
@@ -72,9 +72,9 @@ export function RuntimeCard({ load, loadSamples, filesBytes }: {
 }) {
   const [env, setEnv] = useState<RuntimeEnvironment | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const read = useCallback(() => { load().then((e) => { setEnv(e); setError(null); }).catch(() => setError('動いている環境を読み込めませんでした')); }, [load]);
+  const read = useCallback(() => { load().then((e) => { setEnv(e); setError(null); }).catch(() => setError('稼働環境を読み込めませんでした')); }, [load]);
   useEffect(() => { read(); const t = window.setInterval(read, 60_000); return () => clearInterval(t); }, [read]);
-  if (error) return <div className="card"><h3>動いている環境</h3><p className="error">{error}</p></div>;
+  if (error) return <div className="card"><h3>稼働環境</h3><p className="error">{error}</p></div>;
   if (!env) return null;
   const now = Date.now();
   const m = env.machine;
@@ -82,7 +82,7 @@ export function RuntimeCard({ load, loadSamples, filesBytes }: {
   return (
     <>
     <div className="card runtime-card">
-      <h3>動いている環境</h3>
+      <h3>稼働環境</h3>
       {env.nodeWarn && (
         <p className={env.nodeWarn.expired ? 'error' : 'warn-msg'}>
           {env.nodeWarn.expired
@@ -101,7 +101,7 @@ export function RuntimeCard({ load, loadSamples, filesBytes }: {
         <dd>{m && (m.os || m.arch) ? [m.os, m.arch, m.cpu, m.cores ? `${m.cores} コア` : null].filter(Boolean).join('・') : NONE}</dd>
         <dt>メモリー</dt>
         <dd>{m?.memTotal ? <>{gb(m.memTotal)}{m.memFree !== null && <span className="small muted">（使える量 {gb(m.memFree)}）</span>}</> : NONE}</dd>
-        <dt>動いている形</dt>
+        <dt>稼働の形</dt>
         <dd>{env.deployment === 'onsite' ? 'ローカルの形' : 'クラウドの形'}{env.debug && <span className="badge warn">デバッグモード</span>}</dd>
         <dt>推論</dt><dd>{env.inference ?? NONE}</dd>
         <dt>起動してからの時間</dt>

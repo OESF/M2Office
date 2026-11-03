@@ -732,16 +732,16 @@ function startOffsite(backupDir: string, name: string): void {
     try {
       const before = await readOffsiteStatus(backupDir);
       const rec = await runOffsite(backupDir, name, offsiteCfg);
-      log.info(rec.ok ? '別の置き場の控えを送りました' : '別の置き場の控えを送れませんでした', { name, snapshot: rec.snapshot, bytesAdded: rec.bytesAdded, error: rec.error });
-      if (!rec.ok) await notifyMachine('別の置き場の控えを送れませんでした', `${rec.error ?? ''}。管理者ページの「機械」で確かめてください。`);
+      log.info(rec.ok ? '別の置き場のバックアップを送りました' : '別の置き場のバックアップを送れませんでした', { name, snapshot: rec.snapshot, bytesAdded: rec.bytesAdded, error: rec.error });
+      if (!rec.ok) await notifyMachine('別の置き場のバックアップを送れませんでした', `${rec.error ?? ''}。管理者ページの「サーバー」で確かめてください。`);
       const month = (iso: string) => new Date(Date.parse(iso) + 9 * 3_600_000).toISOString().slice(0, 7);
       if (rec.ok && (!before.check || month(before.check.at) !== month(rec.at))) {
         const c = await checkOffsite(backupDir, offsiteCfg);
-        log.info(c.ok ? '別の置き場の控えが壊れていないことを確かめました' : '別の置き場の控えの確かめに失敗しました', { error: c.error });
-        if (!c.ok) await notifyMachine('別の置き場の控えの確かめに失敗しました', `${c.error ?? ''}。管理者ページの「機械」で確かめ、導入した技術者に伝えてください。`);
+        log.info(c.ok ? '別の置き場のバックアップが壊れていないことを確かめました' : '別の置き場のバックアップの確かめに失敗しました', { error: c.error });
+        if (!c.ok) await notifyMachine('別の置き場のバックアップの確かめに失敗しました', `${c.error ?? ''}。管理者ページの「サーバー」で確かめ、導入した技術者に伝えてください。`);
       }
     } catch (err) {
-      log.warn('別の置き場の控えで例外が発生しました', { err });
+      log.warn('別の置き場のバックアップで例外が発生しました', { err });
     } finally {
       offsiteRunning = false;
     }
@@ -797,9 +797,9 @@ while (running) {
     lastNotifyCheck = Date.now();
     try {
       const r = await notifier.sweep(new Date());
-      if (r.sent > 0) log.info('通知の控えを届けました', r);
+      if (r.sent > 0) log.info('通知の転送を届けました', r);
     } catch (err) {
-      log.error('通知の控えの見回りで例外が発生しました', { err });
+      log.error('通知の転送の見回りで例外が発生しました', { err });
     }
   }
 
@@ -840,18 +840,18 @@ while (running) {
       const due = jst.getUTCHours() >= 2 && !status.last?.name.startsWith(today);
       if (requested || due) {
         const rec = await runBackup(backupCfg, now);
-        log.info(rec.ok ? '控えを取りました' : '控えを取れませんでした', { name: rec.name, bytes: rec.dbBytes, error: rec.error });
-        if (!rec.ok) await notifyMachine('控えを取れませんでした', `${rec.error ?? ''}。管理者ページの「機械」で確かめてください。`);
+        log.info(rec.ok ? 'バックアップを取りました' : 'バックアップを取れませんでした', { name: rec.name, bytes: rec.dbBytes, error: rec.error });
+        if (!rec.ok) await notifyMachine('バックアップを取れませんでした', `${rec.error ?? ''}。管理者ページの「サーバー」で確かめてください。`);
         if (rec.ok) startOffsite(backupCfg.dir, rec.name);
         const lastTest = status.restoreTest?.at ? new Date(Date.parse(status.restoreTest.at) + 9 * 3_600_000).toISOString().slice(0, 7) : null;
         if (rec.ok && lastTest !== jst.toISOString().slice(0, 7)) {
           const t = await restoreTest(backupCfg, now);
-          log.info(t?.ok ? '控えを戻せることを確かめました' : '控えを戻せませんでした', { tables: t?.tables, error: t?.error });
-          if (t && !t.ok) await notifyMachine('控えを戻せませんでした', `${t.error ?? ''}。管理者ページの「機械」で確かめてください。`);
+          log.info(t?.ok ? 'バックアップを戻せることを確かめました' : 'バックアップを戻せませんでした', { tables: t?.tables, error: t?.error });
+          if (t && !t.ok) await notifyMachine('バックアップを戻せませんでした', `${t.error ?? ''}。管理者ページの「サーバー」で確かめてください。`);
         }
       }
     } catch (err) {
-      log.warn('控えの見回りで例外が発生しました', { err });
+      log.warn('バックアップの見回りで例外が発生しました', { err });
     }
   }
   // クラウドの形: ワーカーが動いていることを 1 分ごとに書き、毎晩 0 時 30 分（日本時間）すぎに前の日の数を残す（第23.8.15節）
@@ -883,7 +883,7 @@ while (running) {
       const failed = await takeUnnotifiedUpdateFailure(machineDir(process.env));
       if (failed) {
         await notifyMachine(failed.result === 'rolled-back' ? `新しい版（${failed.to}）を入れられず、前の版に戻しました` : `新しい版（${failed.to}）を入れられませんでした`,
-          `${failed.error ?? ''}。管理者ページの「機械」で確かめ、導入した技術者に伝えてください。`);
+          `${failed.error ?? ''}。管理者ページの「サーバー」で確かめ、導入した技術者に伝えてください。`);
       }
     } catch (err) {
       log.warn('更新の結果の見回りで例外が発生しました', { err });

@@ -105,7 +105,7 @@ const TABS: {
     ],
   },
   { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },
-  { id: 'machine', label: '機械', icon: 'usage', description: '社内に置いた機械の様子と控え（ローカルの形だけ）', group: '記録' },
+  { id: 'machine', label: 'サーバー', icon: 'usage', description: '社内に置いたサーバーの様子とバックアップ（ローカルの形だけ）', group: '記録' },
   { id: 'usage', label: '利用状況', icon: 'usage', description: '業務ごとの実行の件数と費用', group: '記録' },
   // 月ごとの稼働率と障害・計画停止（仕様書 第16.11.3節 G-9。クラウドの形だけ）
   { id: 'service', label: '稼働の報告', icon: 'notifications', description: '月ごとの稼働率と、障害・計画停止の経過', group: '記録' },
@@ -292,7 +292,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             )}
             {tab === 'usage' && <Usage />}
             {tab === 'service' && <ServiceReport />}
-            {tab === 'machine' && <MachinePanel fns={api.admin} help={{ article: 'admin-machine', text: '社内に置いた機械の様子と控えです。業務の中身は出ません。' }} />}
+            {tab === 'machine' && <MachinePanel fns={api.admin} help={{ article: 'admin-machine', text: '社内に置いたサーバーの様子とバックアップです。業務の中身は出ません。' }} />}
             {tab === 'runs' && <Runs viewer={me.proxy?.scope === 'runs' ? me.user.id : null} />}
             {tab === 'support' && !me.proxy && <SupportAccess />}
             {tab === 'schedules' && <TenantSchedules />}

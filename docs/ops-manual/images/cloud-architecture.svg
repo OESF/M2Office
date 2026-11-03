@@ -1,6 +1,6 @@
 <svg viewBox="0 0 960 900" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
   <title id="t">クラウドの形の全体の構成</title>
-  <desc id="d">外から順に、Xserver のパケットフィルター、機械のファイアウォール（ufw・国の遮断・CrowdSec の止める役）、入口の Caddy（証明書と WAF）と WireGuard を通る。奥に API・ワーカー・運営の API・SSH と update.sh があり、PostgreSQL とファイルを毎晩 m2office-backup が Google Cloud Storage へ送り、入口の守りと VPN の数は m2office-edge-status が 5 分ごとに集める。土台は Ubuntu 26.04 LTS。外部に Google・Gemini・Let's Encrypt・Cloud Storage・GitHub・地域の登録機関・CrowdSec の中央がある。</desc>
+  <desc id="d">外から順に、Xserver のパケットフィルター、サーバーのファイアウォール（ufw・国の遮断・CrowdSec の止める役）、入口の Caddy（証明書と WAF）と WireGuard を通る。奥に API・ワーカー・運営の API・SSH と update.sh があり、PostgreSQL とファイルを毎晩 m2office-backup が Google Cloud Storage へ送り、入口の守りと VPN の数は m2office-edge-status が 5 分ごとに集める。土台は Ubuntu 26.04 LTS。外部に Google・Gemini・Let's Encrypt・Cloud Storage・GitHub・地域の登録機関・CrowdSec の中央がある。</desc>
   <!-- 運営者マニュアル 第 18 章の図（仕様書 第23.8.16節「図」）。画面のヘルプでは <img> で出すので、スクリプトと外の読み込みは使わない -->
   <style>
     svg { --fg: #1d2430; --muted: #5a6475; --line: #c9cfd8; --surface: #ffffff; --ext: #eef0f3;
@@ -68,9 +68,9 @@
 
   <rect class="vps" x="30" y="172" width="900" height="618" rx="18"/>
 
-  <!-- 機械のファイアウォール -->
+  <!-- サーバーのファイアウォール -->
   <rect class="b-guard" x="50" y="198" width="860" height="50" rx="8"/>
-  <text class="ttl" x="480" y="218" text-anchor="middle">機械のファイアウォール（nftables）</text>
+  <text class="ttl" x="480" y="218" text-anchor="middle">サーバーのファイアウォール（nftables）</text>
   <text class="sub" x="480" y="237" text-anchor="middle">ufw（80・443・51820 だけ開ける）・国の遮断（中国・ロシア・北朝鮮。入る・出る）・CrowdSec の止める役</text>
 
   <line class="a" x1="140" y1="250" x2="140" y2="278" marker-end="url(#m)"/>
@@ -116,7 +116,7 @@
   <rect class="b-vpn" x="740" y="390" width="170" height="68" rx="8"/>
   <text class="ttl" x="825" y="412" text-anchor="middle">update.sh</text>
   <text class="sub" x="825" y="431" text-anchor="middle">リリースのタグを入れる</text>
-  <text class="sub" x="825" y="448" text-anchor="middle">前に控え・失敗で戻す</text>
+  <text class="sub" x="825" y="448" text-anchor="middle">更新前に保存・失敗で戻す</text>
   <line class="a-vpn" x1="712" y1="424" x2="736" y2="424" marker-end="url(#mv)"/>
 
   <line class="a" x1="125" y1="460" x2="125" y2="488" marker-end="url(#m)"/>
@@ -132,15 +132,15 @@
   <text class="ttl" x="627" y="513" text-anchor="middle">ファイル</text>
   <text class="mono" x="627" y="533" text-anchor="middle">/var/lib/m2office</text>
   <rect class="b-bk" x="740" y="490" width="170" height="60" rx="8"/>
-  <text class="ttl" x="825" y="513" text-anchor="middle">更新の前の控え</text>
+  <text class="ttl" x="825" y="513" text-anchor="middle">更新前のバックアップ</text>
   <text class="sub" x="825" y="533" text-anchor="middle">pg_dump・直近 3 回</text>
 
   <line class="a-bk" x1="290" y1="552" x2="290" y2="580" marker-end="url(#mb)"/>
   <line class="a-bk" x1="627" y1="552" x2="627" y2="580" marker-end="url(#mb)"/>
 
-  <!-- 控えと定期の仕事 -->
+  <!-- バックアップと定期の仕事 -->
   <rect class="b-bk" x="50" y="582" width="660" height="78" rx="8"/>
-  <text class="ttl" x="380" y="605" text-anchor="middle">社外の控え: m2office-backup（毎晩 2 時すぎ）</text>
+  <text class="ttl" x="380" y="605" text-anchor="middle">社外バックアップ: m2office-backup（毎晩 2 時すぎ）</text>
   <text class="sub" x="380" y="625" text-anchor="middle">データベース: pgBackRest（まるごとを 14 日分・変更の記録を 5 分ごと）</text>
   <text class="sub" x="380" y="644" text-anchor="middle">ファイル: restic（30 日分）・月に 1 回、壊れていないかを確かめる</text>
   <rect class="b-guard" x="740" y="582" width="170" height="36" rx="8"/>
@@ -177,7 +177,7 @@
   <text class="sub" x="356" y="871" text-anchor="middle">証明書</text>
   <rect class="b-bk" x="424" y="828" width="120" height="56" rx="8"/>
   <text class="ttl" x="484" y="851" text-anchor="middle">Cloud Storage</text>
-  <text class="sub" x="484" y="871" text-anchor="middle">東京・社外の控え</text>
+  <text class="sub" x="484" y="871" text-anchor="middle">東京・バックアップ</text>
   <rect class="b-ext" x="552" y="828" width="120" height="56" rx="8"/>
   <text class="ttl" x="612" y="851" text-anchor="middle">GitHub</text>
   <text class="sub" x="612" y="871" text-anchor="middle">リリースのタグ</text>

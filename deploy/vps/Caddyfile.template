@@ -2,13 +2,13 @@
 # 開ける口は 443（HTTPS）と 80（HTTPS への転送と証明書の取得）だけ。API と運営の API は 127.0.0.1 で待ち受け、ここから渡す。
 # 証明書は Let's Encrypt から自動で取る。会社のサブドメインは、初めて開かれたときに API に「取ってよいか」を尋ね、払い出した名前だけ取る（On-Demand TLS）。
 # WAF は Coraza と OWASP の規則（CRS）。はじめは記録だけ（DetectionOnly）。誤って止める道を外してから On にする（WAF_ENGINE を On にして setup.sh を走らせ直す）。
-# 攻撃する相手は CrowdSec が Caddy のログを読んで、機械のファイアウォールで止める（Caddy の中では止めない）。
+# 攻撃する相手は CrowdSec が Caddy のログを読んで、サーバーのファイアウォールで止める（Caddy の中では止めない）。
 # 大量の通信の攻撃を受けて Cloudflare を前に置くときは、CLOUDFLARE_FRONT を yes にして走らせ直す（cloudflare_only の段が Cloudflare 以外を断るようになる）。
 # 運営の画面（ops）は WireGuard の網から来た通信だけを通す。公開の DNS は VPS の IP のまま（証明書を取るため）にし、運営者の端末の hosts で ops を 10.66.0.1 に向ける。
 
 {
 	email {{ACME_EMAIL}}
-	# 会社のサブドメインの証明書を取ってよいかを尋ねる先（機械の中だけ）
+	# 会社のサブドメインの証明書を取ってよいかを尋ねる先（サーバーの中だけ）
 	on_demand_tls {
 		ask http://127.0.0.1:{{API_PORT}}/internal/tls-allowed
 	}
@@ -80,7 +80,7 @@
 	}
 }
 
-# 外から機械の中の口（/internal/）に届かせない
+# 外からサーバーの中の口（/internal/）に届かせない
 (no_internal) {
 	@internal path /internal/*
 	handle @internal {

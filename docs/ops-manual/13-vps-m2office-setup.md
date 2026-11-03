@@ -37,8 +37,8 @@ VPS が開ける口は 3 つだけです。
 | 仕組み | 内容 |
 |---|---|
 | WAF（Coraza と OWASP の規則） | Caddy に組み込む。SQL の差し込み・スクリプトの差し込みなど、よくある攻撃の型を見つけて止める。**はじめは記録だけの形で動かし**、文書の本文・ファイルの送信・外部のアプリの配信などを誤って止めないことを確かめてから、止める形にする |
-| CrowdSec | Caddy と SSH のログを読み、総当たり・道の探り・WAF に当たった相手を、決めた時間だけ機械のファイアウォールで断る。世界中の利用者が見つけた攻撃元の一覧（無料の範囲）も使う |
-| 国で通信を止める | 中国・ロシア・北朝鮮（既定）との通信を、入ってくるものも出ていくものも、機械のファイアウォール（nftables の表 `m2office_geo`）で断る。国のアドレスは 5 つの地域インターネットレジストリの公開の一覧から作り、週に 1 回（月曜の朝）取り直す。取れない・壊れているときは前の一覧を使い続ける。WireGuard の網と機械の中は見ない |
+| CrowdSec | Caddy と SSH のログを読み、総当たり・道の探り・WAF に当たった相手を、決めた時間だけサーバーのファイアウォールで断る。世界中の利用者が見つけた攻撃元の一覧（無料の範囲）も使う |
+| 国で通信を止める | 中国・ロシア・北朝鮮（既定）との通信を、入ってくるものも出ていくものも、サーバーのファイアウォール（nftables の表 `m2office_geo`）で断る。国のアドレスは 5 つの地域インターネットレジストリの公開の一覧から作り、週に 1 回（月曜の朝）取り直す。取れない・壊れているときは前の一覧を使い続ける。WireGuard の網とサーバーの中は見ない |
 | 回数の制限 | Caddy が粗い上限（ログイン・外部のアプリの道）、M2Office が細かい上限を持つ（二重） |
 | 自動の更新 | OS のセキュリティの更新（第 12 章の手順 5）と M2Office の夜の更新で、弱点を早くふさぐ |
 
@@ -137,7 +137,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | 紹介のページの公開前の確認の利用者の名前・ハッシュ | 紹介のページを公開する前だけ入れる（下の「紹介のページを公開する」）。公開しているなら空のまま |
 | Gemini の API の鍵・Google のログインのクライアント | あれば入れる（後で走らせ直して入れてもよい）。Gemini の鍵は、マスター管理画面の「設定 › AI」でも入れられる（第 8 章。画面で入れた鍵が優先） |
 
-命令が行うこと: ソフトを公式の置き場から入れる（Node.js 24・PostgreSQL 17 と pgvector・Caddy と WAF・CrowdSec）→ 専用の利用者 `m2office` と置き場を作る → 秘密の値を機械の上で作る → 設定のファイル（`/etc/m2office/m2office.env`）を作る → データベースを作る → 本番の組み立てと移行 → systemd で動かす → Caddy と CrowdSec の設定を置く → 80・443 を開ける → 動きを確かめる。初めては 10〜20 分ほどかかります。
+命令が行うこと: ソフトを公式の置き場から入れる（Node.js 24・PostgreSQL 17 と pgvector・Caddy と WAF・CrowdSec）→ 専用の利用者 `m2office` と置き場を作る → 秘密の値をサーバーの上で作る → 設定のファイル（`/etc/m2office/m2office.env`）を作る → データベースを作る → 本番の組み立てと移行 → systemd で動かす → Caddy と CrowdSec の設定を置く → 80・443 を開ける → 動きを確かめる。初めては 10〜20 分ほどかかります。
 
 最後に「残りの作業」が出ます。何度走らせてもかまいません（秘密の値とデータベースは作り直しません）。
 
@@ -157,15 +157,15 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | # | 確かめること | 命令・操作 | よい結果 |
 |---|---|---|---|
 | 1 | 動いている | `systemctl is-active m2office-api m2office-worker m2office-ops caddy crowdsec` | すべて `active` |
-| 2 | API は機械の中だけ | `sudo ss -tlnp \| grep -E ':310[12]'` | `127.0.0.1:3101` と `127.0.0.1:3102` だけ |
+| 2 | API はサーバーの中だけ | `sudo ss -tlnp \| grep -E ':310[12]'` | `127.0.0.1:3101` と `127.0.0.1:3102` だけ |
 | 3 | 開いている口 | `sudo ufw status verbose` | `80/tcp`・`443/tcp`・`51820/udp`・`22/tcp on wg0` だけ |
 | 4 | 紹介のページ | 手元のブラウザで `https://m2office.net` | 鍵のマークが出て開ける |
 | 5 | 運営の画面 | WireGuard を入れ、hosts に `10.66.0.1 ops.m2office.net` を足して `https://ops.m2office.net` | ログインの画面が出る。WireGuard を切ると開けない |
-| 6 | 外から機械の中の口に届かない | 手元で `curl -s -o /dev/null -w '%{http_code}' https://m2office.net/internal/tls-allowed?domain=x` | `404` |
+| 6 | 外からサーバーの中の口に届かない | 手元で `curl -s -o /dev/null -w '%{http_code}' https://m2office.net/internal/tls-allowed?domain=x` | `404` |
 | 7 | CrowdSec が読んでいる | `sudo cscli metrics` | `Acquisition Metrics` に `/var/log/caddy/access.log` が出る |
 | 8 | CrowdSec が止めている | `sudo cscli bouncers list` と `systemctl is-active crowdsec-firewall-bouncer` | `crowdsec-firewall-bouncer` が並び、`active`。無ければ見つけた相手を止められないので、`setup.sh` を走らせ直す |
 | 9 | 国で通信を止めている | `sudo m2office-geo-update --status` と `systemctl list-timers m2office-geo-update.timer` | 止める国・範囲の数（2 万を超える）・止めた数が出て、次の取り直しの日時が出る。取り直しの記録は `journalctl -u m2office-geo-update` |
-| 10 | 入口の守りと VPN の様子を集めている | `systemctl list-timers m2office-edge-status.timer` と `sudo cat /var/lib/m2office/machine/edge-status.json` | 5 分ごとの次の日時が出て、ファイルの `errors` が空。運営の画面の「稼働状況」の「ネットワーク」に数が出る（第 7 章）。読めなかったものは `errors` と `journalctl -u m2office-edge-status` に理由が出る |
+| 10 | 入口の守りと VPN の様子を集めている | `systemctl list-timers m2office-edge-status.timer` と `sudo cat /var/lib/m2office/machine/edge-status.json` | 5 分ごとの次の日時が出て、ファイルの `errors` が空。運営の画面の「稼働状況」の「VPN」に数が出る（第 7 章）。読めなかったものは `errors` と `journalctl -u m2office-edge-status` に理由が出る |
 
 自分の手元のアドレスが止められて WireGuard でつながらなくなったときは、Xserver の管理画面のコンソールで入り、`sudo cscli decisions delete --ip <手元のアドレス>` で外します。
 
@@ -195,21 +195,21 @@ WAF は記録だけで始めます。週に 1 回、記録（`/var/log/caddy/waf
 sudo /opt/m2office/app/deploy/vps/update.sh --tag <リリースのタグ> --allow-unsigned
 ```
 
-- 入れる前に、データベースの控えを `/var/backups/m2office/pre-update/` に取ります（直近の 3 回）。組み立て・移行・動きの確かめのどれかで失敗したら、前の版と控えに戻します
+- 入れる前に、データベースのバックアップを `/var/backups/m2office/pre-update/` に取ります（直近の 3 回）。組み立て・移行・動きの確かめのどれかで失敗したら、前の版とバックアップに戻します
 - `--allow-unsigned` は、タグへの署名を始める v1.0 までの間だけ付けます
 - 最後に「deploy/vps の雛形が変わっています」と出たら、`setup.sh` を走らせ直します（前の答えのまま Enter で進めます）
 - 記録は `/var/log/m2office/update.log` に残ります
 
-### 手順 9. 社外の控えを入れる（Google Cloud Storage）
+### 手順 9. 社外バックアップを入れる（Google Cloud Storage）
 
-データベースとファイルの控えを、Google Cloud Storage の東京へ送ります（仕様書 第20.4.6節「控え」、ADR-0120）。**顧客を入れる前に入れます。** Google Cloud の用意は運営の管理者のアカウント（2 段階の認証）で行い、VPS には読み書きだけの鍵を置きます。
+データベースとファイルのバックアップを、Google Cloud Storage の東京へ送ります（仕様書 第20.4.6節「控え」、ADR-0120）。**顧客を入れる前に入れます。** Google Cloud の用意は運営の管理者のアカウント（2 段階の認証）で行い、VPS には読み書きだけの鍵を置きます。
 
 **1. Google Cloud で用意する（運営）**
 
 Google Cloud の画面（console.cloud.google.com）か、運営の端末の `gcloud` で行います。`<…>` は決めた名前に置き換えます。
 
 ```bash
-# 控えだけのプロジェクト（請求先は Gemini と Google のログインと同じでよい）
+# バックアップだけのプロジェクト（請求先は Gemini と Google のログインと同じでよい）
 gcloud projects create <プロジェクトの ID>
 gcloud billing projects link <プロジェクトの ID> --billing-account <請求先の ID>
 gcloud config set project <プロジェクトの ID>
@@ -219,7 +219,7 @@ gcloud storage buckets create gs://<バケットの名前> --location=asia-north
   --uniform-bucket-level-access --public-access-prevention --soft-delete-duration=30d
 
 # VPS 用のサービスアカウント: そのバケットのオブジェクトを読み書きする権限と、バケットの名前を読む権限だけ
-gcloud iam service-accounts create m2office-backup --display-name="M2Office の控え（VPS）"
+gcloud iam service-accounts create m2office-backup --display-name="M2Office のバックアップ（VPS）"
 gcloud storage buckets add-iam-policy-binding gs://<バケットの名前> \
   --member=serviceAccount:m2office-backup@<プロジェクトの ID>.iam.gserviceaccount.com --role=roles/storage.objectUser
 gcloud storage buckets add-iam-policy-binding gs://<バケットの名前> \
@@ -238,19 +238,19 @@ gcloud iam service-accounts keys create m2office-backup-key.json \
 scp m2office-backup-key.json <VPS>:~/          # WireGuard の網から
 /opt/m2office/app/deploy/vps/setup.sh           # 前の答えのまま Enter で進め、バケットの名前・プロジェクトの ID・鍵の場所を答える
 rm ~/m2office-backup-key.json
-sudo systemctl start m2office-backup            # 初めての控えをいま取る
+sudo systemctl start m2office-backup            # 初めてのバックアップをいま取る
 sudo m2office-backup --status
 ```
 
 - `setup.sh` は PostgreSQL に変更の記録（WAL）を送る設定を入れて、**一度だけ PostgreSQL を起動し直します**（数秒止まります）。送れないときは設定を外して戻し、止まります
-- 最後に「紙の控えに書き写す社外の控えの合言葉」を出すかを尋ねます。データベースの控えとファイルの控えの合言葉、預かった鍵を開ける鍵（`M2OFFICE_SECRET_KEY`）、バケットの名前とプロジェクトの ID が出ます。**運営が紙に書き写して保管します。** 提携先には渡しません。これが無いと、機械をなくしたときに控えを開けません
-- 毎晩 2 時すぎに、データベースのまるごとの控え（14 日分を残す）とファイル（30 日分を残す）を送ります。変更の記録は絶えず送り、5 分ごとに区切ります。月に 1 回、壊れていないかを確かめます
-- 結果はマスター管理画面の「稼働状況」の「社外の控え」に出ます。見張りの道具からは `sudo m2office-backup --status`（失敗か 26 時間より古いと 1 で終わる）で確かめます
+- 最後に「紙の写しに書き写す社外バックアップの合言葉」を出すかを尋ねます。データベースのバックアップとファイルのバックアップの合言葉、預かった鍵を開ける鍵（`M2OFFICE_SECRET_KEY`）、バケットの名前とプロジェクトの ID が出ます。**運営が紙に書き写して保管します。** 提携先には渡しません。これが無いと、サーバーをなくしたときにバックアップを開けません
+- 毎晩 2 時すぎに、データベースのまるごとのバックアップ（14 日分を残す）とファイル（30 日分を残す）を送ります。変更の記録は絶えず送り、5 分ごとに区切ります。月に 1 回、壊れていないかを確かめます
+- 結果はマスター管理画面の「稼働状況」の「バックアップ」に出ます。見張りの道具からは `sudo m2office-backup --status`（失敗か 26 時間より古いと 1 で終わる）で確かめます
 - 更新（手順 8）のときは、`update.sh` が戻す点（`update-<版>`）を記録します
 
-### 控えから戻す
+### バックアップから戻す
 
-戻し方と、いざというときの手順（控えの失敗・更新の失敗・VPS をなくしたとき・乗っ取りを疑うとき）は、[第 17 章](17-backup-recovery.md) にまとめています。**サーバーが止まると画面のヘルプは読めないので、第 17 章の印刷を手元に置きます**（第 17 章「8. 印刷して保管する」）。
+戻し方と、いざというときの手順（バックアップの失敗・更新の失敗・VPS をなくしたとき・乗っ取りを疑うとき）は、[第 17 章](17-backup-recovery.md) にまとめています。**サーバーが止まると画面のヘルプは読めないので、第 17 章の印刷を手元に置きます**（第 17 章「8. 印刷して保管する」）。
 
 ### まだこの章に無いもの
 

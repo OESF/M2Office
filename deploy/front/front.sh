@@ -1,5 +1,5 @@
 #!/bin/bash
-# @file 機械に 1 つの入口（Caddy）を、M2Office と M2Medical で分け合う（仕様書 第8.6.9節、ADR-0086）。
+# @file サーバーに 1 つの入口（Caddy）を、M2Office と M2Medical で分け合う（仕様書 第8.6.9節、ADR-0086）。
 #
 # 入口はどちらの製品にも属さない共通の置き場（/Library/M2Front）に置く。先に入れた製品が入口を作り、
 # 後から入れた製品は自分の名前の設定（sites/<製品>.caddy）を置いて読み直すだけにする。どちらを先に入れても、片方を外しても、もう片方は動き続ける。
@@ -64,7 +64,7 @@ ensure_front() {
   [ "${have:-0}" -gt "$CONTRACT" ] && { info "より新しい取り決め（版 ${have}）で作られています。共通の設定はそのまま使います"; return 0; }
   [ "${have:-0}" -eq "$CONTRACT" ] && [ -f "$FRONT/Caddyfile" ] && [ -f "$PLIST" ] && return 0
   cat > "$FRONT/Caddyfile" <<'CADDY'
-# 機械に 1 つの入口（M2Office と M2Medical の共通の部品。仕様書 第8.6.9節）。front.sh が書く。手で書き換えない。
+# サーバーに 1 つの入口（M2Office と M2Medical の共通の部品。仕様書 第8.6.9節）。front.sh が書く。手で書き換えない。
 # 製品ごとの名前・証明書・振り分けは sites/<製品>.caddy に置く（1 製品 1 ファイル。全体の設定の段はどの製品も書かない）
 import sites/*.caddy
 CADDY
@@ -73,7 +73,7 @@ CADDY
   cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- 機械に 1 つの入口（M2Office と M2Medical の共通。仕様書 第8.6.9節）。443 番を受けるため root で動かす。front.sh が書く -->
+<!-- サーバーに 1 つの入口（M2Office と M2Medical の共通。仕様書 第8.6.9節）。443 番を受けるため root で動かす。front.sh が書く -->
 <plist version="1.0">
 <dict>
 	<key>Label</key>

@@ -1,5 +1,5 @@
 # 入口の守りと VPN の様子を集める（仕様書 第23.8.7節「ネットワークの様子」）。数だけを /var/lib/m2office/machine/edge-status.json に書き、
-# 運営の画面の「稼働状況」の「ネットワーク」に出す。m2office-edge-status.timer が 5 分ごとに呼ぶ。記録は journalctl -u m2office-edge-status。
+# 運営の画面の「稼働状況」の「セキュリティ」に出す。m2office-edge-status.timer が 5 分ごとに呼ぶ。記録は journalctl -u m2office-edge-status。
 [Unit]
 Description=M2Office: 入口の守りと VPN の様子を集める
 

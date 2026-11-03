@@ -1,5 +1,5 @@
 #!/bin/bash
-# M2Office の機械のログのファイルの入れ替え（仕様書 第16.10.2節）。launchd（jp.m2office.logrotate）が週に 1 回、管理者の権限で呼ぶ。
+# M2Office のサーバーのログのファイルの入れ替え（仕様書 第16.10.2節）。launchd（jp.m2office.logrotate）が週に 1 回、管理者の権限で呼ぶ。
 #
 # launchd は API・ワーカー・データベースの標準出力のファイルを追記で開いたままにしている。名前を変えて入れ替えると、
 # 書き込みが古いファイルに続いてしまう（macOS の newsyslog には、写して空にする指定が無い）。

@@ -20,7 +20,7 @@ src/types/deliveries.ts 外部のアプリからの配信の依頼（依頼・�
 src/types/slide-designs.ts スライドの組み込みのデザイン（SLIDE_DESIGNS の 6 つ・色・字体・表紙の飾り・findSlideDesign。組み立てと画面の見本の絵が同じ定義を使う。仕様書 第9.4.2節）
 src/types/sales-docs.ts 販売の書類と受注（書類・受注・品目・候補・会社の設定。仕様書 第42章）
 src/types/tax.ts      消費税の区分と日付で変わる税率（税率の表 TAX_RATE_TABLE・予定の変更・品名からの区分の推し量り・帳票の印と内訳。制度が変わったら更新で直す。仕様書 第15.1.1節）
-src/types/runtime.ts  動いている環境（Node.js のサポートの表 NODE_RELEASE_LINES とセキュリティの修正の下限 secure・nodeSupport・compareNodeVersions・環境の形。リリースのたびに公式の予定とセキュリティの発表と見比べる。仕様書 第8.6.7.1節）
+src/types/runtime.ts  稼働環境（Node.js のサポートの表 NODE_RELEASE_LINES とセキュリティの修正の下限 secure・nodeSupport・compareNodeVersions・環境の形。リリースのたびに公式の予定とセキュリティの発表と見比べる。仕様書 第8.6.7.1節）
 ```
 
 ## 主なもの

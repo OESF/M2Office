@@ -80,4 +80,4 @@ export class AiPolicyBlockedError extends Error {
 }
 
 /** ローカル AI が設定されていないときの理由。 */
-export const LOCAL_AI_NOT_CONFIGURED = 'ローカル AI が設定されていません。社内の機械で言語モデルを動かし、M2Office の設定（LOCAL_LLM_URL・LOCAL_LLM_MODEL）を確かめてください';
+export const LOCAL_AI_NOT_CONFIGURED = 'ローカル AI が設定されていません。社内のサーバーで言語モデルを動かし、M2Office の設定（LOCAL_LLM_URL・LOCAL_LLM_MODEL）を確かめてください';

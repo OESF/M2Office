@@ -8,9 +8,9 @@
 #
 # 何度走らせてもよい。すでにあるもの（秘密の値・データベース・会社）は作り直さず、答えを変えたところだけを直す。
 # 管理者の権限（sudo）は、専用の利用者・置き場・launchd の設定を入れるときだけ使う。M2Office は専用の利用者（_m2office）で動く。
-# 入口（Caddy）は機械に 1 つの共通の置き場（/Library/M2Front）に置き、M2Medical と分け合う（第8.6.9節、deploy/front/README.md）。
+# 入口（Caddy）はサーバーに 1 つの共通の置き場（/Library/M2Front）に置き、M2Medical と分け合う（第8.6.9節、deploy/front/README.md）。
 #
-# 試すとき（機械を変えずに、雛形を埋めた結果だけを作る）:
+# 試すとき（サーバーを変えずに、雛形を埋めた結果だけを作る）:
 #   setup.sh --render-only <出力先> --answers <KEY=値 のファイル>
 
 set -euo pipefail
@@ -76,7 +76,7 @@ render_all() {
   done
 }
 
-# 入口の TLS の段（名前の形は DNS で公的な証明書、IP の形は機械の認証局）。
+# 入口の TLS の段（名前の形は DNS で公的な証明書、IP の形はサーバーの認証局）。
 # 証明書の連絡先は、共通の入口の全体の段ではなく、ここに書く（M2Medical と入口を分け合うため。第8.6.9節）
 tls_block() {
   if [ "$TLS_MODE" = ip ]; then
@@ -112,9 +112,9 @@ else
 fi
 sudo -v
 
-# 同じ機械のほかの製品（M2Medical など）。共通の入口に置かれた名前の設定を見る（第8.6.9節）
+# 同じサーバーのほかの製品（M2Medical など）。共通の入口に置かれた名前の設定を見る（第8.6.9節）
 OTHER_SITES=$(find "$FRONT_DIR/sites" -name '*.caddy' ! -name 'm2office.caddy' -exec basename {} .caddy \; 2>/dev/null | tr '\n' ' ' || true)
-[ -n "$OTHER_SITES" ] && info "同じ機械のほかの製品: ${OTHER_SITES}（入口を分け合います）"
+[ -n "$OTHER_SITES" ] && info "同じサーバーのほかの製品: ${OTHER_SITES}（入口を分け合います）"
 
 # これまでの答え（2 回目から既定にする）
 if [ -f "$CONF" ]; then
@@ -133,9 +133,9 @@ ask HOST 'M2Office を開く名前（社内の IP に向ける。例 office.exam
 
 say '2. 証明書（社内でも HTTPS にします。仕様書 第8.6.2節）'
 info 'name: 公的な証明書を DNS で取る（標準。Google のログインが使える）'
-info 'ip  : 機械が自分で証明書を出す（Google を使わない会社だけ。端末ごとにルートの証明書を入れる）'
+info 'ip  : サーバーが自分で証明書を出す（Google を使わない会社だけ。端末ごとにルートの証明書を入れる）'
 ask TLS_MODE '形（name か ip）' "${TLS_MODE:-name}"
-[ "$TLS_MODE" = ip ] && [ -n "$OTHER_SITES" ] && die "同じ機械にほかの製品（${OTHER_SITES}）があるときは、ip の形は使えません。name の形にしてください"
+[ "$TLS_MODE" = ip ] && [ -n "$OTHER_SITES" ] && die "同じサーバーにほかの製品（${OTHER_SITES}）があるときは、ip の形は使えません。name の形にしてください"
 if [ "$TLS_MODE" = name ]; then
   ask DNS_PROVIDER 'DNS の事業者（caddy-dns の名前。例 cloudflare・route53・gandi）' "${DNS_PROVIDER:-cloudflare}"
   ask DNS_TOKEN 'DNS の事業者の API の鍵' "$(env_value DNS_TOKEN_SAVED)" secret
@@ -145,16 +145,16 @@ else
   ask ACME_EMAIL '証明書の連絡先のメールアドレス（ip の形でも書く）' "${ACME_EMAIL:-$ADMIN_EMAIL}"
 fi
 
-say '3. データと控えの置き場'
-info 'データは RAID などのディスクに。控えは RAID とは別のディスク（外付けか社内の別の機械）に置きます（第8.6.5節）'
+say '3. データとバックアップの置き場'
+info 'データは RAID などのディスクに。バックアップは RAID とは別のディスク（外付けか社内の別のサーバー）に置きます（第8.6.5節）'
 ask DATA_DIR 'データの置き場' "${DATA_DIR:-$INSTALL_DIR/data}"
-ask BACKUP_DIR '控えの置き場（空なら控えを取りません）' "${BACKUP_DIR:-}"
+ask BACKUP_DIR 'バックアップの置き場（空ならバックアップを取りません）' "${BACKUP_DIR:-}"
 OFFSITE=no
 if [ -n "$BACKUP_DIR" ]; then
-  info '別の置き場の控え: 毎晩の控えを、社内の NAS（restic の rest-server。足せるが消せない形で動かす）か、'
+  info '別の置き場のバックアップ: 毎晩のバックアップを、社内の NAS（restic の rest-server。足せるが消せない形で動かす）か、'
   info '会社が契約した S3 互換の置き場（Amazon S3・Wasabi・Backblaze B2 など）へも送る（ADR-0120）。'
-  info '送る前に restic で暗号化する。合言葉はこの機械で作り、紙の「戻すための控え」に書いて会社に渡す（運営は持たない）'
-  if yes_no '別の置き場へ控えを送りますか（会社が選んだときだけ）' "$( [ "${OFFSITE_SAVED:-no}" = yes ] && echo y || echo n)"; then
+  info '送る前に restic で暗号化する。合言葉はこのサーバーで作り、紙の「戻すためのバックアップ」に書いて会社に渡す（運営は持たない）'
+  if yes_no '別の置き場へバックアップを送りますか（会社が選んだときだけ）' "$( [ "${OFFSITE_SAVED:-no}" = yes ] && echo y || echo n)"; then
     OFFSITE=yes
     info 'NAS なら rest:https://<NAS>:<ポート>/<道>、S3 互換なら s3:https://<口>/<バケット>/<道>'
     ask OFFSITE_REPOSITORY '置き場（例 rest:https://nas.example:8000/m2office/ か s3:https://s3.ap-northeast-1.amazonaws.com/<バケット>/m2office）' "$(env_value M2O_OFFSITE_REPOSITORY)"
@@ -166,7 +166,7 @@ if [ -n "$BACKUP_DIR" ]; then
         [ -n "$OFFSITE_ACCESS_KEY_ID" ] && [ -n "$OFFSITE_SECRET_ACCESS_KEY" ] || die '置き場の鍵が要ります'
         OFFSITE_REST_USER=''; OFFSITE_REST_PASSWORD=''; OFFSITE_CACERT='' ;;
       rest:https://*)
-        info 'NAS の rest-server は --append-only で動かしてください。この機械は古い控えを消しません（間引くのは NAS の上で）'
+        info 'NAS の rest-server は --append-only で動かしてください。このサーバーは古いバックアップを消しません（間引くのは NAS の上で）'
         ask OFFSITE_REST_USER 'rest-server の利用者' "$(env_value M2O_OFFSITE_REST_USER)"
         ask OFFSITE_REST_PASSWORD 'rest-server の合言葉' "$(env_value M2O_OFFSITE_REST_PASSWORD)" secret
         [ -n "$OFFSITE_REST_USER" ] && [ -n "$OFFSITE_REST_PASSWORD" ] || die 'rest-server の利用者と合言葉が要ります'
@@ -179,11 +179,11 @@ if [ -n "$BACKUP_DIR" ]; then
 fi
 [ "$OFFSITE" = yes ] || { OFFSITE_REPOSITORY=''; OFFSITE_REGION=''; OFFSITE_ACCESS_KEY_ID=''; OFFSITE_SECRET_ACCESS_KEY=''; OFFSITE_REST_USER=''; OFFSITE_REST_PASSWORD=''; OFFSITE_CACERT=''; }
 OFFSITE_SAVED=$OFFSITE
-ask API_PORT 'API のポート（機械の中だけで使う）' "${API_PORT:-3101}"
-ask DB_PORT 'データベースのポート（機械の中だけで使う）' "${DB_PORT:-5433}"
+ask API_PORT 'API のポート（サーバーの中だけで使う）' "${API_PORT:-3101}"
+ask DB_PORT 'データベースのポート（サーバーの中だけで使う）' "${DB_PORT:-5433}"
 
 say '4. AI'
-info 'ローカル AI（社内の機械で動かす言語モデル。OpenAI 互換の口）を使うなら、その口とモデルを入れます'
+info 'ローカル AI（社内のサーバーで動かす言語モデル。OpenAI 互換の口）を使うなら、その口とモデルを入れます'
 ask LOCAL_LLM_URL 'ローカル AI の口（使わないなら空）' "${LOCAL_LLM_URL:-http://127.0.0.1:11434/v1}"
 if [ -n "$LOCAL_LLM_URL" ]; then
   ask LOCAL_LLM_MODEL 'ローカル AI のモデル' "${LOCAL_LLM_MODEL:-}"
@@ -213,7 +213,7 @@ ask UPDATE_HOUR '自動の更新の時刻（時。0〜23）' "${UPDATE_HOUR:-3}"
 say '答えの確かめ'
 info "会社: ${COMPANY_NAME}（${SUBDOMAIN}）／ ドメイン: $GW_DOMAIN ／ 管理者: $ADMIN_EMAIL"
 info "名前: https://$HOST ／ 証明書: $TLS_MODE ${DNS_PROVIDER:+（${DNS_PROVIDER}）}"
-info "データ: $DATA_DIR ／ 控え: ${BACKUP_DIR:-（取らない）} ／ 別の置き場の控え: $( [ "$OFFSITE" = yes ] && echo "$OFFSITE_REPOSITORY" || echo 送らない)"
+info "データ: $DATA_DIR ／ バックアップ: ${BACKUP_DIR:-（取らない）} ／ 別の置き場のバックアップ: $( [ "$OFFSITE" = yes ] && echo "$OFFSITE_REPOSITORY" || echo 送らない)"
 info "ローカル AI: ${LOCAL_LLM_URL:-（使わない）} ${LOCAL_LLM_MODEL} ／ Gemini の鍵: $( [ -n "$GEMINI_API_KEY" ] && echo 入れる || echo 入れない)"
 info "自動の更新: ${AUTO_UPDATE}（${UPDATE_HOUR} 時）"
 yes_no 'この答えで入れますか' y || exit 1
@@ -250,26 +250,26 @@ if [ "$TLS_MODE" = name ] && ! "$CADDY_BIN" list-modules 2>/dev/null | grep -q "
   CADDY_RESTART=--restart
 fi
 
-# ---- 3. 秘密の値（機械の上で作る。運営は知らない） ----
+# ---- 3. 秘密の値（サーバーの上で作る。運営は知らない） ----
 SECRET_KEY=$(env_value M2OFFICE_SECRET_KEY)
 DB_OWNER_PASSWORD=$(env_value DB_OWNER_PASSWORD_SAVED)
 DB_APP_PASSWORD=$(env_value DB_APP_PASSWORD_SAVED)
 [ -n "$SECRET_KEY" ] || SECRET_KEY=$(rand_hex 32)
 [ -n "$DB_OWNER_PASSWORD" ] || DB_OWNER_PASSWORD=$(rand_hex 24)
 [ -n "$DB_APP_PASSWORD" ] || DB_APP_PASSWORD=$(rand_hex 24)
-# 別の置き場の控えの暗号化の合言葉（一度作ったら変えない。変えると置き場の控えを開けなくなる）
+# 別の置き場のバックアップの暗号化の合言葉（一度作ったら変えない。変えると置き場のバックアップを開けなくなる）
 OFFSITE_PASSWORD=$(env_value M2O_OFFSITE_PASSWORD)
 [ "$OFFSITE" = yes ] && [ -z "$OFFSITE_PASSWORD" ] && OFFSITE_PASSWORD=$(rand_hex 24)
 [ "$OFFSITE" = yes ] || OFFSITE_PASSWORD=''
-# 機械の管理者（インターネットや Google が止まっても機械の様子を見るための 1 人。業務の画面には入れない。第8.6.3節）。
-# 合言葉はここで作って画面に出すだけで、どこにも残さない（m2office.env には控えだけを置く）。一度作ったら、作り直すと決めたときだけ作り直す
+# サーバーの管理者（インターネットや Google が止まってもサーバーの様子を見るための 1 人。業務の画面には入れない。第8.6.3節）。
+# 合言葉はここで作って画面に出すだけで、どこにも残さない（m2office.env にはバックアップだけを置く）。一度作ったら、作り直すと決めたときだけ作り直す
 MACHINE_ADMIN_ID=$(env_value M2O_MACHINE_ADMIN_ID)
 MACHINE_ADMIN_PASSWORD_HASH=$(env_value M2O_MACHINE_ADMIN_PASSWORD_HASH)
 MACHINE_ADMIN_TOTP=$(env_value M2O_MACHINE_ADMIN_TOTP)
 MACHINE_ADMIN_PASSWORD=''; MACHINE_ADMIN_URI=''
-if [ -z "$MACHINE_ADMIN_PASSWORD_HASH" ] || [ -z "$MACHINE_ADMIN_TOTP" ] || yes_no '機械の管理者の合言葉と確認コードを作り直しますか（忘れた・漏れたときだけ）' n; then
-  ask MACHINE_ADMIN_ID '機械の管理者の ID（英小文字で始まる 3〜32 文字）' "${MACHINE_ADMIN_ID:-machine}"
-  made=$("$NODE_BIN" "$SCRIPT_DIR/machine-admin.mjs" "$MACHINE_ADMIN_ID") || die '機械の管理者を作れませんでした'
+if [ -z "$MACHINE_ADMIN_PASSWORD_HASH" ] || [ -z "$MACHINE_ADMIN_TOTP" ] || yes_no 'サーバーの管理者の合言葉と確認コードを作り直しますか（忘れた・漏れたときだけ）' n; then
+  ask MACHINE_ADMIN_ID 'サーバーの管理者の ID（英小文字で始まる 3〜32 文字）' "${MACHINE_ADMIN_ID:-machine}"
+  made=$("$NODE_BIN" "$SCRIPT_DIR/machine-admin.mjs" "$MACHINE_ADMIN_ID") || die 'サーバーの管理者を作れませんでした'
   MACHINE_ADMIN_PASSWORD=$(printf '%s\n' "$made" | sed -n 's/^PASSWORD=//p')
   MACHINE_ADMIN_PASSWORD_HASH=$(printf '%s\n' "$made" | sed -n 's/^PASSWORD_HASH=//p')
   MACHINE_ADMIN_TOTP=$(printf '%s\n' "$made" | sed -n 's/^TOTP=//p')
@@ -297,7 +297,7 @@ if ! dscl . -read "/Users/$SERVICE_USER" >/dev/null 2>&1; then
 fi
 for d in postgres files logs caddy machine; do sudo mkdir -p "$DATA_DIR/$d"; done
 sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
-# データ・ファイル・ログ・控えは、専用の利用者（と管理者）だけが読めるようにする（同じ機械のほかの利用者に読ませない）
+# データ・ファイル・ログ・バックアップは、専用の利用者（と管理者）だけが読めるようにする（同じサーバーのほかの利用者に読ませない）
 sudo chmod 700 "$DATA_DIR" "$DATA_DIR/postgres" "$DATA_DIR/files" "$DATA_DIR/logs" "$DATA_DIR/machine"
 if [ -n "$BACKUP_DIR" ]; then sudo mkdir -p "$BACKUP_DIR" && sudo chown "$SERVICE_USER:$SERVICE_USER" "$BACKUP_DIR" && sudo chmod 700 "$BACKUP_DIR"; fi
 # 入口を M2Office の中に持っていたころ（第 0.318.0 版まで）の設定を外す（入口は共通の置き場に移した）
@@ -332,14 +332,14 @@ answers="$work/answers"
   printf 'TLS_BLOCK=%s\n' "$(tls_block)"
 } > "$answers"
 render_all "$answers" "$work/out" "$NODE_BIN"
-# 秘密の値の控え（次に走らせたときに作り直さないため。M2Office は読まない名前）
+# 秘密の値のバックアップ（次に走らせたときに作り直さないため。M2Office は読まない名前）
 {
-  printf '\n# setup.sh が次に走らせたときに使う控え（M2Office は読まない）\n'
+  printf '\n# setup.sh が次に走らせたときに使うバックアップ（M2Office は読まない）\n'
   printf 'DB_OWNER_PASSWORD_SAVED=%s\nDB_APP_PASSWORD_SAVED=%s\n' "$DB_OWNER_PASSWORD" "$DB_APP_PASSWORD"
   [ -n "$DNS_TOKEN" ] && printf 'DNS_TOKEN_SAVED=%s\n' "$DNS_TOKEN"
 } >> "$work/out/m2office.env"
 sudo install -m 640 -o root -g "$SERVICE_USER" "$work/out/m2office.env" "$ENV_FILE"
-# 答えの控え（秘密の値は入れない。update.sh も読む）
+# 答えの記録（秘密の値は入れない。update.sh も読む）
 conf="$work/setup.conf"
 {
   printf '# M2Office ローカルの形の答え（setup.sh が書く。秘密の値は m2office.env にだけ置く）\n'
@@ -354,7 +354,7 @@ sudo install -m 644 -o root -g wheel "$conf" "$CONF"
 printf '{"auto":%s,"signed":%s,"hour":%s}\n' "$( [ "$AUTO_UPDATE" = yes ] && echo true || echo false)" \
   "$( [ -n "$ALLOWED_SIGNERS" ] && echo true || echo false)" "$UPDATE_HOUR" > "$work/update-settings.json"
 sudo install -m 644 -o "$SERVICE_USER" -g "$SERVICE_USER" "$work/update-settings.json" "$DATA_DIR/machine/update-settings.json"
-# 遠隔の保守は第 0.492.0 版でなくした。前の版で入れた機械では、印のファイルを片付ける
+# 遠隔の保守は第 0.492.0 版でなくした。前の版で入れたサーバーでは、印のファイルを片付ける
 sudo rm -f "$DATA_DIR/machine/maintenance-settings.json" "$DATA_DIR/machine/maintenance-request.json"
 
 # launchd の設定を入れて（入れ直して）動かす
@@ -374,7 +374,7 @@ if ! sudo test -f "$DATA_DIR/postgres/PG_VERSION"; then
   info 'データベースを作りました'
 fi
 load_daemon jp.m2office.postgres
-# 機械のログのファイルの入れ替え（週に 1 回。第16.10.2節）
+# サーバーのログのファイルの入れ替え（週に 1 回。第16.10.2節）
 load_daemon jp.m2office.logrotate
 for _ in $(seq 1 30); do "$PG_BIN/pg_isready" -h 127.0.0.1 -p "$DB_PORT" >/dev/null 2>&1 && break; sleep 1; done
 "$PG_BIN/pg_isready" -h 127.0.0.1 -p "$DB_PORT" >/dev/null || die "データベースが起動しません（$DATA_DIR/logs/postgres.log を見てください）"
@@ -433,7 +433,7 @@ if [ "$OFFSITE" = yes ]; then
       "$RESTIC_BIN" --no-cache init >/dev/null && info '暗号化した置き場を作りました'
     fi
   ); then
-    info '別の置き場の控え: 毎晩の控えの後に送ります。結果は管理者ページの「機械」に出ます'
+    info '別の置き場のバックアップ: 毎晩のバックアップの後に送ります。結果は管理者ページの「サーバー」に出ます'
   else
     warn '別の置き場を開けられませんでした。置き場・鍵・権限（NAS なら rest-server の利用者と証明書）を確かめて、setup.sh を走らせ直してください'
   fi
@@ -462,14 +462,14 @@ say '入れ終わりました'
 info "開く: https://$HOST （最初の管理者 $ADMIN_EMAIL で Google のログイン）"
 info "設定: ${ENV_FILE}（管理者だけが読める）／ 答え: $CONF ／ ログ: $DATA_DIR/logs"
 info '残りの作業:'
-info "  - DNS: $HOST を、この機械の社内の IP に向ける（公開の DNS に A レコード。ルーターの DNS リバインディングの対策も確かめる）"
-info '  - ルーター: DHCP の予約で、この機械にいつも同じ IP を割り当てる'
+info "  - DNS: $HOST を、このサーバーの社内の IP に向ける（公開の DNS に A レコード。ルーターの DNS リバインディングの対策も確かめる）"
+info '  - ルーター: DHCP の予約で、このサーバーにいつも同じ IP を割り当てる'
 [ -z "$GOOGLE_LOGIN_CLIENT_ID" ] && info '  - Google: 会社の OAuth クライアントを作り、管理者ページの「接続」で入れる'
-[ -z "$BACKUP_DIR" ] && info '  - 控え: 控えの置き場を決めて、setup.sh を走らせ直す'
+[ -z "$BACKUP_DIR" ] && info '  - バックアップ: バックアップの置き場を決めて、setup.sh を走らせ直す'
 [ "$AUTO_UPDATE" = no ] && info '  - 更新: 署名を確かめる鍵が入るまで、自動の更新は切っています（手で update.sh を走らせる）'
 if [ -n "$MACHINE_ADMIN_PASSWORD" ]; then
-  say '機械の管理者（https://'"$HOST"'/machine）'
-  info '会社の機械の担当の人に渡します。合言葉はここにしか出ません（M2Office にも運営にも残りません）'
+  say 'サーバーの管理者（https://'"$HOST"'/machine）'
+  info '会社のサーバーの担当の人に渡します。合言葉はここにしか出ません（M2Office にも運営にも残りません）'
   info "ID: $MACHINE_ADMIN_ID"
   info "合言葉: $MACHINE_ADMIN_PASSWORD"
   info "確認コードの種（認証アプリに入れる）: $MACHINE_ADMIN_TOTP"
@@ -480,12 +480,12 @@ if [ -n "$MACHINE_ADMIN_PASSWORD" ]; then
   fi
   info '書き写したら画面を消してください。忘れたときは setup.sh を走らせ直して作り直します'
 fi
-if yes_no '紙の「戻すための控え」に書き写す秘密の値を、いま画面に出しますか' n; then
+if yes_no '紙の「戻すためのバックアップ」に書き写す秘密の値を、いま画面に出しますか' n; then
   info "M2OFFICE_SECRET_KEY: $SECRET_KEY"
   info "データベースの所有者の合言葉: $DB_OWNER_PASSWORD"
   if [ "$OFFSITE" = yes ]; then
     info "別の置き場: $OFFSITE_REPOSITORY"
-    info "別の置き場の控えの暗号化の合言葉: ${OFFSITE_PASSWORD}（これが無いと別の置き場の控えも、そこからコピーしたディスクも誰にも開けません）"
+    info "別の置き場のバックアップの暗号化の合言葉: ${OFFSITE_PASSWORD}（これが無いと別の置き場のバックアップも、そこからコピーしたディスクも誰にも開けません）"
   fi
   info '書き写したら画面を消してください。運営はこれを持ちません'
 fi

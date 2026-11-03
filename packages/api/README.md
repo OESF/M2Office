@@ -117,7 +117,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | メソッド・パス | 内容 |
 |---|---|
 | `GET /health` | 生存確認。テナント不要 |
-| `GET /internal/tls-allowed?domain=` | 機械の中（127.0.0.1）からだけ。Caddy の On-Demand TLS が、その名前の証明書を取ってよいかを尋ねる。払い出した会社のサブドメイン（解約したものは除く）と運営の決まった名前（親・`www`・`ops`・`signup`）と、体験版の入口（`DEMO_SUBDOMAIN` を決めたとき）だけ 200、ほかは 404（仕様書 第20.4.6節） |
+| `GET /internal/tls-allowed?domain=` | サーバーの中（127.0.0.1）からだけ。Caddy の On-Demand TLS が、その名前の証明書を取ってよいかを尋ねる。払い出した会社のサブドメイン（解約したものは除く）と運営の決まった名前（親・`www`・`ops`・`signup`）と、体験版の入口（`DEMO_SUBDOMAIN` を決めたとき）だけ 200、ほかは 404（仕様書 第20.4.6節） |
 | `GET /v1/security.txt` | 脆弱性の報告の窓口（RFC 9116）。入口が `/.well-known/security.txt` から渡す。テナント不要。設定 `SECURITY_CONTACT` が無ければ 404（仕様書 第16.11.3節 G-11） |
 | `GET /v1/auth/providers` | 使えるログイン手段。認証不要 |
 | `POST /v1/auth/dev-login` | 開発用ログイン。認証不要 |
@@ -127,7 +127,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/auth/logout` | ログアウト |
 | `POST /v1/demo-login` | 体験版のゲストのログイン（本文 `loginId`・`password`）。体験版の入口の名前のときだけ受け、会社の判定より前に置く。最初のログインで見本の会社のデータを入れる。ID が無い・パスワードが違う・期限切れは同じ 401。ID ごとに 5 回の間違いで 15 分、送り元ごとに 15 分に 20 回まで（仕様書 第23.3.2節） |
 | `GET /v1/demo-signup/challenge` | 体験版を自分で申し込むときのロボットよけの問題（ALTCHA と同じ形。10 分で切れる）。体験版の入口の名前のときだけ受ける（第23.3.2節「自分で申し込む」、ADR-0117） |
-| `POST /v1/demo-signup` | 体験版を自分で申し込む（本文 `email`・`agree: true`・解いた `challenge`。メールアドレスは控えにするだけで文字のままは残さない）。会社の判定より前に置く。問題は 1 度だけ使え、送り元ごとに 15 分に 20 回まで。体験用の会社はデータベースの関数 `m2o_demo_self_signup`（移行 176 の 5 つの引数）だけが作り、同じメールアドレス・同じ送り元（24 時間）・1 日の数・体験版全体の月の AI の上限はその中で見る（断れば 409 と `code`）。作れたら見本のデータを入れてログイン状態を作り、ゲストの ID とパスワードを 201 で 1 度だけ返す |
+| `POST /v1/demo-signup` | 体験版を自分で申し込む（本文 `email`・`agree: true`・解いた `challenge`。メールアドレスはバックアップにするだけで文字のままは残さない）。会社の判定より前に置く。問題は 1 度だけ使え、送り元ごとに 15 分に 20 回まで。体験用の会社はデータベースの関数 `m2o_demo_self_signup`（移行 176 の 5 つの引数）だけが作り、同じメールアドレス・同じ送り元（24 時間）・1 日の数・体験版全体の月の AI の上限はその中で見る（断れば 409 と `code`）。作れたら見本のデータを入れてログイン状態を作り、ゲストの ID とパスワードを 201 で 1 度だけ返す |
 | `POST /v1/me/demo/terms` | 体験版の利用規約への同意（体験用の会社だけ）。様子は `GET /v1/me` の `demo` |
 | `GET /v1/agents` | 本人が使える業務の一覧（`agents`。入力スキーマと、定時実行に登録できるかの `schedulable` を含む）。メニューのピン止めは個人設定（`menu.pinned`。仕様書 第6.1.1節） |
 | `GET /v1/agents/slide-designs` | スライドの作成で選べる会社のテンプレート（名前と説明だけ）と、会社の既定（組み込みのデザインの ID かテンプレートの名前）。組み込みのデザインは画面が持つ（仕様書 第9.4.2節「組み込みのデザイン」） |
@@ -417,16 +417,16 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `DELETE /v1/schedules/:id` | 本人の定時実行を消す。動いている実行は止めない |
 | `GET /v1/admin/usage` | 管理者: エージェント別の利用量 |
 | `GET /v1/admin/service-report` | 管理者: 月ごとの稼働の報告（`?month=YYYY-MM`。稼働率（計画停止を除く）・止まった時間・計画停止の時間・その会社に関わる障害の経過）と、いま続いている障害（仕様書 第16.11.3節 G-9） |
-| `GET /v1/admin/machine` | 管理者: ローカルの形の「機械」の様子（版・各部の動き・ディスク・証明書・ローカル AI・控え。仕様書 第8.6.7節）。クラウドの形では 404 |
-| `GET /v1/admin/machine/runtime` | 管理者: 動いている環境（M2Office の版・API とワーカーの Node.js の段階とサポートの終わり・PostgreSQL・OS と CPU・メモリー・動いている形・推論・起動の時刻。API とワーカーが 5 分ごとに置く `runtime_beats` から組み立てる。仕様書 第8.6.7.1節）。クラウドの形では 404（運営の `/v1/ops/runtime` だけ）。データベースの大きさと接続の数・上限（`database`）も返す |
-| `GET /v1/admin/machine/runtime/samples?days=1\|7` | 管理者: 機械の資源の推移（CPU の負荷・メモリー・Swap・ディスクの使っている割合 % と、受けた・送った通信の速さ Mbps。1 日は 5 分ごと、7 日は 30 分ごと。API が 5 分ごとに `runtime_samples` に置き 7 日で消す）と、直近 24 時間の通信量の合計（`net`）。仕様書 第23.8.7節「機械の資源の図」「ネットワークの様子」。クラウドの形では 404 |
-| `POST /v1/admin/machine/backup` | 管理者: 今すぐ控えを取る（ワーカーが次の見回りで取る。202。控えの置き場が無ければ 400） |
+| `GET /v1/admin/machine` | 管理者: ローカルの形の「サーバー」の様子（版・各部の動き・ディスク・証明書・ローカル AI・バックアップ。仕様書 第8.6.7節）。クラウドの形では 404 |
+| `GET /v1/admin/machine/runtime` | 管理者: 稼働環境（M2Office の版・API とワーカーの Node.js の段階とサポートの終わり・PostgreSQL・OS と CPU・メモリー・稼働の形・推論・起動の時刻。API とワーカーが 5 分ごとに置く `runtime_beats` から組み立てる。仕様書 第8.6.7.1節）。クラウドの形では 404（運営の `/v1/ops/runtime` だけ）。データベースの大きさと接続の数・上限（`database`）も返す |
+| `GET /v1/admin/machine/runtime/samples?days=1\|7` | 管理者: サーバーの資源の推移（CPU の負荷・メモリー・Swap・ディスクの使っている割合 % と、受けた・送った通信の速さ Mbps。1 日は 5 分ごと、7 日は 30 分ごと。API が 5 分ごとに `runtime_samples` に置き 7 日で消す）と、直近 24 時間の通信量の合計（`net`）。仕様書 第23.8.7節「機械の資源の図」「ネットワークの様子」。クラウドの形では 404 |
+| `POST /v1/admin/machine/backup` | 管理者: 今すぐバックアップを取る（ワーカーが次の見回りで取る。202。バックアップの置き場が無ければ 400） |
 | `GET /v1/admin/machine/logs` | 管理者（ローカルの形だけ。クラウドの形は 404）: システムログ（`from`・`to`・`levels`・`service`・`q`・`requestId`・`runId`・`before`・`beforeId`。新しい順に 200 件）。最初の 1 回を監査ログ `log.view` に残す（仕様書 第16.10.4節） |
-| `GET /v1/admin/machine/logs/digests`・`/logs/export`・`/logs/files`・`/logs/files/:name` | 管理者（ローカルの形だけ）: 日ごとの改ざんの確かめ（7 日まで）・絞った結果の ZIP（`format=jsonl|csv`。28 日・100 万行まで）・機械のログのファイルの一覧とダウンロード。`log.download` に残す |
+| `GET /v1/admin/machine/logs/digests`・`/logs/export`・`/logs/files`・`/logs/files/:name` | 管理者（ローカルの形だけ）: 日ごとの改ざんの確かめ（7 日まで）・絞った結果の ZIP（`format=jsonl|csv`。28 日・100 万行まで）・サーバーのログのファイルの一覧とダウンロード。`log.download` に残す |
 | `GET・POST /v1/admin/machine/evidence`・`GET /evidence/:id/download`・`DELETE /evidence/:id` | 管理者（ローカルの形だけ）: 証拠保全の一覧・頼む（`reason`・`days`。202）・ZIP のダウンロード・1 年を過ぎたものの削除（1 年に満たなければ 409）（仕様書 第16.10.5節） |
-| `POST /v1/machine-admin/login` | ローカルの形の機械の管理者のログイン（`id`・`password`・`code`。認証アプリの 6 桁）。署名した Cookie `m2o_machine`（8 時間）と CSRF の印を返す。5 回の間違いで 15 分 429。会社の判定より前に置く。クラウドの形・機械の管理者を作っていない機械では 404（仕様書 第8.6.3節） |
-| `GET /v1/machine-admin/me`・`POST /v1/machine-admin/logout` | 機械の管理者のログイン状態・ログアウト |
-| `/v1/machine-admin/machine/…` | 機械の管理者: 管理者ページの `/v1/admin/machine/…` と同じ口（様子・更新・控え・システムログ・証拠保全）。状態を変える操作は CSRF の印が要る。データベースにつながらないときは `GET /machine` だけ返し、ほかは 503 |
+| `POST /v1/machine-admin/login` | ローカルの形のサーバーの管理者のログイン（`id`・`password`・`code`。認証アプリの 6 桁）。署名した Cookie `m2o_machine`（8 時間）と CSRF の印を返す。5 回の間違いで 15 分 429。会社の判定より前に置く。クラウドの形・サーバーの管理者を作っていないサーバーでは 404（仕様書 第8.6.3節） |
+| `GET /v1/machine-admin/me`・`POST /v1/machine-admin/logout` | サーバーの管理者のログイン状態・ログアウト |
+| `/v1/machine-admin/machine/…` | サーバーの管理者: 管理者ページの `/v1/admin/machine/…` と同じ口（様子・更新・バックアップ・システムログ・証拠保全）。状態を変える操作は CSRF の印が要る。データベースにつながらないときは `GET /machine` だけ返し、ほかは 503 |
 | `GET /v1/admin/ai-usage` | 管理者: 今月の AI の利用と上限（会社の月の上限・1 人の上限・用途ごと・人ごと。仕様書 第6.6.2節）。上限は `PUT /v1/admin/settings/aiLimits`（`monthlyJpy`・`perUserShare`）。AI の利用の上限に当たった要求は 429 |
 | `GET /v1/admin/runs` | 管理者: 全利用者の実行の状態（中身は返さない） |
 | `GET /v1/admin/schedules` | 管理者: 会社の全員の定時実行（人・業務・繰り返し・次回・前回・状態）。次の回に動かないものは、起動役と同じ判定（`scheduleBlocker`）の理由を添える。**業務の入力は返さない**。操作の口は無い（仕様書 第6.6.8.2節） |
@@ -446,8 +446,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/connections/google/impact` | 管理者: OAuth クライアントを消す（クライアント ID を替える）と影響する人数と業務の件数 |
 | `DELETE /v1/admin/connections/google` | 管理者: OAuth クライアントの登録を消す。接続している全員の接続を消し、Google を使う動いている途中の業務を止める（仕様書 第6.5.2.1節）。クライアント ID を替える `PUT` も同じ |
 | `GET /v1/me/google` | 本人: Google 連携の状況（業務の言葉の許可の一覧。トークンは返さない） |
-| `POST /v1/me/google/connect` | 本人: 接続を始める（Google の同意の画面の URL を返す。state と PKCE つき）。`extra` に使う人だけに求める権限（`contacts`）、`back` に戻る画面（`/cards`・`/cards/<ID>`・`/settings/notifications`）を渡せる（仕様書 第27.15節。Chat の控えの `chat.spaces.create` は第6.5.5.2.1節） |
-| `GET /v1/me/notifications/chat`・`POST /v1/me/notifications/chat/setup` | 本人: Chat の控えを届けられるか（会社の鍵・本人の個別メッセージの場所）と、場所の用意（既存を探す → 本人の許可で作る。許可が足りなければ `needsScope`）（仕様書 第6.5.5.2.1節） |
+| `POST /v1/me/google/connect` | 本人: 接続を始める（Google の同意の画面の URL を返す。state と PKCE つき）。`extra` に使う人だけに求める権限（`contacts`）、`back` に戻る画面（`/cards`・`/cards/<ID>`・`/settings/notifications`）を渡せる（仕様書 第27.15節。Chat のバックアップの `chat.spaces.create` は第6.5.5.2.1節） |
+| `GET /v1/me/notifications/chat`・`POST /v1/me/notifications/chat/setup` | 本人: Chat のバックアップを届けられるか（会社の鍵・本人の個別メッセージの場所）と、場所の用意（既存を探す → 本人の許可で作る。許可が足りなければ `needsScope`）（仕様書 第6.5.5.2.1節） |
 | `POST /v1/me/google/check` | 本人: 許可の状況を Google に問い合わせ直す。その許可で受け取れれば、プロフィール写真も取り込み直す |
 | `GET /v1/me/google/impact` | 本人: 取り消すと止まる業務と、飛ばす定時実行の数 |
 | `DELETE /v1/me/google` | 本人: 接続を取り消す（Google 側の許可も取り消し、トークンを消す）。Google を使う動いている途中の業務を止め、終わった実行の中身を消す（仕様書 第6.5.2.1節・第14.3.2節） |
@@ -477,7 +477,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/extensions/web-columns/settings` | 管理者: Web のコラムの分野（`topics`）・読み手（`audience`）・業種（`industry`。東証の 33 業種のコード。業種・分野・読み手・監修者が変われば、当てる表現の決まり `rules` を AI が選び直して返す）・監修者（`supervisor`）・AI の表示（`aiNotice`）・AI で挿絵を描くか（`aiIllustration`）。送った項目だけを変える（第32.18.1節） |
 | `PUT` ／ `DELETE /v1/admin/extensions/web-columns/wordpress` | 管理者: WordPress の入れ先（`siteUrl`・`username`）とアプリケーションパスワード（`password`）を、つながるかを確かめてから暗号化して預ける（つながらなければ 400。パスワードは返さない）／ 外す |
 | `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。ツールごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
-| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、ツールの一覧を取って会社の接続として登録する（読むだけの印が付いたツールは「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。`oauth` は相手の認可サーバの情報を読み、アプリの自動登録の口（`registration_endpoint`）があれば控える（仕様書 第12.11.6.2節、Q-99）。認証の要る接続のツールは、認証情報のあとで取る |
+| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、ツールの一覧を取って会社の接続として登録する（読むだけの印が付いたツールは「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。`oauth` は相手の認可サーバの情報を読み、アプリの自動登録の口（`registration_endpoint`）があればバックアップる（仕様書 第12.11.6.2節、Q-99）。認証の要る接続のツールは、認証情報のあとで取る |
 | `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す。自動で登録したアプリより先に使う）、`api_key` は会社の鍵（その鍵でツールを問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |
 | `PUT /v1/admin/connections/mcp/:id` | 管理者: 接続の名前と、ツールごとの危険度を変える |
 | `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: ツールの一覧を取り直す（決めた危険度は保つ）。認証の要る接続は管理者自身の認可（会社の鍵）で問い合わせる |
@@ -611,9 +611,9 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | PUT | `/v1/ops/tenants/:id/status` | 試用と稼働の切り替え | 運営管理者とサポート |
 | GET | `/v1/ops/tenants/:id` | 会社の詳細（概要・利用状況の 12 か月・稼働・シートの氏名とロール・履歴）。開いたことを記録に残す | すべて |
 | GET | `/v1/ops/tenants.csv` | 会社一覧の CSV（書き出したことを記録に残す） | すべて |
-| GET | `/v1/ops/server` | サーバー全体の稼働状況と社外の控えの様子（毎晩の控えの結果・置き場の中身の一覧・戻せる範囲・変更の記録を送った様子・更新の前の戻す点・次の予定。第20.4.6節・第23.8.7節「控えの様子」）と、入口の守りと VPN の様子（`edge`。CrowdSec・国の遮断・WAF・証明書・WireGuard の数。VPS の `m2office-edge-status` が書くファイルを読むだけ。第23.8.7節「ネットワークの様子」） | すべて |
-| GET | `/v1/ops/runtime` | 動いている環境（仕様書 第8.6.7.1節。決めた関数 `ops.runtime_beats()` で読む）。データベースの大きさと接続の数・上限も返す | すべて |
-| GET | `/v1/ops/runtime/samples?days=1\|7` | 機械の資源の推移（使っている割合 % と通信の速さ Mbps）と、直近 24 時間の通信量の合計（`net`。バイト）。仕様書 第23.8.7節「機械の資源の図」「ネットワークの様子」。決めた関数 `ops.runtime_sample_points()`・`ops.runtime_net_total()` で読む | すべて |
+| GET | `/v1/ops/server` | サーバー全体の稼働状況と社外バックアップの様子（毎晩のバックアップの結果・置き場の中身の一覧・戻せる範囲・変更の記録を送った様子・更新の前の戻す点・次の予定。第20.4.6節・第23.8.7節「控えの様子」）と、入口の守りと VPN の様子（`edge`。CrowdSec・国の遮断・WAF・証明書・WireGuard の数。VPS の `m2office-edge-status` が書くファイルを読むだけ。第23.8.7節「ネットワークの様子」） | すべて |
+| GET | `/v1/ops/runtime` | 稼働環境（仕様書 第8.6.7.1節。決めた関数 `ops.runtime_beats()` で読む）。データベースの大きさと接続の数・上限も返す | すべて |
+| GET | `/v1/ops/runtime/samples?days=1\|7` | サーバーの資源の推移（使っている割合 % と通信の速さ Mbps）と、直近 24 時間の通信量の合計（`net`。バイト）。仕様書 第23.8.7節「機械の資源の図」「ネットワークの様子」。決めた関数 `ops.runtime_sample_points()`・`ops.runtime_net_total()` で読む | すべて |
 | GET | `/v1/ops/help?q=` | 運営者のヘルプの章の一覧（運営者マニュアル `docs/ops-manual/`。`q` で題と本文を絞り込む。置き場は `OPS_MANUAL_DIR` で変えられる。仕様書 第23.8.16節） | すべて |
 | GET | `/v1/ops/help/:id` | 運営者のヘルプの 1 章（本文は Markdown。「第 N 章」は `NN-名前.md` へのリンク） | すべて |
 | GET | `/v1/ops/help/images/:name` | 運営者マニュアルの図（`docs/ops-manual/images/` の SVG だけ。スクリプトと外の読み込みを止める `Content-Security-Policy` を付ける。仕様書 第23.8.16節「図」） | すべて |

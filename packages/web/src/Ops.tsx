@@ -606,7 +606,7 @@ function Server() {
   const group: Record<string, string> = { ai: 'AI', google: 'Google', mcp: '会社の接続（MCP）' };
   return (
     <>
-      <OpsTitle title="稼働状況" help={{ chapter: '07-server', text: 'サーバー全体の動きと、機械の資源を見ます。' }} />
+      <OpsTitle title="稼働状況" help={{ chapter: '07-server', text: 'サーバー全体の動きと、サーバーの資源を見ます。' }} />
       {/* 動いている環境（第8.6.7.1節）と機械の資源（第23.8.7節）。クラウドの形では運営の機械の情報なので、運営の画面だけに出す。
           データベースとファイルの置き場の量は、機械の資源のディスクの内訳に出す */}
       <RuntimeCard load={opsApi.runtime} loadSamples={opsApi.runtimeSamples} filesBytes={s ? Number(s.filesBytes) : null} />
@@ -614,9 +614,9 @@ function Server() {
       {s && (
         <>
           <div className="stats">
-            <div className="stat"><span>待ち行列</span><strong>{s.queue.queued}</strong><span>{s.queue.oldestQueuedAt ? `最も古い ${when(s.queue.oldestQueuedAt)}` : '待ちなし'}・動いている {s.queue.running}・承認待ち {s.queue.awaitingApproval}</span></div>
+            <div className="stat"><span>待ち行列</span><strong>{s.queue.queued}</strong><span>{s.queue.oldestQueuedAt ? `最も古い ${when(s.queue.oldestQueuedAt)}` : '待ちなし'}・実行中 {s.queue.running}・承認待ち {s.queue.awaitingApproval}</span></div>
             <div className="stat"><span>実行（1 時間 ／ 今日）</span><strong>{s.runs.hour} ／ {s.runs.today}</strong><span>失敗 {rate(s.runs.hourFailed, s.runs.hour)} ／ {rate(s.runs.todayFailed, s.runs.today)}</span></div>
-            <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '動いています' : '応答がありません'}</span></strong><span>最後の応答 {when(lastWorker)}{liveWorkers.length > 1 ? `・${liveWorkers.length} 台` : ''}</span></div>
+            <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '稼働中' : '応答がありません'}</span></strong><span>最後の応答 {when(lastWorker)}{liveWorkers.length > 1 ? `・${liveWorkers.length} 台` : ''}</span></div>
             <div className="stat"><span>遅れている定時実行</span><strong>{s.schedulesLate}</strong></div>
             {backup && <BackupStat b={backup} />}
             <div className="stat"><span>AI の費用（今日 ／ 今月）</span><strong>{yen(Number(s.ai.today))} ／ {yen(Number(s.ai.month))}</strong><span>前の月の同じ時期 {yen(Number(s.ai.lastMonthSamePeriod))}</span></div>
@@ -650,7 +650,7 @@ function Server() {
  * 失敗・止まっている・送れていないときは、理由を添えて目立たせる。
  */
 function BackupStat({ b }: { b: CloudBackupViewRow }) {
-  if (!b.configured) return <div className="stat"><span>社外の控え</span><strong><span className="badge warn">入れていません</span></strong><span>運営のマニュアル 第 13 章</span></div>;
+  if (!b.configured) return <div className="stat"><span>バックアップ</span><strong><span className="badge warn">未導入</span></strong><span className="small">運営者マニュアル 第 13 章参照</span></div>;
   const last = b.last;
   const bad = !last || !last.ok || b.stale || b.archiveFailing || (last.check !== null && !last.check.ok);
   const label = !last ? 'まだ取っていません' : !last.ok ? '失敗しました' : b.stale ? '止まっています' : b.archiveFailing ? '変更の記録を送れていません' : '取れています';
@@ -658,7 +658,7 @@ function BackupStat({ b }: { b: CloudBackupViewRow }) {
     last?.check && !last.check.ok && `確かめ: ${last.check.error ?? ''}`].filter(Boolean).join(' ／ ');
   return (
     <div className="stat">
-      <span>社外の控え</span>
+      <span>バックアップ</span>
       <strong><span className={`badge ${bad ? 'warn' : 'ok'}`}>{label}</span></strong>
       <span>
         最後 {when(last?.at ?? null)}・変更の記録 {when(b.archive?.lastArchivedAt ?? null)}
@@ -674,8 +674,8 @@ function BackupStat({ b }: { b: CloudBackupViewRow }) {
  * 相手の IP アドレス・鍵・WAF の記録の中身は出さない。読めなかった値は「取得できなかった」と出す（推測で埋めない）。
  */
 function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
-  const title = <OpsSubTitle title="ネットワーク" help={{ chapter: '18-architecture', text: '入口の守り（CrowdSec・国の遮断・WAF・証明書）と VPN の様子です。仕組みの全体は「詳しく見る」から開きます。' }} />;
-  if (!e.configured || !e.last) return <>{title}<p className="muted"><span className="badge warn">入れていません</span> 運営者マニュアル 第 13 章</p></>;
+  const title = <OpsSubTitle title="セキュリティ" help={{ chapter: '18-architecture', text: '入口の守り（CrowdSec・国の遮断・WAF・証明書）と VPN の様子です。仕組みの全体は「詳しく見る」から開きます。' }} />;
+  if (!e.configured || !e.last) return <>{title}<p className="muted"><span className="badge warn">未導入</span> <span className="small">運営者マニュアル 第 13 章参照</span></p></>;
   const l = e.last;
   const NONE = <span className="muted">取得できなかった</span>;
   const n = (v: number | null | undefined) => (v === null || v === undefined ? null : v.toLocaleString('ja-JP'));
@@ -689,7 +689,7 @@ function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
       <div className="table-scroll"><table className="table">
         <tbody>
           <tr><th>CrowdSec</th><td>{l.crowdsec ? <>
-            いま止めている相手 この機械で見つけた {n(l.crowdsec.local) ?? '—'}・世界中で分け合う一覧 {n(l.crowdsec.shared) ?? '—'}・直近 24 時間に見つけた攻撃 {n(l.crowdsec.alerts24h) ?? '—'}
+            いま止めている相手 このサーバーで見つけた {n(l.crowdsec.local) ?? '—'}・世界中で分け合う一覧 {n(l.crowdsec.shared) ?? '—'}・直近 24 時間に見つけた攻撃 {n(l.crowdsec.alerts24h) ?? '—'}
           </> : NONE}</td></tr>
           <tr><th>国の遮断</th><td>{l.geo ? (l.geo.countries ? <>
             {l.geo.countries}・止めた通信 入ってくる {n(l.geo.inBlocked) ?? '—'}・出ていく {n(l.geo.outBlocked) ?? '—'}（表を入れてから）・一覧 {when(l.geo.listAt)}
@@ -701,7 +701,7 @@ function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
             {l.certs.count} 枚・いちばん近い期限 {e.certSoon ? <span className="badge warn">{when(l.certs.nearest)}</span> : when(l.certs.nearest)}
           </> : NONE}</td></tr>
           <tr><th>VPN</th><td>{e.peers.length === 0 ? NONE : e.peers.map((p) => (
-            <div key={p.address}><code>{p.address}</code> {p.connected ? <span className="badge ok">つながっています</span> : <>最後の接続 {p.lastHandshake ? when(p.lastHandshake) : 'まだありません'}</>}</div>
+            <div key={p.address}><code>{p.address}</code> {p.connected ? <span className="badge ok">接続中</span> : <>最後の接続 {p.lastHandshake ? when(p.lastHandshake) : 'まだありません'}</>}</div>
           ))}</td></tr>
         </tbody>
       </table></div>
@@ -720,18 +720,18 @@ function BackupDetail({ b }: { b: CloudBackupViewRow }) {
   const loc = inv?.location ?? null;
   return (
     <>
-      <OpsSubTitle title="社外の控え" help={{ chapter: '17-backup-recovery', text: '控えのいまの状態と、戻せる範囲です。いざというときの手順は「詳しく見る」から開きます。' }} />
+      <OpsSubTitle title="バックアップ" help={{ chapter: '17-backup-recovery', text: 'バックアップのいまの状態と、戻せる範囲です。いざというときの手順は「詳しく見る」から開きます。' }} />
       <div className="table-scroll"><table className="table">
         <tbody>
-          <tr><th>毎晩の控え</th><td>{last ? <>{when(last.at)}・データベース {done(last.database.ok)}・ファイル {done(last.files.ok)}</> : 'まだ取っていません'}</td></tr>
-          <tr><th>次の控え</th><td>{when(b.nextRunAt)} すぎ</td></tr>
+          <tr><th>毎晩のバックアップ</th><td>{last ? <>{when(last.at)}・データベース {done(last.database.ok)}・ファイル {done(last.files.ok)}</> : 'まだ取っていません'}</td></tr>
+          <tr><th>次のバックアップ</th><td>{when(b.nextRunAt)} すぎ</td></tr>
           <tr><th>データベースを戻せる範囲</th><td>{b.recoverable.from ? `${when(b.recoverable.from)} 〜 ${when(b.recoverable.to)}` : '—'}</td></tr>
-          <tr><th>データベースの控え</th><td>{inv?.database ? `まるごと ${inv.database.count} 回・いちばん新しい ${when(inv.database.newest)}・${bytes(inv.database.bytes)}` : '—'}</td></tr>
+          <tr><th>データベースのバックアップ</th><td>{inv?.database ? `まるごと ${inv.database.count} 回・いちばん新しい ${when(inv.database.newest)}・${bytes(inv.database.bytes)}` : '—'}</td></tr>
           <tr><th>変更の記録</th><td>
             最後に送った {when(b.archive?.lastArchivedAt ?? null)}
             {b.archiveFailing && <> <span className="badge warn">いま送れていません</span> 最後に失敗 {when(b.archive?.lastFailedAt ?? null)}</>}
           </td></tr>
-          <tr><th>ファイルの控え</th><td>{inv?.files ? `${inv.files.count} 回（${when(inv.files.oldest)} 〜 ${when(inv.files.newest)}）・${bytes(inv.files.bytes)}` : '—'}</td></tr>
+          <tr><th>ファイルのバックアップ</th><td>{inv?.files ? `${inv.files.count} 回（${when(inv.files.oldest)} 〜 ${when(inv.files.newest)}）・${bytes(inv.files.bytes)}` : '—'}</td></tr>
           <tr><th>壊れていないかの確かめ</th><td>{last?.check ? <>{last.check.ok ? '通りました' : <span className="badge warn">失敗しました</span>}（{when(last.check.at)}）</> : 'まだしていません'}</td></tr>
           <tr><th>更新の前の戻す点</th><td>
             {b.restorePoints.length === 0 ? 'まだありません' : b.restorePoints.slice(0, 5).map((p) => (

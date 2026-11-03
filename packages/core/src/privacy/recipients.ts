@@ -38,7 +38,7 @@ export function buildDataRecipients(f: DataRecipientFacts): DataRecipient[] {
   const cloudAi = f.ai.policy !== 'local-only' && f.ai.geminiSource !== 'none';
   const list: DataRecipient[] = [
     onsite
-      ? { id: 'hosting', name: '会社の中の機械（ローカルの形）', purpose: 'M2Office を動かし、データを置く', data: 'すべての業務のデータ（預かった鍵は暗号化して保管）', location: '会社の中', contract: 'machine', active: true }
+      ? { id: 'hosting', name: '会社の中のサーバー（ローカルの形）', purpose: 'M2Office を動かし、データを置く', data: 'すべての業務のデータ（預かった鍵は暗号化して保管）', location: '会社の中', contract: 'machine', active: true }
       : { id: 'hosting', name: f.hosting.provider ?? `インフラ事業者${UNSET}`, purpose: 'M2Office を動かし、データを置く', data: 'すべての業務のデータ（通信と保管を暗号化。預かった鍵はさらに暗号化）', location: f.hosting.location ?? UNSET, contract: 'operator', active: true },
     {
       id: 'gemini', name: 'Google（Gemini API）', purpose: '秘書と業務の推論（文の読み書き・画像と音声の読み取り・Web の調べもの）',
@@ -50,7 +50,7 @@ export function buildDataRecipients(f: DataRecipientFacts): DataRecipient[] {
       id: 'google-workspace', name: 'Google Workspace（会社の Google）', purpose: 'ログインと、メール・予定・ドライブ・Chat などを業務から使う',
       data: '本人が許した範囲で読み書きする中身（メールの下書き・予定・文書など）', location: '会社の Google の契約による', contract: 'company', active: true,
     },
-    { id: 'google-chat-app', name: 'Google Chat（会社の Chat アプリ）', purpose: '通知の控えを本人に届ける', data: '通知の題と本文', location: '会社の Google の契約による', contract: 'company', active: f.credentials.has('google_chat_app') },
+    { id: 'google-chat-app', name: 'Google Chat（会社の Chat アプリ）', purpose: '通知を本人に届ける', data: '通知の題と本文', location: '会社の Google の契約による', contract: 'company', active: f.credentials.has('google_chat_app') },
     { id: 'line', name: 'LINE（会社の LINE 公式アカウント）', purpose: '問い合わせの受け付けと返事', data: '問い合わせのやり取り', location: 'LINE の設備', contract: 'company', active: f.extensions.inquiries && f.credentials.has('line') },
     { id: 'mailbox', name: '窓口のメール（会社の Gmail）', purpose: '問い合わせのメールの受け付けと返事', data: '問い合わせのメールのやり取り', location: '会社の Google の契約による', contract: 'company', active: f.extensions.inquiries && f.credentials.has('inquiry_mailbox') },
     { id: 'wordpress', name: '会社の WordPress', purpose: 'コラムの公開', data: 'コラムの本文と画像', location: '会社の Web サイトの置き場', contract: 'company', active: f.extensions.columns && f.credentials.has('wordpress') },

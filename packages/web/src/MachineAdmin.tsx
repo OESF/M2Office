@@ -1,5 +1,5 @@
 /**
- * @file ローカルの形の「機械の管理者」の画面（`/machine`。仕様書 第8.6.3節、Q-154）。
+ * @file ローカルの形の「サーバーの管理者」の画面（`/machine`。仕様書 第8.6.3節、Q-154）。
  *
  * ID・合言葉・確認コード（認証アプリの 6 桁）で入り、「機械」だけを出す。業務の画面・左のメニュー・秘書は出さない。
  * Google のログインとは別の入口で、インターネットや Google が止まっていても機械の様子を見られる。
@@ -10,7 +10,7 @@ import { api, ApiError, describeError, setUnauthorizedHandler, type MachineAdmin
 import { MachinePanel } from './Machine.js';
 
 /**
- * 機械の管理者の画面。ログインしていなければログインの欄を、していれば「機械」を出す。
+ * サーバーの管理者の画面。ログインしていなければログインの欄を、していれば「機械」を出す。
  */
 export function MachineAdminRoot() {
   const [session, setSession] = useState<MachineAdminSession | null>(null);
@@ -31,14 +31,14 @@ export function MachineAdminRoot() {
   }, []);
 
   if (state === 'loading') return <p className="muted center">読み込み中…</p>;
-  // ローカルの形でない・機械の管理者を作っていない機械には、この入口が無い
+  // ローカルの形でない・サーバーの管理者を作っていない機械には、この入口が無い
   if (state === 'missing') return <p className="muted center">このページはありません</p>;
   if (state === 'login' || !session) return <MachineLogin onLoggedIn={(s) => { setSession(s); setState('ready'); }} />;
   return (
     <div className="machine-admin">
       <header className="machine-admin-bar">
         <strong>M2Office</strong>
-        <span className="muted">機械の管理</span>
+        <span className="muted">サーバーの管理</span>
         <span className="spacer" />
         <span className="small muted">{session.id}</span>
         <button className="btn ghost small" onClick={() => void logout()}>ログアウト</button>
@@ -76,7 +76,7 @@ function MachineLogin({ onLoggedIn }: { onLoggedIn: (s: MachineAdminSession) => 
     <div className="login">
       <form className="card login-card machine-login" onSubmit={(e) => void submit(e)}>
         <h1>M2Office</h1>
-        <p className="lead">機械の管理</p>
+        <p className="lead">サーバーの管理</p>
         <div className="field">
           <label htmlFor="ma-id">ID</label>
           <input id="ma-id" value={id} autoComplete="username" autoCapitalize="none" spellCheck={false} onChange={(e) => setId(e.target.value)} required />

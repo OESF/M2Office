@@ -179,7 +179,7 @@ export async function runOffsite(backupDir: string, name: string, cfg: OffsiteCo
     await mkdir(cfg.cacheDir, { recursive: true });
     const args = ['backup', '--json', '--tag', TAG, '--host', HOST, ...(status.lastOkSnapshot ? ['--parent', status.lastOkSnapshot] : []), 'db.dump', 'files'];
     const sum = parseBackupSummary(await restic(cfg, args, join(backupDir, name)));
-    if (!sum.snapshot) throw new Error('restic が控えの番号を返しませんでした');
+    if (!sum.snapshot) throw new Error('restic がバックアップの番号を返しませんでした');
     // 古い控えを消す。道が毎晩違うため、印と機械の名前でまとめて数える。足せるが消せない置き場では消さない
     if (!isAppendOnly(cfg)) await restic(cfg, ['forget', '--tag', TAG, '--group-by', 'host,tags', ...OFFSITE_KEEP, '--prune']);
     record = { name, at, ok: true, snapshot: sum.snapshot, bytesAdded: sum.bytesAdded, error: null };

@@ -95,7 +95,7 @@ npm run build:release -- --install
 ```
 
 `dist-release/` に、API とワーカーを 1 つずつのファイルにまとめたもの・画面・実行中に読むファイルを組み立てます（仕様書 第20.4.5節）。
-クラウドのコンテナと、ローカルの形（社内の Mac。仕様書 第8.6.1節）の両方の元になります。ローカルの形は、技術者が GitHub のリリースのタグを取ってきて、対話式の `deploy/onsite/setup.sh` で入れます（手順は [deploy/onsite/README.md](../deploy/onsite/README.md)）。M2Medical と同じ機械に入れるときの入口の取り決めは [deploy/front/README.md](../deploy/front/README.md)。クラウドの形（Xserver の VPS。仕様書 第20.4.6節）は `deploy/vps/setup.sh` で入れます（手順は [deploy/vps/README.md](../deploy/vps/README.md)）。
+クラウドのコンテナと、ローカルの形（社内の Mac。仕様書 第8.6.1節）の両方の元になります。ローカルの形は、技術者が GitHub のリリースのタグを取ってきて、対話式の `deploy/onsite/setup.sh` で入れます（手順は [deploy/onsite/README.md](../deploy/onsite/README.md)）。M2Medical と同じサーバーに入れるときの入口の取り決めは [deploy/front/README.md](../deploy/front/README.md)。クラウドの形（Xserver の VPS。仕様書 第20.4.6節）は `deploy/vps/setup.sh` で入れます（手順は [deploy/vps/README.md](../deploy/vps/README.md)）。
 
 ## 動作確認
 
@@ -170,7 +170,7 @@ API の応答には `X-Request-Id` が付き、同じ値がログの `requestId`
 エラーの問い合わせを受けたら、この ID でログを探せます。
 
 `info` から上は、データベース（表 `system_logs`）にも書き、28 日で入れ替えます（仕様書 第16.10節）。
-ローカルの形では会社の管理者が管理者ページの「機械」で、クラウドの形では運営がマスター管理画面の「システムログ」で、見てダウンロードし、証拠を保全できます。
+ローカルの形では会社の管理者が管理者ページの「サーバー」で、クラウドの形では運営がマスター管理画面の「システムログ」で、見てダウンロードし、証拠を保全できます。
 監査ログ（誰が何をしたか）はこれとは別で、データベースに残り、管理者ページで見られます。
 
 ## 構成
@@ -196,7 +196,7 @@ docs/            開発規約・リリース規定・設計判断記録
 |---|---|---|
 | `WEB_PORT` | 3100 | 画面の開発サーバー |
 | `API_PORT` | 3101 | API |
-| `M2O_LISTEN_HOST` | 127.0.0.1 | API と運営の API が待ち受けるアドレス。どの配備の形でも機械の中だけにし、外からは Caddy が受ける（仕様書 第20.4.6節）。ほかの機械から直接受けるときだけ変える |
+| `M2O_LISTEN_HOST` | 127.0.0.1 | API と運営の API が待ち受けるアドレス。どの配備の形でもサーバーの中だけにし、外からは Caddy が受ける（仕様書 第20.4.6節）。ほかのサーバーから直接受けるときだけ変える |
 | `WORKER_PORT` | 3102 | ワーカー（health 用。現時点では未使用） |
 | `DB_PORT` | 3105 | PostgreSQL |
 | `DATABASE_URL` | — | アプリの接続先。**`m2office_app` ロール**（所有者でなく RLS を迂回できない） |
@@ -214,7 +214,7 @@ docs/            開発規約・リリース規定・設計判断記録
 | `MODEL_VIDEO` | `veo-3.1-lite-generate-preview` | コラムのサイネージ用の 8 秒の動画（720p。仕様書 第32.18.6節） |
 | `MODEL_VIDEO_LONG` | `veo-3.1-fast-generate-preview` | コラムのサイネージ用の 15 秒の動画（8 秒を作り 7 秒延長する。延長できるモデルにする） |
 | `MODEL_TTS` | `gemini-3.8-flash-tts` | コラムのナレーション付きスライドの読み上げ（仕様書 第32.18.6節 段 3） |
-| `FFMPEG_PATH` | `ffmpeg`（`PATH` のもの） | ナレーション付きスライドを MP4 にまとめる ffmpeg。**M2Office には同梱しない**（ライセンスのため）。クラウドは組み立てで、ローカルの形は `setup.sh` が Homebrew で入れる。無い機械ではナレーション付きスライドを作れない |
+| `FFMPEG_PATH` | `ffmpeg`（`PATH` のもの） | ナレーション付きスライドを MP4 にまとめる ffmpeg。**M2Office には同梱しない**（ライセンスのため）。クラウドは組み立てで、ローカルの形は `setup.sh` が Homebrew で入れる。無いサーバーではナレーション付きスライドを作れない |
 | `MODEL_FALLBACK` | — | 推論が混雑・障害などで失敗したときに最初に試す退避先。未設定なら、ほかの役割のモデルに退避する（同じ鍵の中だけ。仕様書 第20.2.5節） |
 | `MODEL_LIVE` | `gemini-3.1-flash-live-preview` | 音声の対話（Gemini Live） |
 | `USD_JPY` | 155 | 費用を円で示すときの為替（概算） |
@@ -263,12 +263,12 @@ docs/            開発規約・リリース規定・設計判断記録
 | `M2O_DEPLOYMENT` | cloud | 配備の形。`cloud`（多数の会社・サブドメイン）か `onsite`（社内の 1 台に 1 社だけ。ローカルの形）（仕様書 第8.6節） |
 | `M2O_ONSITE_TENANT` | （なし） | ローカルの形で入っている 1 社のサブドメイン。アドレスにかかわらずこの会社に決める |
 | `AI_MONTHLY_LIMIT_JPY` | （なし） | 運営が AI の費用をまとめて払う会社の、AI の利用の月の上限（円）の既定と、管理者が上げられる上限。無ければ上限なし。自社の鍵の会社には効かない（仕様書 第6.6.2節）。マスター管理画面で決めれば、そちらが優先する |
-| `M2O_BACKUP_DIR` | （なし） | ローカルの形の控えの置き場（RAID とは別のディスク）。あれば毎晩控えを取り、毎月戻せるかを確かめる（仕様書 第8.6.5節） |
-| `M2O_OFFSITE_REPOSITORY`・`M2O_OFFSITE_PASSWORD`・`M2O_OFFSITE_ACCESS_KEY_ID`・`M2O_OFFSITE_SECRET_ACCESS_KEY`・`M2O_OFFSITE_REGION`・`M2O_OFFSITE_REST_USER`・`M2O_OFFSITE_REST_PASSWORD`・`M2O_OFFSITE_CACERT`・`M2O_RESTIC_BIN` | （なし） | ローカルの形の別の置き場の控え。置き場は社内の NAS の rest-server（`rest:https://…`。足せるが消せない形で受ける前提で、古い控えを消さない）か、会社が契約した S3 互換の置き場（`s3:https://…`）。暗号化の合言葉（機械の上で作り、紙の控えに書く）・S3 の鍵と地域・rest-server の利用者と合言葉・NAS の証明書・restic の道。そろったときだけ、毎晩の控えの後に restic で暗号化して送る（仕様書 第8.6.5節、ADR-0120） |
-| `M2O_MACHINE_ADMIN_ID`・`M2O_MACHINE_ADMIN_PASSWORD_HASH`・`M2O_MACHINE_ADMIN_TOTP` | （なし） | ローカルの形の機械の管理者（`/machine`）の ID・合言葉の控え（scrypt）・認証アプリの確認コードの種（base32）。導入のときに setup.sh が作る。3 つがそろったときだけ使える（仕様書 第8.6.3節） |
-| `M2O_PG_BIN` ／ `M2O_PG_DOCKER` | （なし） | 控えに使う PostgreSQL の道具のある場所（同梱した実行環境）。開発ではデータベースのコンテナの名前（`m2office-db`）を `M2O_PG_DOCKER` に渡すと、その中の道具を使う |
-| `M2O_MACHINE_DIR` | `.data/machine` | ローカルの形の「機械」の様子の知らせ（ワーカーの知らせ）を置く場所（仕様書 第8.6.7節） |
-| `M2O_LOG_DIR` | （なし） | ローカルの形の機械のログのファイルの置き場（`<データの置き場>/logs`）。「機械」でダウンロードし、証拠保全に入れる（仕様書 第16.10節）。セットアップと更新が入れる |
+| `M2O_BACKUP_DIR` | （なし） | ローカルの形のバックアップの置き場（RAID とは別のディスク）。あれば毎晩バックアップを取り、毎月戻せるかを確かめる（仕様書 第8.6.5節） |
+| `M2O_OFFSITE_REPOSITORY`・`M2O_OFFSITE_PASSWORD`・`M2O_OFFSITE_ACCESS_KEY_ID`・`M2O_OFFSITE_SECRET_ACCESS_KEY`・`M2O_OFFSITE_REGION`・`M2O_OFFSITE_REST_USER`・`M2O_OFFSITE_REST_PASSWORD`・`M2O_OFFSITE_CACERT`・`M2O_RESTIC_BIN` | （なし） | ローカルの形の別の置き場のバックアップ。置き場は社内の NAS の rest-server（`rest:https://…`。足せるが消せない形で受ける前提で、古いバックアップを消さない）か、会社が契約した S3 互換の置き場（`s3:https://…`）。暗号化の合言葉（サーバーの上で作り、紙の写しに書く）・S3 の鍵と地域・rest-server の利用者と合言葉・NAS の証明書・restic の道。そろったときだけ、毎晩のバックアップの後に restic で暗号化して送る（仕様書 第8.6.5節、ADR-0120） |
+| `M2O_MACHINE_ADMIN_ID`・`M2O_MACHINE_ADMIN_PASSWORD_HASH`・`M2O_MACHINE_ADMIN_TOTP` | （なし） | ローカルの形のサーバーの管理者（`/machine`）の ID・合言葉のバックアップ（scrypt）・認証アプリの確認コードの種（base32）。導入のときに setup.sh が作る。3 つがそろったときだけ使える（仕様書 第8.6.3節） |
+| `M2O_PG_BIN` ／ `M2O_PG_DOCKER` | （なし） | バックアップに使う PostgreSQL の道具のある場所（同梱した実行環境）。開発ではデータベースのコンテナの名前（`m2office-db`）を `M2O_PG_DOCKER` に渡すと、その中の道具を使う |
+| `M2O_MACHINE_DIR` | `.data/machine` | ローカルの形の「サーバー」の様子の知らせ（ワーカーの知らせ）を置く場所（仕様書 第8.6.7節） |
+| `M2O_LOG_DIR` | （なし） | ローカルの形のサーバーのログのファイルの置き場（`<データの置き場>/logs`）。「サーバー」でダウンロードし、証拠保全に入れる（仕様書 第16.10節）。セットアップと更新が入れる |
 | `M2O_APP_ROOT` | （リポジトリの根） | 実行中に読むファイル（ヘルプ・マニュアル・フォント・拡張機能・版の番号）の置き場所の根。本番の組み立て（`npm run build:release`）では組み立てたものの根を渡す（仕様書 第20.4.5節） |
 | `LOCAL_LLM_URL` | （なし） | ローカル AI の OpenAI 互換の口（例: `http://127.0.0.1:11434/v1`）。ローカルの方針の会社が使う（仕様書 第16.3.7.1節） |
 | `LOCAL_LLM_MODEL` | （なし） | ローカル AI のモデル。`LOCAL_LLM_MODEL_FAST`・`_STANDARD`・`_ADVANCED` で役割ごとに変えられる |

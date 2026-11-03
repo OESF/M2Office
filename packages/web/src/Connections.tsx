@@ -39,7 +39,7 @@ function clientChangeText(impact: { users: number; runs: number } | null, what: 
   if (impact === null) lines.push('', '影響する人数を確かめられませんでした。');
   else if (impact.users > 0) {
     lines.push('', `接続している ${impact.users} 人の許可が使えなくなります。`);
-    if (impact.runs > 0) lines.push(`動いている業務 ${impact.runs} 件が止まります。`);
+    if (impact.runs > 0) lines.push(`実行中の業務 ${impact.runs} 件が止まります。`);
     lines.push('業務が読んだメールや文書の中身も消します。従業員は、新しい設定で接続し直す必要があります。');
   }
   lines.push('', 'クライアント シークレットだけを替える場合は、従業員の接続に影響しません。');
@@ -223,8 +223,8 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
   };
   // いま動いている鍵（状態の欄の印と文）。鍵が無ければ、秘書も業務も動かないことをはっきり出す
   const effective = {
-    tenant: { cls: 'badge ok', text: '自社の鍵で動いています' },
-    platform: { cls: 'badge ok', text: '運営の鍵で動いています' },
+    tenant: { cls: 'badge ok', text: '自社の鍵で稼働中' },
+    platform: { cls: 'badge ok', text: '運営の鍵で稼働中' },
     none: { cls: 'badge warn', text: '使える鍵がありません。秘書も業務も動きません' },
   }[data.effective];
 
@@ -611,7 +611,7 @@ function GoogleCard({ data, page, onSaved }: {
           'スライドのテーマ・文書と表のテンプレート・秘書にドライブのファイルを渡す・販促物の「ドライブから」',
           data.pickerKeyRegistered ? { state: 'ok', text: '設定済み' } : { state: 'off', text: '未設定' },
           <PickerKey registered={!!data.pickerKeyRegistered} onSaved={onSaved} />)}
-        {extra('chat', 'google-chat', 'Chat への通知（Chat アプリの鍵）', '通知の控えを Google Chat で届ける',
+        {extra('chat', 'google-chat', 'Chat への通知（Chat アプリの鍵）', '通知を Google Chat にも届ける',
           data.chatApp?.registered ? { state: 'ok', text: '設定済み' } : { state: 'off', text: '未設定' },
           <ChatAppKey data={data.chatApp ?? null} onSaved={onSaved} />)}
         {audit && audit.state !== 'na' && extra('audit', 'google-audit', 'ログインの見張り（ログインの記録）', 'Google アカウントの不正の兆しを見張る',

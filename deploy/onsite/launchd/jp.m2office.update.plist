@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- M2Office の夜の自動の更新（仕様書 第8.6.4節）。署名つきのリリースのタグがあれば入れ、失敗したら前の版に戻す。
-     プログラムを入れ替えるため管理者の権限で動かす。会社の管理者が「機械」で止めていれば飛ばす。setup.sh が 雛形の名前 を埋める -->
+     プログラムを入れ替えるため管理者の権限で動かす。会社の管理者が「サーバー」で止めていれば飛ばす。setup.sh が 雛形の名前 を埋める -->
 <plist version="1.0">
 <dict>
 	<key>Label</key>

@@ -10,7 +10,7 @@
 |---|---|
 | [第 12 章 VPS の用意](../../docs/ops-manual/12-vps-setup.md) | OS の固め・スワップ・WireGuard（`setup.sh` の前に終える） |
 | [第 13 章 M2Office のセットアップ](../../docs/ops-manual/13-vps-m2office-setup.md) | 入口の守りの考え方と、`setup.sh` の走らせ方 |
-| [第 17 章 控えと復旧](../../docs/ops-manual/17-backup-recovery.md) | 控えの見方と、いざというときに戻す手順（印刷して手元に置く。`npm run docs:ops-recovery-pdf`） |
+| [第 17 章 バックアップと復旧](../../docs/ops-manual/17-backup-recovery.md) | バックアップの見方と、いざというときに戻す手順（印刷して手元に置く。`npm run docs:ops-recovery-pdf`） |
 
 ## 入れる
 
@@ -36,13 +36,13 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | `crowdsec/acquis-m2office.yaml` | CrowdSec に Caddy のアクセスのログを読ませる設定 |
 | `geo/m2office-geo-update.sh` | 国で通信を止める（既定は中国・ロシア・北朝鮮）。地域インターネットレジストリの一覧から nftables の表 `m2office_geo` を作り、入ってくる通信と出ていく通信を断る。`setup.sh` が `/usr/local/sbin/m2office-geo-update` に入れる |
 | `geo/*.service`・`geo/*.timer` | 起動のときに表を入れる（`m2office-geo`）・週に 1 回一覧を取り直す（`m2office-geo-update`） |
-| `update.sh` | リリースのタグを入れる更新。控え（`pg_dump`）→ 社外の控えに戻す点を記録 → 止める → 切り替えて組み立て直す → 移行 → 動かす → 確かめる。失敗したら前の版と控えに戻す |
-| `backup/m2office-backup.sh` | 社外の控え（Google Cloud Storage の東京。仕様書 第20.4.6節「控え」、ADR-0120）。データベースを pgBackRest で（まるごと。14 日分）、ファイルを restic で（30 日分）送り、月に 1 回壊れていないかを確かめる。結果は `/var/lib/m2office/machine/cloud-backup.json`（運営の画面の「稼働状況」）。`--status` で最後の結果、`--check` で確かめだけ。`setup.sh` が `/usr/local/sbin/m2office-backup` に入れる |
-| `backup/*.service`・`backup/*.timer` | 毎晩 2 時すぎに社外の控えを取る（`m2office-backup`） |
-| `edge/m2office-edge-status.mjs` | 入口の守りと VPN の様子を集める（仕様書 第23.8.7節「ネットワークの様子」）。CrowdSec・国の遮断・WAF・証明書・WireGuard の数だけを `/var/lib/m2office/machine/edge-status.json` に書き、運営の画面の「稼働状況」の「ネットワーク」に出す。相手の IP アドレス・鍵・WAF の記録の中身は書かない。`setup.sh` が `/usr/local/lib/m2office/` に入れる |
+| `update.sh` | リリースのタグを入れる更新。バックアップ（`pg_dump`）→ 社外バックアップに戻す点を記録 → 止める → 切り替えて組み立て直す → 移行 → 動かす → 確かめる。失敗したら前の版とバックアップに戻す |
+| `backup/m2office-backup.sh` | 社外バックアップ（Google Cloud Storage の東京。仕様書 第20.4.6節「控え」、ADR-0120）。データベースを pgBackRest で（まるごと。14 日分）、ファイルを restic で（30 日分）送り、月に 1 回壊れていないかを確かめる。結果は `/var/lib/m2office/machine/cloud-backup.json`（運営の画面の「稼働状況」）。`--status` で最後の結果、`--check` で確かめだけ。`setup.sh` が `/usr/local/sbin/m2office-backup` に入れる |
+| `backup/*.service`・`backup/*.timer` | 毎晩 2 時すぎに社外バックアップを取る（`m2office-backup`） |
+| `edge/m2office-edge-status.mjs` | 入口の守りと VPN の様子を集める（仕様書 第23.8.7節「ネットワークの様子」）。CrowdSec・国の遮断・WAF・証明書・WireGuard の数だけを `/var/lib/m2office/machine/edge-status.json` に書き、運営の画面の「稼働状況」の「VPN」に出す。相手の IP アドレス・鍵・WAF の記録の中身は書かない。`setup.sh` が `/usr/local/lib/m2office/` に入れる |
 | `edge/*.service`・`edge/*.timer` | 5 分ごとに root で集める（`m2office-edge-status`。記録は `journalctl -u m2office-edge-status`） |
 
-雛形の埋め方は、ローカルの形と同じ `deploy/onsite/render.mjs` を使います。機械を変えずに埋めた結果だけを見るときは、次のようにします。
+雛形の埋め方は、ローカルの形と同じ `deploy/onsite/render.mjs` を使います。サーバーを変えずに埋めた結果だけを見るときは、次のようにします。
 
 ```bash
 deploy/vps/setup.sh --render-only <出力先> --answers <KEY=値 のファイル>
@@ -53,12 +53,12 @@ deploy/vps/setup.sh --render-only <出力先> --answers <KEY=値 のファイル
 | 道 | 中身 |
 |---|---|
 | `/opt/m2office/app` | 取ってきたリリースのタグ。組み立ては `dist-release/` |
-| `/etc/m2office/` | 環境変数（`m2office.env`）と答え（`setup.conf`）。社外の控えの設定（`backup.env`。root だけ） |
-| `/etc/pgbackrest/` | データベースの控えの設定（`pgbackrest.conf`。暗号化の合言葉を含む）と、控え用のサービスアカウントの鍵（`gcs-key.json`）。root と postgres だけ |
+| `/etc/m2office/` | 環境変数（`m2office.env`）と答え（`setup.conf`）。社外バックアップの設定（`backup.env`。root だけ） |
+| `/etc/pgbackrest/` | データベースのバックアップの設定（`pgbackrest.conf`。暗号化の合言葉を含む）と、バックアップ用のサービスアカウントの鍵（`gcs-key.json`）。root と postgres だけ |
 | `/etc/postgresql/17/main/conf.d/m2office-archive.conf` | 変更の記録（WAL）を絶えず送る設定 |
-| `/var/lib/m2office/` | ファイル（`files/`）・機械の様子（`machine/`。社外の控えの結果 `cloud-backup.json`・更新の前の戻す点 `restore-points.json`・入口の守りと VPN の様子 `edge-status.json` を含む） |
+| `/var/lib/m2office/` | ファイル（`files/`）・サーバーの様子（`machine/`。社外バックアップの結果 `cloud-backup.json`・更新の前の戻す点 `restore-points.json`・入口の守りと VPN の様子 `edge-status.json` を含む） |
 | `/var/www/m2office-site/` | 紹介のページ（`m2office.net`・`www`） |
-| `/var/backups/m2office/pre-update/` | 更新の前の控え（直近の 3 回。root だけが読める） |
+| `/var/backups/m2office/pre-update/` | 更新の前のバックアップ（直近の 3 回。root だけが読める） |
 | `/var/log/m2office/` | アプリのログと更新の記録（`update.log`） |
 | `/var/log/caddy/` | 入口のアクセスのログと WAF の記録（CrowdSec が読む） |
 
@@ -72,9 +72,9 @@ sudo /opt/m2office/app/deploy/vps/update.sh --tag <リリースのタグ> --allo
 - タグへの署名を始める v1.0 までは、`--allow-unsigned` を付けて技術者が手で入れる。v1.0 からは `/etc/m2office/allowed_signers` の鍵で署名を確かめ、夜の自動の更新も入れる。
 - 雛形（`deploy/vps/`）が変わった版では、入れた後に `setup.sh` を走らせ直すよう示す。
 
-## 社外の控え
+## 社外バックアップ
 
-Google Cloud Storage の東京に送ります。用意は運営のマニュアル 第 13 章 手順 9、戻し方といざというときの手順は第 17 章「控えと復旧」です。結果と戻せる範囲は、マスター管理画面の「稼働状況」の「社外の控え」に出ます。`setup.sh` でバケットの名前を空のままにすると入れません。
+Google Cloud Storage の東京に送ります。用意は運営のマニュアル 第 13 章 手順 9、戻し方といざというときの手順は第 17 章「バックアップと復旧」です。結果と戻せる範囲は、マスター管理画面の「稼働状況」の「バックアップ」に出ます。`setup.sh` でバケットの名前を空のままにすると入れません。
 
 ## まだ入れていないもの
 

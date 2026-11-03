@@ -6,9 +6,9 @@
 #   sudo /opt/m2office/app/deploy/vps/update.sh --tag v0.21.0 --allow-unsigned  # 決めたタグを入れる（署名を始める v1.0 までは --allow-unsigned を付ける）
 #   sudo /opt/m2office/app/deploy/vps/update.sh --allow-unsigned                 # いちばん新しいリリースのタグを入れる
 #
-# 流れ: タグを取る → 署名を確かめる → 控えを取る → 止める → 切り替えて組み立て直す → データベースの移行 → 動かす → 確かめる。
-# 確かめに失敗したら、前の版と更新の前の控えに戻す。夜の自動の更新は、タグへの署名を始める v1.0 から入れる（第20.4.6節）。
-# 社外の控えの置き場を決めるまでは、更新の前の控え（pg_dump）を VPS の中に取る（直近の 3 回。root だけが読める）。
+# 流れ: タグを取る → 署名を確かめる → バックアップを取る → 止める → 切り替えて組み立て直す → データベースの移行 → 動かす → 確かめる。
+# 確かめに失敗したら、前の版と更新の前のバックアップに戻す。夜の自動の更新は、タグへの署名を始める v1.0 から入れる（第20.4.6節）。
+# 社外バックアップの置き場を決めるまでは、更新の前のバックアップ（pg_dump）を VPS の中に取る（直近の 3 回。root だけが読める）。
 
 set -uo pipefail
 
@@ -68,8 +68,8 @@ else
   log '注意: 署名を確かめずに入れます（--allow-unsigned）'
 fi
 
-# 更新の前の控え（データベース）。会社の全データなので root だけが読める置き場に取り、直近の 3 回を残す。
-# 控えを取る間だけ umask 077 にし、すぐ戻す（戻さずに組み立てると、m2office がプログラムを読めなくなる。2026-10-29 に実機で起きた）
+# 更新の前のバックアップ（データベース）。会社の全データなので root だけが読める置き場に取り、直近の 3 回を残す。
+# バックアップを取る間だけ umask 077 にし、すぐ戻す（戻さずに組み立てると、m2office がプログラムを読めなくなる。2026-10-29 に実機で起きた）
 umask 077
 mkdir -p "$BACKUP_DIR"; chmod 700 "$(dirname "$BACKUP_DIR")" "$BACKUP_DIR"
 DUMP="$BACKUP_DIR/$(date +%Y%m%d-%H%M%S)-$FROM.dump"
@@ -77,16 +77,16 @@ OWNER_URL=$(grep -E '^MIGRATION_DATABASE_URL=' "$ENV_FILE" | cut -d= -f2-)
 # パスワードはコマンドの引数に出さず（ps で見えるため）、環境の変数で渡す
 OWNER_PASS=$(node -e 'process.stdout.write(decodeURIComponent(new URL(process.argv[1]).password))' "$OWNER_URL")
 OWNER_NOPASS=$(node -e 'const u = new URL(process.argv[1]); u.password = ""; process.stdout.write(u.toString())' "$OWNER_URL")
-PGPASSWORD="$OWNER_PASS" "$PG_BIN/pg_dump" -Fc -f "$DUMP" "$OWNER_NOPASS" || { log '更新の前の控えを取れません。入れません'; exit 1; }
+PGPASSWORD="$OWNER_PASS" "$PG_BIN/pg_dump" -Fc -f "$DUMP" "$OWNER_NOPASS" || { log '更新の前のバックアップを取れません。入れません'; exit 1; }
 ls -1t "$BACKUP_DIR"/*.dump 2>/dev/null | tail -n +4 | xargs -r rm -f
 umask 022
-log "控えを取りました: $DUMP"
-# 社外の控えを入れていれば、戻す点に名前を付けて変更の記録を区切って送る（第20.4.6節「控え」の「更新の前」。pgBackRest の --type=name で、この時点に戻せる）
+log "バックアップを取りました: $DUMP"
+# 社外バックアップを入れていれば、戻す点に名前を付けて変更の記録を区切って送る（第20.4.6節「控え」の「更新の前」。pgBackRest の --type=name で、この時点に戻せる）
 if [ -f /etc/pgbackrest/pgbackrest.conf ]; then
   if (cd / && sudo -u postgres psql -qtA -d m2office -c "select pg_create_restore_point('update-$TO')" -c 'select pg_switch_wal()' >/dev/null 2>&1); then
     lsn=$(cd / && sudo -u postgres psql -qtA -c 'select pg_current_wal_lsn()' 2>/dev/null)
     log "戻す点を記録しました: update-${TO}（${lsn}）"
-    # 運営の画面の「社外の控え」に出す（第23.8.7節「控えの様子」。直近の 20 件）
+    # 運営の画面の「バックアップ」に出す（第23.8.7節「控えの様子」。直近の 20 件）
     node -e '
       const fs = require("fs"); const [f, name, lsn] = process.argv.slice(1);
       let a = []; try { a = JSON.parse(fs.readFileSync(f, "utf8")); } catch {}
@@ -94,7 +94,7 @@ if [ -f /etc/pgbackrest/pgbackrest.conf ]; then
       fs.writeFileSync(f + ".tmp", JSON.stringify(a.slice(-20)) + "\n"); fs.chmodSync(f + ".tmp", 0o644); fs.renameSync(f + ".tmp", f);
     ' /var/lib/m2office/machine/restore-points.json "update-$TO" "$lsn" || log '注意: 戻す点を運営の画面に出すファイルに書けませんでした'
   else
-    log '注意: 戻す点を記録できませんでした（社外の控えの変更の記録は送り続けます）'
+    log '注意: 戻す点を記録できませんでした（社外バックアップの変更の記録は送り続けます）'
   fi
 fi
 
@@ -120,7 +120,7 @@ rollback() {
   log "失敗しました（${why}）。前の版 $FROM に戻します"
   stop_app
   build "$FROM" || log '前の版の組み立てにも失敗しました。技術者が手で戻してください'
-  PGPASSWORD="$OWNER_PASS" "$PG_BIN/pg_restore" --clean --if-exists --no-owner -d "$OWNER_NOPASS" "$DUMP" >/dev/null 2>&1 || log '控えの戻しで警告がありました'
+  PGPASSWORD="$OWNER_PASS" "$PG_BIN/pg_restore" --clean --if-exists --no-owner -d "$OWNER_NOPASS" "$DUMP" >/dev/null 2>&1 || log 'バックアップの戻しで警告がありました'
   start_app
   if healthy; then log "前の版 $FROM に戻しました"; else log '前の版に戻しても動きません。技術者が手で確かめてください'; fi
   exit 1

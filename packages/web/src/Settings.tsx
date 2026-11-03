@@ -877,7 +877,7 @@ function ServicesSettings() {
     if (impact === null) lines.push('', '止まる業務を確かめられませんでした。');
     else {
       if (impact.agents.length > 0) lines.push('', '次の業務が使えなくなります:', ...impact.agents.map((a) => `・${a.name}`));
-      if (impact.runs > 0) lines.push('', `動いている業務 ${impact.runs} 件を止めます。`);
+      if (impact.runs > 0) lines.push('', `実行中の業務 ${impact.runs} 件を止めます。`);
       if (impact.schedules > 0) lines.push('', `定時実行 ${impact.schedules} 件は、接続し直すまで飛ばします（設定は残ります）。`);
     }
     if (!confirm(lines.join('\n'))) return;

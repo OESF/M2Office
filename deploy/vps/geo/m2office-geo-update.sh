@@ -3,7 +3,7 @@
 #
 # 5 つの地域インターネットレジストリが公開する割り当ての一覧（delegated-*-extended-latest）から、止める国の IPv4・IPv6 の範囲を取り出し、
 # nftables の表 m2office_geo に入れる。相手が止める国なら入ってくる通信を黙って断り、宛先が止める国なら出ていく通信を断る。
-# 機械の中（lo）と WireGuard の網（wg0）は見ない。表の入れ替えは 1 回の nft の処理で行い、入れ替えの間も守りを外さない。
+# サーバーの中（lo）と WireGuard の網（wg0）は見ない。表の入れ替えは 1 回の nft の処理で行い、入れ替えの間も守りを外さない。
 # 取れない・検査の値（md5）が合わない・範囲が前の半分より少ないときは、前の一覧を使い続ける（空や壊れた一覧で守りが外れるのを防ぐ）。
 #
 # 使い方（root で。setup.sh が /usr/local/sbin/m2office-geo-update に入れ、systemd のタイマーが週に 1 回呼ぶ）:
@@ -11,7 +11,7 @@
 #   m2office-geo-update --load      # 前に作った表を入れる（起動のとき。取りに行かない）
 #   m2office-geo-update --status    # 止める国・範囲の数・止めた数を出す
 #
-# 試すとき（機械を変えない）:
+# 試すとき（サーバーを変えない）:
 #   m2office-geo-update --from-dir <一覧の置き場> --render <出力する nft のファイル>
 #   （置き場には delegated-<名前>-extended-latest と、あれば .md5 を置く。M2O_GEO_CONF・M2O_GEO_DIR で設定と置き場を替えられる）
 

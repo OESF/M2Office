@@ -165,7 +165,7 @@ export async function runBackup(cfg: BackupConfig, now: Date = new Date()): Prom
     const dump = join(dest, 'db.dump');
     await pgTool(cfg, 'pg_dump', ['--format=custom', '--no-owner', '-d', conn(cfg.ownerUrl).db], cfg.ownerUrl, { output: dump });
     const bytes = (await stat(dump)).size;
-    if (bytes < 100) throw new Error('データベースの控えが空です');
+    if (bytes < 100) throw new Error('データベースのバックアップが空です');
     // ファイルは、前の控えと同じものを共有する（場所を取らない）
     const prev = status.lastOk && existsSync(join(cfg.dir, status.lastOk, 'files')) ? join(cfg.dir, status.lastOk, 'files') : null;
     if (existsSync(cfg.filesDir)) {
@@ -206,7 +206,7 @@ export async function restoreTest(cfg: BackupConfig, now: Date = new Date()): Pr
     const tables = Number((await c.query<{ n: string }>(`select count(*) as n from information_schema.tables where table_schema = 'public'`)).rows[0]?.n ?? 0);
     const tenants = Number((await c.query<{ n: string }>('select count(*) as n from tenants').catch(() => ({ rows: [{ n: '0' }] }))).rows[0]?.n ?? 0);
     await c.end();
-    if (tables === 0 || tenants === 0) throw new Error('戻した控えに表か会社がありません');
+    if (tables === 0 || tenants === 0) throw new Error('戻したバックアップに表か会社がありません');
     result = { at: now.toISOString(), ok: true, name: status.lastOk, tables, error: null };
   } catch (err) {
     result = { at: now.toISOString(), ok: false, name: status.lastOk, tables: 0, error: err instanceof Error ? err.message.slice(0, 300) : String(err) };

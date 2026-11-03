@@ -49,7 +49,7 @@ export function machineAdminRoute(deps: AppDeps) {
     await deps.repo.appendAudit({
       id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: MACHINE_ADMIN_ACTOR, action, targetType: 'machine', targetId: 'admin',
       detail, occurredAt: new Date().toISOString(),
-    }).catch((err) => deps.log.warn('機械の管理者の操作を監査ログに残せませんでした', { action, err }));
+    }).catch((err) => deps.log.warn('サーバーの管理者の操作を監査ログに残せませんでした', { action, err }));
   };
 
   app.use('*', async (c, next) => {
@@ -74,7 +74,7 @@ export function machineAdminRoute(deps: AppDeps) {
     const tenant = await tenantOf();
     if (!idOk || !passwordOk || step === null) {
       throttle.fail(from);
-      deps.log.warn('機械の管理者のログインに失敗しました', { from });
+      deps.log.warn('サーバーの管理者のログインに失敗しました', { from });
       await audit(tenant, 'machine.admin_login_failed');
       return c.json({ error: WRONG }, 401);
     }
@@ -85,7 +85,7 @@ export function machineAdminRoute(deps: AppDeps) {
     setCookie(c, MACHINE_ADMIN_COOKIE, s.token, {
       httpOnly: true, sameSite: 'Strict', secure: deps.auth.cookieSecure, path: COOKIE_PATH, maxAge: Math.floor(MACHINE_ADMIN_SESSION_MS / 1000),
     });
-    deps.log.info('機械の管理者がログインしました', { from });
+    deps.log.info('サーバーの管理者がログインしました', { from });
     await audit(tenant, 'machine.admin_login');
     return c.json({ id: cfg.id, expiresAt: s.expiresAt, csrfToken: machineCsrf(key, s.token) });
   });
@@ -123,10 +123,10 @@ export function machineAdminRoute(deps: AppDeps) {
     const tenant = await tenantOf();
     // データベースにつながらないときは、機械の様子だけを見せる（各部の動きでデータベースの不調が分かる）
     if (!tenant && !(c.req.method === 'GET' && /\/machine\/?$/.test(c.req.path))) {
-      return c.json({ error: 'データベースにつながらないため使えません。機械の様子を確かめてください' }, 503);
+      return c.json({ error: 'データベースにつながらないため使えません。サーバーの様子を確かめてください' }, 503);
     }
     const t = tenant ?? ({ id: '', subdomain: deps.onsiteTenant! } as Tenant);
-    const user: User = { id: MACHINE_ADMIN_ACTOR, tenantId: t.id, email: '', displayName: '機械の管理者', roles: [], status: 'active' };
+    const user: User = { id: MACHINE_ADMIN_ACTOR, tenantId: t.id, email: '', displayName: 'サーバーの管理者', roles: [], status: 'active' };
     c.set('tenant', t);
     c.set('ctx', { tenant: t, user });
     c.set('auth', { method: 'machine-admin' });

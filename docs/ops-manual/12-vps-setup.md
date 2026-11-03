@@ -1,7 +1,7 @@
 # 第 12 章 VPS の用意（OS の初期設定）
 
 クラウドの形の M2Office を置く VPS（Xserver の VPS・Ubuntu）を、**M2Office を入れる前に**固める手順です。配備する技術者（提携先の技術者を含む）が行います。
-仕組みの考え方は仕様書 第20.4.6節にあります。この章は、その「機械」と「資源の配分」と「保守の入り口」の部分を、打つ命令に落としたものです。
+仕組みの考え方は仕様書 第20.4.6節にあります。この章は、その「サーバー」と「資源の配分」と「保守の入り口」の部分を、打つ命令に落としたものです。
 
 **目指す形: VPS が開ける口を、HTTPS（443）・HTTP（80）・WireGuard の UDP の 3 つだけにする。** 保守の SSH は、VPS に立てる WireGuard の網からだけ通します。この章を終えると、開いている口は WireGuard だけになり、SSH には WireGuard からしか入れなくなります。80・443 は、M2Office を入れる第 13 章で開けます。
 
@@ -141,7 +141,7 @@ echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-m2office.conf && sudo sysctl
 
 ### 手順 7. 名前・時間帯・時刻・記録の残し方
 
-機械の名前を決め、時間帯を日本時間にします（ログを読みやすくするため。M2Office 自体は日本時間を自分で計算するので、どちらでも動きます）。
+サーバーの名前を決め、時間帯を日本時間にします（ログを読みやすくするため。M2Office 自体は日本時間を自分で計算するので、どちらでも動きます）。
 
 ```bash
 sudo hostnamectl set-hostname m2office-cloud-1 && sudo timedatectl set-timezone Asia/Tokyo && timedatectl status
@@ -198,7 +198,7 @@ WireGuard を入れ、VPS の鍵の組を作ります。
 sudo apt install -y wireguard && sudo sh -c 'umask 077; wg genkey > /etc/wireguard/server.key; wg pubkey < /etc/wireguard/server.key > /etc/wireguard/server.pub' && sudo cat /etc/wireguard/server.pub
 ```
 
-最後に出た 1 行が **VPS の公開の鍵**です。手元の端末の設定で使うので控えます（公開の鍵は人に見られてもかまいません）。
+最後に出た 1 行が **VPS の公開の鍵**です。手元の端末の設定で使うのでバックアップます（公開の鍵は人に見られてもかまいません）。
 
 網の設定のファイルを作ります。
 
@@ -206,7 +206,7 @@ sudo apt install -y wireguard && sudo sh -c 'umask 077; wg genkey > /etc/wiregua
 sudo sh -c 'umask 077; printf "[Interface]\nAddress = 10.66.0.1/24\nListenPort = 51820\nPrivateKey = %s\n" "$(cat /etc/wireguard/server.key)" > /etc/wireguard/wg0.conf'
 ```
 
-WireGuard を起動し、機械が起きたときにも起動するようにします。
+WireGuard を起動し、サーバーが起きたときにも起動するようにします。
 
 ```bash
 sudo systemctl enable --now wg-quick@wg0 && sudo wg show
@@ -214,7 +214,7 @@ sudo systemctl enable --now wg-quick@wg0 && sudo wg show
 
 `interface: wg0` と `listening port: 51820` が出れば動いています。
 
-WireGuard の口を開けます。機械のファイアウォールで UDP 51820 を許し、**Xserver の管理画面のパケットフィルターにも UDP 51820 を許す規則を足します**（項目の名前は管理画面で確かめてください）。
+WireGuard の口を開けます。サーバーのファイアウォールで UDP 51820 を許し、**Xserver の管理画面のパケットフィルターにも UDP 51820 を許す規則を足します**（項目の名前は管理画面で確かめてください）。
 
 ```bash
 sudo ufw allow 51820/udp && sudo ufw status verbose
@@ -348,4 +348,4 @@ M2Office の設定の置き場（`/etc/m2office`）の見張りは、セット�
 | PostgreSQL 17 と pgvector | セットアップの手順 |
 | Caddy（Let's Encrypt の証明書・WAF）・CrowdSec と、80・443 を開けること | セットアップの手順と、Xserver の DNS の設定（第 13 章） |
 | 置き場所（`/opt/m2office`・`/var/lib/m2office`・`/etc/m2office`）と動かす利用者 `m2office` | セットアップの手順 |
-| 控え（pgBackRest・restic） | セットアップの手順 |
+| バックアップ（pgBackRest・restic） | セットアップの手順 |

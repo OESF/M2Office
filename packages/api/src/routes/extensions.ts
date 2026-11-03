@@ -440,7 +440,7 @@ export function extensionsRoute(deps: AppDeps) {
    */
   app.put(`/${INQUIRIES_EXTENSION_ID}/line`, async (c) => {
     const { tenant, user } = c.get('ctx');
-    if (deps.onsiteTenant) return c.json({ error: '社内の機械だけで動かす形（ローカルの形）では、LINE を使えません。社外から届く受け口が要るためです' }, 409);
+    if (deps.onsiteTenant) return c.json({ error: '社内のサーバーだけで動かす形（ローカルの形）では、LINE を使えません。社外から届く受け口が要るためです' }, 409);
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const s = (v: unknown) => (typeof v === 'string' ? v : '');
     const res = await deps.inquiries.service.connectLine({ tenantId: tenant.id, userId: user.id }, {

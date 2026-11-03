@@ -5,11 +5,11 @@
 #   sudo deploy/onsite/update.sh                  # いちばん新しいリリースのタグを入れる（技術者が手で）
 #   sudo deploy/onsite/update.sh --tag v0.19.0    # 決めたタグを入れる
 #   sudo deploy/onsite/update.sh --check          # 新しいタグがあるかだけを見る
-#   sudo deploy/onsite/update.sh --allow-unsigned # 署名の鍵が入っていない機械で、手で入れる（自動では使えない）
-#   （夜の自動の更新は launchd が --auto で呼ぶ。会社の管理者が「機械」で止めていれば飛ばす）
+#   sudo deploy/onsite/update.sh --allow-unsigned # 署名の鍵が入っていないサーバーで、手で入れる（自動では使えない）
+#   （夜の自動の更新は launchd が --auto で呼ぶ。会社の管理者が「サーバー」で止めていれば飛ばす）
 #
-# 流れ: タグを取る → 署名を確かめる → 控えを取る → 止める → 切り替えて組み立て直す → データベースの移行 → 動かす → 確かめる。
-# 確かめに失敗したら、前のタグと更新の前の控えに戻し、結果を「機械」の置き場の update.json に書く（ワーカーが会社の管理者に知らせる）。
+# 流れ: タグを取る → 署名を確かめる → バックアップを取る → 止める → 切り替えて組み立て直す → データベースの移行 → 動かす → 確かめる。
+# 確かめに失敗したら、前のタグと更新の前のバックアップに戻し、結果を「サーバー」の置き場の update.json に書く（ワーカーが会社の管理者に知らせる）。
 
 set -uo pipefail
 
@@ -91,9 +91,9 @@ else
   log '注意: 署名を確かめずに入れます（--allow-unsigned）'
 fi
 
-# 控え（データベース）。直近の 3 回を残す
+# バックアップ（データベース）。直近の 3 回を残す
 OWNER_URL=$(grep -E '^MIGRATION_DATABASE_URL=' "$ENV_FILE" | cut -d= -f2-)
-# 控えは会社の全データなので、作る人だけが読める権限で作る。前に入れた機械の置き場の権限もここでそろえる
+# バックアップは会社の全データなので、作る人だけが読める権限で作る。前に入れたサーバーの置き場の権限もここでそろえる
 umask 077
 chmod 700 "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/logs" "$DATA_DIR/machine" ${BACKUP_DIR:+"$BACKUP_DIR"} 2>/dev/null || true
 mkdir -p "${BACKUP_DIR:-$DATA_DIR}/pre-update"
@@ -101,15 +101,15 @@ DUMP="${BACKUP_DIR:-$DATA_DIR}/pre-update/$(date +%Y%m%d-%H%M%S)-$FROM.dump"
 # パスワードはコマンドの引数に出さず（ps で見えるため）、環境の変数で渡す
 OWNER_PASS=$("$NODE_BIN" -e 'process.stdout.write(decodeURIComponent(new URL(process.argv[1]).password))' "$OWNER_URL")
 OWNER_NOPASS=$("$NODE_BIN" -e 'const u = new URL(process.argv[1]); u.password = ""; process.stdout.write(u.toString())' "$OWNER_URL")
-PGPASSWORD="${OWNER_PASS}" "$PG_BIN/pg_dump" -Fc -f "$DUMP" "${OWNER_NOPASS}" || { record failed "$FROM" "$TO" '更新の前の控えを取れませんでした'; log '控えを取れません。入れません'; exit 1; }
+PGPASSWORD="${OWNER_PASS}" "$PG_BIN/pg_dump" -Fc -f "$DUMP" "${OWNER_NOPASS}" || { record failed "$FROM" "$TO" '更新の前のバックアップを取れませんでした'; log 'バックアップを取れません。入れません'; exit 1; }
 ls -1t "$(dirname "$DUMP")"/*.dump 2>/dev/null | tail -n +4 | xargs rm -f
-# 控えを取る間だけ umask 077 にした。戻さずに組み立てると、サービスの利用者がプログラムを読めなくなる（2026-10-29 にクラウドの形で起きた）
+# バックアップを取る間だけ umask 077 にした。戻さずに組み立てると、サービスの利用者がプログラムを読めなくなる（2026-10-29 にクラウドの形で起きた）
 umask 022
-log "控えを取りました: $DUMP"
+log "バックアップを取りました: $DUMP"
 
 daemon() { launchctl "$1" system "/Library/LaunchDaemons/$2.plist" >/dev/null 2>&1 || launchctl "$1" "system/$2" >/dev/null 2>&1 || true; }
-# 機械のログのファイルの入れ替え（第16.10.2節）。前に入れた機械に無ければ入れる（セットアップを流し直さなくても週に 1 回入れ替わる）
-# 機械のログの置き場を設定に足す（前に入れた機械の設定には無い。次に API が動き直したときから「機械」でダウンロードできる）
+# サーバーのログのファイルの入れ替え（第16.10.2節）。前に入れたサーバーに無ければ入れる（セットアップを流し直さなくても週に 1 回入れ替わる）
+# サーバーのログの置き場を設定に足す（前に入れたサーバーの設定には無い。次に API が動き直したときから「サーバー」でダウンロードできる）
 grep -q '^M2O_LOG_DIR=' "$ENV_FILE" || printf 'M2O_LOG_DIR=%s/logs\n' "$DATA_DIR" >> "$ENV_FILE"
 LOGROTATE_PLIST=/Library/LaunchDaemons/jp.m2office.logrotate.plist
 if [ ! -f "$LOGROTATE_PLIST" ]; then
@@ -132,7 +132,7 @@ rollback() {
   log "失敗しました（${why}）。前の版 $FROM に戻します"
   stop_app
   build "$FROM" || log '前の版の組み立てにも失敗しました。技術者が手で戻してください'
-  "$PG_BIN/pg_restore" --clean --if-exists --no-owner -d "$OWNER_URL" "$DUMP" >/dev/null 2>&1 || log '控えの戻しで警告がありました'
+  "$PG_BIN/pg_restore" --clean --if-exists --no-owner -d "$OWNER_URL" "$DUMP" >/dev/null 2>&1 || log 'バックアップの戻しで警告がありました'
   start_app
   if healthy; then record rolled-back "$FROM" "$TO" "$why"; log "前の版 $FROM に戻しました"
   else record failed "$FROM" "$TO" "${why}。前の版に戻しても動きません"; log '前の版に戻しても動きません。技術者が手で確かめてください'; fi

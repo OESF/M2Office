@@ -26,5 +26,5 @@ export interface DataRecipient {
 export const DATA_RECIPIENT_CONTRACT_LABEL: Record<DataRecipientContract, string> = {
   operator: '運営の契約',
   company: '会社の契約',
-  machine: '会社の機械（社外に出ない）',
+  machine: '会社のサーバー（社外に出ない）',
 };

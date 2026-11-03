@@ -330,7 +330,7 @@ export class ColumnSignageService {
    */
   async narratedUnusable(tenantId: string): Promise<string | null> {
     if (!(await this.deps.llmFor(tenantId)).generateSpeech) return 'この会社の AI では読み上げを作れません（Gemini の鍵が要ります）';
-    if (!(await (this.deps.ffmpeg ?? (() => ffmpegInfo()))())) return 'この機械では動画にまとめられません（ffmpeg が要ります）';
+    if (!(await (this.deps.ffmpeg ?? (() => ffmpegInfo()))())) return 'このサーバーでは動画にまとめられません（ffmpeg が要ります）';
     return null;
   }
 
@@ -541,7 +541,7 @@ export class ColumnSignageService {
     const { llm } = a;
     if (!llm.generateSpeech) return a.fail('この会社の AI では読み上げを作れません（Gemini の鍵が要ります）');
     const ff = await (this.deps.ffmpeg ?? (() => ffmpegInfo()))();
-    if (!ff) return a.fail('この機械では動画にまとめられません（ffmpeg が要ります）');
+    if (!ff) return a.fail('このサーバーでは動画にまとめられません（ffmpeg が要ります）');
     const count = (o: SignageSide) => a.screens.filter((x) => x.orientation === o).length;
     const side: SignageSide = count('portrait') > count('landscape') ? 'portrait' : 'landscape';
     const style = s.imageStyle ?? COLUMN_IMAGE_STYLE_DEFAULT;

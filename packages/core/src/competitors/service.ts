@@ -415,7 +415,7 @@ export class CompetitorService {
     const rows = await store.list(who.tenantId);
     const max = competitorsMax(competitorAutoMax((await this.deps.repo.getTenantSettings(who.tenantId)).competitors));
     if (rows.filter((c) => c.status === 'watching').length >= max) return { error: `競合は ${max} 社までです。外してから入れてください` };
-    if (this.deps.externalAllowed && !(await this.deps.externalAllowed(who.tenantId))) return { error: '社内の機械だけで AI を使う会社では、競合の分析を使えません' };
+    if (this.deps.externalAllowed && !(await this.deps.externalAllowed(who.tenantId))) return { error: '社内のサーバーだけで AI を使う会社では、競合の分析を使えません' };
     const fetcher = this.fetcher(who.tenantId);
     const robots = this.robotsFor(who.tenantId, fetcher);
     let newRow: { name: string; url: string; placeId: string | null; lat: number | null; lng: number | null } | null = null;
@@ -588,7 +588,7 @@ export class CompetitorService {
   async runJob(tenantId: string, job: StoredJob): Promise<{ ok: boolean; message: string }> {
     const who = { tenantId, userId: job.requestedBy };
     if (this.deps.externalAllowed && !(await this.deps.externalAllowed(tenantId))) {
-      return { ok: false, message: '社内の機械だけで AI を使う会社では、競合の分析を使えません' };
+      return { ok: false, message: '社内のサーバーだけで AI を使う会社では、競合の分析を使えません' };
     }
     const progress = (m: string) => this.deps.store.setJobMessage(tenantId, job.id, m).catch(() => undefined);
     const scheduled = job.args['scheduled'] === true;

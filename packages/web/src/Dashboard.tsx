@@ -152,7 +152,7 @@ function People({ data, board = false }: { data: DashboardLive; board?: boolean 
             <span key={x.state} className={`chip presence-${x.state}`}>{x.label} {x.n} 人</span>
           ))}
         </div>
-        {agents.length > 0 && <p className="muted small">動いている業務: {agents.join('、')}</p>}
+        {agents.length > 0 && <p className="muted small">実行中の業務: {agents.join('、')}</p>}
       </section>
     );
   }
@@ -288,14 +288,14 @@ function Live({ board = false }: { board?: boolean }) {
       )}
       {/* Node.js のセキュリティの修正がある（ローカルの形。第8.6.7.1節）。眺める画面では出さない */}
       {data.nodeSecurity && !board && (
-        <p className="error" role="status">{nodeSecurityText(data.nodeSecurity)}。管理者ページの「機械」で確かめられます</p>
+        <p className="error" role="status">{nodeSecurityText(data.nodeSecurity)}。管理者ページの「サーバー」で確かめられます</p>
       )}
       {/* Node.js のサポートの終わりが近い・終わった（ローカルの形。第8.6.7.1節）。眺める画面では出さない */}
       {data.nodeWarn && !board && (
         <p className={data.nodeWarn.expired ? 'error' : 'warn-msg'} role="status">
           {data.nodeWarn.expired
-            ? `Node.js（${data.nodeWarn.version}）のサポートが終わっています。管理者ページの「機械」で確かめ、新しい LTS の版へ更新してください`
-            : `Node.js の更新が要ります（${data.nodeWarn.version} のサポートは ${data.nodeWarn.end ?? '近く'} まで）。管理者ページの「機械」で確かめられます`}
+            ? `Node.js（${data.nodeWarn.version}）のサポートが終わっています。管理者ページの「サーバー」で確かめ、新しい LTS の版へ更新してください`
+            : `Node.js の更新が要ります（${data.nodeWarn.version} のサポートは ${data.nodeWarn.end ?? '近く'} まで）。管理者ページの「サーバー」で確かめられます`}
         </p>
       )}
       <Agents data={data} board={board} />
@@ -305,7 +305,7 @@ function Live({ board = false }: { board?: boolean }) {
       <div className="dash-grid">
         <section className="card">
           <h3>業務の流れ</h3>
-          {data.flows.length === 0 && <p className="muted">いま動いている業務はありません。</p>}
+          {data.flows.length === 0 && <p className="muted">実行中の業務はありません。</p>}
           {data.flows.map((f) => (
             <div className={`flow ${f.status}`} key={f.runId}>
               <div className="flow-head">

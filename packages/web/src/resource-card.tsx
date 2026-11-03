@@ -3,7 +3,7 @@
  *
  * CPU の負荷・メモリー・Swap・ディスク・データベースの接続を、全体に対する割合の棒（80% で注意・90% で危険の色）で出し、
  * CPU の負荷・メモリー・Swap・ディスクの直近 24 時間（7 日に切り替え）の推移を折れ線で出す。図のライブラリは使わず SVG で描く。
- * 機械の通信量（受けた量と送った量）は単位が違うので、いまの速さ・直近 24 時間の合計と、別の折れ線で出す（第23.8.7節「ネットワークの様子」）。
+ * 機械の通信量（受信と送信）は単位が違うので、現在の速度・直近 24 時間の合計と、別の折れ線で出す（第23.8.7節「ネットワークの様子」）。
  * 色だけに頼らず、割合の数も必ず出す。取れなかった値は棒を出さずに「取得できなかった」と出す（推測で埋めない）。
  */
 
@@ -64,8 +64,8 @@ const SERIES = [
 ] as const;
 type SeriesKey = (typeof SERIES)[number]['key'];
 const NET_SERIES = [
-  { key: 'rxMbps', label: '受けた速さ' },
-  { key: 'txMbps', label: '送った速さ' },
+  { key: 'rxMbps', label: '受信速度' },
+  { key: 'txMbps', label: '送信速度' },
 ] as const;
 type NetKey = (typeof NET_SERIES)[number]['key'];
 
@@ -131,7 +131,7 @@ function Trend({ samples, days, kind = 'pct' }: { samples: RuntimeSamplePoint[];
     setHover(best);
   };
   const h = hover !== null ? samples[hover] : null;
-  const label = kind === 'net' ? '機械の通信の速さの推移' : '機械の資源の推移';
+  const label = kind === 'net' ? 'サーバーの通信速度の推移' : 'サーバーの資源の推移';
   return (
     <div className="rc-trend">
       <p className="rc-readout small" aria-live="polite">
@@ -193,7 +193,7 @@ export function ResourceCard({ env, loadSamples, filesBytes }: {
   const diskParts = [db ? `データベース ${size(db.bytes)}` : null, filesBytes != null ? `ファイル ${size(filesBytes)}` : null].filter(Boolean);
   return (
     <div className="card resource-card">
-      <h3>機械の資源</h3>
+      <h3>サーバーの資源</h3>
       <div className="rc-meters">
         <Meter label="CPU の負荷" pct={cpu}
           text={m?.load && m.cores ? `1 分 ${m.load[0].toFixed(2)}・5 分 ${m.load[1].toFixed(2)}・15 分 ${m.load[2].toFixed(2)} ／ ${m.cores} コア` : undefined} />
@@ -221,7 +221,7 @@ export function ResourceCard({ env, loadSamples, filesBytes }: {
 }
 
 /**
- * 機械の通信量（第23.8.7節「ネットワークの様子」）。いまの速さ（いちばん新しい点）と直近 24 時間の合計、速さの折れ線。
+ * 機械の通信量（第23.8.7節「ネットワークの様子」）。現在の速度（いちばん新しい点）と直近 24 時間の合計、速度の折れ線。
  * 読めない OS・記録の無いときは「取得できなかった」と出す（推測で埋めない）。
  */
 function NetSection({ samples, net, days }: { samples: RuntimeSamplePoint[]; net: RuntimeNetTotal | null; days: RuntimeSampleDays }) {
@@ -233,10 +233,10 @@ function NetSection({ samples, net, days }: { samples: RuntimeSamplePoint[]; net
       {!has ? <p className="muted small">取得できなかった</p> : (
         <>
           <dl className="kv rc-net">
-            <dt>いまの速さ</dt>
-            <dd>{last ? `受けた ${last.rxMbps === null ? '—' : mbpsText(last.rxMbps)}・送った ${last.txMbps === null ? '—' : mbpsText(last.txMbps)}` : '—'}</dd>
+            <dt>現在の速度</dt>
+            <dd>{last ? `受信 ${last.rxMbps === null ? '—' : mbpsText(last.rxMbps)}・送信 ${last.txMbps === null ? '—' : mbpsText(last.txMbps)}` : '—'}</dd>
             <dt>直近 24 時間の合計</dt>
-            <dd>{net && (net.rx !== null || net.tx !== null) ? `受けた ${net.rx === null ? '—' : trafficText(net.rx)}・送った ${net.tx === null ? '—' : trafficText(net.tx)}` : '—'}</dd>
+            <dd>{net && (net.rx !== null || net.tx !== null) ? `受信 ${net.rx === null ? '—' : trafficText(net.rx)}・送信 ${net.tx === null ? '—' : trafficText(net.tx)}` : '—'}</dd>
           </dl>
           {last && <Trend samples={samples} days={days} kind="net" />}
         </>

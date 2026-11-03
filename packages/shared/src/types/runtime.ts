@@ -181,7 +181,7 @@ export interface RuntimeSamplePoint {
   memory: number | null;
   swap: number | null;
   disk: number | null;
-  /** 受けた速さと送った速さ（Mbps。第23.8.7節「ネットワークの様子」）。記録が無い・途切れた区間は `null`。 */
+  /** 受信と送信の速度（Mbps。第23.8.7節「ネットワークの様子」）。記録が無い・途切れた区間は `null`。 */
   rxMbps: number | null;
   txMbps: number | null;
 }

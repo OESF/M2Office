@@ -178,7 +178,7 @@ function MachineLogFiles({ files, describe }: { files: NonNullable<LogSource['fi
   useEffect(() => { files.list().then((r) => { setItems(r.items); setConfigured(r.configured); }).catch((e) => setError(describe(e, '読めませんでした'))); }, [files, describe]);
   return (
     <div className="card">
-      <h3>機械のログのファイル</h3>
+      <h3>サーバーのログのファイル</h3>
       {error && <p className="error">{error}</p>}
       {!configured && <p className="muted">ログの置き場が設定されていません（M2O_LOG_DIR）</p>}
       {items && items.length > 0 && (

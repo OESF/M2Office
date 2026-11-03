@@ -67,7 +67,7 @@ export class MockNotificationSender implements NotificationSender {
 
   private record(channel: NotificationChannel, envelope: NotificationEnvelope): void {
     this.outbox.push({ ...envelope, channel, sentAt: new Date().toISOString() });
-    this.log.info('通知の控えを送ったことにしました（見本の送信口）', {
+    this.log.info('通知の転送を送ったことにしました（見本の送信口）', {
       tenantId: envelope.tenantId, channel, to: envelope.email, title: envelope.title,
     });
   }

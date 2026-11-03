@@ -1,12 +1,12 @@
 /**
- * @file ローカルの形の「機械の管理者」の合言葉と確認コードの種を作る（仕様書 第8.6.3節、Q-154）。setup.sh から呼ぶ。
+ * @file ローカルの形の「サーバーの管理者」の合言葉と確認コードの種を作る（仕様書 第8.6.3節、Q-154）。setup.sh から呼ぶ。
  *
  * 使い方: node machine-admin.mjs <ID>
  *
- * 出すもの（`KEY=値` の行）: `ID`・`PASSWORD`（紙に書き写して渡す。どこにも残さない）・`PASSWORD_HASH`（m2office.env に置く控え）・
+ * 出すもの（`KEY=値` の行）: `ID`・`PASSWORD`（紙に書き写して渡す。どこにも残さない）・`PASSWORD_HASH`（m2office.env に置くバックアップ）・
  * `TOTP`（認証アプリに入れる種。m2office.env にも置く）・`URI`（認証アプリに読ませる otpauth の URI）。
- * 控えの形は M2Office の `packages/core/src/machine/machine-admin.ts` と同じ（scrypt。値に `$` を使わず、環境変数のファイルにそのまま書ける）。
- * 依存のパッケージを使わない（入れる前の機械でも動くように）。
+ * バックアップの形は M2Office の `packages/core/src/machine/machine-admin.ts` と同じ（scrypt。値に `$` を使わず、環境変数のファイルにそのまま書ける）。
+ * 依存のパッケージを使わない（入れる前のサーバーでも動くように）。
  */
 
 import { randomBytes, randomInt, scryptSync } from 'node:crypto';

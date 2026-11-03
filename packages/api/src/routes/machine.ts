@@ -84,7 +84,7 @@ export function machineRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     if (deps.ai.deployment() !== 'onsite') return c.json({ error: 'ローカルの形だけで使えます' }, 404);
     const cfg = backupConfigFromEnv(process.env);
-    if (!cfg) return c.json({ error: '控えの置き場が設定されていません（M2O_BACKUP_DIR）' }, 400);
+    if (!cfg) return c.json({ error: 'バックアップの置き場が設定されていません（M2O_BACKUP_DIR）' }, 400);
     await requestBackup(cfg.dir, user.id);
     await audit(deps, tenant.id, user.id, 'machine.backup_request', 'machine', 'backup', {});
     return c.json({ ok: true }, 202);
