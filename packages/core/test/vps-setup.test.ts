@@ -20,7 +20,7 @@ const setup = join(root, 'deploy/vps/setup.sh');
 
 const ANSWERS = {
   BASE_DOMAIN: 'm2office.net', ACME_EMAIL: 'ops@example.jp', OPS_GOOGLE_DOMAIN: 'example.jp,partner.example.co.jp', WG_NETWORK: '10.66.0.0/24', WAF_ENGINE: 'DetectionOnly',
-  GEMINI_API_KEY: '', GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', SECRET_KEY: 'k'.repeat(64),
+  GEMINI_API_KEY: '', GOOGLE_LOGIN_CLIENT_ID: '', GOOGLE_LOGIN_CLIENT_SECRET: '', M2O_OPS_ALERT_WEBHOOK: 'https://chat.googleapis.com/v1/spaces/AAA/messages?key=k&token=t', SECRET_KEY: 'k'.repeat(64),
   DB_OWNER_PASSWORD: 'owner-pass', DB_APP_PASSWORD: 'app-pass', DB_OPS_PASSWORD: 'ops-pass',
   RELEASE_DIR: '/opt/m2office/app/dist-release', DATA_DIR: '/var/lib/m2office', LOG_DIR: '/var/log/m2office', CADDY_LOG_DIR: '/var/log/caddy',
   SITE_DIR: '/var/www/m2office-site', API_PORT: '3101', OPS_PORT: '3102', DEMO_SUBDOMAIN: 'demo',
@@ -70,6 +70,8 @@ test('雛形がすべて埋まり、API は機械の中だけで待ち受ける�
     assert.match(env, /^OPS_GOOGLE_DOMAIN=example\.jp,partner\.example\.co\.jp$/m);
     // 体験版の入口の名前（第23.3.2節）
     assert.match(env, /^DEMO_SUBDOMAIN=demo$/m);
+    // 警戒のときの知らせの受け口（第23.8.7節「警戒のときの知らせ」）。URL の ? と & はそのまま入る
+    assert.match(env, /^M2O_OPS_ALERT_WEBHOOK=https:\/\/chat\.googleapis\.com\/v1\/spaces\/AAA\/messages\?key=k&token=t$/m);
     const api = readFileSync(join(out, 'systemd/m2office-api.service'), 'utf8');
     assert.match(api, /--max-old-space-size=768 \/opt\/m2office\/app\/dist-release\/server\/api\.js/);
     assert.match(api, /^ProtectSystem=strict$/m);
@@ -258,6 +260,9 @@ test('入口の守りと VPN の様子（第23.8.7節「ネットワークの様
     summarizeWaf(text: string, now: number): { hits24h: number; hits7d: number; kinds24h: { key: string; count: number }[] };
     summarizeAlerts(alerts: unknown[], now: number): { alerts24h: number; alerts7d: number; scenarios24h: { key: string; count: number }[]; countries24h: { key: string; count: number }[] };
     geoDelta24h(history: { at: string; inBlocked: number | null; outBlocked: number | null }[], current: { inBlocked: number | null; outBlocked: number | null }, now: number): { in24h: number | null; out24h: number | null };
+    summarizeTrend(input: { alerts: number[] | null; waf: number[] | null; geo: { at: string; inBlocked: number | null; outBlocked: number | null }[] | null }, now: number): { hours: { at: string; alerts: number | null; waf: number | null; geoIn: number | null; geoOut: number | null }[]; days: { at: string; alerts: number | null; waf: number | null; geoIn: number | null; geoOut: number | null }[] };
+    alertTimes(alerts: unknown[]): number[];
+    wafTimes(text: string): number[];
     wgPeers(dump: string): { address: string; lastHandshake: string | null }[];
     collect(now: number, run: (cmd: string, args: string[]) => string): { crowdsec: unknown; vpn: { peers: unknown[] } | null; errors: string[] };
   };
@@ -302,6 +307,23 @@ test('入口の守りと VPN の様子（第23.8.7節「ネットワークの様
   ];
   assert.deepEqual(edge.geoDelta24h(h, { inBlocked: 9, outBlocked: 2 }, now), { in24h: 20 + 5 + 4, out24h: 2 });
   assert.deepEqual(edge.geoDelta24h([], { inBlocked: 9, outBlocked: null }, now), { in24h: 0, out24h: null });
+  // 推移（第23.8.7節「セキュリティの推移」）: 24 時間は時の始まりから 1 時間ごと、7 日は日本時間の 0 時から 1 日ごと。読めなかった材料は null
+  const tr = edge.summarizeTrend({
+    alerts: edge.alertTimes([{ scenario: 'crowdsecurity/http-probing', created_at: iso(30 * 60_000) }, { scenario: 'update : +1/-0 IPs', created_at: iso(60_000) }, { scenario: 'crowdsecurity/ssh-bf', created_at: iso(3 * 86_400_000) }]),
+    waf: edge.wafTimes(waf),
+    geo: [...h, { at: iso(0), inBlocked: 9, outBlocked: 2 }],
+  }, now);
+  assert.equal(tr.hours.length, 24);
+  assert.equal(tr.days.length, 7);
+  assert.equal(tr.hours[23]!.at, '2026-11-03T12:00:00.000Z', 'いちばん新しい区切りは、いまの時の始まり');
+  assert.equal(tr.days[6]!.at, '2026-11-02T15:00:00.000Z', 'いちばん新しい日は、日本時間の今日の 0 時');
+  assert.equal(tr.hours.reduce((n, p) => n + (p.alerts ?? 0), 0), 1, '分け合う一覧の取り込みは数えない');
+  assert.equal(tr.hours.find((p) => p.at === '2026-11-03T11:00:00.000Z')?.waf, 1);
+  assert.equal(tr.days.reduce((n, p) => n + (p.alerts ?? 0), 0), 2);
+  assert.equal(tr.days.reduce((n, p) => n + (p.geoIn ?? 0), 0), 9 + 20 + 5 + 4, '7 日の区切りでは 25 時間前からの差も入る');
+  assert.equal(tr.hours.reduce((n, p) => n + (p.geoOut ?? 0), 0), 2);
+  const none = edge.summarizeTrend({ alerts: null, waf: [], geo: null }, now);
+  assert.deepEqual([none.hours[0]!.alerts, none.hours[0]!.waf, none.hours[0]!.geoIn], [null, 0, null]);
   const dump = 'PRIVKEY\tPUBKEY\t51820\toff\nPEERKEY1\t(none)\t203.0.113.5:61000\t10.66.0.2/32\t1762171000\t100\t200\t25\nPEERKEY2\t(none)\t(none)\t10.66.0.3/32\t0\t0\t0\toff\n';
   const peers = edge.wgPeers(dump);
   assert.deepEqual(peers, [{ address: '10.66.0.2', lastHandshake: new Date(1762171000 * 1000).toISOString() }, { address: '10.66.0.3', lastHandshake: null }]);

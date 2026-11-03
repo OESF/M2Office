@@ -21,6 +21,7 @@ import { OpsHelp, OpsSubTitle, OpsTitle } from './ops-help.js';
 import { DemoDefaultsCard, OpsDemos } from './ops-demos.js';
 import { openHelp, useOpenHelp } from './help.js';
 import { HealthNotes, HealthPanel, healthAnchor, type HealthViewRow } from './health-panel.js';
+import { EdgeTrend } from './edge-trend.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
 const ROLE_LABEL: Record<OperatorRole, string> = { admin: '運営管理者', support: 'サポート', monitor: '監視' };
@@ -173,6 +174,27 @@ function usePlatformAiAlert(): string | null {
   return text;
 }
 
+/**
+ * 稼働状況の警戒（第23.8.7節「警戒のときの知らせ」）。警戒のあいだは、どの画面の上にも帯を出す。5 分ごとに読み直す。
+ *
+ * @returns 出す文。警戒でない・読めないときは `null`
+ */
+function useHealthAlert(): string | null {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    const load = () => {
+      opsApi.health().then(({ health }) => {
+        const alerts = health.items.filter((i) => i.level === 'alert');
+        setText(health.level !== 'alert' || !alerts[0] ? null : `警戒: ${alerts[0].title}${alerts.length > 1 ? `（ほか ${alerts.length - 1} 件）` : ''}`);
+      }).catch(() => setText(null));
+    };
+    load();
+    const t = window.setInterval(load, 300_000);
+    return () => clearInterval(t);
+  }, []);
+  return text;
+}
+
 /** 運営の画面の枠。 */
 function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
   const [page, setPage] = useState<OpsPage>('tenants');
@@ -180,6 +202,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
   // 画面の「？」の「詳しく見る」で、その画面の章を開く（第23.8.16節）
   useOpenHelp(useCallback((id: string | null) => { setHelpChapter(id); setPage('help'); }, []));
   const aiAlert = usePlatformAiAlert();
+  const healthAlert = useHealthAlert();
   const [requests, setRequests] = useState<StatusRequestRow[]>([]);
   // 承認できる運営者が自分だけか（自分の申請を理由を書いて承認・確認できる。ADR-0116）
   const [solo, setSolo] = useState(false);
@@ -203,6 +226,13 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
             <div className="suspended-banner" role="alert">
               <strong>確認待ちの緊急停止: {unconfirmed.map((r) => `${r.tenantName ?? r.tenantId}（${when(r.requestedAt)}）`).join('、')}</strong>
               {' '}<button className="link-btn" onClick={() => setPage('requests')}>確かめる</button>
+            </div>
+          )}
+          {/* 稼働状況を開いているときは、その画面の帯で分かるので出さない */}
+          {healthAlert && page !== 'server' && (
+            <div className="suspended-banner danger" role="alert">
+              <strong>{healthAlert}</strong>
+              {' '}<button className="link-btn" onClick={() => setPage('server')}>稼働状況を開く</button>
             </div>
           )}
           {aiAlert && (
@@ -700,6 +730,7 @@ function EdgeDetail({ e, health, onGuide }: { e: EdgeStatusViewRow; health: Heal
         最終収集 {e.stale ? <span className="badge warn">{when(l.at)}（止まっています）</span> : when(l.at)}
       </p>
       {notes}
+      <EdgeTrend trend={l.trend} />
       <div className="table-scroll"><table className="table">
         <tbody>
           <tr><th>攻撃の種類（24 時間）</th><td>{list(csOk, e.top.kinds.map((k) => [k.label, k.count]))}</td></tr>

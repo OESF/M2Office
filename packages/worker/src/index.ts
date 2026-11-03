@@ -19,7 +19,7 @@ import {
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, PlatformAiSource, PostgresPlatformAiSettingsReader, envTenantCapJpy, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
-  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, machineStatus, machineConfigFromEnv, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
+  defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, machineStatus, machineConfigFromEnv, machineHealth, HealthAlerter, HEALTH_ALERT_INTERVAL_MS, runtimeEnvironment, inferenceText, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, isPublicImageBase, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, WORKER_BEAT_INTERVAL_MS, keepAliveOnTransientErrors,
   PostgresDemoStore, isDemoTenantId,
 } from '@m2office/core';
@@ -764,6 +764,22 @@ async function notifyMachine(title: string, body: string): Promise<void> {
   }
 }
 
+// 警戒のときの知らせ（ローカルの形。第23.8.7節「警戒のときの知らせ」）。「サーバー」の画面と同じ判断（machineHealth）を 5 分ごとに行い、
+// 警戒になった・増えた・続いている（6 時間ごと）・回復したときに、会社の管理者の「お知らせ」へ届ける
+const machineAlerter = onsite ? new HealthAlerter((t) => notifyMachine(t.title, t.body), '管理者ページの「サーバー」') : null;
+let lastMachineAlert = 0;
+
+/** いまの「サーバー」の全体の状態（「サーバー」の API と同じ材料。読めない部分は null にして注意にする）。 */
+async function machineHealthNow() {
+  const [status, runtime] = await Promise.all([
+    machineStatus(machineConfigFromEnv(process.env, appVersion())).catch(() => null),
+    Promise.all([runtimeBeats.read(), runtimeBeats.postgresVersion().catch(() => null), runtimeBeats.database().catch(() => null)])
+      .then(([beats, postgres, database]) => runtimeEnvironment(beats, postgres, { deployment: 'onsite', debug: process.env['M2O_DEBUG'] === 'true', inference: inferenceText(localLlmFromEnv(process.env), 'onsite'), database }))
+      .catch(() => null),
+  ]);
+  return machineHealth(status, runtime);
+}
+
 /** 会議の後の議事録を見回る間隔（10 分）。 */
 const AUTO_MINUTES_INTERVAL_MS = 10 * 60_000;
 let lastAutoMinutes = 0;
@@ -829,6 +845,17 @@ while (running) {
 
   // ローカルの形の機械: ワーカーが動いていることを書き、毎晩 2 時（日本時間）か頼まれたときに控えを取り、毎月 1 回戻せるかを確かめる（第8.6.5節・第8.6.7節）
   await writeWorkerBeat(machineDir(process.env), appVersion()).catch(() => undefined);
+  // 起動の直後は、ほかの部分の知らせがそろうまで待つ（はじめの 1 回は 1 分後）
+  if (machineAlerter && Date.now() - lastMachineAlert >= HEALTH_ALERT_INTERVAL_MS && Date.now() - WORKER_STARTED_AT.getTime() >= 60_000) {
+    lastMachineAlert = Date.now();
+    try {
+      const h = await machineHealthNow();
+      const kind = await machineAlerter.check(h);
+      if (kind) log.info('警戒の知らせを管理者に届けました', { kind, level: h.level });
+    } catch (err) {
+      log.warn('警戒の知らせを届けられませんでした（次の回で試し直します）', { err });
+    }
+  }
   if (backupCfg && Date.now() - lastBackupCheck >= 60_000) {
     lastBackupCheck = Date.now();
     try {

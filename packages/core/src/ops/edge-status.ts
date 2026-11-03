@@ -57,7 +57,18 @@ export interface EdgeStatus {
     /** 登録した端末ごとの網の中のアドレスと、最後につながった時刻（つながったことが無ければ `null`）。 */
     peers: { address: string; lastHandshake: string | null }[];
   } | null;
+  /** 推移（第23.8.7節「セキュリティの推移」。第 0.514.0 版より前の結果には無い）。 */
+  trend?: { hours: EdgeTrendPoint[]; days: EdgeTrendPoint[] };
   errors: string[];
+}
+
+/** 推移の 1 区切り（`at` は区切りの始まり）。読めなかった材料は `null`。 */
+export interface EdgeTrendPoint {
+  at: string;
+  alerts: number | null;
+  waf: number | null;
+  geoIn: number | null;
+  geoOut: number | null;
 }
 
 /** 名前ごとの数（集める仕組みが多い順に書く）。 */

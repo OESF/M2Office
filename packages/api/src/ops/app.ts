@@ -104,6 +104,52 @@ function originOf(c: Context): string {
 }
 
 /**
+ * 稼働状況の読み出し（`GET /v1/ops/server` と、警戒のときの知らせの見回りで同じものを使う）。
+ *
+ * @param deps 運営の置き場と、VPS の上の結果のファイル
+ * @returns `runtime` 動いている環境、`server` 稼働状況とバックアップ・セキュリティの様子と全体の状態
+ */
+export function opsServerReader(deps: Pick<OpsDeps, 'store' | 'cloudBackupFile' | 'restorePointsFile' | 'edgeStatusFile'>) {
+  const { store } = deps;
+  /** 動いている環境を作る（`/v1/ops/runtime` と全体の状態で使う）。 */
+  const runtime = async () => {
+    const [{ beats, postgres }, database] = await Promise.all([
+      store.runtimeBeats().catch(() => ({ beats: [], postgres: null })), store.databaseUsage().catch(() => null),
+    ]);
+    return runtimeEnvironment(beats, postgres, {
+      deployment: deploymentFromEnv(process.env) === 'onsite' ? 'onsite' : 'cloud', debug: process.env['M2O_DEBUG'] === 'true',
+      inference: inferenceText(localLlmFromEnv(process.env), 'cloud'), database,
+    });
+  };
+  const server = async () => {
+    const { start } = jstMonth(new Date());
+    const [status, last, archive, points, edgeRaw, env, tenants, platformAi] = await Promise.all([
+      store.serverStatus(),
+      deps.cloudBackupFile ? readCloudBackupRun(deps.cloudBackupFile) : Promise.resolve(null),
+      deps.cloudBackupFile ? store.walArchiveStatus() : Promise.resolve(null),
+      deps.restorePointsFile ? readRestorePoints(deps.restorePointsFile) : Promise.resolve([]),
+      deps.edgeStatusFile ? readEdgeStatus(deps.edgeStatusFile) : Promise.resolve(null),
+      // 全体の状態の材料。読めなければ null にし、その区分を「読めませんでした」にする（推測しない）
+      runtime().catch(() => null),
+      store.tenantOverview().catch(() => null),
+      Promise.all([store.platformAiSettings(), store.platformAiTotal(start)]).then(([s, used]) => ({ usedJpy: Math.round(used), capJpy: s.platformCapJpy })).catch(() => null),
+    ]);
+    // 社外の控え（第20.4.6節「控え」・第23.8.7節「控えの様子」）。毎晩の控えの結果、変更の記録を送った様子、更新の前の戻す点。
+    // 入口の守りと VPN（第23.8.7節「ネットワークの様子」）。root の仕組みが書いた数を読むだけ
+    const backup = deps.cloudBackupFile ? cloudBackupView(last, archive, Date.now(), points) : null;
+    const edge = deps.edgeStatusFile ? edgeStatusView(edgeRaw) : null;
+    return {
+      status,
+      backup,
+      edge,
+      // バックアップとセキュリティは、入れる形（置き場を決めてある）のときだけ区分に出す
+      health: opsHealth({ status, runtime: env, tenants, platformAi, ...(backup ? { backup } : {}), ...(edge ? { edge } : {}) }),
+    };
+  };
+  return { runtime, server };
+}
+
+/**
  * マスター管理画面の API を組み立てる。
  *
  * @remarks 運営者の操作はすべて運営の操作の記録に残す。会社に影響する操作は、データベースの関数がその会社の監査ログにも残す
@@ -485,43 +531,17 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     } catch (err) { return ruleError(c, err); }
   });
 
-  /** 動いている環境を作る（`/v1/ops/runtime` と全体の状態で使う）。 */
-  const opsRuntime = async () => {
-    const [{ beats, postgres }, database] = await Promise.all([
-      store.runtimeBeats().catch(() => ({ beats: [], postgres: null })), store.databaseUsage().catch(() => null),
-    ]);
-    return runtimeEnvironment(beats, postgres, {
-      deployment: deploymentFromEnv(process.env) === 'onsite' ? 'onsite' : 'cloud', debug: process.env['M2O_DEBUG'] === 'true',
-      inference: inferenceText(localLlmFromEnv(process.env), 'cloud'), database,
-    });
-  };
+  const reader = opsServerReader(deps);
+  const opsRuntime = reader.runtime;
 
   // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）と、全体の状態（第23.8.7節「全体の状態」）
-  app.get('/v1/ops/server', async (c) => {
-    const { start } = jstMonth(new Date());
-    const [status, last, archive, points, edgeRaw, runtime, tenants, platformAi] = await Promise.all([
-      store.serverStatus(),
-      deps.cloudBackupFile ? readCloudBackupRun(deps.cloudBackupFile) : Promise.resolve(null),
-      deps.cloudBackupFile ? store.walArchiveStatus() : Promise.resolve(null),
-      deps.restorePointsFile ? readRestorePoints(deps.restorePointsFile) : Promise.resolve([]),
-      deps.edgeStatusFile ? readEdgeStatus(deps.edgeStatusFile) : Promise.resolve(null),
-      // 全体の状態の材料。読めなければ null にし、その区分を「読めませんでした」にする（推測しない）
-      opsRuntime().catch(() => null),
-      store.tenantOverview().catch(() => null),
-      Promise.all([store.platformAiSettings(), store.platformAiTotal(start)]).then(([s, used]) => ({ usedJpy: Math.round(used), capJpy: s.platformCapJpy })).catch(() => null),
-    ]);
-    // 社外の控え（第20.4.6節「控え」・第23.8.7節「控えの様子」）。毎晩の控えの結果、変更の記録を送った様子、更新の前の戻す点。
-    // 入口の守りと VPN（第23.8.7節「ネットワークの様子」）。root の仕組みが書いた数を読むだけ
-    const backup = deps.cloudBackupFile ? cloudBackupView(last, archive, Date.now(), points) : null;
-    const edge = deps.edgeStatusFile ? edgeStatusView(edgeRaw) : null;
-    return c.json({
-      status,
-      backup,
-      edge,
-      // バックアップとセキュリティは、入れる形（置き場を決めてある）のときだけ区分に出す
-      health: opsHealth({ status, runtime, tenants, platformAi, ...(backup ? { backup } : {}), ...(edge ? { edge } : {}) }),
-    });
-  });
+  app.get('/v1/ops/server', async (c) => c.json(await reader.server()));
+  /**
+   * 全体の状態だけ（第23.8.7節「警戒のときの知らせ」の画面の帯。どの画面も 5 分ごとに読む）。
+   *
+   * @remarks 読むだけ。数と種類だけを返す
+   */
+  app.get('/v1/ops/health', async (c) => c.json({ health: (await reader.server()).health }));
   /**
    * 動いている環境（第8.6.7.1節）。クラウドの形では、OS・メモリー・CPU・Node.js の版は運営の機械の情報なので、運営の画面だけに出す（2026-10-22 に三浦さんが決めた）。
    *

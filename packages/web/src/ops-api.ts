@@ -125,6 +125,15 @@ export interface ServerStatusView {
   ai: { today: number; month: number; lastMonthSamePeriod: number };
 }
 
+/** セキュリティの推移の 1 区切り（`at` は区切りの始まり。読めなかった材料は `null`）。 */
+export interface EdgeTrendPointRow {
+  at: string;
+  alerts: number | null;
+  waf: number | null;
+  geoIn: number | null;
+  geoOut: number | null;
+}
+
 /** 入口の守りと VPN の様子（仕様書 第23.8.7節「ネットワークの様子」）。読めなかった部分は `null`。 */
 export interface EdgeStatusViewRow {
   /** 集める仕組みを入れてあるか（結果のファイルがあるか）。 */
@@ -136,6 +145,8 @@ export interface EdgeStatusViewRow {
     geo: { countries: string; inBlocked: number | null; outBlocked: number | null; in24h?: number | null; out24h?: number | null; listAt: string | null } | null;
     waf: { engine: string | null; hits24h: number | null; hits7d?: number | null } | null;
     certs: { count: number; nearest: string | null } | null;
+    /** 推移（第23.8.7節「セキュリティの推移」。前の版の集める仕組みの結果には無い）。 */
+    trend?: { hours: EdgeTrendPointRow[]; days: EdgeTrendPointRow[] };
     errors: string[];
   } | null;
   /** 最後に集めたのが 15 分より前。 */
@@ -300,6 +311,8 @@ export const opsApi = {
   tenantDetail: (id: string) => call<{ detail: TenantDetailView; opsHistory: OpsAuditRow[] }>(`/tenants/${encodeURIComponent(id)}`),
   /** 稼働状況。`health` は全体の状態（第23.8.7節「全体の状態」）。 */
   server: () => call<{ status: ServerStatusView; backup: CloudBackupViewRow | null; edge: EdgeStatusViewRow | null; health: HealthViewRow }>('/server'),
+  /** 全体の状態だけ（第23.8.7節「警戒のときの知らせ」の画面の帯）。 */
+  health: () => call<{ health: HealthViewRow }>('/health'),
   /** 動いている環境（仕様書 第8.6.7.1節。クラウドの形では運営だけが見る）。 */
   runtime: () => call<RuntimeEnvironment>('/runtime'),
   /** 運営者のヘルプの章の一覧（仕様書 第23.8.16節）。`q` で題と本文を絞り込む。 */

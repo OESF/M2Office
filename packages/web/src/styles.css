@@ -578,6 +578,8 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .badge.danger { background: var(--danger-soft); color: var(--danger); }
 /* 通常の停止の案内（仕様書 第23.8.6節） */
 .suspended-banner { padding: calc(8px * var(--space-scale)) calc(16px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid var(--warn-line); }
+/* 稼働状況の警戒の帯（仕様書 第23.8.7節「警戒のときの知らせ」） */
+.suspended-banner.danger { background: var(--danger-soft); color: var(--danger); border-bottom-color: var(--danger-line); }
 .row { display: flex; gap: calc(8px * var(--space-scale)); margin-top: calc(10px * var(--space-scale)); }
 .notice.unread { border-color: var(--accent); }
 .me-summary {
@@ -2967,6 +2969,17 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .rc-line.rxMbps { stroke: var(--rc-rx); }
 .rc-line.txMbps { stroke: var(--rc-tx); }
 .rc-cursor { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* セキュリティの推移（仕様書 第23.8.7節「セキュリティの推移」）。区分ごとの小さな棒の図 */
+.et { margin-bottom: calc(12px * var(--space-scale)); }
+.et-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: calc(12px * var(--space-scale)); margin-top: calc(6px * var(--space-scale)); }
+.et-chart { margin: 0; min-width: 0; }
+.et-chart figcaption { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.et-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.et-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.et-axis { font-size: 9px; fill: var(--muted); }
+.et-bar { fill: var(--accent); opacity: .75; }
+.et-bar.on { opacity: 1; }
+.et-bar.over { fill: var(--danger); opacity: 1; }
 @media (max-width: 640px) {
   .rc-row { grid-template-columns: 1fr; gap: 2px; }
   .rc-none { grid-column: auto; }

@@ -7,9 +7,9 @@
 
 import { serve } from '@hono/node-server';
 import { join } from 'node:path';
-import { attachLogSink, createLoggerFromEnv, createPool, envTenantCapJpy, installPoolLogger, machineDir, OpsStore, parseOpsDomains, secretBoxFromEnv, SystemLogSink } from '@m2office/core';
+import { attachLogSink, createLoggerFromEnv, createPool, envTenantCapJpy, HEALTH_ALERT_INTERVAL_MS, HealthAlerter, installPoolLogger, machineDir, OpsStore, parseOpsDomains, postHealthAlert, secretBoxFromEnv, SystemLogSink } from '@m2office/core';
 import { loadAuthConfig } from '../auth/config.js';
-import { opsApp, type OpsConfig } from './app.js';
+import { opsApp, opsServerReader, type OpsConfig } from './app.js';
 import { listenHost } from '../listen.js';
 
 const log = createLoggerFromEnv('ops');
@@ -50,8 +50,22 @@ const restorePointsFile = join(machineDir(env), 'restore-points.json');
 const edgeStatusFile = join(machineDir(env), 'edge-status.json');
 const app = opsApp({ store, config, log, cloudBackupFile, restorePointsFile, edgeStatusFile, platformAi: { box, env: { key: env['GEMINI_API_KEY']?.trim() || null, tenantCapJpy: envTenantCapJpy(env) } } });
 
+// 警戒のときの知らせ（第23.8.7節「警戒のときの知らせ」）。運営者が setup.sh で入れた Google Chat か Slack の受け口へ、5 分ごとの判断で送る。
+// 受け口が無ければ送らない（画面の帯だけ）。受け口の URL は秘密の設定なので、記録には出さない
+const alertWebhook = env['M2O_OPS_ALERT_WEBHOOK']?.trim() || null;
+if (alertWebhook) {
+  const reader = opsServerReader({ store, cloudBackupFile, restorePointsFile, edgeStatusFile });
+  const alerter = new HealthAlerter((t) => postHealthAlert(alertWebhook, `*${t.title}*\n${t.body}`), 'マスター管理画面の「稼働状況」');
+  const watch = () => void reader.server()
+    .then(async (v) => { const kind = await alerter.check(v.health); if (kind) log.info('警戒の知らせを送りました', { kind, level: v.health.level }); })
+    // 例外の中身（cause）に受け口の URL が入りうるので、文だけを残す
+    .catch((err) => log.warn('警戒の知らせを送れませんでした（次の回で試し直します）', { error: err instanceof Error ? err.message : String(err) }));
+  setInterval(watch, HEALTH_ALERT_INTERVAL_MS).unref();
+  setTimeout(watch, 60_000).unref();
+}
+
 const hostname = listenHost();
 serve({ fetch: app.fetch, port, hostname }, (info) => {
-  log.info('運営の API の待ち受けを開始しました', { host: hostname, port: info.port, google: !!config.login, googleDomains: config.googleDomains, devLogin: config.devLogin });
+  log.info('運営の API の待ち受けを開始しました', { host: hostname, port: info.port, google: !!config.login, googleDomains: config.googleDomains, devLogin: config.devLogin, alertWebhook: !!alertWebhook });
   if (config.devLogin) log.warn('開発用ログインが有効です（本番では起動を拒否します）');
 });

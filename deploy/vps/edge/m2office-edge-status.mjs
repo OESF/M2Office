@@ -5,7 +5,8 @@
  * `/var/lib/m2office/machine/edge-status.json`（だれでも読めるが、書けるのは root だけ）に書く。運営の API はそれを読むだけ。
  * 相手の IP アドレス・鍵・WAF の記録の中身はファイルに入れない。読めなかった部分は `null` にし、理由を `errors` に残す（推測で埋めない）。
  * 攻撃と WAF は、直近 24 時間の種類と国（数だけ）と、ふだんと比べるための 7 日の数も書く（第23.8.7節「セキュリティの状態」）。
- * 国の遮断の数は積み上がった数しか無いので、24 時間分の前の値を `edge-history.json`（root だけが読み書きする）に残し、差を出す。
+ * 国の遮断の数は積み上がった数しか無いので、7 日分の前の値を `edge-history.json`（root だけが読み書きする）に残し、差を出す。
+ * 推移の図のため、攻撃・WAF・国の遮断の数を、直近 24 時間は 1 時間ごと、7 日は日本時間の 1 日ごとに区切って書く（第23.8.7節「セキュリティの推移」）。
  * 記録は journalctl -u m2office-edge-status。
  */
 
@@ -148,9 +149,9 @@ export function geoDelta24h(history, current, now) {
   return { in24h: delta('inBlocked'), out24h: delta('outBlocked') };
 }
 
-/** 残す前の値（25 時間より古いものは捨てる）。 */
+/** 残す前の値（推移の図の 7 日分と 1 時間より古いものは捨てる）。 */
 export function nextHistory(history, result, now) {
-  const kept = history.filter((h) => Date.parse(h.at) >= now - DAY_MS - 60 * 60_000);
+  const kept = history.filter((h) => Date.parse(h.at) >= now - 7 * DAY_MS - 60 * 60_000);
   if (result.geo && (result.geo.inBlocked !== null || result.geo.outBlocked !== null)) {
     kept.push({ at: result.at, inBlocked: result.geo.inBlocked, outBlocked: result.geo.outBlocked });
   }
@@ -187,6 +188,63 @@ export function certSummary(dir) {
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 20_000, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
 const readText = (p) => { try { return readFileSync(p, 'utf8'); } catch { return ''; } };
 
+/** 攻撃の記録の時刻（ミリ秒）。分け合う一覧の取り込みは除く（`summarizeAlerts` と同じ）。 */
+export function alertTimes(alerts) {
+  return (alerts ?? []).filter((a) => !/^update\s*:/i.test(String(a?.scenario ?? '')))
+    .map((a) => Date.parse(a?.created_at ?? a?.start_at ?? '')).filter(Number.isFinite);
+}
+
+/** WAF の記録の時刻（ミリ秒）。読めない行は飛ばす。 */
+export function wafTimes(text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const t = JSON.parse(line).transaction ?? {};
+      const at = typeof t.unix_timestamp === 'number' ? t.unix_timestamp / 1e6 : Date.parse(t.timestamp ?? '');
+      if (Number.isFinite(at)) out.push(at);
+    } catch { /* 途中で切れた行など */ }
+  }
+  return out;
+}
+
+/** 推移の区切り。直近 24 時間は時の始まりから 1 時間ごと（24 本）、7 日は日本時間の 0 時から 1 日ごと（7 本）。最後の区切りは途中まで。 */
+export function trendBuckets(now) {
+  const HOUR = 3_600_000; const JST = 9 * HOUR;
+  const hour = Math.floor(now / HOUR) * HOUR;
+  const day = Math.floor((now + JST) / DAY_MS) * DAY_MS - JST;
+  return {
+    hours: Array.from({ length: 24 }, (_, i) => ({ from: hour - (23 - i) * HOUR, to: hour - (22 - i) * HOUR })),
+    days: Array.from({ length: 7 }, (_, i) => ({ from: day - (6 - i) * DAY_MS, to: day - (5 - i) * DAY_MS })),
+  };
+}
+
+/**
+ * 攻撃・WAF・国の遮断の数を、推移の区切りごとに数える（第23.8.7節「セキュリティの推移」）。読めなかった材料は `null`。
+ * 国の遮断は、前の値と次の値の差を、次の値の時刻の区切りに足す（表を入れ直して数が戻ったときは、戻った後の数を差とする）。
+ *
+ * @param input `alerts`・`waf` は時刻の並び、`geo` は前の値といまの値（古い順。`{ at, inBlocked, outBlocked }`）
+ */
+export function summarizeTrend(input, now) {
+  const { hours, days } = trendBuckets(now);
+  const count = (times, b) => (times ? times.filter((t) => t >= b.from && t < b.to).length : null);
+  const geo = input.geo ?? null;
+  const geoSum = (key, b) => {
+    if (!geo) return null;
+    let sum = 0;
+    for (let i = 1; i < geo.length; i++) {
+      const at = Date.parse(geo[i].at);
+      if (!(at >= b.from && at < b.to)) continue;
+      const prev = geo[i - 1][key]; const cur = geo[i][key];
+      if (typeof cur !== 'number') continue;
+      sum += typeof prev === 'number' && cur >= prev ? cur - prev : (typeof prev === 'number' ? cur : 0);
+    }
+    return sum;
+  };
+  const point = (b) => ({ at: new Date(b.from).toISOString(), alerts: count(input.alerts, b), waf: count(input.waf, b), geoIn: geoSum('inBlocked', b), geoOut: geoSum('outBlocked', b) });
+  return { hours: hours.map(point), days: days.map(point) };
+}
+
 /** 残した前の値を読む（無い・壊れているときは空）。 */
 function readHistory() {
   try { const j = JSON.parse(readFileSync(PATHS.history, 'utf8')); return Array.isArray(j) ? j : []; } catch { return []; }
@@ -200,10 +258,13 @@ function readHistory() {
 export function collect(now = Date.now(), run = sh, history = []) {
   const errors = [];
   const part = (name, fn) => { try { return fn(); } catch (e) { errors.push(`${name}: ${String(e?.message ?? e).split('\n')[0].slice(0, 200)}`); return null; } };
+  // 推移の図の材料（読めなかったものは null のまま）
+  const trendIn = { alerts: null, waf: null, geo: null };
 
   const crowdsec = part('CrowdSec', () => {
     const { local, shared } = countDecisions(run('cscli', ['decisions', 'list', '--all', '--limit', '0', '-o', 'json']));
     const alerts = JSON.parse(run('cscli', ['alerts', 'list', '--since', '168h', '--limit', '0', '-o', 'json']) || 'null') ?? [];
+    trendIn.alerts = alertTimes(alerts);
     return { local, shared, ...summarizeAlerts(alerts, now) };
   });
 
@@ -216,6 +277,7 @@ export function collect(now = Date.now(), run = sh, history = []) {
     let listAt = null;
     try { listAt = statSync(join(PATHS.geoDir, 'geo.nft')).mtime.toISOString(); } catch { /* まだ作っていない */ }
     const current = { inBlocked: counter('in_blocked'), outBlocked: counter('out_blocked') };
+    trendIn.geo = [...history, { at: new Date(now).toISOString(), ...current }];
     return { countries, ...current, ...geoDelta24h(history, current, now), listAt };
   });
 
@@ -224,6 +286,7 @@ export function collect(now = Date.now(), run = sh, history = []) {
     // 記録が無ければ数えられない（0 件とは言えない）。毎日入れ替えるので、前の日までのファイルも見る
     const text = readWafLogs(PATHS.wafLog);
     if (text === null) { errors.push(`WAF: ${PATHS.wafLog} がありません`); return { engine, hits24h: null, hits7d: null, kinds24h: [] }; }
+    trendIn.waf = wafTimes(text);
     return { engine, ...summarizeWaf(text, now) };
   });
 
@@ -231,7 +294,7 @@ export function collect(now = Date.now(), run = sh, history = []) {
 
   const vpn = part('VPN', () => ({ peers: wgPeers(run('wg', ['show', 'wg0', 'dump'])) }));
 
-  return { at: new Date(now).toISOString(), crowdsec, geo, waf, certs, vpn, errors };
+  return { at: new Date(now).toISOString(), crowdsec, geo, waf, certs, vpn, trend: summarizeTrend(trendIn, now), errors };
 }
 
 /** 書く（書きかけを読まれないよう、別の名前に書いてから入れ替える）。 */

@@ -1,6 +1,6 @@
 <svg viewBox="0 0 960 900" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
   <title id="t">クラウドの形の全体の構成</title>
-  <desc id="d">外から順に、Xserver のパケットフィルター、サーバーのファイアウォール（ufw・国の遮断・CrowdSec の止める役）、入口の Caddy（証明書と WAF）と WireGuard を通る。奥に API・ワーカー・運営の API・SSH と update.sh があり、PostgreSQL とファイルを毎晩 m2office-backup が Google Cloud Storage へ送り、入口の守りと VPN の数は m2office-edge-status が 5 分ごとに集める。土台は Ubuntu 26.04 LTS。外部に Google・Gemini・Let's Encrypt・Cloud Storage・GitHub・地域の登録機関・CrowdSec の中央がある。</desc>
+  <desc id="d">外から順に、Xserver のパケットフィルター、サーバーのファイアウォール（ufw・国の遮断・CrowdSec の止める役）、入口の Caddy（証明書と WAF）と WireGuard を通る。奥に API・ワーカー・運営の API・SSH と update.sh があり、PostgreSQL とファイルを毎晩 m2office-backup が Google Cloud Storage へ送り、入口の守りと VPN の数は m2office-edge-status が 5 分ごとに集める。土台は Ubuntu 26.04 LTS。外部に Google・Gemini・Let's Encrypt・Cloud Storage・GitHub・地域の登録機関・CrowdSec の中央と、警戒を知らせる Google Chat か Slack（入れたときだけ）がある。</desc>
   <!-- 運営者マニュアル 第 18 章の図（仕様書 第23.8.16節「図」）。画面のヘルプでは <img> で出すので、スクリプトと外の読み込みは使わない -->
   <style>
     svg { --fg: #1d2430; --muted: #5a6475; --line: #c9cfd8; --surface: #ffffff; --ext: #eef0f3;
@@ -157,34 +157,38 @@
 
   <text class="ttl" x="50" y="772">Xserver の VPS（国内）</text>
 
-  <line class="a" x1="100" y1="792" x2="100" y2="826" marker-end="url(#m)"/>
-  <line class="a" x1="228" y1="792" x2="228" y2="826" marker-end="url(#m)"/>
-  <line class="a" x1="356" y1="792" x2="356" y2="826" marker-end="url(#m)"/>
-  <line class="a-bk" x1="484" y1="792" x2="484" y2="826" marker-end="url(#mb)"/>
-  <line class="a" x1="612" y1="792" x2="612" y2="826" marker-end="url(#m)"/>
-  <line class="a" x1="740" y1="792" x2="740" y2="826" marker-end="url(#m)"/>
-  <line class="a" x1="868" y1="792" x2="868" y2="826" marker-end="url(#m)"/>
+  <line class="a" x1="92" y1="792" x2="92" y2="826" marker-end="url(#m)"/>
+  <line class="a" x1="202" y1="792" x2="202" y2="826" marker-end="url(#m)"/>
+  <line class="a" x1="312" y1="792" x2="312" y2="826" marker-end="url(#m)"/>
+  <line class="a-bk" x1="422" y1="792" x2="422" y2="826" marker-end="url(#mb)"/>
+  <line class="a" x1="532" y1="792" x2="532" y2="826" marker-end="url(#m)"/>
+  <line class="a" x1="642" y1="792" x2="642" y2="826" marker-end="url(#m)"/>
+  <line class="a" x1="752" y1="792" x2="752" y2="826" marker-end="url(#m)"/>
+  <line class="a" x1="862" y1="792" x2="862" y2="826" marker-end="url(#m)"/>
 
   <!-- 外部 -->
-  <rect class="b-ext" x="40" y="828" width="120" height="56" rx="8"/>
-  <text class="ttl" x="100" y="851" text-anchor="middle">Google</text>
-  <text class="sub" x="100" y="871" text-anchor="middle">ログイン・連携</text>
-  <rect class="b-ext" x="168" y="828" width="120" height="56" rx="8"/>
-  <text class="ttl" x="228" y="851" text-anchor="middle">Gemini</text>
-  <text class="sub" x="228" y="871" text-anchor="middle">AI の推論</text>
-  <rect class="b-ext" x="296" y="828" width="120" height="56" rx="8"/>
-  <text class="ttl" x="356" y="851" text-anchor="middle">Let's Encrypt</text>
-  <text class="sub" x="356" y="871" text-anchor="middle">証明書</text>
-  <rect class="b-bk" x="424" y="828" width="120" height="56" rx="8"/>
-  <text class="ttl" x="484" y="851" text-anchor="middle">Cloud Storage</text>
-  <text class="sub" x="484" y="871" text-anchor="middle">東京・バックアップ</text>
-  <rect class="b-ext" x="552" y="828" width="120" height="56" rx="8"/>
-  <text class="ttl" x="612" y="851" text-anchor="middle">GitHub</text>
-  <text class="sub" x="612" y="871" text-anchor="middle">リリースのタグ</text>
-  <rect class="b-ext" x="680" y="828" width="120" height="56" rx="8"/>
-  <text class="ttl" x="740" y="851" text-anchor="middle">地域の登録機関</text>
-  <text class="sub" x="740" y="871" text-anchor="middle">国のアドレス</text>
-  <rect class="b-ext" x="808" y="828" width="120" height="56" rx="8"/>
-  <text class="ttl" x="868" y="851" text-anchor="middle">CrowdSec</text>
-  <text class="sub" x="868" y="871" text-anchor="middle">攻撃元の共有</text>
+  <rect class="b-ext" x="40" y="828" width="104" height="56" rx="8"/>
+  <text class="ttl" style="font-size:12px" x="92" y="851" text-anchor="middle">Google</text>
+  <text class="sub" style="font-size:10px" x="92" y="871" text-anchor="middle">ログイン・連携</text>
+  <rect class="b-ext" x="150" y="828" width="104" height="56" rx="8"/>
+  <text class="ttl" style="font-size:12px" x="202" y="851" text-anchor="middle">Gemini</text>
+  <text class="sub" style="font-size:10px" x="202" y="871" text-anchor="middle">AI の推論</text>
+  <rect class="b-ext" x="260" y="828" width="104" height="56" rx="8"/>
+  <text class="ttl" style="font-size:12px" x="312" y="851" text-anchor="middle">Let's Encrypt</text>
+  <text class="sub" style="font-size:10px" x="312" y="871" text-anchor="middle">証明書</text>
+  <rect class="b-bk" x="370" y="828" width="104" height="56" rx="8"/>
+  <text class="ttl" style="font-size:12px" x="422" y="851" text-anchor="middle">Cloud Storage</text>
+  <text class="sub" style="font-size:10px" x="422" y="871" text-anchor="middle">東京・バックアップ</text>
+  <rect class="b-ext" x="480" y="828" width="104" height="56" rx="8"/>
+  <text class="ttl" style="font-size:12px" x="532" y="851" text-anchor="middle">GitHub</text>
+  <text class="sub" style="font-size:10px" x="532" y="871" text-anchor="middle">リリースのタグ</text>
+  <rect class="b-ext" x="590" y="828" width="104" height="56" rx="8"/>
+  <text class="ttl" style="font-size:12px" x="642" y="851" text-anchor="middle">地域の登録機関</text>
+  <text class="sub" style="font-size:10px" x="642" y="871" text-anchor="middle">国のアドレス</text>
+  <rect class="b-ext" x="700" y="828" width="104" height="56" rx="8"/>
+  <text class="ttl" style="font-size:12px" x="752" y="851" text-anchor="middle">CrowdSec</text>
+  <text class="sub" style="font-size:10px" x="752" y="871" text-anchor="middle">攻撃元の共有</text>
+  <rect class="b-ext" x="810" y="828" width="104" height="56" rx="8"/>
+  <text class="ttl" style="font-size:12px" x="862" y="851" text-anchor="middle">Chat・Slack</text>
+  <text class="sub" style="font-size:10px" x="862" y="871" text-anchor="middle">警戒の知らせ</text>
 </svg>

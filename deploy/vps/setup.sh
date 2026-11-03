@@ -175,6 +175,10 @@ GOOGLE_LOGIN_CLIENT_ID=$(env_value GOOGLE_LOGIN_CLIENT_ID)
 ask GOOGLE_LOGIN_CLIENT_ID 'Google のログインの OAuth クライアントの ID（後でもよい）' "$GOOGLE_LOGIN_CLIENT_ID"
 GOOGLE_LOGIN_CLIENT_SECRET=$(env_value GOOGLE_LOGIN_CLIENT_SECRET)
 ask GOOGLE_LOGIN_CLIENT_SECRET 'そのシークレット' "$GOOGLE_LOGIN_CLIENT_SECRET" secret
+# 警戒のときの知らせの受け口（仕様書 第23.8.7節「警戒のときの知らせ」）。URL に鍵が入るので、秘密として尋ね、画面に出さない
+M2O_OPS_ALERT_WEBHOOK=$(env_value M2O_OPS_ALERT_WEBHOOK)
+ask M2O_OPS_ALERT_WEBHOOK '警戒を知らせる Google Chat か Slack の受け口（Webhook の URL。使わないなら空のまま。外すなら -）' "$M2O_OPS_ALERT_WEBHOOK" secret
+[ -z "$M2O_OPS_ALERT_WEBHOOK" ] || [[ "$M2O_OPS_ALERT_WEBHOOK" =~ ^https://[^[:space:]]+$ ]] || die '警戒を知らせる受け口は https:// で始まる URL にしてください'
 [[ "$BASE_DOMAIN" =~ ^[a-z0-9.-]+\.[a-z]+$ ]] || die "ドメインの形が違います: $BASE_DOMAIN"
 [[ "$ACME_EMAIL" == *@* ]] || die '証明書の連絡先のメールアドレスを入れてください'
 # 運営者に許すドメイン（仕様書 第23.8.9節「提携会社の運営者」）。空白を除いて小文字にそろえ、1 つ以上を求める（空だと誰でも運営者に登録できてしまう）
@@ -306,6 +310,7 @@ SITE_PREVIEW_IMPORT='$SITE_PREVIEW_IMPORT'
 GEMINI_API_KEY=$GEMINI_API_KEY
 GOOGLE_LOGIN_CLIENT_ID=$GOOGLE_LOGIN_CLIENT_ID
 GOOGLE_LOGIN_CLIENT_SECRET=$GOOGLE_LOGIN_CLIENT_SECRET
+M2O_OPS_ALERT_WEBHOOK=$M2O_OPS_ALERT_WEBHOOK
 SECRET_KEY=$SECRET_KEY
 DB_OWNER_PASSWORD=$DB_OWNER_PASSWORD
 DB_APP_PASSWORD=$DB_APP_PASSWORD

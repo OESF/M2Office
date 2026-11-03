@@ -39,7 +39,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | `update.sh` | リリースのタグを入れる更新。バックアップ（`pg_dump`）→ 社外バックアップに戻す点を記録 → 止める → 切り替えて組み立て直す → 移行 → 動かす → 確かめる。失敗したら前の版とバックアップに戻す |
 | `backup/m2office-backup.sh` | 社外バックアップ（Google Cloud Storage の東京。仕様書 第20.4.6節「控え」、ADR-0120）。データベースを pgBackRest で（まるごと。14 日分）、ファイルを restic で（30 日分）送り、月に 1 回壊れていないかを確かめる。結果は `/var/lib/m2office/machine/cloud-backup.json`（運営の画面の「稼働状況」）。`--status` で最後の結果、`--check` で確かめだけ。`setup.sh` が `/usr/local/sbin/m2office-backup` に入れる |
 | `backup/*.service`・`backup/*.timer` | 毎晩 2 時すぎに社外バックアップを取る（`m2office-backup`） |
-| `edge/m2office-edge-status.mjs` | 入口の守りと VPN の様子を集める（仕様書 第23.8.7節「ネットワークの様子」）。CrowdSec・国の遮断・WAF・証明書・WireGuard の数と、直近 24 時間の攻撃と WAF の種類・国だけを `/var/lib/m2office/machine/edge-status.json` に書き、運営の画面の「稼働状況」の「セキュリティ」に出す。国の遮断の 24 時間の差を出すため、前の値を `edge-history.json`（root だけ）に残す。相手の IP アドレス・鍵・WAF の記録の中身は書かない。`setup.sh` が `/usr/local/lib/m2office/` に入れる |
+| `edge/m2office-edge-status.mjs` | 入口の守りと VPN の様子を集める（仕様書 第23.8.7節「ネットワークの様子」）。CrowdSec・国の遮断・WAF・証明書・WireGuard の数と、直近 24 時間の攻撃と WAF の種類・国だけを `/var/lib/m2office/machine/edge-status.json` に書き、運営の画面の「稼働状況」の「セキュリティ」に出す。国の遮断の差を出すため、7 日分の前の値を `edge-history.json`（root だけ）に残す。攻撃・WAF・国の遮断の 24 時間（1 時間ごと）と 7 日（1 日ごと）の推移も書く。相手の IP アドレス・鍵・WAF の記録の中身は書かない。`setup.sh` が `/usr/local/lib/m2office/` に入れる |
 | `edge/*.service`・`edge/*.timer` | 5 分ごとに root で集める（`m2office-edge-status`。記録は `journalctl -u m2office-edge-status`） |
 
 雛形の埋め方は、ローカルの形と同じ `deploy/onsite/render.mjs` を使います。サーバーを変えずに埋めた結果だけを見るときは、次のようにします。
