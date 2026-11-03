@@ -229,7 +229,7 @@ function NetSection({ samples, net, days }: { samples: RuntimeSamplePoint[]; net
   const has = !!last || net?.rx != null || net?.tx != null;
   return (
     <>
-      <div className="rc-trend-head"><h4>通信量</h4></div>
+      <div className="rc-trend-head"><h4>ネットワーク</h4></div>
       {!has ? <p className="muted small">取得できなかった</p> : (
         <>
           <dl className="kv rc-net">
