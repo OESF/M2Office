@@ -44,14 +44,14 @@ const guideLabel = (guide: string) => (guide === 'page:tenants' ? '会社一覧�
 /** 対応が要るものの一覧（警戒が先。API が並べた順）。手順を開けない画面（`onGuide` が無い）では、手順のリンクを出さない。 */
 function HealthItems({ items, onGuide }: { items: HealthItemRow[]; onGuide?: ((guide: string) => void) | undefined }) {
   return (
-    <ul className="health-items">
+    <ul className="status-items">
       {items.map((it, i) => (
-        <li key={`${it.area}-${i}`} className={`health-item ${it.level}`}>
+        <li key={`${it.area}-${i}`} className={`status-item ${it.level}`}>
           <span className={`badge ${HEALTH_LEVEL[it.level].badge}`}>{HEALTH_LEVEL[it.level].text}</span>
-          <div className="health-body">
+          <div className="status-body">
             <strong>{it.title}</strong>
             {it.detail && <span className="small muted">{it.detail}</span>}
-            <span className="health-action">すること: {it.action}{onGuide && <>{' '}<button type="button" className="link-btn" onClick={() => onGuide(it.guide)}>{guideLabel(it.guide)}</button></>}</span>
+            <span className="status-action">すること: {it.action}{onGuide && <>{' '}<button type="button" className="link-btn" onClick={() => onGuide(it.guide)}>{guideLabel(it.guide)}</button></>}</span>
           </div>
         </li>
       ))}
@@ -78,19 +78,19 @@ export function HealthPanel({ health, onGuide, tools, checkedAt }: { health: Hea
   // 会社と AI の費用は、ほかの画面にある（会社一覧・設定）
   const elsewhere: Partial<Record<HealthArea, string>> = { tenants: 'page:tenants', ai: 'page:settings' };
   return (
-    <section className={`health-panel ${health.level}`} aria-label="全体の状態">
-      <div className="health-banner">
-        <span className="health-level">{lv.text}</span>
+    <section className={`status-panel ${health.level}`} aria-label="全体の状態">
+      <div className="status-banner">
+        <span className="status-level">{lv.text}</span>
         <span>{health.items.length === 0 ? '対応が要るものはありません' : `対応が要るもの ${health.items.length} 件（警戒 ${alerts}・注意 ${cautions}）`}</span>
         <span className="spacer" />
         {checkedAt && <span className="small">{checkedAt}</span>}
         {tools}
       </div>
       {health.items.length > 0 && <HealthItems items={health.items} onGuide={onGuide} />}
-      <div className="health-tiles">
+      <div className="status-tiles">
         {health.areas.map((a) => (
-          <button type="button" key={a.area} className={`health-tile ${a.level}`} onClick={() => go(a.area, elsewhere[a.area])}>
-            <span className="health-tile-head">{a.label}<span className={`badge ${HEALTH_LEVEL[a.level].badge}`}>{HEALTH_LEVEL[a.level].text}</span></span>
+          <button type="button" key={a.area} className={`status-tile ${a.level}`} onClick={() => go(a.area, elsewhere[a.area])}>
+            <span className="status-tile-head">{a.label}<span className={`badge ${HEALTH_LEVEL[a.level].badge}`}>{HEALTH_LEVEL[a.level].text}</span></span>
             <span className="small muted">{a.summary}</span>
           </button>
         ))}

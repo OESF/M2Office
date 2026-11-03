@@ -589,27 +589,27 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 
 /* 管理者ページ（仕様書 第6.6節） */
 .stats { display: flex; gap: calc(12px * var(--space-scale)); margin-bottom: calc(16px * var(--space-scale)); flex-wrap: wrap; }
-/* 稼働状況の全体の状態（仕様書 第23.8.7節「全体の状態」）。帯・対応が要るもの・区分の札 */
-.health-panel { display: grid; gap: calc(12px * var(--space-scale)); margin-bottom: calc(20px * var(--space-scale)); }
-.health-banner { display: flex; align-items: center; gap: calc(12px * var(--space-scale)); flex-wrap: wrap; border: 1px solid var(--ok-line); background: var(--ok-soft); color: var(--ok-strong); border-radius: 8px; padding: calc(12px * var(--space-scale)) calc(16px * var(--space-scale)); }
-.health-panel.caution .health-banner { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
-.health-panel.alert .health-banner { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
-.health-banner .spacer { flex: 1; }
-.health-level { font-size: calc(22px * var(--font-scale)); font-weight: 700; }
-.health-items { list-style: none; margin: 0 0 calc(12px * var(--space-scale)); padding: 0; display: grid; gap: calc(8px * var(--space-scale)); }
-.health-item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: calc(10px * var(--space-scale)); align-items: start; padding: calc(10px * var(--space-scale)) calc(12px * var(--space-scale)); border: 1px solid var(--warn-line); border-left-width: 4px; border-radius: 0; background: var(--panel); }
-.health-item.alert { border-color: var(--danger-line); border-left-color: var(--danger); }
-.health-item.caution { border-left-color: var(--warn); }
-.health-body { display: grid; gap: calc(2px * var(--space-scale)); min-width: 0; }
-.health-action { font-size: calc(13px * var(--font-scale)); }
-.health-action .link-btn { display: inline; padding: 0; }
-.health-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: calc(8px * var(--space-scale)); }
-.health-tile { display: grid; gap: calc(4px * var(--space-scale)); text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(10px * var(--space-scale)) calc(12px * var(--space-scale)); color: var(--ink); cursor: pointer; font: inherit; }
-.health-tile:hover { border-color: var(--accent); }
-.health-tile.caution { border-color: var(--warn-line); }
-.health-tile.alert { border-color: var(--danger-line); background: var(--danger-soft); }
-.health-tile-head { display: flex; justify-content: space-between; align-items: center; gap: calc(8px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
-.health-tile .small { overflow-wrap: anywhere; }
+/* 稼働状況の全体の状態（仕様書 第23.8.7節「全体の状態」）。帯・対応が要るもの・区分の札。接続先の健全性（.health-item）と名前を分ける */
+.status-panel { display: grid; gap: calc(12px * var(--space-scale)); margin-bottom: calc(20px * var(--space-scale)); }
+.status-banner { display: flex; align-items: center; gap: calc(12px * var(--space-scale)); flex-wrap: wrap; border: 1px solid var(--ok-line); background: var(--ok-soft); color: var(--ok-strong); border-radius: 8px; padding: calc(12px * var(--space-scale)) calc(16px * var(--space-scale)); }
+.status-panel.caution .status-banner { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+.status-panel.alert .status-banner { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
+.status-banner .spacer { flex: 1; }
+.status-level { font-size: calc(22px * var(--font-scale)); font-weight: 700; }
+.status-items { list-style: none; margin: 0 0 calc(12px * var(--space-scale)); padding: 0; display: grid; gap: calc(8px * var(--space-scale)); }
+.status-item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: calc(10px * var(--space-scale)); align-items: start; padding: calc(10px * var(--space-scale)) calc(12px * var(--space-scale)); border: 1px solid var(--warn-line); border-left-width: 4px; border-radius: 0; background: var(--panel); }
+.status-item.alert { border-color: var(--danger-line); border-left-color: var(--danger); }
+.status-item.caution { border-left-color: var(--warn); }
+.status-body { display: grid; gap: calc(2px * var(--space-scale)); min-width: 0; }
+.status-action { font-size: calc(13px * var(--font-scale)); }
+.status-action .link-btn { display: inline; padding: 0; }
+.status-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: calc(8px * var(--space-scale)); }
+.status-tile { display: grid; gap: calc(4px * var(--space-scale)); text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(10px * var(--space-scale)) calc(12px * var(--space-scale)); color: var(--ink); cursor: pointer; font: inherit; }
+.status-tile:hover { border-color: var(--accent); }
+.status-tile.caution { border-color: var(--warn-line); }
+.status-tile.alert { border-color: var(--danger-line); background: var(--danger-soft); }
+.status-tile-head { display: flex; justify-content: space-between; align-items: center; gap: calc(8px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
+.status-tile .small { overflow-wrap: anywhere; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(12px * var(--space-scale)) calc(16px * var(--space-scale)); min-width: 160px; }
 .stat span { display: block; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .stat strong { font-size: calc(22px * var(--font-scale)); }
