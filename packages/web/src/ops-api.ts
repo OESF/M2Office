@@ -4,6 +4,7 @@
 
 import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint } from '@m2office/shared';
 import { logQuery, type EvidenceView, type SystemLogDigestView, type SystemLogPage, type SystemLogQuery } from './api.js';
+import type { HealthViewRow } from './health-panel.js';
 
 /** 運営の API の失敗。 */
 export class OpsApiError extends Error {
@@ -147,6 +148,8 @@ export interface EdgeStatusViewRow {
   level: 'normal' | 'caution' | 'alert' | null;
   /** 当てはまった理由（警戒の理由が先）。 */
   reasons: string[];
+  /** 理由ごとの状態とすること（`reasons` と同じ順）。 */
+  findings: { level: 'caution' | 'alert'; text: string; action: string }[];
   /** 直近 24 時間に来たもの（多い順に 5 つまで）。国は ISO の 2 文字（分からなければ空）。 */
   top: { kinds: { label: string; count: number }[]; countries: { key: string; count: number }[]; waf: { label: string; count: number }[] };
 }
@@ -295,7 +298,8 @@ export const opsApi = {
     call<{ id: string; loginUrl: string; welcome: string }>('/tenants', send('POST', b)),
   setTenantStatus: (id: string, status: 'trial' | 'active') => call<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/status`, send('PUT', { status })),
   tenantDetail: (id: string) => call<{ detail: TenantDetailView; opsHistory: OpsAuditRow[] }>(`/tenants/${encodeURIComponent(id)}`),
-  server: () => call<{ status: ServerStatusView; backup: CloudBackupViewRow | null; edge: EdgeStatusViewRow | null }>('/server'),
+  /** 稼働状況。`health` は全体の状態（第23.8.7節「全体の状態」）。 */
+  server: () => call<{ status: ServerStatusView; backup: CloudBackupViewRow | null; edge: EdgeStatusViewRow | null; health: HealthViewRow }>('/server'),
   /** 動いている環境（仕様書 第8.6.7.1節。クラウドの形では運営だけが見る）。 */
   runtime: () => call<RuntimeEnvironment>('/runtime'),
   /** 運営者のヘルプの章の一覧（仕様書 第23.8.16節）。`q` で題と本文を絞り込む。 */

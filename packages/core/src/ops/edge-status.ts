@@ -69,6 +69,13 @@ export interface EdgeCount {
 /** セキュリティの状態（平常・注意・警戒）。 */
 export type EdgeLevel = 'normal' | 'caution' | 'alert';
 
+/** 当てはまった理由の 1 つ。`action` はすること（決めた文。AI に作らせない）。 */
+export interface EdgeFinding {
+  level: 'caution' | 'alert';
+  text: string;
+  action: string;
+}
+
 /** 入口の守りと VPN の様子（運営の画面の形）。 */
 export interface EdgeStatusView {
   /** 結果のファイルがあるか（無ければ、まだ入れていない）。 */
@@ -84,6 +91,8 @@ export interface EdgeStatusView {
   level: EdgeLevel | null;
   /** 当てはまった理由（警戒の理由を先に）。 */
   reasons: string[];
+  /** 理由ごとの状態とすること（`reasons` と同じ順。第23.8.7節「全体の状態」）。 */
+  findings: EdgeFinding[];
   /** 直近 24 時間に来たもの（多い順に 5 つまで）。攻撃の種類・攻撃の国（ISO の 2 文字。分からなければ空）・WAF に当たった要求の種類。 */
   top: { kinds: { label: string; count: number }[]; countries: EdgeCount[]; waf: { label: string; count: number }[] };
 }
@@ -176,23 +185,30 @@ export function edgeSurge(day: number | null | undefined, week: number | null | 
  * @param stale 集める仕組みが止まっている
  * @param certSoon 証明書の期限が 30 日を切った
  */
-export function edgeLevel(last: EdgeStatus, stale: boolean, certSoon: boolean, now: number): { level: EdgeLevel; reasons: string[] } {
-  const alert: string[] = [];
-  const caution: string[] = [];
+export function edgeLevel(last: EdgeStatus, stale: boolean, certSoon: boolean, now: number): { level: EdgeLevel; reasons: string[]; findings: EdgeFinding[] } {
+  const found: EdgeFinding[] = [];
+  const add = (level: EdgeFinding['level'], text: string, action: string) => found.push({ level, text, action });
   const n = (v: number) => v.toLocaleString('ja-JP');
-  if (stale) alert.push('集める仕組みが止まっています');
-  if (typeof last.geo?.out24h === 'number' && last.geo.out24h > 0) alert.push(`出ていく通信を国の遮断で止めました（直近 24 時間 ${n(last.geo.out24h)} 件）`);
+  if (stale) add('alert', '集める仕組みが止まっています', 'いまの様子が分かりません。技術者に知らせる（journalctl -u m2office-edge-status）');
+  if (typeof last.geo?.out24h === 'number' && last.geo.out24h > 0) {
+    add('alert', `出ていく通信を国の遮断で止めました（直近 24 時間 ${n(last.geo.out24h)} 件）`, 'サーバーの中から止めた国へつなごうとしているものがあります。乗っ取りを疑い、すぐに技術者に連絡する');
+  }
   const nearest = last.certs?.nearest ? Date.parse(last.certs.nearest) : NaN;
-  if (Number.isFinite(nearest) && nearest <= now) alert.push('証明書の期限が切れています');
-  else if (certSoon) caution.push('証明書の期限まで 30 日を切りました');
+  if (Number.isFinite(nearest) && nearest <= now) add('alert', '証明書の期限が切れています', '利用者が画面を開けません。すぐに技術者に連絡する（証明書の自動の更新が止まっている）');
+  else if (certSoon) add('caution', '証明書の期限まで 30 日を切りました', 'ふつうは自動で延びます。数日たっても延びなければ、技術者に知らせる');
   const cs = last.crowdsec;
   const csUsual = edgeSurge(cs?.alerts24h, cs?.alerts7d, EDGE_SURGE_MIN.alerts);
-  if (csUsual !== null) caution.push(`攻撃が急に増えました（直近 24 時間 ${n(cs!.alerts24h!)} 件・ふだん ${n(csUsual)} 件）`);
+  if (csUsual !== null) {
+    add('caution', `攻撃が急に増えました（直近 24 時間 ${n(cs!.alerts24h!)} 件・ふだん ${n(csUsual)} 件）`, '止める役は働いています。セキュリティの表で種類と国を確かめ、2 日続いたら技術者に知らせる');
+  }
   const wafUsual = edgeSurge(last.waf?.hits24h, last.waf?.hits7d, EDGE_SURGE_MIN.waf);
-  if (wafUsual !== null) caution.push(`WAF に当たる要求が急に増えました（直近 24 時間 ${n(last.waf!.hits24h!)} 件・ふだん ${n(wafUsual)} 件）`);
-  if (cs?.shared === 0) caution.push('CrowdSec が中央とつながっていません');
-  if (last.errors.length > 0) caution.push('一部を読めませんでした');
-  return { level: alert.length ? 'alert' : caution.length ? 'caution' : 'normal', reasons: [...alert, ...caution] };
+  if (wafUsual !== null) {
+    add('caution', `WAF に当たる要求が急に増えました（直近 24 時間 ${n(last.waf!.hits24h!)} 件・ふだん ${n(wafUsual)} 件）`, 'セキュリティの表で種類を確かめ、技術者に知らせる（WAF が「記録だけ」の間は止めていない）');
+  }
+  if (cs?.shared === 0) add('caution', 'CrowdSec が中央とつながっていません', '世界中で分け合う一覧が届いていません。技術者に知らせる');
+  if (last.errors.length > 0) add('caution', '一部を読めませんでした', 'セキュリティの表の「取得できなかった」を確かめ、技術者に知らせる');
+  const findings = [...found.filter((f) => f.level === 'alert'), ...found.filter((f) => f.level === 'caution')];
+  return { level: findings.some((f) => f.level === 'alert') ? 'alert' : findings.length ? 'caution' : 'normal', reasons: findings.map((f) => f.text), findings };
 }
 
 /** 結果のファイルを読む（無い・壊れているときは `null`）。 */
@@ -222,6 +238,7 @@ export function edgeStatusView(last: EdgeStatus | null, now: number = Date.now()
     certSoon,
     level: judged?.level ?? null,
     reasons: judged?.reasons ?? [],
+    findings: judged?.findings ?? [],
     top: {
       kinds: mergeTop(last?.crowdsec?.scenarios24h, alertKindLabel),
       countries: (last?.crowdsec?.countries24h ?? []).slice(0, EDGE_TOP),

@@ -240,7 +240,8 @@ export {
   serviceReport, monthRange, INCIDENT_IMPACT_LABEL, type IncidentImpact, type ServiceIncident, type ServiceReport, type OpsIncident,
   loadOpsManual, searchOpsManual, linkChapters, opsManualImageRefs, readOpsManualImage, OPS_MANUAL_INTRO, type OpsManualChapter, type OpsManualEntry, type OpsManualImageRef,
   readCloudBackupRun, readRestorePoints, nextNightlyRun, cloudBackupView, CLOUD_BACKUP_STALE_MS, type CloudBackupRun, type CloudBackupInventory, type CloudBackupView, type RestorePoint, type WalArchiveStatus,
-  readEdgeStatus, edgeStatusView, edgeLevel, edgeSurge, alertKindLabel, wafKindLabel, EDGE_SURGE_RATIO, EDGE_SURGE_MIN, EDGE_TOP, EDGE_STATUS_STALE_MS, EDGE_CERT_SOON_MS, EDGE_PEER_ONLINE_MS, type EdgeStatus, type EdgeStatusView, type EdgeCount, type EdgeLevel,
+  opsHealth, jstShort, OPS_HEALTH_AREAS, OPS_HEALTH_RULES, type OpsHealthArea, type OpsHealthLevel, type OpsHealthItem, type OpsHealthAreaView, type OpsHealthView, type OpsHealthInput,
+  readEdgeStatus, edgeStatusView, edgeLevel, edgeSurge, alertKindLabel, wafKindLabel, EDGE_SURGE_RATIO, EDGE_SURGE_MIN, EDGE_TOP, EDGE_STATUS_STALE_MS, EDGE_CERT_SOON_MS, EDGE_PEER_ONLINE_MS, type EdgeStatus, type EdgeStatusView, type EdgeCount, type EdgeLevel, type EdgeFinding,
 } from './ops/index.js';
 export * from './demo/index.js';
 export { scoreEval, CONTRACT_REVIEW_AVOID, CONTRACT_REVIEW_MUST, type EvalScore } from './evals/score.js';

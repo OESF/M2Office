@@ -19,7 +19,8 @@ import { BackButton } from './back-button.js';
 import { RuntimeCard } from './runtime-card.js';
 import { OpsHelp, OpsSubTitle, OpsTitle } from './ops-help.js';
 import { DemoDefaultsCard, OpsDemos } from './ops-demos.js';
-import { useOpenHelp } from './help.js';
+import { openHelp, useOpenHelp } from './help.js';
+import { HealthNotes, HealthPanel, healthAnchor, type HealthViewRow } from './health-panel.js';
 
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
 const ROLE_LABEL: Record<OperatorRole, string> = { admin: '運営管理者', support: 'サポート', monitor: '監視' };
@@ -213,7 +214,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           {page === 'tenants' && <Tenants me={me} onChanged={loadRequests} />}
           {page === 'demos' && <OpsDemos me={me} />}
           {page === 'requests' && <Requests me={me} rows={requests} solo={solo} onChanged={loadRequests} />}
-          {page === 'server' && <Server />}
+          {page === 'server' && <Server onOpenPage={setPage} />}
           {page === 'incidents' && <Incidents />}
           {page === 'logs' && <OpsLogs me={me} />}
           {page === 'settings' && <Settings me={me} />}
@@ -590,15 +591,26 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
   );
 }
 
-/** サーバー全体の稼働状況。1 分ごとに読み直し、題名の横の「更新」ですぐにも読み直す（第23.8.7節「読み直し」）。 */
-function Server() {
+/**
+ * サーバー全体の稼働状況。いちばん上に全体の状態・対応が要るもの・区分ごとの札を出し（第23.8.7節「全体の状態」）、
+ * その下に区分ごとの詳しい表を同じ順で並べる。1 分ごとに読み直し、帯の「更新」ですぐにも読み直す（第23.8.7節「読み直し」）。
+ *
+ * @param onOpenPage 会社一覧・設定など、ほかの画面を開く（会社と AI の費用の手順）
+ */
+function Server({ onOpenPage }: { onOpenPage: (page: OpsPage) => void }) {
   const [s, setS] = useState<ServerStatusView | null>(null);
   const [backup, setBackup] = useState<CloudBackupViewRow | null>(null);
   const [edge, setEdge] = useState<EdgeStatusViewRow | null>(null);
+  const [health, setHealth] = useState<HealthViewRow | null>(null);
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => opsApi.server().then((r) => { setS(r.status); setBackup(r.backup); setEdge(r.edge); setError(null); }).catch((e) => setError(errText(e, '読み込めませんでした'))), []);
+  const load = useCallback(() => opsApi.server().then((r) => {
+    setS(r.status); setBackup(r.backup); setEdge(r.edge); setHealth(r.health); setCheckedAt(new Date().toISOString()); setError(null);
+  }).catch((e) => setError(errText(e, '読み込めませんでした'))), []);
+  // 手順は運営者マニュアルの章か、ほかの画面（`page:tenants` など）
+  const guide = useCallback((g: string) => { if (g.startsWith('page:')) onOpenPage(g.slice(5) as OpsPage); else openHelp(g); }, [onOpenPage]);
   useEffect(() => { void load(); const t = window.setInterval(() => void load(), 60_000); return () => clearInterval(t); }, [load]);
   // 「更新」は、要約と表に加えて、稼働環境とサーバーの資源の欄（`refresh` を渡す）も読み直す
   const reload = () => { setBusy(true); setRefresh((n) => n + 1); void load().finally(() => setBusy(false)); };
@@ -608,29 +620,34 @@ function Server() {
   // いま動いているワーカー（3 分以内に知らせのあったもの）。起動し直して止めた前のワーカーの記録は数えない
   const liveWorkers = (s?.workers ?? []).filter((w) => Date.now() - Date.parse(w.at) < 3 * 60_000);
   const group: Record<string, string> = { ai: 'AI', google: 'Google', mcp: '会社の接続（MCP）' };
+  const refreshButton = <button type="button" className="btn ghost small" disabled={busy} onClick={reload}>{busy ? '…' : '更新'}</button>;
   return (
     <>
-      <OpsTitle title="稼働状況" help={{ chapter: '07-server', text: 'サーバー全体の動きと、サーバーの資源を見ます。' }}>
-        <button type="button" className="btn ghost small" disabled={busy} onClick={reload}>{busy ? '…' : '更新'}</button>
-      </OpsTitle>
+      {/* 読めないあいだは、帯の代わりに題名の横に「更新」を置く */}
+      <OpsTitle title="稼働状況" help={{ chapter: '07-server', text: '全体が問題なく動いているか、対応が要るものと、そのときにすることを見ます。' }}>{!health && refreshButton}</OpsTitle>
+      {error && <p className="error">{error}</p>}
+      {health && <HealthPanel health={health} onGuide={guide} tools={refreshButton} checkedAt={checkedAt ? `最終更新 ${when(checkedAt)}` : null} />}
       {/* 動いている環境（第8.6.7.1節）と機械の資源（第23.8.7節）。クラウドの形では運営の機械の情報なので、運営の画面だけに出す。
           データベースとファイルの置き場の量は、機械の資源のディスクの内訳に出す */}
-      <RuntimeCard load={opsApi.runtime} loadSamples={opsApi.runtimeSamples} filesBytes={s ? Number(s.filesBytes) : null} refresh={refresh} />
-      {error && <p className="error">{error}</p>}
+      <div id={healthAnchor('runtime')}>
+        <HealthNotes health={health} areas={['runtime', 'resources']} onGuide={guide} />
+        <RuntimeCard load={opsApi.runtime} loadSamples={opsApi.runtimeSamples} filesBytes={s ? Number(s.filesBytes) : null} refresh={refresh} />
+      </div>
       {s && (
         <>
+          <h3 id={healthAnchor('jobs')}>業務の実行</h3>
+          <HealthNotes health={health} areas={['jobs', 'ai']} onGuide={guide} />
           <div className="stats">
             <div className="stat"><span>待ち行列</span><strong>{s.queue.queued}</strong><span>{s.queue.oldestQueuedAt ? `最も古い ${when(s.queue.oldestQueuedAt)}` : '待ちなし'}・実行中 {s.queue.running}・承認待ち {s.queue.awaitingApproval}</span></div>
             <div className="stat"><span>実行（1 時間 ／ 今日）</span><strong>{s.runs.hour} ／ {s.runs.today}</strong><span>失敗 {rate(s.runs.hourFailed, s.runs.hour)} ／ {rate(s.runs.todayFailed, s.runs.today)}</span></div>
             <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '稼働中' : '応答がありません'}</span></strong><span>最終応答 {when(lastWorker)}{liveWorkers.length > 1 ? `・${liveWorkers.length} 台` : ''}</span></div>
             <div className="stat"><span>遅れている定時実行</span><strong>{s.schedulesLate}</strong></div>
-            {backup && <BackupStat b={backup} />}
-            {edge && <EdgeStat e={edge} />}
             <div className="stat"><span>AI の費用（今日 ／ 今月）</span><strong>{yen(Number(s.ai.today))} ／ {yen(Number(s.ai.month))}</strong><span>前の月の同じ時期 {yen(Number(s.ai.lastMonthSamePeriod))}</span></div>
           </div>
-          {backup?.configured && <BackupDetail b={backup} />}
-          {edge && <EdgeDetail e={edge} />}
-          <h3>外部の接続（24 時間）</h3>
+          {backup && <BackupDetail b={backup} health={health} onGuide={guide} />}
+          {edge && <EdgeDetail e={edge} health={health} onGuide={guide} />}
+          <h3 id={healthAnchor('external')}>外部の接続（24 時間）</h3>
+          <HealthNotes health={health} areas={['external']} onGuide={guide} />
           {s.targets.length === 0 ? <p className="muted">まだありません</p> : <div className="table-scroll"><table className="table">
             <thead><tr><th>接続先</th><th className="num">成功</th><th className="num">失敗</th><th className="num">失敗の割合</th><th className="num">平均の速さ</th></tr></thead>
             <tbody>{s.targets.map((t) => (
@@ -652,64 +669,21 @@ function Server() {
   );
 }
 
-/**
- * 社外の控え（仕様書 第20.4.6節「控え」）。毎晩の控え（データベースとファイル）と、変更の記録を絶えず送れているか。
- * 失敗・止まっている・送れていないときは、理由を添えて目立たせる。
- */
-function BackupStat({ b }: { b: CloudBackupViewRow }) {
-  if (!b.configured) return <div className="stat"><span>バックアップ</span><strong><span className="badge warn">未導入</span></strong><span className="small">運営者マニュアル 第 13 章参照</span></div>;
-  const last = b.last;
-  const bad = !last || !last.ok || b.stale || b.archiveFailing || (last.check !== null && !last.check.ok);
-  const label = !last ? 'まだ取っていません' : !last.ok ? '失敗しました' : b.stale ? '止まっています' : b.archiveFailing ? '変更の記録を送れていません' : '取得完了';
-  const errors = [last?.database.error && `データベース: ${last.database.error}`, last?.files.error && `ファイル: ${last.files.error}`,
-    last?.check && !last.check.ok && `確認: ${last.check.error ?? ''}`].filter(Boolean).join(' ／ ');
-  return (
-    <div className="stat">
-      <span>バックアップ</span>
-      <strong><span className={`badge ${bad ? 'warn' : 'ok'}`}>{label}</span></strong>
-      <span>
-        最終 {when(last?.at ?? null)}・変更の記録 {when(b.archive?.lastArchivedAt ?? null)}
-        {last?.check && `・確認 ${when(last.check.at)}`}
-        {errors && <><br />{errors}</>}
-      </span>
-    </div>
-  );
-}
-
-/** セキュリティの状態の札の色と言葉（第23.8.7節「セキュリティの状態」）。 */
-const EDGE_LEVEL: Record<'normal' | 'caution' | 'alert', { badge: string; text: string }> = {
-  normal: { badge: 'ok', text: '平常' }, caution: { badge: 'warn', text: '注意' }, alert: { badge: 'danger', text: '警戒' },
-};
-
 /** 国の名前（ISO の 2 文字から。分からなければ「不明」）。 */
 function countryName(code: string): string {
   if (!code) return '不明';
   try { return new Intl.DisplayNames(['ja'], { type: 'region' }).of(code) ?? code; } catch { return code; }
 }
 
-/** 要約の欄のセキュリティの札。状態と、最初の理由（平常なら直近 24 時間の数）。 */
-function EdgeStat({ e }: { e: EdgeStatusViewRow }) {
-  if (!e.configured || !e.level) return <div className="stat"><span>セキュリティ</span><strong><span className="badge warn">未導入</span></strong><span className="small">運営者マニュアル 第 13 章参照</span></div>;
-  const lv = EDGE_LEVEL[e.level];
-  const l = e.last;
-  const n = (v: number | null | undefined) => (typeof v === 'number' ? v.toLocaleString('ja-JP') : '—');
-  return (
-    <div className="stat">
-      <span>セキュリティ</span>
-      <strong><span className={`badge ${lv.badge}`}>{lv.text}</span></strong>
-      <span>{e.reasons[0] ?? `直近 24 時間 攻撃 ${n(l?.crowdsec?.alerts24h)}・WAF ${n(l?.waf?.hits24h)}`}{e.reasons.length > 1 && ` ほか ${e.reasons.length - 1} 件`}</span>
-    </div>
-  );
-}
-
 /**
  * 入口の守りと VPN の様子（仕様書 第23.8.7節「ネットワークの様子」）。VPS の上で root の仕組みが 5 分ごとに書いた数を出す。
- * 上に状態と理由、直近 24 時間に来たもの（攻撃の種類・国、WAF に当たった要求の種類）を出す（第23.8.7節「セキュリティの状態」）。
+ * 上にこの区分の対応が要るもの（すること付き。第23.8.7節「全体の状態」）、直近 24 時間に来たもの（攻撃の種類・国、WAF に当たった要求の種類）を出す（第23.8.7節「セキュリティの状態」）。
  * 相手の IP アドレス・鍵・WAF の記録の中身は出さない。読めなかった値は「取得できなかった」と出す（推測で埋めない）。
  */
-function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
+function EdgeDetail({ e, health, onGuide }: { e: EdgeStatusViewRow; health: HealthViewRow | null; onGuide: (guide: string) => void }) {
   const title = <OpsSubTitle title="セキュリティ" help={{ chapter: '18-architecture', text: '入口の守り（CrowdSec・国の遮断・WAF・証明書）と VPN の様子です。仕組みの全体は「詳しく見る」から開きます。' }} />;
-  if (!e.configured || !e.last) return <>{title}<p className="muted"><span className="badge warn">未導入</span> <span className="small">運営者マニュアル 第 13 章参照</span></p></>;
+  const notes = <HealthNotes health={health} areas={['security']} onGuide={onGuide} />;
+  if (!e.configured || !e.last) return <section id={healthAnchor('security')}>{title}{notes}</section>;
   const l = e.last;
   const NONE = <span className="muted">取得できなかった</span>;
   const n = (v: number | null | undefined) => (v === null || v === undefined ? null : v.toLocaleString('ja-JP'));
@@ -720,17 +694,12 @@ function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
   const csOk = !!l.crowdsec && l.crowdsec.alerts7d !== undefined;
   const wafOk = !!l.waf && typeof l.waf.hits7d === 'number';
   return (
-    <>
+    <section id={healthAnchor('security')}>
       {title}
       <p className="small muted">
         最終収集 {e.stale ? <span className="badge warn">{when(l.at)}（止まっています）</span> : when(l.at)}
       </p>
-      {e.level && (
-        <p>
-          <span className={`badge ${EDGE_LEVEL[e.level].badge}`}>{EDGE_LEVEL[e.level].text}</span>
-          {e.reasons.map((r) => <span key={r}>{' '}{r}</span>)}
-        </p>
-      )}
+      {notes}
       <div className="table-scroll"><table className="table">
         <tbody>
           <tr><th>攻撃の種類（24 時間）</th><td>{list(csOk, e.top.kinds.map((k) => [k.label, k.count]))}</td></tr>
@@ -758,7 +727,7 @@ function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
           ))}</td></tr>
         </tbody>
       </table></div>
-    </>
+    </section>
   );
 }
 
@@ -766,14 +735,19 @@ function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
  * 社外の控えの様子（仕様書 第23.8.7節「控えの様子」）。いざというときに「どこまで戻せるか」「どの名前で戻すか」を、ここで確かめる。
  * 中身は VPS の毎晩の控えと `update.sh` が書いたファイルで、画面から Google Cloud へは見に行かない。
  */
-function BackupDetail({ b }: { b: CloudBackupViewRow }) {
+function BackupDetail({ b, health, onGuide }: { b: CloudBackupViewRow; health: HealthViewRow | null; onGuide: (guide: string) => void }) {
   const last = b.last;
   const inv = last?.inventory ?? null;
   const done = (ok: boolean) => (ok ? '完了' : '失敗');
   const loc = inv?.location ?? null;
+  const title = <OpsSubTitle title="バックアップ" help={{ chapter: '17-backup-recovery', text: 'バックアップのいまの状態と、戻せる範囲です。いざというときの手順は「詳しく見る」から開きます。' }} />;
+  const notes = <HealthNotes health={health} areas={['backup']} onGuide={onGuide} />;
+  // 入れていなければ、対応が要るもの（未導入）だけを出す
+  if (!b.configured) return <section id={healthAnchor('backup')}>{title}{notes}</section>;
   return (
-    <>
-      <OpsSubTitle title="バックアップ" help={{ chapter: '17-backup-recovery', text: 'バックアップのいまの状態と、戻せる範囲です。いざというときの手順は「詳しく見る」から開きます。' }} />
+    <section id={healthAnchor('backup')}>
+      {title}
+      {notes}
       <div className="table-scroll"><table className="table">
         <tbody>
           <tr><th>毎晩のバックアップ</th><td>{last ? <>{when(last.at)}・データベース {done(last.database.ok)}・ファイル {done(last.files.ok)}</> : 'まだ取っていません'}</td></tr>
@@ -794,7 +768,7 @@ function BackupDetail({ b }: { b: CloudBackupViewRow }) {
           <tr><th>置き場</th><td>{loc ? <>Google Cloud Storage・<code>{loc.bucket}</code>{loc.project && <>（{loc.project}）</>}</> : '—'}</td></tr>
         </tbody>
       </table></div>
-    </>
+    </section>
   );
 }
 

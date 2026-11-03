@@ -194,7 +194,8 @@ export function ResourceCard({ env, loadSamples, filesBytes, refresh = 0 }: {
   const db = env.database;
   const diskParts = [db ? `データベース ${size(db.bytes)}` : null, filesBytes != null ? `ファイル ${size(filesBytes)}` : null].filter(Boolean);
   return (
-    <div className="card resource-card">
+    // 稼働状況の区分の札「サーバーの資源」から移る先（第23.8.7節「全体の状態」）
+    <div className="card resource-card" id="health-resources">
       <h3>サーバーの資源</h3>
       <div className="rc-meters">
         <Meter label="CPU の負荷" pct={cpu}

@@ -12,7 +12,7 @@ import { runtimeEnvironment, sampleDays, inferenceText, localLlmFromEnv, deploym
   buildGoogleLoginUrl, createPkce, exchangeGoogleLoginCode, googleUserInfo, checkNewTenant, operatorCan, opsDomainAllowed, OPERATOR_ROLES,
   tenantErrorText, welcomeText, tenantsCsv, statusNoticeText, SUSPEND_REASONS, LOCK_REASONS, OpsRuleError,
   OPS_PASSKEY_MAX, parseLogFilter, logExportZip, SYSTEM_LOG_PAGE, SYSTEM_LOG_EXPORT_MAX, SYSTEM_LOG_KEEP_DAYS, appPath, loadOpsManual, searchOpsManual, readOpsManualImage,
-  checkGeminiText, defaultGeminiModels, jstMonth, readCloudBackupRun, readRestorePoints, cloudBackupView, readEdgeStatus, edgeStatusView, type CheckResult, type SecretBox,
+  checkGeminiText, defaultGeminiModels, jstMonth, readCloudBackupRun, readRestorePoints, cloudBackupView, readEdgeStatus, edgeStatusView, opsHealth, type CheckResult, type SecretBox,
   checkNewDemo, demoSubdomain, demoWelcomeText, hashMachinePassword, newGuestLoginId, newGuestPassword, DEMO_COMPANY_NAME, DEMO_EXTEND_MAX_DAYS, DEMO_MAX_DAYS,
   type SystemLogLine,
   type Logger, type Operator, type OperatorRole, type OpsAction, type OpsSession, type OpsStore,
@@ -485,21 +485,41 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     } catch (err) { return ruleError(c, err); }
   });
 
-  // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）
+  /** 動いている環境を作る（`/v1/ops/runtime` と全体の状態で使う）。 */
+  const opsRuntime = async () => {
+    const [{ beats, postgres }, database] = await Promise.all([
+      store.runtimeBeats().catch(() => ({ beats: [], postgres: null })), store.databaseUsage().catch(() => null),
+    ]);
+    return runtimeEnvironment(beats, postgres, {
+      deployment: deploymentFromEnv(process.env) === 'onsite' ? 'onsite' : 'cloud', debug: process.env['M2O_DEBUG'] === 'true',
+      inference: inferenceText(localLlmFromEnv(process.env), 'cloud'), database,
+    });
+  };
+
+  // サーバー全体の稼働状況（第23.8.7節のうち段 1 の分）と、全体の状態（第23.8.7節「全体の状態」）
   app.get('/v1/ops/server', async (c) => {
-    const [status, last, archive, points, edge] = await Promise.all([
+    const { start } = jstMonth(new Date());
+    const [status, last, archive, points, edgeRaw, runtime, tenants, platformAi] = await Promise.all([
       store.serverStatus(),
       deps.cloudBackupFile ? readCloudBackupRun(deps.cloudBackupFile) : Promise.resolve(null),
       deps.cloudBackupFile ? store.walArchiveStatus() : Promise.resolve(null),
       deps.restorePointsFile ? readRestorePoints(deps.restorePointsFile) : Promise.resolve([]),
       deps.edgeStatusFile ? readEdgeStatus(deps.edgeStatusFile) : Promise.resolve(null),
+      // 全体の状態の材料。読めなければ null にし、その区分を「読めませんでした」にする（推測しない）
+      opsRuntime().catch(() => null),
+      store.tenantOverview().catch(() => null),
+      Promise.all([store.platformAiSettings(), store.platformAiTotal(start)]).then(([s, used]) => ({ usedJpy: Math.round(used), capJpy: s.platformCapJpy })).catch(() => null),
     ]);
     // 社外の控え（第20.4.6節「控え」・第23.8.7節「控えの様子」）。毎晩の控えの結果、変更の記録を送った様子、更新の前の戻す点。
     // 入口の守りと VPN（第23.8.7節「ネットワークの様子」）。root の仕組みが書いた数を読むだけ
+    const backup = deps.cloudBackupFile ? cloudBackupView(last, archive, Date.now(), points) : null;
+    const edge = deps.edgeStatusFile ? edgeStatusView(edgeRaw) : null;
     return c.json({
       status,
-      backup: deps.cloudBackupFile ? cloudBackupView(last, archive, Date.now(), points) : null,
-      edge: deps.edgeStatusFile ? edgeStatusView(edge) : null,
+      backup,
+      edge,
+      // バックアップとセキュリティは、入れる形（置き場を決めてある）のときだけ区分に出す
+      health: opsHealth({ status, runtime, tenants, platformAi, ...(backup ? { backup } : {}), ...(edge ? { edge } : {}) }),
     });
   });
   /**
@@ -507,15 +527,7 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
    *
    * @remarks 外へは見に行かない。秘密の値・業務の中身・個人の情報は返さない
    */
-  app.get('/v1/ops/runtime', async (c) => {
-    const [{ beats, postgres }, database] = await Promise.all([
-      store.runtimeBeats().catch(() => ({ beats: [], postgres: null })), store.databaseUsage().catch(() => null),
-    ]);
-    return c.json(runtimeEnvironment(beats, postgres, {
-      deployment: deploymentFromEnv(process.env) === 'onsite' ? 'onsite' : 'cloud', debug: process.env['M2O_DEBUG'] === 'true',
-      inference: inferenceText(localLlmFromEnv(process.env), 'cloud'), database,
-    }));
-  });
+  app.get('/v1/ops/runtime', async (c) => c.json(await opsRuntime()));
 
   /**
    * 運営者のヘルプ（第23.8.16節）。運営者マニュアル（`docs/ops-manual/`）の章の一覧。`?q=` で題と本文を絞り込む。
