@@ -253,7 +253,9 @@ test('入口の守りと VPN の様子（第23.8.7節「ネットワークの様
     confValue(text: string, key: string): string | null;
     countDecisions(json: string): { local: number; shared: number };
     nftPackets(text: string): number | null;
-    countWafHits(text: string, since: number): number;
+    summarizeWaf(text: string, now: number): { hits24h: number; hits7d: number; kinds24h: { key: string; count: number }[] };
+    summarizeAlerts(alerts: unknown[], now: number): { alerts24h: number; alerts7d: number; scenarios24h: { key: string; count: number }[]; countries24h: { key: string; count: number }[] };
+    geoDelta24h(history: { at: string; inBlocked: number | null; outBlocked: number | null }[], current: { inBlocked: number | null; outBlocked: number | null }, now: number): { in24h: number | null; out24h: number | null };
     wgPeers(dump: string): { address: string; lastHandshake: string | null }[];
     collect(now: number, run: (cmd: string, args: string[]) => string): { crowdsec: unknown; vpn: { peers: unknown[] } | null; errors: string[] };
   };
@@ -266,11 +268,38 @@ test('入口の守りと VPN の様子（第23.8.7節「ネットワークの様
   assert.equal(edge.nftPackets('table inet m2office_geo {\n\tcounter in_blocked {\n\t\tpackets 87 bytes 4520\n\t}\n}'), 87);
   const now = Date.parse('2026-11-03T12:00:00Z');
   const waf = [
-    JSON.stringify({ transaction: { unix_timestamp: (now - 3_600_000) * 1e6, request: { uri: '/secret?x' } } }),
+    JSON.stringify({ transaction: { unix_timestamp: (now - 3_600_000) * 1e6, request: { uri: '/secret?x' } }, messages: [{ data: { id: 942100, tags: ['application-multi', 'attack-sqli', 'OWASP_CRS'] } }] }),
+    JSON.stringify({ transaction: { unix_timestamp: (now - 7_200_000) * 1e6 }, messages: [{ data: { id: 949110, tags: ['anomaly-evaluation'] } }] }),
     JSON.stringify({ transaction: { timestamp: new Date(now - 2 * 86_400_000).toISOString() } }),
+    JSON.stringify({ transaction: { timestamp: new Date(now - 8 * 86_400_000).toISOString() } }),
     '{"transaction": 途中で切れた行',
   ].join('\n');
-  assert.equal(edge.countWafHits(waf, now - 86_400_000), 1);
+  const w = edge.summarizeWaf(waf, now);
+  assert.deepEqual([w.hits24h, w.hits7d], [2, 3]);
+  assert.deepEqual(w.kinds24h, [{ key: '', count: 1 }, { key: 'attack-sqli', count: 1 }]);
+  assert.ok(!JSON.stringify(w).includes('/secret'), '要求の中身は残さない');
+  // 攻撃: 分け合う一覧の取り込みは数えず、国と見張りの名前だけを残す（相手のアドレスは捨てる）
+  const iso = (ms: number) => new Date(now - ms).toISOString();
+  const a = edge.summarizeAlerts([
+    { scenario: 'crowdsecurity/http-probing', created_at: iso(3_600_000), source: { cn: 'us', ip: '192.0.2.9' } },
+    { scenario: 'crowdsecurity/http-probing', created_at: iso(7_200_000), source: { cn: 'NL' } },
+    { scenario: 'crowdsecurity/http-sensitive-files', created_at: iso(10_800_000), source: {} },
+    { scenario: 'crowdsecurity/ssh-bf', created_at: iso(3 * 86_400_000), source: { cn: 'US' } },
+    { scenario: 'update : +15868/-0 IPs', created_at: iso(60_000), source: { scope: 'lists:crowdsec' } },
+  ], now);
+  assert.deepEqual([a.alerts24h, a.alerts7d], [3, 4]);
+  assert.deepEqual(a.scenarios24h, [{ key: 'crowdsecurity/http-probing', count: 2 }, { key: 'crowdsecurity/http-sensitive-files', count: 1 }]);
+  assert.deepEqual(a.countries24h, [{ key: '', count: 1 }, { key: 'NL', count: 1 }, { key: 'US', count: 1 }]);
+  assert.ok(!JSON.stringify(a).includes('192.0.2.9'), '相手のアドレスは残さない');
+  // 国の遮断: 24 時間分の前の値との差。表を入れ直して数が戻ったら、戻った後の数を足す
+  const h = [
+    { at: iso(25 * 3_600_000), inBlocked: 1, outBlocked: 0 },
+    { at: iso(23 * 3_600_000), inBlocked: 10, outBlocked: 0 },
+    { at: iso(12 * 3_600_000), inBlocked: 30, outBlocked: 0 },
+    { at: iso(6 * 3_600_000), inBlocked: 5, outBlocked: 2 },
+  ];
+  assert.deepEqual(edge.geoDelta24h(h, { inBlocked: 9, outBlocked: 2 }, now), { in24h: 20 + 5 + 4, out24h: 2 });
+  assert.deepEqual(edge.geoDelta24h([], { inBlocked: 9, outBlocked: null }, now), { in24h: 0, out24h: null });
   const dump = 'PRIVKEY\tPUBKEY\t51820\toff\nPEERKEY1\t(none)\t203.0.113.5:61000\t10.66.0.2/32\t1762171000\t100\t200\t25\nPEERKEY2\t(none)\t(none)\t10.66.0.3/32\t0\t0\t0\toff\n';
   const peers = edge.wgPeers(dump);
   assert.deepEqual(peers, [{ address: '10.66.0.2', lastHandshake: new Date(1762171000 * 1000).toISOString() }, { address: '10.66.0.3', lastHandshake: null }]);

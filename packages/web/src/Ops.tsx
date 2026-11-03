@@ -590,14 +590,18 @@ function TenantDetail({ id, me, onBack, onChanged }: { id: string; me: OpsMe; on
   );
 }
 
-/** サーバー全体の稼働状況。1 分ごとに読み直す。 */
+/** サーバー全体の稼働状況。1 分ごとに読み直し、題名の横の「更新」ですぐにも読み直す（第23.8.7節「読み直し」）。 */
 function Server() {
   const [s, setS] = useState<ServerStatusView | null>(null);
   const [backup, setBackup] = useState<CloudBackupViewRow | null>(null);
   const [edge, setEdge] = useState<EdgeStatusViewRow | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => { opsApi.server().then((r) => { setS(r.status); setBackup(r.backup); setEdge(r.edge); }).catch((e) => setError(errText(e, '読み込めませんでした'))); }, []);
-  useEffect(() => { load(); const t = window.setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
+  const [refresh, setRefresh] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => opsApi.server().then((r) => { setS(r.status); setBackup(r.backup); setEdge(r.edge); setError(null); }).catch((e) => setError(errText(e, '読み込めませんでした'))), []);
+  useEffect(() => { void load(); const t = window.setInterval(() => void load(), 60_000); return () => clearInterval(t); }, [load]);
+  // 「更新」は、要約と表に加えて、稼働環境とサーバーの資源の欄（`refresh` を渡す）も読み直す
+  const reload = () => { setBusy(true); setRefresh((n) => n + 1); void load().finally(() => setBusy(false)); };
   const rate = (f: number, n: number) => (n ? `${Math.round((f / n) * 1000) / 10}%` : '—');
   const lastWorker = s?.workers[0]?.at ?? null;
   const workerOk = !!lastWorker && Date.now() - Date.parse(lastWorker) < 3 * 60_000;
@@ -606,19 +610,22 @@ function Server() {
   const group: Record<string, string> = { ai: 'AI', google: 'Google', mcp: '会社の接続（MCP）' };
   return (
     <>
-      <OpsTitle title="稼働状況" help={{ chapter: '07-server', text: 'サーバー全体の動きと、サーバーの資源を見ます。' }} />
+      <OpsTitle title="稼働状況" help={{ chapter: '07-server', text: 'サーバー全体の動きと、サーバーの資源を見ます。' }}>
+        <button type="button" className="btn ghost small" disabled={busy} onClick={reload}>{busy ? '…' : '更新'}</button>
+      </OpsTitle>
       {/* 動いている環境（第8.6.7.1節）と機械の資源（第23.8.7節）。クラウドの形では運営の機械の情報なので、運営の画面だけに出す。
           データベースとファイルの置き場の量は、機械の資源のディスクの内訳に出す */}
-      <RuntimeCard load={opsApi.runtime} loadSamples={opsApi.runtimeSamples} filesBytes={s ? Number(s.filesBytes) : null} />
+      <RuntimeCard load={opsApi.runtime} loadSamples={opsApi.runtimeSamples} filesBytes={s ? Number(s.filesBytes) : null} refresh={refresh} />
       {error && <p className="error">{error}</p>}
       {s && (
         <>
           <div className="stats">
             <div className="stat"><span>待ち行列</span><strong>{s.queue.queued}</strong><span>{s.queue.oldestQueuedAt ? `最も古い ${when(s.queue.oldestQueuedAt)}` : '待ちなし'}・実行中 {s.queue.running}・承認待ち {s.queue.awaitingApproval}</span></div>
             <div className="stat"><span>実行（1 時間 ／ 今日）</span><strong>{s.runs.hour} ／ {s.runs.today}</strong><span>失敗 {rate(s.runs.hourFailed, s.runs.hour)} ／ {rate(s.runs.todayFailed, s.runs.today)}</span></div>
-            <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '稼働中' : '応答がありません'}</span></strong><span>最後の応答 {when(lastWorker)}{liveWorkers.length > 1 ? `・${liveWorkers.length} 台` : ''}</span></div>
+            <div className="stat"><span>ワーカー</span><strong><span className={`badge ${workerOk ? 'ok' : 'warn'}`}>{workerOk ? '稼働中' : '応答がありません'}</span></strong><span>最終応答 {when(lastWorker)}{liveWorkers.length > 1 ? `・${liveWorkers.length} 台` : ''}</span></div>
             <div className="stat"><span>遅れている定時実行</span><strong>{s.schedulesLate}</strong></div>
             {backup && <BackupStat b={backup} />}
+            {edge && <EdgeStat e={edge} />}
             <div className="stat"><span>AI の費用（今日 ／ 今月）</span><strong>{yen(Number(s.ai.today))} ／ {yen(Number(s.ai.month))}</strong><span>前の月の同じ時期 {yen(Number(s.ai.lastMonthSamePeriod))}</span></div>
           </div>
           {backup?.configured && <BackupDetail b={backup} />}
@@ -634,7 +641,7 @@ function Server() {
             <>
               <h3>ワーカー</h3>
               <div className="table-scroll"><table className="table">
-                <thead><tr><th>名前</th><th>最後の応答</th><th>版</th></tr></thead>
+                <thead><tr><th>名前</th><th>最終応答</th><th>版</th></tr></thead>
                 <tbody>{liveWorkers.map((w) => <tr key={w.id}><td>{w.id}</td><td>{when(w.at)}</td><td>{w.version ?? '—'}</td></tr>)}</tbody>
               </table></div>
             </>
@@ -653,24 +660,51 @@ function BackupStat({ b }: { b: CloudBackupViewRow }) {
   if (!b.configured) return <div className="stat"><span>バックアップ</span><strong><span className="badge warn">未導入</span></strong><span className="small">運営者マニュアル 第 13 章参照</span></div>;
   const last = b.last;
   const bad = !last || !last.ok || b.stale || b.archiveFailing || (last.check !== null && !last.check.ok);
-  const label = !last ? 'まだ取っていません' : !last.ok ? '失敗しました' : b.stale ? '止まっています' : b.archiveFailing ? '変更の記録を送れていません' : '取れています';
+  const label = !last ? 'まだ取っていません' : !last.ok ? '失敗しました' : b.stale ? '止まっています' : b.archiveFailing ? '変更の記録を送れていません' : '取得完了';
   const errors = [last?.database.error && `データベース: ${last.database.error}`, last?.files.error && `ファイル: ${last.files.error}`,
-    last?.check && !last.check.ok && `確かめ: ${last.check.error ?? ''}`].filter(Boolean).join(' ／ ');
+    last?.check && !last.check.ok && `確認: ${last.check.error ?? ''}`].filter(Boolean).join(' ／ ');
   return (
     <div className="stat">
       <span>バックアップ</span>
       <strong><span className={`badge ${bad ? 'warn' : 'ok'}`}>{label}</span></strong>
       <span>
-        最後 {when(last?.at ?? null)}・変更の記録 {when(b.archive?.lastArchivedAt ?? null)}
-        {last?.check && `・確かめ ${when(last.check.at)}`}
+        最終 {when(last?.at ?? null)}・変更の記録 {when(b.archive?.lastArchivedAt ?? null)}
+        {last?.check && `・確認 ${when(last.check.at)}`}
         {errors && <><br />{errors}</>}
       </span>
     </div>
   );
 }
 
+/** セキュリティの状態の札の色と言葉（第23.8.7節「セキュリティの状態」）。 */
+const EDGE_LEVEL: Record<'normal' | 'caution' | 'alert', { badge: string; text: string }> = {
+  normal: { badge: 'ok', text: '平常' }, caution: { badge: 'warn', text: '注意' }, alert: { badge: 'danger', text: '警戒' },
+};
+
+/** 国の名前（ISO の 2 文字から。分からなければ「不明」）。 */
+function countryName(code: string): string {
+  if (!code) return '不明';
+  try { return new Intl.DisplayNames(['ja'], { type: 'region' }).of(code) ?? code; } catch { return code; }
+}
+
+/** 要約の欄のセキュリティの札。状態と、最初の理由（平常なら直近 24 時間の数）。 */
+function EdgeStat({ e }: { e: EdgeStatusViewRow }) {
+  if (!e.configured || !e.level) return <div className="stat"><span>セキュリティ</span><strong><span className="badge warn">未導入</span></strong><span className="small">運営者マニュアル 第 13 章参照</span></div>;
+  const lv = EDGE_LEVEL[e.level];
+  const l = e.last;
+  const n = (v: number | null | undefined) => (typeof v === 'number' ? v.toLocaleString('ja-JP') : '—');
+  return (
+    <div className="stat">
+      <span>セキュリティ</span>
+      <strong><span className={`badge ${lv.badge}`}>{lv.text}</span></strong>
+      <span>{e.reasons[0] ?? `直近 24 時間 攻撃 ${n(l?.crowdsec?.alerts24h)}・WAF ${n(l?.waf?.hits24h)}`}{e.reasons.length > 1 && ` ほか ${e.reasons.length - 1} 件`}</span>
+    </div>
+  );
+}
+
 /**
  * 入口の守りと VPN の様子（仕様書 第23.8.7節「ネットワークの様子」）。VPS の上で root の仕組みが 5 分ごとに書いた数を出す。
+ * 上に状態と理由、直近 24 時間に来たもの（攻撃の種類・国、WAF に当たった要求の種類）を出す（第23.8.7節「セキュリティの状態」）。
  * 相手の IP アドレス・鍵・WAF の記録の中身は出さない。読めなかった値は「取得できなかった」と出す（推測で埋めない）。
  */
 function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
@@ -680,19 +714,38 @@ function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
   const NONE = <span className="muted">取得できなかった</span>;
   const n = (v: number | null | undefined) => (v === null || v === undefined ? null : v.toLocaleString('ja-JP'));
   const engine: Record<string, string> = { DetectionOnly: '記録だけ', On: '止める' };
+  // 前の版の集める仕組みの結果には種類が無い（「取得できなかった」と出す）。種類が 1 つも無ければ「なし」
+  const list = (ok: boolean, rows: [string, number][]) => (!ok ? NONE
+    : rows.length === 0 ? 'なし' : rows.map(([k, c]) => `${k} ${c.toLocaleString('ja-JP')}`).join('・'));
+  const csOk = !!l.crowdsec && l.crowdsec.alerts7d !== undefined;
+  const wafOk = !!l.waf && typeof l.waf.hits7d === 'number';
   return (
     <>
       {title}
       <p className="small muted">
-        最後に集めた時刻 {e.stale ? <span className="badge warn">{when(l.at)}（止まっています）</span> : when(l.at)}
+        最終収集 {e.stale ? <span className="badge warn">{when(l.at)}（止まっています）</span> : when(l.at)}
       </p>
+      {e.level && (
+        <p>
+          <span className={`badge ${EDGE_LEVEL[e.level].badge}`}>{EDGE_LEVEL[e.level].text}</span>
+          {e.reasons.map((r) => <span key={r}>{' '}{r}</span>)}
+        </p>
+      )}
+      <div className="table-scroll"><table className="table">
+        <tbody>
+          <tr><th>攻撃の種類（24 時間）</th><td>{list(csOk, e.top.kinds.map((k) => [k.label, k.count]))}</td></tr>
+          <tr><th>攻撃の国（24 時間）</th><td>{list(csOk, e.top.countries.map((c) => [countryName(c.key), c.count]))}</td></tr>
+          <tr><th>WAF の種類（24 時間）</th><td>{list(wafOk, e.top.waf.map((k) => [k.label, k.count]))}</td></tr>
+        </tbody>
+      </table></div>
       <div className="table-scroll"><table className="table">
         <tbody>
           <tr><th>CrowdSec</th><td>{l.crowdsec ? <>
             いま止めている相手 このサーバーで見つけた {n(l.crowdsec.local) ?? '—'}・世界中で分け合う一覧 {n(l.crowdsec.shared) ?? '—'}・直近 24 時間に見つけた攻撃 {n(l.crowdsec.alerts24h) ?? '—'}
           </> : NONE}</td></tr>
           <tr><th>国の遮断</th><td>{l.geo ? (l.geo.countries ? <>
-            {l.geo.countries}・止めた通信 入ってくる {n(l.geo.inBlocked) ?? '—'}・出ていく {n(l.geo.outBlocked) ?? '—'}（表を入れてから）・一覧 {when(l.geo.listAt)}
+            {l.geo.countries}・止めた通信 入ってくる {n(l.geo.inBlocked) ?? '—'}・出ていく {n(l.geo.outBlocked) ?? '—'}（表を入れてから）
+            {l.geo.in24h !== undefined && <>・直近 24 時間 入ってくる {n(l.geo.in24h) ?? '—'}・出ていく {n(l.geo.out24h) ?? '—'}</>}・一覧 {when(l.geo.listAt)}
           </> : '止めていません') : NONE}</td></tr>
           <tr><th>WAF</th><td>{l.waf ? <>
             {l.waf.engine ? engine[l.waf.engine] ?? l.waf.engine : '—'}・直近 24 時間に規則に当たった要求 {n(l.waf.hits24h) ?? '—'}
@@ -701,7 +754,7 @@ function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
             {l.certs.count} 枚・いちばん近い期限 {e.certSoon ? <span className="badge warn">{when(l.certs.nearest)}</span> : when(l.certs.nearest)}
           </> : NONE}</td></tr>
           <tr><th>VPN</th><td>{e.peers.length === 0 ? NONE : e.peers.map((p) => (
-            <div key={p.address}><code>{p.address}</code> {p.connected ? <span className="badge ok">接続中</span> : <>最後の接続 {p.lastHandshake ? when(p.lastHandshake) : 'まだありません'}</>}</div>
+            <div key={p.address}><code>{p.address}</code> {p.connected ? <span className="badge ok">接続中</span> : <>最終接続 {p.lastHandshake ? when(p.lastHandshake) : 'まだありません'}</>}</div>
           ))}</td></tr>
         </tbody>
       </table></div>
@@ -716,7 +769,7 @@ function EdgeDetail({ e }: { e: EdgeStatusViewRow }) {
 function BackupDetail({ b }: { b: CloudBackupViewRow }) {
   const last = b.last;
   const inv = last?.inventory ?? null;
-  const done = (ok: boolean) => (ok ? '済み' : '失敗');
+  const done = (ok: boolean) => (ok ? '完了' : '失敗');
   const loc = inv?.location ?? null;
   return (
     <>
@@ -724,15 +777,15 @@ function BackupDetail({ b }: { b: CloudBackupViewRow }) {
       <div className="table-scroll"><table className="table">
         <tbody>
           <tr><th>毎晩のバックアップ</th><td>{last ? <>{when(last.at)}・データベース {done(last.database.ok)}・ファイル {done(last.files.ok)}</> : 'まだ取っていません'}</td></tr>
-          <tr><th>次のバックアップ</th><td>{when(b.nextRunAt)} すぎ</td></tr>
+          <tr><th>次のバックアップ</th><td>{when(b.nextRunAt)} 過ぎ</td></tr>
           <tr><th>データベースを戻せる範囲</th><td>{b.recoverable.from ? `${when(b.recoverable.from)} 〜 ${when(b.recoverable.to)}` : '—'}</td></tr>
-          <tr><th>データベースのバックアップ</th><td>{inv?.database ? `まるごと ${inv.database.count} 回・いちばん新しい ${when(inv.database.newest)}・${bytes(inv.database.bytes)}` : '—'}</td></tr>
+          <tr><th>データベースのバックアップ</th><td>{inv?.database ? `全体 ${inv.database.count} 回・最新 ${when(inv.database.newest)}・${bytes(inv.database.bytes)}` : '—'}</td></tr>
           <tr><th>変更の記録</th><td>
-            最後に送った {when(b.archive?.lastArchivedAt ?? null)}
-            {b.archiveFailing && <> <span className="badge warn">いま送れていません</span> 最後に失敗 {when(b.archive?.lastFailedAt ?? null)}</>}
+            最終更新 {when(b.archive?.lastArchivedAt ?? null)}
+            {b.archiveFailing && <> <span className="badge warn">いま送れていません</span> 最終失敗 {when(b.archive?.lastFailedAt ?? null)}</>}
           </td></tr>
           <tr><th>ファイルのバックアップ</th><td>{inv?.files ? `${inv.files.count} 回（${when(inv.files.oldest)} 〜 ${when(inv.files.newest)}）・${bytes(inv.files.bytes)}` : '—'}</td></tr>
-          <tr><th>壊れていないかの確かめ</th><td>{last?.check ? <>{last.check.ok ? '通りました' : <span className="badge warn">失敗しました</span>}（{when(last.check.at)}）</> : 'まだしていません'}</td></tr>
+          <tr><th>データチェック</th><td>{last?.check ? <>{last.check.ok ? '正常' : <span className="badge warn">異常</span>}（{when(last.check.at)}）</> : 'まだしていません'}</td></tr>
           <tr><th>更新の前の戻す点</th><td>
             {b.restorePoints.length === 0 ? 'まだありません' : b.restorePoints.slice(0, 5).map((p) => (
               <div key={p.name + p.at}><code>{p.name}</code>（{when(p.at)}）{!p.restorable && <> <span className="badge warn">戻せる範囲の外</span></>}</div>

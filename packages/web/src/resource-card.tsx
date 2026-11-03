@@ -168,11 +168,13 @@ function Trend({ samples, days, kind = 'pct' }: { samples: RuntimeSamplePoint[];
  * @param env 動いている環境（「動いている環境」の欄と同じもの。1 分ごとに読み直される）
  * @param loadSamples 推移を読む口（管理者ページは `/admin/machine/runtime/samples`、運営は `/ops/runtime/samples`）
  * @param filesBytes ファイルの置き場の使用量（ディスクの内訳に添える。分からなければ省く）
+ * @param refresh 変わるたびにすぐ読み直す（画面の「更新」）
  */
-export function ResourceCard({ env, loadSamples, filesBytes }: {
+export function ResourceCard({ env, loadSamples, filesBytes, refresh = 0 }: {
   env: RuntimeEnvironment;
   loadSamples: (days: RuntimeSampleDays) => Promise<{ samples: RuntimeSamplePoint[]; net?: RuntimeNetTotal }>;
   filesBytes?: number | null;
+  refresh?: number;
 }) {
   const [days, setDays] = useState<RuntimeSampleDays>(1);
   const [samples, setSamples] = useState<RuntimeSamplePoint[] | null>(null);
@@ -181,7 +183,7 @@ export function ResourceCard({ env, loadSamples, filesBytes }: {
   const read = useCallback(() => {
     loadSamples(days).then((r) => { setSamples(r.samples); setNet(r.net ?? null); setError(null); }).catch(() => setError('推移を読み込めませんでした'));
   }, [loadSamples, days]);
-  useEffect(() => { read(); const t = window.setInterval(read, 300_000); return () => clearInterval(t); }, [read]);
+  useEffect(() => { read(); const t = window.setInterval(read, 300_000); return () => clearInterval(t); }, [read, refresh]);
 
   const m = env.machine;
   const cpu = m?.load && m.cores ? (m.load[0] / m.cores) * 100 : null;

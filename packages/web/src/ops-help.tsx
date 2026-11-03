@@ -7,7 +7,7 @@
  * 説明を画面に常に出すことはしない（原則 u11）。マスター管理画面には秘書が無いので、AI に尋ねる口は置かない。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { opsApi } from './ops-api.js';
 import { HelpTip, Markdown, MdImageContext, MdRefContext } from './help.js';
 
@@ -20,12 +20,17 @@ export interface OpsPageHelp {
   text: string;
 }
 
-/** 運営の画面の題名と、その横の「？」（1 画面に 1 つ）。 */
-export function OpsTitle({ title, help }: { title: string; help: OpsPageHelp }) {
+/**
+ * 運営の画面の題名と、その横の「？」（1 画面に 1 つ）。
+ *
+ * @param children 題名の横に並べる操作（「稼働状況」の「更新」など）
+ */
+export function OpsTitle({ title, help, children }: { title: string; help: OpsPageHelp; children?: ReactNode }) {
   return (
     <h2>
       {title}
       {' '}<HelpTip article={help.chapter}>{help.text}</HelpTip>
+      {children && <>{' '}{children}</>}
     </h2>
   );
 }

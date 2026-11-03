@@ -165,7 +165,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 | 7 | CrowdSec が読んでいる | `sudo cscli metrics` | `Acquisition Metrics` に `/var/log/caddy/access.log` が出る |
 | 8 | CrowdSec が止めている | `sudo cscli bouncers list` と `systemctl is-active crowdsec-firewall-bouncer` | `crowdsec-firewall-bouncer` が並び、`active`。無ければ見つけた相手を止められないので、`setup.sh` を走らせ直す |
 | 9 | 国で通信を止めている | `sudo m2office-geo-update --status` と `systemctl list-timers m2office-geo-update.timer` | 止める国・範囲の数（2 万を超える）・止めた数が出て、次の取り直しの日時が出る。取り直しの記録は `journalctl -u m2office-geo-update` |
-| 10 | 入口の守りと VPN の様子を集めている | `systemctl list-timers m2office-edge-status.timer` と `sudo cat /var/lib/m2office/machine/edge-status.json` | 5 分ごとの次の日時が出て、ファイルの `errors` が空。運営の画面の「稼働状況」の「VPN」に数が出る（第 7 章）。読めなかったものは `errors` と `journalctl -u m2office-edge-status` に理由が出る |
+| 10 | 入口の守りと VPN の様子を集めている | `systemctl list-timers m2office-edge-status.timer` と `sudo cat /var/lib/m2office/machine/edge-status.json` | 5 分ごとの次の日時が出て、ファイルの `errors` が空。運営の画面の「稼働状況」の「セキュリティ」に数が出る（第 7 章）。読めなかったものは `errors` と `journalctl -u m2office-edge-status` に理由が出る |
 
 自分の手元のアドレスが止められて WireGuard でつながらなくなったときは、Xserver の管理画面のコンソールで入り、`sudo cscli decisions delete --ip <手元のアドレス>` で外します。
 

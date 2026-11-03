@@ -49,10 +49,10 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
             <dl className="kv">
               <dt>版</dt><dd>{data.version}</dd>
               <dt>データベース</dt><dd>{state(data.database.ok, '稼働中', '止まっています')} {data.database.ms !== null && <span className="small muted">{data.database.ms} ms</span>} {data.database.error && <span className="small muted">{data.database.error}</span>}</dd>
-              <dt>ワーカー</dt><dd>{state(data.worker.ok, '稼働中', '止まっています')} {data.worker.lastSeen && <span className="small muted">最後の知らせ {whenText(data.worker.lastSeen)}</span>}</dd>
+              <dt>ワーカー</dt><dd>{state(data.worker.ok, '稼働中', '止まっています')} {data.worker.lastSeen && <span className="small muted">最終応答 {whenText(data.worker.lastSeen)}</span>}</dd>
               <dt>入口と証明書</dt><dd>{data.entrance.host ? <>{data.entrance.host} {data.entrance.certExpires
                 ? state((data.entrance.certDaysLeft ?? 0) > 14, `期限 ${whenText(data.entrance.certExpires)}（あと ${data.entrance.certDaysLeft} 日）`, `期限 ${whenText(data.entrance.certExpires)}（あと ${data.entrance.certDaysLeft} 日）`)
-                : <span className="badge warn">確かめられません</span>} {data.entrance.error && <span className="small muted">{data.entrance.error}</span>}</> : <span className="muted">—</span>}</dd>
+                : <span className="badge warn">確認できません</span>} {data.entrance.error && <span className="small muted">{data.entrance.error}</span>}</> : <span className="muted">—</span>}</dd>
               <dt>ローカル AI</dt><dd>{data.localAi.configured ? <>{state(data.localAi.ok, '稼働中', '答えません')} <span className="small muted">{data.localAi.models.join('、') || data.localAi.error}</span></> : <span className="muted">設定していません</span>}</dd>
               <dt>データのディスク</dt><dd>{space(data.disk.data)}</dd>
             </dl>
@@ -62,13 +62,13 @@ export function MachinePanel({ fns, help }: { fns: MachineApi; help?: PageHelp }
             {!data.backup.configured ? <p className="muted">バックアップの置き場が設定されていません</p> : (
               <>
                 <dl className="kv">
-                  <dt>最後のバックアップ</dt><dd>{st?.last ? <>{state(st.last.ok, whenText(st.last.at), `${whenText(st.last.at)} 失敗`)} {st.last.ok ? <span className="small muted">データベース {bytesText(st.last.dbBytes)}</span> : <span className="small muted">{st.last.error}</span>}</> : <span className="muted">まだありません</span>}</dd>
-                  <dt>戻せるかの確かめ</dt><dd>{st?.restoreTest ? <>{state(st.restoreTest.ok, `${whenText(st.restoreTest.at)} 戻せました`, `${whenText(st.restoreTest.at)} 戻せませんでした`)} {st.restoreTest.error && <span className="small muted">{st.restoreTest.error}</span>}</> : <span className="muted">まだありません</span>}</dd>
+                  <dt>最終バックアップ</dt><dd>{st?.last ? <>{state(st.last.ok, whenText(st.last.at), `${whenText(st.last.at)} 失敗`)} {st.last.ok ? <span className="small muted">データベース {bytesText(st.last.dbBytes)}</span> : <span className="small muted">{st.last.error}</span>}</> : <span className="muted">まだありません</span>}</dd>
+                  <dt>戻せるかの確認</dt><dd>{st?.restoreTest ? <>{state(st.restoreTest.ok, `${whenText(st.restoreTest.at)} 戻せました`, `${whenText(st.restoreTest.at)} 戻せませんでした`)} {st.restoreTest.error && <span className="small muted">{st.restoreTest.error}</span>}</> : <span className="muted">まだありません</span>}</dd>
                   <dt>バックアップのディスク</dt><dd>{space(data.disk.backup)}</dd>
                   <dt>別の置き場のバックアップ</dt><dd>{!data.backup.offsite.configured ? <span className="muted">設定していません</span> : off?.last
                     ? <>{state(off.last.ok, `${whenText(off.last.at)} 送りました`, `${whenText(off.last.at)} 送れませんでした`)} {off.last.ok ? <span className="small muted">新しく送った量 {bytesText(off.last.bytesAdded)}</span> : <span className="small muted">{off.last.error}</span>}</>
                     : <span className="muted">まだありません</span>}</dd>
-                  {data.backup.offsite.configured && <><dt>別の置き場のバックアップの確かめ</dt><dd>{off?.check ? <>{state(off.check.ok, `${whenText(off.check.at)} 壊れていません`, `${whenText(off.check.at)} 確かめに失敗`)} {off.check.error && <span className="small muted">{off.check.error}</span>}</> : <span className="muted">まだありません</span>}</dd></>}
+                  {data.backup.offsite.configured && <><dt>別の置き場のバックアップの確認</dt><dd>{off?.check ? <>{state(off.check.ok, `${whenText(off.check.at)} 壊れていません`, `${whenText(off.check.at)} 確認に失敗`)} {off.check.error && <span className="small muted">{off.check.error}</span>}</> : <span className="muted">まだありません</span>}</dd></>}
                 </dl>
                 <button className="btn small" onClick={backup}>今すぐバックアップを取る</button>
                 {note && <p className="ok-msg small">{note}</p>}

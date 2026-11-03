@@ -574,6 +574,8 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .link { color: var(--accent); font-size: calc(13px * var(--font-scale)); text-decoration: none; }
 .link:hover { text-decoration: underline; }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
+/* すぐに手当てが要る状態（稼働状況のセキュリティの「警戒」など） */
+.badge.danger { background: var(--danger-soft); color: var(--danger); }
 /* 通常の停止の案内（仕様書 第23.8.6節） */
 .suspended-banner { padding: calc(8px * var(--space-scale)) calc(16px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid var(--warn-line); }
 .row { display: flex; gap: calc(8px * var(--space-scale)); margin-top: calc(10px * var(--space-scale)); }

@@ -64,16 +64,18 @@ export function nodeSecurityText(n: NodeSecurityNotice): string {
  * @param load 環境を読む口（管理者ページは `/admin/machine/runtime`、運営は `/ops/runtime`）
  * @param loadSamples 機械の資源の推移を読む口。与えれば、すぐ下に機械の資源の欄を出す
  * @param filesBytes ファイルの置き場の使用量（機械の資源の欄のディスクの内訳に添える）
+ * @param refresh 変わるたびにすぐ読み直す（画面の「更新」。機械の資源の欄にも渡す）
  */
-export function RuntimeCard({ load, loadSamples, filesBytes }: {
+export function RuntimeCard({ load, loadSamples, filesBytes, refresh = 0 }: {
   load: () => Promise<RuntimeEnvironment>;
   loadSamples?: (days: RuntimeSampleDays) => Promise<{ samples: RuntimeSamplePoint[] }>;
   filesBytes?: number | null;
+  refresh?: number;
 }) {
   const [env, setEnv] = useState<RuntimeEnvironment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const read = useCallback(() => { load().then((e) => { setEnv(e); setError(null); }).catch(() => setError('稼働環境を読み込めませんでした')); }, [load]);
-  useEffect(() => { read(); const t = window.setInterval(read, 60_000); return () => clearInterval(t); }, [read]);
+  useEffect(() => { read(); const t = window.setInterval(read, 60_000); return () => clearInterval(t); }, [read, refresh]);
   if (error) return <div className="card"><h3>稼働環境</h3><p className="error">{error}</p></div>;
   if (!env) return null;
   const now = Date.now();
@@ -111,7 +113,7 @@ export function RuntimeCard({ load, loadSamples, filesBytes }: {
         </dd>
       </dl>
     </div>
-    {loadSamples && <ResourceCard env={env} loadSamples={loadSamples} filesBytes={filesBytes} />}
+    {loadSamples && <ResourceCard env={env} loadSamples={loadSamples} filesBytes={filesBytes} refresh={refresh} />}
     </>
   );
 }

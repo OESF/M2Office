@@ -4,20 +4,28 @@
  * CrowdSec・国の遮断・WAF・証明書・WireGuard の数は root でないと読めないので、ここで集めて**数だけ**を
  * `/var/lib/m2office/machine/edge-status.json`（だれでも読めるが、書けるのは root だけ）に書く。運営の API はそれを読むだけ。
  * 相手の IP アドレス・鍵・WAF の記録の中身はファイルに入れない。読めなかった部分は `null` にし、理由を `errors` に残す（推測で埋めない）。
+ * 攻撃と WAF は、直近 24 時間の種類と国（数だけ）と、ふだんと比べるための 7 日の数も書く（第23.8.7節「セキュリティの状態」）。
+ * 国の遮断の数は積み上がった数しか無いので、24 時間分の前の値を `edge-history.json`（root だけが読み書きする）に残し、差を出す。
  * 記録は journalctl -u m2office-edge-status。
  */
 
 import { execFileSync } from 'node:child_process';
 import { X509Certificate } from 'node:crypto';
 import { chmodSync, existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const DAY_MS = 86_400_000;
+/** 種類と国を、多い順にいくつまで書くか（画面は 5 つまで出す。同じ種類にまとめた後でも 5 つ残るよう多めに書く）。 */
+const TOP_KEEP = 20;
+/** WAF の記録を、今のファイルからいくつ前まで読むか（毎日入れ替えるので 7 日分。`.1` はまだ縮めていない）。 */
+const WAF_DAYS = 7;
 
 /** 置き場（試すときは環境変数で替える）。 */
 export const PATHS = {
   out: process.env.M2O_EDGE_STATUS_FILE ?? '/var/lib/m2office/machine/edge-status.json',
+  history: process.env.M2O_EDGE_HISTORY_FILE ?? '/var/lib/m2office/machine/edge-history.json',
   setupConf: process.env.M2O_SETUP_CONF ?? '/etc/m2office/setup.conf',
   geoConf: process.env.M2O_GEO_CONF ?? '/etc/m2office/geo.conf',
   geoDir: process.env.M2O_GEO_DIR ?? '/var/lib/m2office/geo',
@@ -54,22 +62,99 @@ export function nftPackets(text) {
   return m ? Number(m[1]) : null;
 }
 
+/** 数えた表を、多い順の `[{ key, count }]` にする（同じ数なら名前の順）。 */
+function topOf(map) {
+  return [...map].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, TOP_KEEP).map(([key, count]) => ({ key, count }));
+}
+const bump = (map, key) => map.set(key, (map.get(key) ?? 0) + 1);
+
 /**
- * WAF の記録（1 行 1 件の JSON）から、`since` より後に規則に当たった要求の数を数える。読めない行は飛ばす。
+ * CrowdSec の 7 日の攻撃の記録から、直近 24 時間と 7 日の数、直近 24 時間の見張りの名前ごと・国ごとの数を出す。
+ * 分け合う一覧の取り込み（見張りの名前が `update : +N/-M IPs`）は攻撃ではないので数えない。相手の IP アドレスは捨てる。
  *
- * @param since この時刻（ミリ秒）より後だけを数える
+ * @param alerts `cscli alerts list --since 168h --limit 0 -o json` を読んだもの
+ * @returns 国の分からない攻撃は、国を空の文字（`''`）で数える
  */
-export function countWafHits(text, since) {
-  let n = 0;
+export function summarizeAlerts(alerts, now) {
+  let alerts24h = 0; let alerts7d = 0;
+  const scenarios = new Map(); const countries = new Map();
+  for (const a of alerts ?? []) {
+    const scenario = String(a?.scenario ?? '');
+    if (/^update\s*:/i.test(scenario)) continue;
+    const at = Date.parse(a?.created_at ?? a?.start_at ?? '');
+    if (!Number.isFinite(at) || at < now - 7 * DAY_MS) continue;
+    alerts7d++;
+    if (at < now - DAY_MS) continue;
+    alerts24h++;
+    bump(scenarios, scenario || '不明');
+    bump(countries, typeof a?.source?.cn === 'string' ? a.source.cn.toUpperCase() : '');
+  }
+  return { alerts24h, alerts7d, scenarios24h: topOf(scenarios), countries24h: topOf(countries) };
+}
+
+/**
+ * WAF の記録（1 行 1 件の JSON）から、直近 24 時間と 7 日に規則に当たった要求の数と、直近 24 時間の規則の分類ごとの数を出す。
+ * 分類は、当たった規則の印（OWASP の規則の `attack-*`）のうち最初のもの。無ければ空の文字（`''`）。要求の中身は読まない。読めない行は飛ばす。
+ */
+export function summarizeWaf(text, now) {
+  let hits24h = 0; let hits7d = 0;
+  const kinds = new Map();
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     try {
-      const t = JSON.parse(line).transaction ?? {};
+      const j = JSON.parse(line);
+      const t = j.transaction ?? {};
       const at = typeof t.unix_timestamp === 'number' ? t.unix_timestamp / 1e6 : Date.parse(t.timestamp ?? '');
-      if (Number.isFinite(at) && at >= since) n++;
+      if (!Number.isFinite(at) || at < now - 7 * DAY_MS) continue;
+      hits7d++;
+      if (at < now - DAY_MS) continue;
+      hits24h++;
+      const tags = (j.messages ?? t.messages ?? []).flatMap((m) => m?.data?.tags ?? m?.tags ?? []);
+      bump(kinds, tags.find((tag) => typeof tag === 'string' && tag.startsWith('attack-')) ?? '');
     } catch { /* 途中で切れた行など */ }
   }
-  return n;
+  return { hits24h, hits7d, kinds24h: topOf(kinds) };
+}
+
+/** WAF の記録を 7 日分つなげて読む（今のファイル・`.1`・縮めた `.2.gz` 以降）。今のファイルが無ければ `null`。 */
+function readWafLogs(path) {
+  if (!existsSync(path)) return null;
+  const parts = [readText(path), readText(`${path}.1`)];
+  for (let i = 2; i <= WAF_DAYS; i++) {
+    try { parts.push(gunzipSync(readFileSync(`${path}.${i}.gz`)).toString('utf8')); } catch { /* まだ無い */ }
+  }
+  return parts.join('\n');
+}
+
+/**
+ * 国の遮断の直近 24 時間に止めた数を、残した前の値との差で出す。表を入れ直して数が戻ったときは、戻った後の数を差とする。
+ * 24 時間分の前の値がまだ無いときは、残っているいちばん古い値からの差（短い間の数）になる。
+ *
+ * @param history 前の値（`[{ at, inBlocked, outBlocked }]`。古い順）
+ * @param current いまの値
+ */
+export function geoDelta24h(history, current, now) {
+  const points = [...history.filter((h) => Date.parse(h.at) >= now - DAY_MS - 10 * 60_000), { at: new Date(now).toISOString(), ...current }];
+  const delta = (key) => {
+    if (current[key] === null || current[key] === undefined) return null;
+    let sum = 0;
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1][key]; const cur = points[i][key];
+      if (typeof cur !== 'number') continue;
+      sum += typeof prev === 'number' && cur >= prev ? cur - prev : (typeof prev === 'number' ? cur : 0);
+    }
+    return sum;
+  };
+  return { in24h: delta('inBlocked'), out24h: delta('outBlocked') };
+}
+
+/** 残す前の値（25 時間より古いものは捨てる）。 */
+export function nextHistory(history, result, now) {
+  const kept = history.filter((h) => Date.parse(h.at) >= now - DAY_MS - 60 * 60_000);
+  if (result.geo && (result.geo.inBlocked !== null || result.geo.outBlocked !== null)) {
+    kept.push({ at: result.at, inBlocked: result.geo.inBlocked, outBlocked: result.geo.outBlocked });
+  }
+  return kept;
 }
 
 /**
@@ -102,34 +187,44 @@ export function certSummary(dir) {
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 20_000, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
 const readText = (p) => { try { return readFileSync(p, 'utf8'); } catch { return ''; } };
 
-/** 集める。部分ごとに失敗しても止めず、`null` と理由を残す。 */
-export function collect(now = Date.now(), run = sh) {
+/** 残した前の値を読む（無い・壊れているときは空）。 */
+function readHistory() {
+  try { const j = JSON.parse(readFileSync(PATHS.history, 'utf8')); return Array.isArray(j) ? j : []; } catch { return []; }
+}
+
+/**
+ * 集める。部分ごとに失敗しても止めず、`null` と理由を残す。
+ *
+ * @param history 国の遮断の前の値（直近 24 時間の差を出すため）
+ */
+export function collect(now = Date.now(), run = sh, history = []) {
   const errors = [];
   const part = (name, fn) => { try { return fn(); } catch (e) { errors.push(`${name}: ${String(e?.message ?? e).split('\n')[0].slice(0, 200)}`); return null; } };
 
   const crowdsec = part('CrowdSec', () => {
     const { local, shared } = countDecisions(run('cscli', ['decisions', 'list', '--all', '--limit', '0', '-o', 'json']));
-    const alerts = JSON.parse(run('cscli', ['alerts', 'list', '--since', '24h', '--limit', '0', '-o', 'json']) || 'null') ?? [];
-    return { local, shared, alerts24h: alerts.length };
+    const alerts = JSON.parse(run('cscli', ['alerts', 'list', '--since', '168h', '--limit', '0', '-o', 'json']) || 'null') ?? [];
+    return { local, shared, ...summarizeAlerts(alerts, now) };
   });
 
   const geo = part('国の遮断', () => {
     if (!existsSync(PATHS.geoConf)) throw new Error(`${PATHS.geoConf} がありません`);
     const conf = confValue(readText(PATHS.geoConf), 'BLOCK_COUNTRIES') ?? '';
-    if (!conf || conf.toUpperCase() === 'NONE') return { countries: '', inBlocked: null, outBlocked: null, listAt: null };
+    if (!conf || conf.toUpperCase() === 'NONE') return { countries: '', inBlocked: null, outBlocked: null, in24h: null, out24h: null, listAt: null };
     const countries = readText(join(PATHS.geoDir, 'countries')).trim() || conf.toUpperCase();
     const counter = (name) => nftPackets(run('nft', ['list', 'counter', 'inet', 'm2office_geo', name]));
     let listAt = null;
     try { listAt = statSync(join(PATHS.geoDir, 'geo.nft')).mtime.toISOString(); } catch { /* まだ作っていない */ }
-    return { countries, inBlocked: counter('in_blocked'), outBlocked: counter('out_blocked'), listAt };
+    const current = { inBlocked: counter('in_blocked'), outBlocked: counter('out_blocked') };
+    return { countries, ...current, ...geoDelta24h(history, current, now), listAt };
   });
 
   const waf = part('WAF', () => {
     const engine = confValue(readText(PATHS.setupConf), 'WAF_ENGINE');
-    // 記録が無ければ数えられない（0 件とは言えない）。毎日入れ替えるので、前の日のファイル（.1）も見る
-    const hits24h = existsSync(PATHS.wafLog) ? countWafHits(readText(PATHS.wafLog) + '\n' + readText(`${PATHS.wafLog}.1`), now - DAY_MS) : null;
-    if (hits24h === null) errors.push(`WAF: ${PATHS.wafLog} がありません`);
-    return { engine, hits24h };
+    // 記録が無ければ数えられない（0 件とは言えない）。毎日入れ替えるので、前の日までのファイルも見る
+    const text = readWafLogs(PATHS.wafLog);
+    if (text === null) { errors.push(`WAF: ${PATHS.wafLog} がありません`); return { engine, hits24h: null, hits7d: null, kinds24h: [] }; }
+    return { engine, ...summarizeWaf(text, now) };
   });
 
   const certs = part('証明書', () => certSummary(PATHS.certDir));
@@ -139,16 +234,19 @@ export function collect(now = Date.now(), run = sh) {
   return { at: new Date(now).toISOString(), crowdsec, geo, waf, certs, vpn, errors };
 }
 
-/** 結果を書く（書きかけを読まれないよう、別の名前に書いてから入れ替える）。 */
-function write(result) {
-  const tmp = `${PATHS.out}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(result)}\n`);
-  chmodSync(tmp, 0o644);
-  renameSync(tmp, PATHS.out);
+/** 書く（書きかけを読まれないよう、別の名前に書いてから入れ替える）。 */
+function write(path, value, mode) {
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(value)}\n`);
+  chmodSync(tmp, mode);
+  renameSync(tmp, path);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const result = collect();
-  write(result);
+  const now = Date.now();
+  const history = readHistory();
+  const result = collect(now, sh, history);
+  write(PATHS.out, result, 0o644);
+  write(PATHS.history, nextHistory(history, result, now), 0o600);
   if (result.errors.length) console.error(`読めなかったもの: ${result.errors.join(' ／ ')}`);
 }

@@ -130,9 +130,10 @@ export interface EdgeStatusViewRow {
   configured: boolean;
   last: {
     at: string;
-    crowdsec: { local: number | null; shared: number | null; alerts24h: number | null } | null;
-    geo: { countries: string; inBlocked: number | null; outBlocked: number | null; listAt: string | null } | null;
-    waf: { engine: string | null; hits24h: number | null } | null;
+    crowdsec: { local: number | null; shared: number | null; alerts24h: number | null; alerts7d?: number } | null;
+    /** `in24h`・`out24h` は直近 24 時間に止めた数（第 0.510.0 版より前の結果には無い）。 */
+    geo: { countries: string; inBlocked: number | null; outBlocked: number | null; in24h?: number | null; out24h?: number | null; listAt: string | null } | null;
+    waf: { engine: string | null; hits24h: number | null; hits7d?: number | null } | null;
     certs: { count: number; nearest: string | null } | null;
     errors: string[];
   } | null;
@@ -142,6 +143,12 @@ export interface EdgeStatusViewRow {
   certSoon: boolean;
   /** VPN の端末ごとの、網の中のアドレスと最後の接続。 */
   peers: { address: string; lastHandshake: string | null; connected: boolean }[];
+  /** セキュリティの状態（第23.8.7節「セキュリティの状態」）。入れていなければ `null`。 */
+  level: 'normal' | 'caution' | 'alert' | null;
+  /** 当てはまった理由（警戒の理由が先）。 */
+  reasons: string[];
+  /** 直近 24 時間に来たもの（多い順に 5 つまで）。国は ISO の 2 文字（分からなければ空）。 */
+  top: { kinds: { label: string; count: number }[]; countries: { key: string; count: number }[]; waf: { label: string; count: number }[] };
 }
 
 /** 社外の控えの様子（仕様書 第20.4.6節「控え」）。 */

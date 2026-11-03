@@ -73,7 +73,7 @@ VPN を通らずに入れる管理の道はありません。運営者の端末�
 | CrowdSec | `crowdsec`・`crowdsec-firewall-bouncer` | なし | 攻撃する相手を決めて、ファイアウォールで止める |
 | 国の遮断 | `m2office-geo`・`m2office-geo-update.timer` | なし | 起動のときに国の表を入れ、毎週月曜の朝 5 時に一覧を取り直す |
 | 社外バックアップ | `m2office-backup.timer` | なし | 毎晩 2 時に社外バックアップを取る |
-| 入口の守りと VPN の様子 | `m2office-edge-status.timer` | なし | 5 分ごとに、CrowdSec・国の遮断・WAF・証明書・WireGuard の数だけを集め、「稼働状況」の「VPN」に出す（第 7 章） |
+| 入口の守りと VPN の様子 | `m2office-edge-status.timer` | なし | 5 分ごとに、CrowdSec・国の遮断・WAF・証明書・WireGuard の数と、攻撃の種類・国だけを集め、「稼働状況」の「セキュリティ」に出す（第 7 章） |
 
 M2Office の 3 つのプログラムは、専用の利用者 `m2office` で動き、Node.js のメモリの上限を付けています。動いているかどうかは、マスター管理画面の「稼働状況」（第 7 章）で見られます。
 
