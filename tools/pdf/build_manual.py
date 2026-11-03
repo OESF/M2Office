@@ -5,7 +5,7 @@ Markdown は章ごとに分けたまま保守し、配布と通読のときだ�
 
 使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF] [--owner=作成の法人 --company=会社名 --contact=担当者 --to=宛先]
   マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・ops（運営者。docs/ops-manual/）・
-    ops-recovery（運営者マニュアルのうち全体の構成・控えと復旧の章と、新しい VPS を用意して入れる章だけ。サーバーが止まったときに読む印刷用）・
+    ops-recovery（運営者マニュアルのうち全体の構成・バックアップと復旧の章と、新しい VPS を用意して入れる章だけ。サーバーが止まったときに読む印刷用）・
     hr-review（人事・給与の監修のお願い。docs/review/hr-payroll/）
   既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
   前との互換のため、最初の引数が .pdf で終われば開発者マニュアルの出力先とみなす
@@ -39,7 +39,7 @@ MANUALS = {
     # chapters に並べた順に載せ、はじめに（README）は載せない。全体の構成（第 18 章）を先に置き、何を戻すのかの見通しを立てられるようにする
     'ops-recovery': {
         'dir': os.path.join(ROOT, 'docs', 'ops-manual'), 'pdf': 'ops-recovery.pdf',
-        'title': 'M2Office 控えと復旧の手順書', 'subtitle': 'サーバーが止まったときに読む印刷用の控え',
+        'title': 'M2Office バックアップと復旧の手順書', 'subtitle': 'サーバーが止まったときに読む印刷用の手順書',
         'chapters': ['18-architecture.md', '17-backup-recovery.md', '12-vps-setup.md', '13-vps-m2office-setup.md'], 'intro': False,
     },
     'hr-payroll': {
