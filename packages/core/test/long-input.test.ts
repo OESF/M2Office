@@ -89,6 +89,15 @@ test('上げたサイネージの HTML と外のサイトの HTML は、閉じ�
   assert.equal(stripHidden('a<script>never closed'), 'a ');
   const page = readHtml('<title>見本</title><!-- <h1>隠れ</h1> --><h1>表の見出し</h1><script>var h="<h2>x</h2>"</script>', 'https://shop.example/');
   assert.deepEqual([page.title, page.headings], ['見本', ['表の見出し']]);
+  // 題名・説明・見出し・リンク・本文を読む処理も、閉じの無い形が 2 MB 続いてもすぐ終わる
+  for (const [name, html] of [['<title', '<title>'.repeat(mb / 7)], ['<a', '<a href="/x">'.repeat(mb / 13)], ['<h1', '<h1>'.repeat(mb / 4)], ['<', '<'.repeat(mb)], ['<meta', '<meta name="description" content="'.repeat(mb / 34)], ['<body', '<body>'.repeat(mb / 6)]] as const) {
+    const took = ms(() => readHtml(html, 'https://shop.example/'));
+    assert.ok(took < 2_000, `readHtml ${name}（2 MB。${Math.round(took)} ms）`);
+  }
+  const full = readHtml('<head><meta charset="utf-8"><meta content="料金と &amp; 予約" name="description"></head><body><h2>料金</h2><a href="/menu" title="メニュー"><img src="m.png"></a><a href="/menu">二度目</a><a href="/staff#top">スタッフ</a></body>', 'https://shop.example/');
+  assert.equal(full.description, '料金と & 予約', 'content を先に書いた <meta> も読む');
+  assert.deepEqual(full.links, [{ url: 'https://shop.example/menu', label: 'メニュー' }, { url: 'https://shop.example/staff', label: 'スタッフ' }]);
+  assert.match(full.text, /料金/);
 });
 
 test('問い合わせのメールの本文は 5,000 字で区切って連絡先を探す（長い本文でもすぐ終わる）', () => {
