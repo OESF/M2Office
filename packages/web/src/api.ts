@@ -26,6 +26,7 @@ import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSam
   Contract, ContractSettings, SalesDocsSettings, SalesDocument, SalesOrder, SalesSuggestions, TaxRateEntry, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
   EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckFormat, SlideDeckKind, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
+  DecisionDetail, DecisionMaterial, DecisionStreamEvent, DecisionSummary,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 import type { HealthViewRow } from './health-panel.js';
@@ -421,6 +422,8 @@ export interface Me {
   reservations?: boolean;
   /** 補助金・助成金の案内を使えるか（会社の入り切りと利用範囲。仕様書 第39章）。 */
   subsidies?: boolean;
+  /** 意思決定支援を使えるか（会社の入り切りと利用範囲。仕様書 第43章）。 */
+  decisions?: boolean;
   /** 会員とポイントを使えるか（会社の入り切りと利用範囲。仕様書 第40章）。 */
   members?: boolean;
   /** 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）。 */
@@ -1862,6 +1865,63 @@ export const api = {
     /** 会社の関心と業種を直す（管理者だけ）。 */
     saveSettings: (input: { interest?: string; industry?: string }) =>
       call<{ ok: true }>('/admin/extensions/subsidies/settings', { method: 'PUT', body: JSON.stringify(input) }),
+  },
+  /** 意思決定支援（内蔵の拡張。仕様書 第43章）。 */
+  decisions: {
+    /** 自分の相談と、共有された相談。 */
+    list: () => call<{ items: DecisionSummary[] }>('/decisions'),
+    /** 相談を始める（討論はワーカーが進める）。添付は先に `uploadFile` で上げた ID。 */
+    start: (input: { topic: string; turns: number; crossCheck: boolean; fileIds: string[] }) =>
+      call<{ id: string }>('/decisions', { method: 'POST', body: JSON.stringify(input) }),
+    /** 相談の中身（全文・主張・優勢の推移・材料）。 */
+    get: (id: string) => call<DecisionDetail>(`/decisions/${encodeURIComponent(id)}`),
+    /** 共有の相手に選べる人。 */
+    people: () => call<{ items: { id: string; name: string }[] }>('/decisions/people'),
+    interject: (id: string, text: string) => call<{ ok: true }>(`/decisions/${encodeURIComponent(id)}/interject`, { method: 'POST', body: JSON.stringify({ text }) }),
+    stop: (id: string) => call<{ ok: true }>(`/decisions/${encodeURIComponent(id)}/stop`, { method: 'POST', body: '{}' }),
+    continue: (id: string, turns: number) => call<{ ok: true }>(`/decisions/${encodeURIComponent(id)}/continue`, { method: 'POST', body: JSON.stringify({ turns }) }),
+    dig: (id: string, issue: string, turns: number) => call<{ ok: true }>(`/decisions/${encodeURIComponent(id)}/dig`, { method: 'POST', body: JSON.stringify({ issue, turns }) }),
+    addMaterial: (id: string, fileId: string) => call<{ material: DecisionMaterial }>(`/decisions/${encodeURIComponent(id)}/materials`, { method: 'POST', body: JSON.stringify({ fileId }) }),
+    share: (id: string, userIds: string[]) => call<{ ok: true }>(`/decisions/${encodeURIComponent(id)}/shares`, { method: 'PUT', body: JSON.stringify({ userIds }) }),
+    trash: (id: string) => call<{ ok: true }>(`/decisions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /**
+     * 討論の差分を受け取り続ける（SSE。仕様書 第43.11.2節）。
+     *
+     * @param since これより後の差分から受け取る（つなぎ直すときは、最後に受け取った番号）
+     * @param onEvent 差分が届くたびに呼ぶ
+     * @param onEnd 経路が切れたときに呼ぶ（呼び出し側が、最後の番号からつなぎ直す）
+     * @returns 受け取りをやめる関数
+     * @remarks `EventSource` ではなく `fetch` の読み取りで受ける（開発用のテナント指定のヘッダーを付けるため。ADR-0013）
+     */
+    stream: (id: string, since: number, onEvent: (ev: DecisionStreamEvent) => void, onEnd: (e: unknown) => void): (() => void) => {
+      const controller = new AbortController();
+      void (async () => {
+        try {
+          const res = await fetch(`/v1/decisions/${encodeURIComponent(id)}/stream?since=${since}`, {
+            credentials: 'same-origin', headers: { ...(devTenant ? { 'x-tenant': devTenant } : {}) }, signal: controller.signal,
+          });
+          if (!res.ok || !res.body) throw new Error(`受け取れませんでした (${res.status})`);
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const chunks = buffer.split('\n\n');
+            buffer = chunks.pop() ?? '';
+            for (const chunk of chunks) {
+              const data = chunk.split('\n').find((l) => l.startsWith('data: '));
+              if (data && chunk.includes('event: change')) onEvent(JSON.parse(data.slice('data: '.length)) as DecisionStreamEvent);
+            }
+          }
+          throw new Error('接続が終了しました');
+        } catch (e) {
+          if (!controller.signal.aborted) onEnd(e);
+        }
+      })();
+      return () => controller.abort();
+    },
   },
   /** 販促物の作成（内蔵の拡張。仕様書 第41章）。 */
   printDesigns: {

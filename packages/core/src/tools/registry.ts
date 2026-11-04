@@ -23,6 +23,7 @@ import type { WebReviewToolContext } from '../web-review/tools.js';
 import type { ContractToolContext } from '../contracts/tools.js';
 import type { SalesDocToolContext } from '../sales-docs/tools.js';
 import type { SubsidyToolContext } from '../subsidies/tools.js';
+import type { DecisionToolContext } from '../decisions/tools.js';
 import type { MemberToolContext } from '../members/tools.js';
 import type { PrintDesignToolContext } from '../print-designs/tools.js';
 import type { ReservationService } from '../reservations/service.js';
@@ -137,6 +138,8 @@ export interface ToolContext {
   salesDocs?: SalesDocToolContext;
   /** 補助金・助成金の案内（内蔵の拡張。仕様書 第39章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   subsidies?: SubsidyToolContext;
+  /** 意思決定支援（内蔵の拡張。仕様書 第43章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
+  decisions?: DecisionToolContext;
   /** 会員とポイント（内蔵の拡張。仕様書 第40章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   members?: MemberToolContext;
   /** 外部のアプリからの配信（第13.4.4節）。業務「外部のアプリからの配信」のツールが使う。 */

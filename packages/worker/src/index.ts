@@ -15,7 +15,7 @@ import {
   fillApprovalCompartments, discardStaleRecordings, discardStaleLiveRecordings, PostgresSystemLogStore, SystemLogSink, attachLogSink, EvidenceBuilder, SYSTEM_LOG_KEEP_DAYS,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, SalesDocWatch, salesInventoryFrom, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, SalesDocWatch, salesInventoryFrom, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, DecisionService, PostgresDecisionStore, DecisionRunner, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, PlatformAiSource, PostgresPlatformAiSettingsReader, envTenantCapJpy, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
@@ -320,6 +320,12 @@ const subsidies = new SubsidyService({
     return (await hrStore.listEmployees(tenantId)).filter((e) => e.category !== 'owner' && (!e.leftOn || e.leftOn >= today)).length;
   },
 });
+// 意思決定支援（第43章）。相談を受け持って討論を進める（裏で進め、見回りを待たせない）。推論は会社の AI の方針に従う
+const decisions = new DecisionService({
+  store: new PostgresDecisionStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, files, logger: log, llmFor: (tenantId) => ai.llmFor(tenantId),
+});
+const decisionRunner = new DecisionRunner(decisions, repo, { maxConcurrent: Number(process.env['DECISIONS_MAX_CONCURRENT'] ?? 3), logger: log });
 // 販促物の作成（第41章）。ワーカーは掲示の期間の見張り（サイネージに流す・外すを含む）と、秘書の業務からの頼みを扱う
 const printDesigns = new PrintDesignService({
   store: new PostgresPrintDesignStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
@@ -453,6 +459,7 @@ const engine = new RunEngine({
   salesDocs: { service: salesDocs, access: salesDocsAccess(repo) },
   taxTable,
   subsidies: { service: subsidies, access: subsidiesAccess(repo) },
+  decisions: { service: decisions, access: decisionsAccess(repo) },
   members: { service: members, access: membersAccess(repo) },
   printDesigns: { service: printDesigns, access: printDesignsAccess(repo) },
   // 日程調整で会議と一緒に会議室を取る（第37.18節）
@@ -667,6 +674,12 @@ let lastReservationPurge = 0;
 /** 補助金・助成金の月の調べものと締め切りの知らせを見る間隔（第39.7節。既定は 1 時間）。 */
 const SUBSIDY_INTERVAL_MS = Number(process.env['SUBSIDY_INTERVAL_MS'] ?? 3_600_000);
 let lastSubsidyCheck = 0;
+/** 意思決定支援の、動かす必要のある相談を見る間隔（第43.11.2節。始めてすぐ動き出すように短くする）。 */
+const DECISION_POLL_MS = Number(process.env['DECISIONS_POLL_MS'] ?? 2000);
+let lastDecisionPoll = 0;
+/** ゴミ箱に入れて 30 日を過ぎた相談を消す間隔（第43.9節。1 日に 1 回で足りる）。 */
+const DECISION_PURGE_INTERVAL_MS = 86_400_000;
+let lastDecisionPurge = 0;
 /** 会員のポイントの失効と週の見立てを見る間隔（第40.6節・第40.18節。見立ては月曜の 8 時を過ぎたら週に 1 回）。 */
 const MEMBER_EXPIRY_INTERVAL_MS = 3_600_000;
 let lastMemberExpiry = 0;
@@ -1366,6 +1379,26 @@ while (running) {
       if (r.searched + r.reminded + r.changed > 0) log.info('補助金・助成金を調べ、締め切りと公募の変更を知らせました', { searched: r.searched, reminded: r.reminded, changed: r.changed });
     } catch (err) {
       log.warn('補助金・助成金の見張りに失敗しました', { err });
+    }
+  }
+
+  // 意思決定支援の相談を受け持ち、討論を裏で進める（第43.11.2節。止まったワーカーの相談も、続きから受け持つ）
+  if (Date.now() - lastDecisionPoll >= DECISION_POLL_MS) {
+    lastDecisionPoll = Date.now();
+    try {
+      const n = await decisionRunner.poll();
+      if (n > 0) log.info('意思決定支援の討論を受け持ちました', { started: n, running: decisionRunner.size });
+    } catch (err) {
+      log.warn('意思決定支援の相談を受け持てませんでした', { err });
+    }
+  }
+  if (Date.now() - lastDecisionPurge >= DECISION_PURGE_INTERVAL_MS) {
+    lastDecisionPurge = Date.now();
+    try {
+      const n = await decisions.purge(new Date());
+      if (n > 0) log.info('ゴミ箱の意思決定支援の相談を消しました', { purged: n });
+    } catch (err) {
+      log.warn('ゴミ箱の意思決定支援の相談を消せませんでした', { err });
     }
   }
 

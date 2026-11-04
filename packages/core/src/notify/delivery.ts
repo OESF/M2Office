@@ -35,6 +35,7 @@ const KIND_LABELS: Record<string, string> = {
   contract: '契約書の管理',
   reservation: '予約',
   subsidy: '補助金・助成金',
+  decision: '意思決定支援',
   member: '会員',
   print: '販促物の作成',
   usage: 'AI の利用',

@@ -46,6 +46,7 @@ import { tlsAskRoute } from './routes/tls-ask.js';
 import { listenHost } from './listen.js';
 import { reservationsRoute } from './routes/reservations.js';
 import { subsidiesRoute } from './routes/subsidies.js';
+import { decisionsRoute } from './routes/decisions.js';
 import { membersRoute } from './routes/members.js';
 import { memberCardRoute } from './routes/member-card.js';
 import { printDesignsRoute } from './routes/print-designs.js';
@@ -263,6 +264,8 @@ app.get('/v1/me', async (c) => {
     reservations: !!(await deps.reservations.access(ctx.tenant.id, ctx.user.id)),
     // 補助金・助成金の案内を使えるか（会社の入り切りと利用範囲。仕様書 第39章）
     subsidies: !!(await deps.subsidies.access(ctx.tenant.id, ctx.user.id)),
+    // 意思決定支援を使えるか（会社の入り切りと利用範囲。仕様書 第43章）
+    decisions: !!(await deps.decisions.access(ctx.tenant.id, ctx.user.id)),
     // 会員とポイントを使えるか（会社の入り切りと利用範囲。仕様書 第40章）
     members: !!(await deps.members.access(ctx.tenant.id, ctx.user.id)),
     // 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）
@@ -314,6 +317,7 @@ app.route('/v1/quotes', quotesRoute(deps));
 app.get('/v1/tax-rates', async (c) => c.json({ rows: await deps.taxRates() }));
 app.route('/v1/reservations', reservationsRoute(deps));
 app.route('/v1/subsidies', subsidiesRoute(deps));
+app.route('/v1/decisions', decisionsRoute(deps));
 app.route('/v1/members', membersRoute(deps));
 app.route('/v1/print-designs', printDesignsRoute(deps));
 app.route('/v1/web-review', webReviewRoute(deps));

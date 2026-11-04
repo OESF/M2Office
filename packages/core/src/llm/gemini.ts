@@ -5,8 +5,9 @@
  */
 
 import type { Logger } from '../log/logger.js';
-import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmTranscribeRequest, type LlmTranscribeResponse, type LlmImageGenerateRequest, type LlmProvider, type LlmRequest, type LlmResponse, type LlmSpeechRequest, type LlmVideoRequest, type ModelTier } from './provider.js';
+import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmTranscribeRequest, type LlmTranscribeResponse, type LlmImageGenerateRequest, type LlmProvider, type LlmRequest, type LlmResponse, type LlmSpeechRequest, type LlmTextSink, type LlmVideoRequest, type ModelTier } from './provider.js';
 import { pcmToWav, wavDurationMs } from '../media/wav.js';
+import { readChatStream } from './stream.js';
 
 /** 役割ごとのモデル名。設定で差し替えられる（仕様書 第20.2節）。 */
 export interface GeminiModelMap {
@@ -182,6 +183,18 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       ...(used.completion_tokens !== undefined ? { outputTokens: used.completion_tokens } : {}),
       model: json.model ?? model,
     };
+  }
+
+  /**
+   * 文を少しずつ受け取りながら推論する（仕様書 第43.11.2節）。退避は {@link complete} と同じく、応答が始まる前の失敗だけで行う。
+   */
+  async completeStream(req: LlmRequest, onText: LlmTextSink): Promise<LlmResponse> {
+    const { res, model } = await this.withFallback(req.tier, (m) => fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({ model: m, messages: req.messages, max_tokens: req.maxOutputTokens, stream: true, stream_options: { include_usage: true } }),
+    }), 'LLM 呼び出しに失敗しました');
+    return readChatStream(res, req.messages, model, onText);
   }
 
   /**

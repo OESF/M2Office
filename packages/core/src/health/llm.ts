@@ -48,6 +48,7 @@ export function observeLlm(tenantId: string, inner: LlmProvider): LlmProvider {
     name: inner.name,
     complete: (req: LlmRequest): Promise<LlmResponse> => timed(() => inner.complete(req)),
   };
+  if (inner.completeStream) wrapped.completeStream = (req, onText) => timed(() => inner.completeStream!(req, onText));
   if (inner.readImage) wrapped.readImage = (req) => timed(() => inner.readImage!(req));
   if (inner.extractFromImage) wrapped.extractFromImage = (req) => timed(() => inner.extractFromImage!(req));
   if (inner.transcribeAudio) wrapped.transcribeAudio = (req) => timed(() => inner.transcribeAudio!(req));

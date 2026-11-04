@@ -271,6 +271,14 @@ const ACTION_LABELS: Record<string, string> = {
   'reservation.item.stop': '予約できるものを止めた',
   'reservation.admin_change': 'ほかの人の予約を管理者が変えた・取り消した',
   'subsidy.search': '補助金・助成金を調べた',
+  'decision.start': '意思決定支援の相談を始めた',
+  'decision.interject': '意思決定支援の討論に一言足した',
+  'decision.stop': '意思決定支援の討論を止めた',
+  'decision.continue': '意思決定支援の討論を続けた',
+  'decision.dig': '意思決定支援の論点を掘り下げた',
+  'decision.material': '意思決定支援の相談に材料を足した',
+  'decision.share': '意思決定支援の相談の共有を変えた',
+  'decision.trash': '意思決定支援の相談をゴミ箱に入れた',
   'member.settings': '会員とポイントの設定を直した',
   'member.undo': '会員のポイントの前の日の記録を取り消した',
   'member.merge': '会員をまとめた',
@@ -569,6 +577,8 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'print-design': return `販促物 ${id.slice(4, 12)}`;
     case 'canva': return '本人の Canva';
     case 'member': return id === 'settings' ? '会員とポイントの設定' : id.startsWith('mrw-') ? `特典 ${id.slice(4, 12)}` : `会員 ${id.slice(4, 12)}`;
+    // 相談の中身（お題）は監査に出さない（第43.14節）
+    case 'decision': return `意思決定支援の相談 ${id.slice(4, 12)}`;
     case 'subsidy': return id === 'search' ? '補助金・助成金の調べもの' : id === 'settings' ? '補助金・助成金の設定' : `補助金・助成金の候補 ${id.slice(4, 12)}`;
     case 'reservation': return id.startsWith('rsi-') ? `予約できるもの ${id.slice(4, 12)}` : `予約 ${id.slice(4, 12)}`;
     case 'web_review': return 'Webの分析';

@@ -551,6 +551,7 @@ export function meterLlm(tenantId: string, inner: LlmProvider, meter: AiUsageMet
     return res;
   };
   const wrapped: LlmProvider = { name: inner.name, complete: (req) => text(() => inner.complete(req)) };
+  if (inner.completeStream) wrapped.completeStream = (req, onText) => text(() => inner.completeStream!(req, onText));
   if (inner.readImage) wrapped.readImage = (req) => text(() => inner.readImage!(req));
   if (inner.extractFromImage) wrapped.extractFromImage = (req) => text(() => inner.extractFromImage!(req));
   // 録音の文字起こし（第9.4.5節）。音声の入力は文章より単価が高い

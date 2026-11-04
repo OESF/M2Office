@@ -73,8 +73,10 @@ agent01.png ～ agent60.png
 | 49 | Web について聞く（`web-review:ask`） | Webの分析 |
 | 50 | Web の依頼文を送る（`web-review:request`） | Webの分析 |
 | 51 | 注文請書の作成（`sales-docs:acknowledgement`） | 販売の書類と受注 |
+| 52 | 意思決定支援（`decisions:consult`） | 意思決定支援 |
+| 53 | 意思決定支援の材料集め（`decisions:gather`） | 意思決定支援 |
 
-**未使用: 52〜60**
+**未使用: 54〜60**
 
 ### 業務を足すとき
 

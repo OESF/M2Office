@@ -29,6 +29,7 @@ import { CONTRACTS_PACKAGE } from '../contracts/agents.js';
 import { SALES_DOCS_PACKAGE } from '../sales-docs/agents.js';
 import { RESERVATIONS_PACKAGE } from '../reservations/package.js';
 import { SUBSIDIES_PACKAGE } from '../subsidies/agents.js';
+import { DECISIONS_PACKAGE } from '../decisions/agents.js';
 import { MEMBERS_PACKAGE } from '../members/agents.js';
 import { PRINT_DESIGNS_PACKAGE } from '../print-designs/agents.js';
 
@@ -51,12 +52,13 @@ export const BUILTIN_EXTENSIONS: { pkg: ExtensionPackage; section: BuiltinSectio
   { pkg: SALES_DOCS_PACKAGE, section: 'salesDocs' },
   { pkg: RESERVATIONS_PACKAGE, section: 'reservations' },
   { pkg: SUBSIDIES_PACKAGE, section: 'subsidies' },
+  { pkg: DECISIONS_PACKAGE, section: 'decisions' },
   { pkg: MEMBERS_PACKAGE, section: 'members' },
   { pkg: PRINT_DESIGNS_PACKAGE, section: 'printDesigns' },
 ];
 
 /** 内蔵の拡張の入り切りを持つ会社の設定の区分。 */
-export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns' | 'inquiries' | 'competitors' | 'announcements' | 'webReview' | 'contracts' | 'salesDocs' | 'reservations' | 'subsidies' | 'members' | 'printDesigns';
+export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns' | 'inquiries' | 'competitors' | 'announcements' | 'webReview' | 'contracts' | 'salesDocs' | 'reservations' | 'subsidies' | 'decisions' | 'members' | 'printDesigns';
 
 /** 内蔵の拡張なら、入り切りを持つ会社の設定の区分を返す。 */
 export function builtinSection(extensionId: string): BuiltinSection | null {

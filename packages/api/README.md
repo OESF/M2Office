@@ -360,6 +360,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/reservations/series` ／ `GET` ／ `DELETE /v1/reservations/series/:id` | 繰り返しの予約（第37.18節）: 作る（`itemId`・`rule`（weekly・biweekly・monthly）・`startsOn`・`startTime`・`endTime`・`endsOn`・`purpose`。90 日先までの回を作り、取れた数と取れなかった日を返す）／ 決まりの文・取れなかった日 ／ 止める（これからの回を取り消す。本人と管理者） |
 | `GET /v1/subsidies` ／ `POST /v1/subsidies/search` ／ `PATCH /v1/subsidies/:id` | 補助金・助成金の案内（仕様書 第39章）: 候補（締め切りの近い順。過ぎたもの・見送りも含む）と会社のこと・関心・最後に調べた日時・調べているか・相談先の地域の窓口（`contacts`。第39.18節） ／ いま調べる（後ろで調べる。1 日 1 回まで。202、済んでいれば 409）／ 気になる・見送り・戻す（`status`） |
 | `PUT /v1/admin/extensions/subsidies/settings` | 管理者: 補助金・助成金の会社の関心と業種（`interest`・`industry`） |
+| `GET` ／ `POST /v1/decisions` ／ `GET /v1/decisions/people` | 意思決定支援（仕様書 第43章）: 自分の相談と共有された相談の一覧・相談を始める（`topic`・`turns`（1〜30。既定 10）・`crossCheck`・`fileIds`。討論はワーカーが進める）・共有の相手に選べる人。会社で切っているか利用範囲の外なら 403 |
+| `GET /v1/decisions/:id` ／ `GET /v1/decisions/:id/stream?since=` | 相談の中身（判断の問い・材料・発言の全文・主張・論点の優勢の推移・報告と、通し番号 `rev`）と、`since` より後の差分（SSE。`event: change`。0.5 秒ごとに置き場を読み、`id` に通し番号。つなぎ直しは `Last-Event-ID` か `since`）。見られるのは始めた人と共有された人だけ（ほかは 404） |
+| `POST /v1/decisions/:id/interject` ／ `stop` ／ `continue` ／ `dig` ／ `materials` ／ `PUT /v1/decisions/:id/shares` ／ `DELETE /v1/decisions/:id` | 始めた人だけ: 一言（事実の訂正・材料の追加）・止める・続ける（`turns`）・論点を掘り下げる（`issue`・`turns`）・添付を材料に足す（`fileId`）・共有（見るだけ）・ゴミ箱（30 日後に消す）。共有された人は 403 |
 | `GET` ／ `POST /v1/members` ／ `GET` ／ `PATCH` ／ `DELETE /v1/members/:id` | 会員とポイント（仕様書 第40章）: 一覧（`q`）と会社の率とランクの境（`rank`。第40.19節） ／ 店頭で作る（会員証の URL を返す）／ 1 人とポイントの記録・まとめる候補 ／ 呼び名と電話 ／ 削除（管理者） |
 | `GET /v1/members/card?code=` ／ `GET /v1/members/lookup` | 店員が読んだ会員証（QR の URL か鍵）から会員と使える特典 ／ 問い合わせの連絡先と同じ人の会員（`phone`・`inquiryId`） |
 | `POST /v1/members/:id/visit` ／ `purchase` ／ `reward` ／ `adjust` ／ `merge`、`POST /v1/members/points/:id/undo` | 来店（1 日 1 回）／ 購入（`amount`。金額は残さない）／ 特典を使う ／ 調整（理由）／ まとめる（管理者）／ 取り消し（前の日は管理者） |

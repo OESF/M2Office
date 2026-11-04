@@ -11,7 +11,7 @@ import { KnowledgeQa } from './knowledge-qa.js';
 import { SalesDocs } from './SalesDocs.js';
 import { QUOTE_AGENT_ID, QuoteList } from './quotes.js';
 import { DOCUMENT_AGENT_ID, SHEET_AGENT_ID, SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, swapCategories, togglePinned, type MenuSection,
 } from './menu.js';
@@ -23,6 +23,7 @@ import {
 } from './api.js';
 import { BriefScreen } from './Briefs.js';
 import { AgentHelpTip, HelpCenter, HelpRating, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
+import { ViewTitle } from './back-button.js';
 import { AppLauncher, AppVersionBadge } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
@@ -41,6 +42,7 @@ import { Announcements } from './Announcements.js';
 import { CONTRACT_REVIEW_AGENT_ID, ContractFromReview, Contracts } from './Contracts.js';
 import { Reservations } from './Reservations.js';
 import { Subsidies } from './Subsidies.js';
+import { Decisions } from './Decisions.js';
 import { PrintDesigns } from './PrintDesigns.js';
 import { Members } from './Members.js';
 import { WebReview } from './WebReview.js';
@@ -130,6 +132,7 @@ type View =
   | { kind: 'sales'; itemId: string | null }
   | { kind: 'reservations' }
   | { kind: 'subsidies' }
+  | { kind: 'decisions'; decisionId: string | null }
   | { kind: 'members'; memberId: string | null }
   | { kind: 'printDesigns'; designId: string | null }
   | { kind: 'webReview'; month: string | null }
@@ -153,6 +156,7 @@ function viewPath(v: View): string {
     case 'members': return routePath({ kind: 'members', memberId: v.memberId });
     case 'printDesigns': return routePath({ kind: 'printDesigns', designId: v.designId });
     case 'webReview': return routePath({ kind: 'webReview', month: v.month });
+    case 'decisions': return routePath({ kind: 'decisions', decisionId: v.decisionId });
     case 'help': return routePath({ kind: 'help', articleId: v.articleId });
     default: return routePath({ kind: v.kind });
   }
@@ -181,6 +185,7 @@ function viewOf(r: Route): View | null {
     case 'members': return { kind: 'members', memberId: r.memberId };
     case 'printDesigns': return { kind: 'printDesigns', designId: r.designId };
     case 'webReview': return { kind: 'webReview', month: r.month };
+    case 'decisions': return { kind: 'decisions', decisionId: r.decisionId };
     case 'help': return { kind: 'help', articleId: r.articleId };
     default: return { kind: r.kind };
   }
@@ -355,6 +360,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // 秘書が予約を扱ったら、予約の画面を読み直す（秘書が答えるたび）
   const reservationChangeKey = result?.id ?? '';
   // 秘書が補助金・助成金を調べ終えた・状態を変えたら、補助金・助成金の画面を読み直す
+  const decisionChangeKey = history.filter((h) => h.job?.agentId === 'decisions:consult' && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   const subsidyChangeKey = history.filter((h) => h.job?.agentId?.startsWith('subsidies:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   // 秘書が会員のポイントや特典を直したら、会員の画面を読み直す
   const printChangeKey = history.filter((h) => h.job?.agentId?.startsWith('print-designs:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
@@ -453,6 +459,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ...(me.members ? [{ id: MEMBERS_EXTENSION_ID, name: '会員', description: 'お客様を会員にし、来店と購入でポイントを貯めて特典と交換する', icon: 'users' as IconName, agent: null }] : []),
     // 販促物の作成（仕様書 第41章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.printDesigns ? [{ id: PRINT_DESIGNS_EXTENSION_ID, name: '販促物の作成', description: 'ポップ・チラシ・パンフレット・案内・ポスターを、頼むだけで作る', icon: 'slides' as IconName, agent: null }] : []),
+    ...(me.decisions ? [{ id: DECISIONS_EXTENSION_ID, name: '意思決定支援', description: '経営の判断について、慎重と推進の AI が社内の材料で討論し、見立てと論点を報告する', icon: 'report' as IconName, agent: null }] : []),
     ...(me.subsidies ? [{ id: SUBSIDIES_EXTENSION_ID, name: '補助金・助成金', description: '会社に合いそうな補助金・助成金を、締め切りと出典と一緒に知らせる', icon: 'research' as IconName, agent: null }] : []),
     // 販売の書類と受注（仕様書 第42章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.salesDocs ? [{ id: SALES_DOCS_EXTENSION_ID, name: '受注と販売の書類', description: '注文書を取り込んで受注を整理し、納品書・請求書・領収書・注文書を作る', icon: 'doc' as IconName, agent: null }] : []),
@@ -487,13 +494,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   : m.id === SALES_DOCS_EXTENSION_ID ? setView({ kind: 'sales', itemId: null })
                   : m.id === RESERVATIONS_EXTENSION_ID ? setView({ kind: 'reservations' })
                   : m.id === SUBSIDIES_EXTENSION_ID ? setView({ kind: 'subsidies' })
+                  : m.id === DECISIONS_EXTENSION_ID ? setView({ kind: 'decisions', decisionId: null })
                   : m.id === MEMBERS_EXTENSION_ID ? setView({ kind: 'members', memberId: null })
                   : m.id === PRINT_DESIGNS_EXTENSION_ID ? setView({ kind: 'printDesigns', designId: null })
                   : m.id === WEB_REVIEW_EXTENSION_ID ? setView({ kind: 'webReview', month: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
-        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === SALES_DOCS_EXTENSION_ID ? view.kind === 'sales' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === SALES_DOCS_EXTENSION_ID ? view.kind === 'sales' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === DECISIONS_EXTENSION_ID ? view.kind === 'decisions' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -803,7 +811,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'cards' && (
             <>
-              <h1>名刺管理 <HelpTip article="start-cards">撮るかファイルを選ぶと、AI が読み取って登録します。秘書に「〇〇さんの電話番号は？」と聞けます。</HelpTip></h1>
+              <ViewTitle>名刺管理 <HelpTip article="start-cards">撮るかファイルを選ぶと、AI が読み取って登録します。秘書に「〇〇さんの電話番号は？」と聞けます。</HelpTip></ViewTitle>
               <Cards contactId={view.contactId} onOpen={(contactId) => setView({ kind: 'cards', contactId })}
                 mailer={{ email: me.user.email, google: me.workspaceSource === 'google' }} admin={me.user.roles.includes('admin')}
                 onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }}
@@ -813,20 +821,20 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'inventory' && (
             <>
-              <h1>在庫管理 <HelpTip article="start-inventory">品目と数を記録します。秘書に「〇〇の在庫は？」「〇〇を 2 箱入庫して」と頼めます。</HelpTip></h1>
+              <ViewTitle>在庫管理 <HelpTip article="start-inventory">品目と数を記録します。秘書に「〇〇の在庫は？」「〇〇を 2 箱入庫して」と頼めます。</HelpTip></ViewTitle>
               <Inventory itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'inventory', itemId })} userId={me.user.id} />
             </>
           )}
           {view.kind === 'columns' && (
             <>
-              <h1>コラムの作成 <HelpTip article="start-web-columns">テーマを入れると、AI が調べて出典つきのコラムを書き、表現の決まりに照らして校正します。</HelpTip></h1>
+              <ViewTitle>コラムの作成 <HelpTip article="start-web-columns">テーマを入れると、AI が調べて出典つきのコラムを書き、表現の決まりに照らして校正します。</HelpTip></ViewTitle>
               <Columns columnId={view.columnId} onOpen={(columnId) => setView({ kind: 'columns', columnId })}
                 onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }} />
             </>
           )}
           {view.kind === 'inquiries' && (
             <>
-              <h1>問い合わせの記録 <HelpTip article="start-inquiries">電話や来店の問い合わせを、1 行書くか秘書に話すだけで残します。次にやることの期限が近づくと知らせます。</HelpTip></h1>
+              <ViewTitle>問い合わせの記録 <HelpTip article="start-inquiries">電話や来店の問い合わせを、1 行書くか秘書に話すだけで残します。次にやることの期限が近づくと知らせます。</HelpTip></ViewTitle>
               <Inquiries inquiryId={view.inquiryId} members={!!me.members} onMember={(memberId) => setView({ kind: 'members', memberId })} onOpen={(inquiryId) => setView({ kind: 'inquiries', inquiryId })}
                 onContact={(contactId) => setView({ kind: 'cards', contactId })} userId={me.user.id} changeKey={inquiryChangeKey} admin={me.user.roles.includes('admin')}
                 {...(me.webColumns ? { onColumn: async (theme: string) => { const { id } = await api.columns.create(theme, 'お客様からよく聞かれる質問です'); setView({ kind: 'columns', columnId: id }); } } : {})} />
@@ -834,51 +842,57 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'members' && (
             <>
-              <h1>会員 <HelpTip article="start-members">お客様を会員にし、来店と購入でポイントを貯めて特典と交換します。店員はスマホの会員のページで QR を読みます。</HelpTip></h1>
+              <ViewTitle>会員 <HelpTip article="start-members">お客様を会員にし、来店と購入でポイントを貯めて特典と交換します。店員はスマホの会員のページで QR を読みます。</HelpTip></ViewTitle>
               <Members memberId={view.memberId} onOpen={(memberId) => setView({ kind: 'members', memberId })} changeKey={memberChangeKey} />
             </>
           )}
           {view.kind === 'printDesigns' && (
             <>
-              <h1>販促物の作成 <HelpTip article="start-print-designs">ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの案を 3 つ作り、頼みのとおりに直します。印刷用の PDF と画像を書き出します。</HelpTip></h1>
+              <ViewTitle>販促物の作成 <HelpTip article="start-print-designs">ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの案を 3 つ作り、頼みのとおりに直します。印刷用の PDF と画像を書き出します。</HelpTip></ViewTitle>
               <PrintDesigns designId={view.designId} onOpen={(designId) => setView({ kind: 'printDesigns', designId })} changeKey={printChangeKey}
                 onAnnouncement={(announcementId) => setView({ kind: 'announcements', announcementId })} />
             </>
           )}
           {view.kind === 'subsidies' && (
             <>
-              <h1>補助金・助成金 <HelpTip article="start-subsidies">会社に合いそうな補助金・助成金を月に 1 回調べ、合う理由・締め切り・出典と一緒に並べます。申請書は作りません。</HelpTip></h1>
+              <ViewTitle>補助金・助成金 <HelpTip article="start-subsidies">会社に合いそうな補助金・助成金を月に 1 回調べ、合う理由・締め切り・出典と一緒に並べます。申請書は作りません。</HelpTip></ViewTitle>
               <Subsidies changeKey={subsidyChangeKey} />
+            </>
+          )}
+          {view.kind === 'decisions' && (
+            <>
+              <ViewTitle>意思決定支援 <HelpTip article="start-decisions">慎重の役と推進の役の AI が社内の材料で討論し、判定の役が見立て・論点の流れ・やめる目安を報告します。決めるのは経営者です。</HelpTip></ViewTitle>
+              <Decisions id={view.decisionId} changeKey={decisionChangeKey} onOpen={(decisionId) => setView({ kind: 'decisions', decisionId })} />
             </>
           )}
           {view.kind === 'reservations' && (
             <>
-              <h1>予約 <HelpTip article="start-reservations">会議室・社用車・備品を予約します。同じものの同じ時間は取れません。秘書に「明日 10 時から 1 時間、会議室を取って」と頼めます。</HelpTip></h1>
+              <ViewTitle>予約 <HelpTip article="start-reservations">会議室・社用車・備品を予約します。同じものの同じ時間は取れません。秘書に「明日 10 時から 1 時間、会議室を取って」と頼めます。</HelpTip></ViewTitle>
               <Reservations userId={me.user.id} changeKey={reservationChangeKey} />
             </>
           )}
           {view.kind === 'sales' && (
             <>
-              <h1>受注と販売の書類 <HelpTip article="start-sales-docs">注文書を取り込んで受注を整理し、納品書・請求書・領収書・注文書を作ります。請求書・領収書・注文書は、あなたが発行するまで下書きです。</HelpTip></h1>
+              <ViewTitle>受注と販売の書類 <HelpTip article="start-sales-docs">注文書を取り込んで受注を整理し、納品書・請求書・領収書・注文書を作ります。請求書・領収書・注文書は、あなたが発行するまで下書きです。</HelpTip></ViewTitle>
               <SalesDocs itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'sales', itemId })} onOpenRun={(runId) => setView({ kind: 'run', runId })} changeKey={salesChangeKey} />
             </>
           )}
           {view.kind === 'contracts' && (
             <>
-              <h1>契約書の管理 <HelpTip article="start-contracts">結んだ契約を台帳にし、自動更新の解約の申し出の期限と、契約の終わりの前に担当へ知らせます。</HelpTip></h1>
+              <ViewTitle>契約書の管理 <HelpTip article="start-contracts">結んだ契約を台帳にし、自動更新の解約の申し出の期限と、契約の終わりの前に担当へ知らせます。</HelpTip></ViewTitle>
               <Contracts contractId={view.contractId} onOpen={(contractId) => setView({ kind: 'contracts', contractId })} changeKey={contractChangeKey} userId={me.user.id} />
             </>
           )}
           {view.kind === 'announcements' && (
             <>
-              <h1>お知らせの作成 <HelpTip article="start-announcements">休業などのお知らせを 1 つ作ると、Web サイト・LINE・サイネージの画面ごとの文を作り、承認の後にまとめて出します。</HelpTip></h1>
+              <ViewTitle>お知らせの作成 <HelpTip article="start-announcements">休業などのお知らせを 1 つ作ると、Web サイト・LINE・サイネージの画面ごとの文を作り、承認の後にまとめて出します。</HelpTip></ViewTitle>
               <Announcements announcementId={view.announcementId} onOpen={(announcementId) => setView({ kind: 'announcements', announcementId })}
                 onApprovals={() => { void refresh(); }} changeKey={announcementChangeKey} />
             </>
           )}
           {view.kind === 'webReview' && (
             <>
-              <h1>Webの分析 <HelpTip article="start-web-review">会社の Web サイトの数字（アナリティクスと Search Console）を、月に 1 回ふつうの言葉で届けます。秘書に聞けば数字を答えます。</HelpTip></h1>
+              <ViewTitle>Webの分析 <HelpTip article="start-web-review">会社の Web サイトの数字（アナリティクスと Search Console）を、月に 1 回ふつうの言葉で届けます。秘書に聞けば数字を答えます。</HelpTip></ViewTitle>
               <WebReview month={view.month} onOpen={(month) => setView({ kind: 'webReview', month })}
                 columns={me.webColumns ? {
                   create: async (theme, memo) => { const { id } = await api.columns.create(theme, memo); setView({ kind: 'columns', columnId: id }); },
@@ -888,7 +902,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'competitors' && (
             <>
-              <h1>競合の分析 <HelpTip article="start-competitors">近くの同業や同じような事業の会社を AI が探し、公開のページから動きと違いをまとめます。</HelpTip></h1>
+              <ViewTitle>競合の分析 <HelpTip article="start-competitors">近くの同業や同じような事業の会社を AI が探し、公開のページから動きと違いをまとめます。</HelpTip></ViewTitle>
               <Competitors changeKey={competitorChangeKey}
                 {...(me.webColumns ? { onColumn: async (theme: string) => { const { id } = await api.columns.create(theme, '競合の動きから（競合の名前は入れていません。他社と比べる書き方にしないでください）'); setView({ kind: 'columns', columnId: id }); } } : {})}
                 {...(me.announcements ? { onAnnouncement: async (text: string) => { const r = await api.announcements.draft(text); setView({ kind: 'announcements', announcementId: r.announcement.id }); } } : {})} />
@@ -896,25 +910,25 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'signage' && (
             <>
-              <h1>サイネージ <HelpTip article="start-signage">店頭や待合の画面に、画像と動画を繰り返し流します。</HelpTip></h1>
+              <ViewTitle>サイネージ <HelpTip article="start-signage">店頭や待合の画面に、画像と動画を繰り返し流します。</HelpTip></ViewTitle>
               <Signage />
             </>
           )}
           {view.kind === 'attendance' && (
             <>
-              <h1>給与・勤怠 <HelpTip article="start-attendance">打刻と今月の勤怠、有給の残りと申請。秘書に「出勤」「有給あと何日？」と言っても扱えます。</HelpTip></h1>
+              <ViewTitle>給与・勤怠 <HelpTip article="start-attendance">打刻と今月の勤怠、有給の残りと申請。秘書に「出勤」「有給あと何日？」と言っても扱えます。</HelpTip></ViewTitle>
               <MyAttendance />
             </>
           )}
           {view.kind === 'hr' && (
             <>
-              <h1>人事・給与 <HelpTip article="start-hr">従業員の台帳と雇用条件を持ち、入社・退職の手続きを期限つきで並べます。</HelpTip></h1>
+              <ViewTitle>人事・給与 <HelpTip article="start-hr">従業員の台帳と雇用条件を持ち、入社・退職の手続きを期限つきで並べます。</HelpTip></ViewTitle>
               <Hr employeeId={view.employeeId} onOpen={(employeeId) => setView({ kind: 'hr', employeeId })} />
             </>
           )}
           {view.kind === 'schedules' && (
             <>
-              <h1>定時実行 <HelpTip article="start-schedules">決まった時刻に、あなたの権限で業務を自動で実行します。「今すぐ実行」で動きを確かめられます。</HelpTip></h1>
+              <ViewTitle>定時実行 <HelpTip article="start-schedules">決まった時刻に、あなたの権限で業務を自動で実行します。「今すぐ実行」で動きを確かめられます。</HelpTip></ViewTitle>
               {/* 秘書が止めた・再開したことを一覧に映すため、秘書の答えが出るたびに読み直す（仕様書 第10.9.8節） */}
               <Schedules agents={agents} reloadKey={result?.id} />
             </>
@@ -1078,6 +1092,7 @@ const VIEW_LABELS: Record<string, string> = {
   sales: '受注と販売の書類',
   reservations: '予約',
   subsidies: '補助金・助成金',
+  decisions: '意思決定支援',
   members: '会員',
   printDesigns: '販促物の作成',
   webReview: 'Webの分析',

@@ -573,7 +573,7 @@ function ErasePerson({ inquiryId, onDone }: { inquiryId: string; onDone: () => v
     return (
       <div className="card inquiries-erase">
         <p role="status">{done}</p>
-        <button className="btn ghost small" onClick={onDone}>‹ 問い合わせの一覧</button>
+        <BackButton label="問い合わせの一覧" onClick={onDone} place="bottom" />
       </div>
     );
   }

@@ -19,6 +19,7 @@ import { DEFAULT_CONTRACT_SETTINGS, type ContractSettings } from './contracts.js
 import { DEFAULT_SALES_DOCS_SETTINGS, type SalesDocsSettings } from './sales-docs.js';
 import { DEFAULT_RESERVATION_SETTINGS, type ReservationSettings } from './reservations.js';
 import { DEFAULT_SUBSIDY_SETTINGS, type SubsidySettings } from './subsidies.js';
+import { DEFAULT_DECISION_SETTINGS, type DecisionSettings } from './decisions.js';
 import { DEFAULT_MEMBER_SETTINGS, type MemberSettings } from './members.js';
 import { DEFAULT_PRINT_DESIGN_SETTINGS, type PrintDesignSettings } from './print-designs.js';
 import { DEFAULT_WEB_REVIEW_SETTINGS, type WebReviewSettings } from './web-review.js';
@@ -318,6 +319,8 @@ export interface TenantSettings {
   reservations: ReservationSettings;
   /** 補助金・助成金の案内（内蔵の拡張。第39章） */
   subsidies: SubsidySettings;
+  /** 意思決定支援（内蔵の拡張。第43章） */
+  decisions: DecisionSettings;
   /** 会員とポイント（内蔵の拡張。第40章） */
   members: MemberSettings;
   /** 販促物の作成（内蔵の拡張。第41章） */
@@ -408,6 +411,8 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   reservations: DEFAULT_RESERVATION_SETTINGS,
   // 補助金・助成金の案内は既定で切り（第39.2節）
   subsidies: DEFAULT_SUBSIDY_SETTINGS,
+  // 意思決定支援は既定で切り（第43.2節）
+  decisions: DEFAULT_DECISION_SETTINGS,
   // 会員とポイントは既定で切り（第40.2節）
   members: DEFAULT_MEMBER_SETTINGS,
   printDesigns: DEFAULT_PRINT_DESIGN_SETTINGS,
@@ -498,7 +503,7 @@ export interface UserSettings {
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
-    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'member' | 'print', boolean>;
+    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'decision' | 'member' | 'print', boolean>;
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
     /**
@@ -679,7 +684,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
-    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true, reservation: true, subsidy: true, member: true, print: true },
+    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true, reservation: true, subsidy: true, decision: true, member: true, print: true },
     quietHours: null,
     channels: { chat: false },
   },

@@ -20,6 +20,7 @@ import { PRINT_DESIGNS_EXTENSION_ID } from './print-designs.js';
 import { RESERVATIONS_EXTENSION_ID } from './reservations.js';
 import { SIGNAGE_EXTENSION_ID } from './signage.js';
 import { SUBSIDIES_EXTENSION_ID } from './subsidies.js';
+import { DECISIONS_EXTENSION_ID } from './decisions.js';
 import { WEB_COLUMNS_EXTENSION_ID } from './web-columns.js';
 import { WEB_REVIEW_EXTENSION_ID } from './web-review.js';
 
@@ -342,7 +343,7 @@ export const AGENT_AREAS: readonly AgentArea[] = [
   {
     id: 'admin', name: '契約と総務', categories: [],
     // 契約書チェックは公式の拡張機能（jp.m2office.legal.contract-review）
-    extensions: [CONTRACTS_EXTENSION_ID, 'jp.m2office.legal.contract-review', RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID],
+    extensions: [CONTRACTS_EXTENSION_ID, 'jp.m2office.legal.contract-review', RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID],
   },
   { id: 'sales', name: '販売の書類と受注', categories: [], extensions: [SALES_DOCS_EXTENSION_ID] },
   { id: 'inventory', name: '在庫管理', categories: [], extensions: [INVENTORY_EXTENSION_ID] },

@@ -19,7 +19,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Job, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type SubsidySettings, type MemberSettings, type PrintDesignSettings, type ReservationSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type ReservationSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -52,6 +52,7 @@ import type { AnnouncementService } from '../announcements/service.js';
 import type { ContractService } from '../contracts/service.js';
 import type { SalesDocService } from '../sales-docs/service.js';
 import type { SubsidyService } from '../subsidies/service.js';
+import type { DecisionService } from '../decisions/service.js';
 import type { MemberService } from '../members/service.js';
 import type { DeliveryService } from '../deliveries/service.js';
 import type { PrintDesignService } from '../print-designs/service.js';
@@ -218,6 +219,11 @@ export interface RunEngineDeps {
   subsidies?: {
     service: SubsidyService;
     access(tenantId: string, userId: string): Promise<SubsidySettings | null>;
+  };
+  /** 意思決定支援（内蔵の拡張。仕様書 第43章）。ツールに渡す。 */
+  decisions?: {
+    service: DecisionService;
+    access(tenantId: string, userId: string): Promise<DecisionSettings | null>;
   };
   /** 外部のアプリからの配信（第13.4.4節）。業務「外部のアプリからの配信」のツールが使う。 */
   deliveries?: { service: DeliveryService };
@@ -1173,6 +1179,10 @@ export class RunEngine {
       // 補助金・助成金の案内（第39.8節）
       ...(this.deps.subsidies ? {
         subsidies: { service: this.deps.subsidies.service, access: () => this.deps.subsidies!.access(run.tenantId, requestedBy) },
+      } : {}),
+      // 意思決定支援（第43.10節）
+      ...(this.deps.decisions ? {
+        decisions: { service: this.deps.decisions.service, access: () => this.deps.decisions!.access(run.tenantId, requestedBy) },
       } : {}),
       // 会員とポイント（第40.7節）
       ...(this.deps.deliveries ? { deliveries: { service: this.deps.deliveries.service } } : {}),

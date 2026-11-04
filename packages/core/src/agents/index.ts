@@ -163,6 +163,9 @@ export const DEFAULT_STANDARD_MINUTES: Record<string, number> = {
   'web-review:request': 15,
   'contracts:ledger': 10,
   'subsidies:guide': 60,
+  // 意思決定支援は、経営層が集まって議論する時間の代わり（第43.1節）。材料集めは討論の一部なので数えない
+  'decisions:consult': 120,
+  'decisions:gather': 0,
   'members:desk': 5,
   'members:line-send': 20,
   'print-designs:desk': 60,

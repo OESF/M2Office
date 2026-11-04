@@ -8,7 +8,8 @@
  * @see 仕様書 第8.6節 配備の形
  */
 
-import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmImageRequest, type LlmProvider, type LlmRequest, type LlmResponse, type ModelTier } from './provider.js';
+import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmImageRequest, type LlmProvider, type LlmRequest, type LlmResponse, type LlmTextSink, type ModelTier } from './provider.js';
+import { readChatStream } from './stream.js';
 import { LlmRequestError } from './gemini.js';
 
 /** ローカル AI の設定。 */
@@ -92,6 +93,13 @@ export class LocalLlmProvider implements LlmProvider {
     return this.toResponse(json, model);
   }
 
+  /** 文を少しずつ受け取りながら推論する（OpenAI 互換の `stream`。仕様書 第43.11.2節）。 */
+  async completeStream(req: LlmRequest, onText: LlmTextSink): Promise<LlmResponse> {
+    const model = this.config.models[req.tier];
+    const res = await this.send({ model, messages: req.messages, stream: true, stream_options: { include_usage: true }, ...(req.maxOutputTokens ? { max_tokens: req.maxOutputTokens } : {}) });
+    return readChatStream(res, req.messages, model, onText);
+  }
+
   /** 画像から文字を読む（OCR）。画像を読めるモデルのときだけ働く。PDF は読めない。 */
   async readImage(req: LlmImageRequest): Promise<LlmResponse> {
     if (req.mimeType === 'application/pdf') throw new LlmRequestError('ローカル AI では PDF を読めません', '');
@@ -141,6 +149,12 @@ export class LocalLlmProvider implements LlmProvider {
   }
 
   private async post(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const res = await this.send(body);
+    return await res.json() as Record<string, unknown>;
+  }
+
+  /** `/chat/completions` に送り、うまくいった応答を返す。 */
+  private async send(body: Record<string, unknown>): Promise<Response> {
     let res: Response;
     try {
       res = await fetch(`${this.config.baseUrl}/chat/completions`, {
@@ -151,7 +165,7 @@ export class LocalLlmProvider implements LlmProvider {
       throw new LlmRequestError('ローカル AI に届きませんでした', err instanceof Error ? err.message : String(err));
     }
     if (!res.ok) throw new LlmRequestError(`ローカル AI の呼び出しに失敗しました (${res.status})`, await res.text().catch(() => ''));
-    return await res.json() as Record<string, unknown>;
+    return res;
   }
 
   private toResponse(json: Record<string, unknown>, model: string): LlmResponse {

@@ -44,6 +44,7 @@
 | `contacts.get` | read | — | 1 人分の名刺の中身と、誰がいつ名刺を受け取ったかを見ます。見るだけです |
 | `contacts.search` | read | — | 取り込んだ名刺から、氏名・会社名・住所・電話番号などで人を探します。見るだけです |
 | `contracts.find` | read | — | 契約の台帳から、相手・種類・期限で契約を探します |
+| `decisions.find` | read | — | 意思決定支援の相談の状態と報告を読みます |
 | `directory.search` | read | `directory.readonly`（機密） | 社内の人を名前・メール・部署で探します。社外の連絡先は探しません |
 | `docs.get` | read | `drive.file`（機密でない） | 前に作った文書の本文を読みます（直すため） |
 | `docs.list` | read | `drive.file`（機密でない） | あなたが作った文書と、会社で共有された文書の一覧を読みます |
@@ -137,6 +138,9 @@
 | `contacts.save` | write-internal | — | 名刺を連絡先として登録するか、電話番号やメモなどを直します。社内の名刺の置き場に書くだけで、誰にも送りません |
 | `contracts.register` | write-internal | — | 結んだ契約書から相手・期間・自動更新と解約の申し出の期限を取り出し、契約の台帳に入れます |
 | `contracts.update` | write-internal | — | 契約の状態（解約を申し出た など）・担当・期間を直します |
+| `decisions.add_material` | write-internal | — | 意思決定支援の相談に、添付を材料として足します |
+| `decisions.interject` | write-internal | — | 意思決定支援の討論に、事実の訂正や材料を一言足します。論点を掘り下げることもできます |
+| `decisions.start` | write-internal | — | 経営の判断について、慎重の役と推進の役の AI の討論を始めます |
 | `docs.share` | write-internal | `drive.file`（機密でない） | 作った文書を、会社の中で共有するか、自分だけにするかを切り替えます。社外には共有しません |
 | `drive.share_company` | write-internal | `drive.file`（機密でない） | M2Office で作ったファイルを、会社の全員が閲覧できるようにします。社外の人は見られません。リンクで誰にでも公開することはしません |
 | `inquiries.record` | write-internal | — | 電話や来店の問い合わせを、話した文から項目に分けて残します。前の問い合わせの続きなら、同じ問い合わせに足します。お客様には何も送りません |
@@ -210,6 +214,7 @@
 | `contacts.get` | `contactId`（必須）: 連絡先の ID（contacts.search の結果） |
 | `contacts.search` | `query`: 探す言葉（空なら交換した日の範囲だけで絞る）、`from`: 交換した日の始め（YYYY-MM-DD）、`to`: 交換した日の終わり（YYYY-MM-DD） |
 | `contracts.find` | `query`: 相手・件名・種類の言葉、`dueWithinDays`: 期限が何日のうちに来るか、`includeEnded`: 終わった契約も含めるか |
+| `decisions.find` | `id`: 相談の ID（省略可）、`query`: 判断の問いの言葉 |
 | `directory.search` | `query`（必須）: 名前・メール・部署に含まれる言葉、`limit`: 件数（既定 20） |
 | `docs.get` | `draftId`（必須）: 文書の ID（docs.list の id） |
 | `docs.list` | なし |
@@ -304,6 +309,9 @@
 | `contacts.save` | `contactId`: 直す連絡先の ID。新しく登録するときは書かない、`fields`: 直す項目（name・nameKana・company・department・title・postalCode・address・phones・emails・website・extra）、`note`: メモ（「展示会で会った」など）。書くと置き換える、`card`: 登録する名刺。card.read の結果の fileId・fields・rotation、`receivedOn`: 名刺を受け取った日（YYYY-MM-DD）。直すときだけ書く、`cardId`: 受け取った日を直す名刺（contacts.get の exchanges の cardId）。省くと呼んだ人のいちばん新しい名刺 |
 | `contracts.register` | `fileId`: 契約書のファイルの ID、`fromReview`: いちばん新しい契約書チェックの契約書を使うか |
 | `contracts.update` | `query`（必須）: 相手・件名・種類の言葉、`status`: active・cancel_requested・ended、`startOn`: 始め（YYYY-MM-DD）、`endOn`: 終わり（YYYY-MM-DD）、`note`: メモ |
+| `decisions.add_material` | `fileId`（必須）: ファイルの ID、`id`: 相談の ID（省略可） |
+| `decisions.interject` | `text`: 経営者の一言、`dig`: 掘り下げる論点の名前、`turns`: 掘り下げのターン数、`id`: 相談の ID（省略可） |
+| `decisions.start` | `topic`（必須）: お題（経営者の言葉）、`turns`: ターン数（1〜30。既定 10）、`crossCheck`: 突き合わせるか、`fileId`: 材料にする添付のファイルの ID |
 | `docs.share` | `draftId`（必須）: 文書の ID（docs.draft の draftId か docs.list の id）、`sharing`（必須）: 「会社で共有」か「自分だけ」 |
 | `drive.share_company` | `fileId`（必須）: ファイルの ID（docs.create の結果の file.id） |
 | `inquiries.record` | `text`（必須）: 依頼者が話した・書いた文（そのまま）、`inquiryId`: 続きを足す問い合わせ（分かっているときだけ） |

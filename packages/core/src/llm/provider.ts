@@ -141,9 +141,20 @@ export interface LlmEmbedResponse {
   inputTokens: number;
 }
 
+/** 少しずつ受け取る呼び方（{@link LlmProvider.completeStream}）で、届いた文の切れ端を受け取る口。 */
+export type LlmTextSink = (chunk: string) => void;
+
 export interface LlmProvider {
   readonly name: string;
   complete(req: LlmRequest): Promise<LlmResponse>;
+  /**
+   * {@link complete} と同じ依頼を、文を少しずつ受け取りながら行う（意思決定支援の討論を順に見せる。仕様書 第43.11.2節）。
+   * 届いた切れ端を `onText` に渡し、終わったら全文と使った量を返す。
+   *
+   * @remarks 持たない提供者（見本など）では未定義にし、呼び出し側は {@link completeStreaming} で {@link complete} に戻す。
+   * 使った量が応答に無いときは、文字数から多めに見積もる（費用を少なく数えないため）
+   */
+  completeStream?(req: LlmRequest, onText: LlmTextSink): Promise<LlmResponse>;
   /**
    * 画像や PDF から文字を読み取る（OCR。仕様書 第9.4.1節、Q-56、ADR-0017）。
    *
@@ -225,4 +236,17 @@ export interface LlmImageGenerateRequest {
   aspectRatio: string;
   /** 使うモデル（例: `gemini-nano-banana-2.1`。既定は `imageModel()`）。 */
   model: string;
+}
+
+/**
+ * 文を少しずつ受け取りながら推論する。提供者が少しずつ返せなければ、{@link LlmProvider.complete} で全文を受け取り、まとめて 1 回渡す。
+ *
+ * @param onText 届いた切れ端の受け取り口
+ * @returns 全文と使った量
+ */
+export async function completeStreaming(llm: LlmProvider, req: LlmRequest, onText: LlmTextSink): Promise<LlmResponse> {
+  if (llm.completeStream) return llm.completeStream(req, onText);
+  const res = await llm.complete(req);
+  if (res.text) onText(res.text);
+  return res;
 }

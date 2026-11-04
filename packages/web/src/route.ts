@@ -41,6 +41,7 @@ export type Route =
   | { kind: 'reservations' }
   /** 補助金・助成金の案内（仕様書 第39章）。 */
   | { kind: 'subsidies' }
+  | { kind: 'decisions'; decisionId: string | null }
   /** 会員とポイント（仕様書 第40章）。`memberId` があれば 1 人。 */
   | { kind: 'members'; memberId: string | null }
   /** 販促物の作成（仕様書 第41章）。`designId` があれば 1 つ。 */
@@ -89,6 +90,7 @@ export function parseRoute(pathname: string): Route {
     case 'sales': return second === undefined ? { kind: 'sales', itemId: null } : id(second) ? { kind: 'sales', itemId: id(second) } : { kind: 'unknown' };
     case 'reservations': return second === undefined ? { kind: 'reservations' } : { kind: 'unknown' };
     case 'subsidies': return second === undefined ? { kind: 'subsidies' } : { kind: 'unknown' };
+    case 'decisions': return second === undefined ? { kind: 'decisions', decisionId: null } : id(second) ? { kind: 'decisions', decisionId: id(second) } : { kind: 'unknown' };
     case 'members': return second === undefined ? { kind: 'members', memberId: null } : id(second) ? { kind: 'members', memberId: id(second) } : { kind: 'unknown' };
     case 'print-designs': return second === undefined ? { kind: 'printDesigns', designId: null } : id(second) ? { kind: 'printDesigns', designId: id(second) } : { kind: 'unknown' };
     case 'web-review': return second === undefined ? { kind: 'webReview', month: null } : /^\d{4}-(0[1-9]|1[0-2])$/.test(second) ? { kind: 'webReview', month: second } : { kind: 'unknown' };
@@ -119,6 +121,7 @@ export function routePath(route: Route): string {
     case 'sales': return route.itemId ? `/sales/${enc(route.itemId)}` : '/sales';
     case 'reservations': return '/reservations';
     case 'subsidies': return '/subsidies';
+    case 'decisions': return route.decisionId ? `/decisions/${enc(route.decisionId)}` : '/decisions';
     case 'members': return route.memberId ? `/members/${enc(route.memberId)}` : '/members';
     case 'printDesigns': return route.designId ? `/print-designs/${enc(route.designId)}` : '/print-designs';
     case 'webReview': return route.month ? `/web-review/${enc(route.month)}` : '/web-review';
