@@ -30,6 +30,8 @@
 # WAF（Coraza と OWASP の規則）。記録は {{CADDY_LOG_DIR}}/waf-audit.log
 # 記録に残すのは基本の情報（A）・締め（H）・当たった規則（K）だけ。おすすめの設定（ABIJDEFHZ）のままでは、Cookie を含む要求のヘッダー（B）・
 # 要求と応答の中身（I・J・E）が残り、当たった規則が残らない（仕様書 第20.4.6節「ログ」。2026-11-03 に VPS で確かめた）
+# 残すのは規則に当たった要求だけ。おすすめの設定は、規則に当たらなくても応答が 400 番台・500 番台の要求を残す（SecAuditLogRelevantStatus）ので、
+# どの応答の番号にも当たらない値で打ち消す（仕様書 第 0.515.4 版。ログインの切れた画面の問い合わせ 401 が 1 日 2,000 件あまり残った）
 (waf) {
 	coraza_waf {
 		load_owasp_crs
@@ -42,6 +44,7 @@
 			SecAuditLog {{CADDY_LOG_DIR}}/waf-audit.log
 			SecAuditLogFormat JSON
 			SecAuditLogParts AHKZ
+			SecAuditLogRelevantStatus "^999$"
 		`
 	}
 }

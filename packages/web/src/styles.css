@@ -2971,12 +2971,12 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .rc-cursor { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
 /* セキュリティの推移（仕様書 第23.8.7節「セキュリティの推移」）。区分ごとの小さな棒の図 */
 .et { margin-bottom: calc(12px * var(--space-scale)); }
-.et-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: calc(12px * var(--space-scale)); margin-top: calc(6px * var(--space-scale)); }
+.et-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: calc(16px * var(--space-scale)) calc(40px * var(--space-scale)); margin-top: calc(10px * var(--space-scale)); }
 .et-chart { margin: 0; min-width: 0; }
-.et-chart figcaption { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.et-chart figcaption { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .et-svg { width: 100%; height: auto; display: block; overflow: visible; }
 .et-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.et-axis { font-size: 9px; fill: var(--muted); }
+.et-axis { font-size: 8px; fill: var(--muted); }
 .et-bar { fill: var(--accent); opacity: .75; }
 .et-bar.on { opacity: 1; }
 .et-bar.over { fill: var(--danger); opacity: 1; }

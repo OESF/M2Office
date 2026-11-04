@@ -12,7 +12,7 @@ import { SystemLogs, type LogSource } from './SystemLogs.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import {
-  opsApi, OpsApiError, TENANTS_CSV_URL, type OperatorProfileView, type OpsAiSettingsView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
+  opsApi, OpsApiError, setOpsSignedOutHandler, TENANTS_CSV_URL, type OperatorProfileView, type OpsAiSettingsView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
   type CloudBackupViewRow, type EdgeStatusViewRow, type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
@@ -76,6 +76,8 @@ export function OpsRoot() {
     opsApi.me().then((m) => { setMe(m); setState('ready'); }).catch(() => { setMe(null); setState('login'); });
   }, []);
   useEffect(() => { document.title = 'M2Office マスター管理'; load(); }, [load]);
+  // 読み直しの途中でログインが切れたら、ログインの状態を確かめ直す（ログインかパスキーの画面に戻り、運営の画面の読み直しも止まる）
+  useEffect(() => { setOpsSignedOutHandler(load); return () => setOpsSignedOutHandler(null); }, [load]);
   if (state === 'loading') return <p className="muted center">読み込み中…</p>;
   if (state === 'login' || !me) return <OpsLogin onLoggedIn={load} />;
   // Google のあと、ログインのたびにパスキーで確かめる（第23.8.15節）

@@ -94,25 +94,39 @@ export function summarizeAlerts(alerts, now) {
 }
 
 /**
+ * WAF の記録の 1 行を読む。当たった規則が無い行（応答が 400 番台・500 番台だったので残った行など）と、読めない行は `null`。
+ * 第 0.515.4 版から記録に残すのは規則に当たった要求だけだが、それより前に残った行もあるので、ここでも外す。
+ *
+ * @returns 時刻（ミリ秒）と、当たった規則の印
+ */
+function wafHit(line) {
+  if (!line.trim()) return null;
+  try {
+    const j = JSON.parse(line);
+    const t = j.transaction ?? {};
+    const messages = j.messages ?? t.messages ?? [];
+    if (!Array.isArray(messages) || messages.length === 0) return null;
+    const at = typeof t.unix_timestamp === 'number' ? t.unix_timestamp / 1e6 : Date.parse(t.timestamp ?? '');
+    if (!Number.isFinite(at)) return null;
+    return { at, tags: messages.flatMap((m) => m?.data?.tags ?? m?.tags ?? []) };
+  } catch { return null; /* 途中で切れた行など */ }
+}
+
+/**
  * WAF の記録（1 行 1 件の JSON）から、直近 24 時間と 7 日に規則に当たった要求の数と、直近 24 時間の規則の分類ごとの数を出す。
- * 分類は、当たった規則の印（OWASP の規則の `attack-*`）のうち最初のもの。無ければ空の文字（`''`）。要求の中身は読まない。読めない行は飛ばす。
+ * 分類は、当たった規則の印（OWASP の規則の `attack-*`）のうち最初のもの。無ければ空の文字（`''`）。要求の中身は読まない。
+ * 当たった規則の無い行と読めない行は飛ばす。
  */
 export function summarizeWaf(text, now) {
   let hits24h = 0; let hits7d = 0;
   const kinds = new Map();
   for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const j = JSON.parse(line);
-      const t = j.transaction ?? {};
-      const at = typeof t.unix_timestamp === 'number' ? t.unix_timestamp / 1e6 : Date.parse(t.timestamp ?? '');
-      if (!Number.isFinite(at) || at < now - 7 * DAY_MS) continue;
-      hits7d++;
-      if (at < now - DAY_MS) continue;
-      hits24h++;
-      const tags = (j.messages ?? t.messages ?? []).flatMap((m) => m?.data?.tags ?? m?.tags ?? []);
-      bump(kinds, tags.find((tag) => typeof tag === 'string' && tag.startsWith('attack-')) ?? '');
-    } catch { /* 途中で切れた行など */ }
+    const hit = wafHit(line);
+    if (!hit || hit.at < now - 7 * DAY_MS) continue;
+    hits7d++;
+    if (hit.at < now - DAY_MS) continue;
+    hits24h++;
+    bump(kinds, hit.tags.find((tag) => typeof tag === 'string' && tag.startsWith('attack-')) ?? '');
   }
   return { hits24h, hits7d, kinds24h: topOf(kinds) };
 }
@@ -198,12 +212,8 @@ export function alertTimes(alerts) {
 export function wafTimes(text) {
   const out = [];
   for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const t = JSON.parse(line).transaction ?? {};
-      const at = typeof t.unix_timestamp === 'number' ? t.unix_timestamp / 1e6 : Date.parse(t.timestamp ?? '');
-      if (Number.isFinite(at)) out.push(at);
-    } catch { /* 途中で切れた行など */ }
+    const hit = wafHit(line);
+    if (hit) out.push(hit.at);
   }
   return out;
 }

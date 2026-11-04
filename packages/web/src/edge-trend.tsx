@@ -12,7 +12,8 @@ import type { EdgeTrendPointRow } from './ops-api.js';
 /** 図の大きさ（SVG の単位）。 */
 const W = 300;
 const H = 72;
-const PAD_TOP = 4;
+/** 上の余白。目盛りの上の数をここに書き、いちばん高い棒と重ならないようにする。 */
+const PAD_TOP = 12;
 const PAD_BOTTOM = 14;
 
 /** 区切りの呼び名（24 時間は「13 時」、7 日は「11/3」）。 */
@@ -45,15 +46,19 @@ function Bars({ label, values, over, period, points, hover, onHover }: {
   const barW = Math.max(2, slot * 0.7);
   const y = (v: number) => PAD_TOP + (H - PAD_TOP - PAD_BOTTOM) * (1 - v / top);
   const total = values.reduce<number>((n, v) => n + (v ?? 0), 0);
-  // 目盛りの字（はじめ・まんなか・終わりの区切り）
-  const ticks = [0, Math.floor(values.length / 2), values.length - 1];
+  // 目盛りの字（はじめ・まんなか・終わりの区切り）。はじめは左、終わりは右にそろえ、図の外にはみ出して隣の図の字と重ならないようにする
+  const ticks: [number, 'start' | 'middle' | 'end', number][] = [
+    [0, 'start', 0],
+    [Math.floor(values.length / 2), 'middle', Math.floor(values.length / 2) * slot + slot / 2],
+    [values.length - 1, 'end', W],
+  ];
   return (
     <figure className="et-chart">
       <figcaption className="small"><span>{label}</span><span className="muted">{hover !== null ? `${bucketLabel(points[hover]!.at, period)} ${values[hover] ?? '—'}${over && (over[hover] ?? 0) > 0 ? `（出ていく ${over[hover]}）` : ''}` : `計 ${total.toLocaleString('ja-JP')}`}</span></figcaption>
       <svg className="et-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${label}の推移（${period === 'hours' ? '24 時間' : '7 日'}）`}
         onMouseLeave={() => onHover(null)}>
         <line className="et-grid" x1={0} x2={W} y1={y(0)} y2={y(0)} />
-        <text className="et-axis" x={W} y={PAD_TOP + 8} textAnchor="end">{top.toLocaleString('ja-JP')}</text>
+        <text className="et-axis" x={W} y={PAD_TOP - 3} textAnchor="end">{top.toLocaleString('ja-JP')}</text>
         {values.map((v, i) => (
           <g key={points[i]!.at} onMouseEnter={() => onHover(i)}>
             {/* マウスを受ける透明な枠（棒が低くても選べるように） */}
@@ -62,7 +67,7 @@ function Bars({ label, values, over, period, points, hover, onHover }: {
             {over && (over[i] ?? 0) > 0 && <rect className="et-bar over" x={i * slot + (slot - barW) / 2} y={y(over[i]!)} width={barW} height={y(0) - y(over[i]!)} />}
           </g>
         ))}
-        {ticks.map((i) => <text key={i} className="et-axis" x={i * slot + slot / 2} y={H - 2} textAnchor="middle">{bucketLabel(points[i]!.at, period)}</text>)}
+        {ticks.map(([i, anchor, x]) => <text key={i} className="et-axis" x={x} y={H - 2} textAnchor={anchor}>{bucketLabel(points[i]!.at, period)}</text>)}
       </svg>
     </figure>
   );

@@ -147,6 +147,8 @@ test('ログ: アクセスのログは毎日入れ替えて 28 日、前のペ�
   assert.match(file, /request>headers>Referer regexp \\\?\.\*\$ \?\*\*\*/);
   // おすすめの設定（ABIJDEFHZ）を読み込んだ後で、残す部分を基本の情報・締め・当たった規則に絞る（第20.4.6節「ログ」）
   assert.match(file, /Include @coraza\.conf-recommended[\s\S]*SecAuditLogParts AHKZ\n/);
+  // 規則に当たらなくても応答の番号で残す設定（おすすめの設定は 400 番台・500 番台）を、どの応答にも当たらない値で打ち消す（第 0.515.4 版）
+  assert.match(file, /SecAuditLogParts AHKZ\n\t+SecAuditLogRelevantStatus "\^999\$"\n/);
   const body = readFileSync(setup, 'utf8');
   assert.match(body, /waf-audit\.log \{\\n\\tdaily\\n\\trotate 8\\n\\tmaxage 8/);
   assert.match(body, /\/etc\/logrotate\.d\/m2office-waf/);
@@ -277,8 +279,11 @@ test('入口の守りと VPN の様子（第23.8.7節「ネットワークの様
   const waf = [
     JSON.stringify({ transaction: { unix_timestamp: (now - 3_600_000) * 1e6, request: { uri: '/secret?x' } }, messages: [{ data: { id: 942100, tags: ['application-multi', 'attack-sqli', 'OWASP_CRS'] } }] }),
     JSON.stringify({ transaction: { unix_timestamp: (now - 7_200_000) * 1e6 }, messages: [{ data: { id: 949110, tags: ['anomaly-evaluation'] } }] }),
-    JSON.stringify({ transaction: { timestamp: new Date(now - 2 * 86_400_000).toISOString() } }),
-    JSON.stringify({ transaction: { timestamp: new Date(now - 8 * 86_400_000).toISOString() } }),
+    JSON.stringify({ transaction: { timestamp: new Date(now - 2 * 86_400_000).toISOString() }, messages: [{ data: { id: 930120, tags: ['attack-lfi'] } }] }),
+    JSON.stringify({ transaction: { timestamp: new Date(now - 8 * 86_400_000).toISOString() }, messages: [{ data: { id: 930120, tags: ['attack-lfi'] } }] }),
+    // 規則に当たらず、応答が 401 だったので残った行（第 0.515.4 版より前の記録）。数えない
+    JSON.stringify({ transaction: { unix_timestamp: (now - 3_600_000) * 1e6, request: { method: 'GET', uri: '/v1/ops/server' }, response: { status: 401 } }, messages: [] }),
+    JSON.stringify({ transaction: { unix_timestamp: (now - 3_600_000) * 1e6, request: { method: 'GET', uri: '/v1/ops/runtime' } } }),
     '{"transaction": 途中で切れた行',
   ].join('\n');
   const w = edge.summarizeWaf(waf, now);

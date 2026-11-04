@@ -16,6 +16,17 @@ export class OpsApiError extends Error {
 
 let csrf: string | null = null;
 
+/** ログインが切れた（またはパスキーの確かめが要る）と分かったときに呼ぶもの。マスター管理画面の入口が登録する。 */
+let onSignedOut: (() => void) | null = null;
+
+/**
+ * ログインが切れたときの扱いを登録する（仕様書 第23.8.15節「ログイン」）。運営の画面は 1 分ごとに読み直すので、
+ * ログインが切れたまま開いておくと、断られる問い合わせが続く。入口がこれを受けてログインかパスキーの画面に戻し、読み直しを止める。
+ *
+ * @param handler 呼ぶもの。外すときは `null`
+ */
+export function setOpsSignedOutHandler(handler: (() => void) | null): void { onSignedOut = handler; }
+
 /** 運営の API を呼ぶ。書き換える要求には CSRF の値を付ける。 */
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/v1/ops${path}`, {
@@ -24,7 +35,11 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'content-type': 'application/json', ...(csrf ? { 'x-csrf-token': csrf } : {}), ...(init?.headers ?? {}) },
   });
   const body = await res.json().catch(() => ({})) as Record<string, unknown>;
-  if (!res.ok) throw new OpsApiError(typeof body['error'] === 'string' ? body['error'] : '通信に失敗しました', res.status, body['needsLogin'] === true);
+  if (!res.ok) {
+    // ログインの状態を確かめる口（`/me`）の失敗は、入口が自分で扱う
+    if (res.status === 401 && (body['needsLogin'] === true || body['needsPasskey'] === true) && path !== '/me') onSignedOut?.();
+    throw new OpsApiError(typeof body['error'] === 'string' ? body['error'] : '通信に失敗しました', res.status, body['needsLogin'] === true);
+  }
   return body as T;
 }
 
