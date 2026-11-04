@@ -813,6 +813,28 @@ function isHtml(mime: string, head: Uint8Array): boolean {
 }
 
 /**
+ * `open` から次の `close` までの中身を、前から順に取り出す（大文字と小文字は区別しない。中身は 4,096 字まで）。
+ *
+ * @remarks 上げた HTML（10 MB まで）を読むので、正規表現で閉じを探さない。閉じの無い `url(` や `<meta` が長く続くと、
+ * 正規表現では時間が長さの 2 乗以上で伸びるため（CodeQL の js/polynomial-redos。仕様書 第10.9.9節）。`indexOf` で 1 回なめ、
+ * 閉じの後から次を探す（重なった開きは、外側の 1 つとして読む）
+ */
+function between(html: string, open: string, close: string): string[] {
+  const lower = html.toLowerCase();
+  const out: string[] = [];
+  let pos = 0;
+  for (;;) {
+    const at = lower.indexOf(open, pos);
+    if (at < 0) break;
+    const end = lower.indexOf(close, at + open.length);
+    if (end < 0) break;
+    out.push(html.slice(at + open.length, Math.min(end, at + open.length + 4_096)));
+    pos = end + close.length;
+  }
+  return out;
+}
+
+/**
  * HTML の中に残った外への参照（`http:`・`https:`・`//` で始まるもの）。画像・スクリプト・CSS・字体・囲い・フォームの送り先・移動の印（第31.6.3節）。
  *
  * @returns 見つかった参照（重ねない）
@@ -827,10 +849,16 @@ export function externalRefs(html: string): string[] {
   for (const m of html.matchAll(/\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
     for (const part of (m[1] ?? m[2] ?? '').split(',')) if (ext.test(part)) out.add(part.trim().split(/\s+/)[0]!.slice(0, 80));
   }
-  for (const m of html.matchAll(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi)) if (ext.test(m[2] ?? '')) out.add(m[2]!.trim().slice(0, 80));
+  // CSS の url(…)。中の空白と引用符は後で外す
+  for (const inner of between(html, 'url(', ')')) {
+    const v = inner.trim().replace(/^(['"])(.*)\1$/s, '$2');
+    if (ext.test(v)) out.add(v.trim().slice(0, 80));
+  }
   for (const m of html.matchAll(/@import\s+(['"])([^'"]+)\1/gi)) if (ext.test(m[2] ?? '')) out.add(m[2]!.trim().slice(0, 80));
-  for (const m of html.matchAll(/<meta[^>]+http-equiv\s*=\s*["']?refresh[^>]*>/gi)) {
-    const u = /url\s*=\s*([^"'>;]+)/i.exec(m[0])?.[1];
+  // 移動の印（<meta http-equiv="refresh" content="0; url=…">）。タグの中だけを見る
+  for (const inner of between(html, '<meta', '>')) {
+    if (!/http-equiv\s*=\s*["']?refresh/i.test(inner)) continue;
+    const u = /url\s*=\s*([^"'>;]+)/i.exec(inner)?.[1];
     if (u && ext.test(u)) out.add(u.trim().slice(0, 80));
   }
   return [...out];

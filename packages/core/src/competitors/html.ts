@@ -35,6 +35,37 @@ export function decodeEntities(s: string): string {
 
 const clean = (s: string) => decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 
+/** 中身ごと除く要素（読むための文字が無い）。 */
+const DROPPED = /<(script|style|noscript|svg|template|iframe)\b/gi;
+
+/**
+ * コメントと、中身ごと除く要素（スクリプト・スタイルなど）を空白に替える。
+ *
+ * @remarks 外のサイトの HTML（2 MB まで）を読むので、正規表現の `[\s\S]*?` で閉じを探さない。閉じの無いものが長く続くと、
+ * 時間が長さの 2 乗で伸びるため（CodeQL の js/polynomial-redos。仕様書 第10.9.9節）。`indexOf` で前から 1 回なめる。閉じが無ければ終わりまで除く
+ */
+export function stripHidden(html: string): string {
+  const lower = html.toLowerCase();
+  const out: string[] = [];
+  let pos = 0;
+  // 次のコメントと次の要素の位置は、いまの位置より前になったときだけ探し直す（同じところを何度もなめない）
+  let comment = -1; let commentFrom = -1;
+  let tag: RegExpExecArray | null = null; let tagFrom = -1;
+  while (pos < html.length) {
+    if (commentFrom < 0 || (comment >= 0 && comment < pos)) { comment = lower.indexOf('<!--', pos); commentFrom = pos; }
+    if (tagFrom < 0 || (tag && tag.index < pos)) { DROPPED.lastIndex = pos; tag = DROPPED.exec(lower); tagFrom = pos; }
+    const next = tag && (comment < 0 || tag.index < comment) ? { at: tag.index, end: `</${tag[1]}` } : comment >= 0 ? { at: comment, end: '-->' } : null;
+    if (!next) break;
+    out.push(html.slice(pos, next.at), ' ');
+    const close = lower.indexOf(next.end, next.at + 4);
+    if (close < 0) { pos = html.length; break; }
+    // 閉じのタグは `>` まで除く（`</script >` のような形も）
+    pos = next.end === '-->' ? close + 3 : Math.max(close + next.end.length, lower.indexOf('>', close) + 1);
+  }
+  out.push(html.slice(pos));
+  return out.join('');
+}
+
 /**
  * HTML を読む。
  *
@@ -42,7 +73,7 @@ const clean = (s: string) => decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(
  */
 export function readHtml(html: string, url: string): PageContent {
   const base = new URL(url);
-  const noScript = html.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style|noscript|svg|template|iframe)\b[\s\S]*?<\/\1>/gi, ' ');
+  const noScript = stripHidden(html);
   const title = clean(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(noScript)?.[1] ?? '').slice(0, 200);
   const description = clean(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']*)["']/i.exec(noScript)?.[1]
     ?? /<meta[^>]+content=["']([^"']*)["'][^>]*name=["']description["']/i.exec(noScript)?.[1] ?? '').slice(0, 300);

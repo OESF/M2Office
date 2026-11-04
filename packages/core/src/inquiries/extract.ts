@@ -81,7 +81,9 @@ const PHONE = /0\d{1,4}[-‐ー−]?\d{1,4}[-‐ー−]?\d{3,4}/;
 
 /** 文に出た連絡先（推論の答えに無ければ、これで埋める）。 */
 function contactsIn(text: string): { email: string; phone: string } {
-  return { email: EMAIL.exec(text)?.[0] ?? '', phone: (PHONE.exec(text)?.[0] ?? '').replace(/[‐ー−]/g, '-') };
+  // 社外の人が書いた本文なので、読む長さを区切る（正規表現が長い文で遅くなるため。仕様書 第10.9.9節。LINE と同じ 5,000 字）
+  const t = text.slice(0, 5_000);
+  return { email: EMAIL.exec(t)?.[0] ?? '', phone: (PHONE.exec(t)?.[0] ?? '').replace(/[‐ー−]/g, '-') };
 }
 
 /** `YYYY-MM-DD` に日を足す。 */

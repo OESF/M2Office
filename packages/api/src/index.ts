@@ -112,7 +112,8 @@ const app = new Hono<AppEnv>();
  * ここで許すのはテナントのサブドメインだけである。
  * 任意のオリジンを許すと、Cookie を伴う要求を他のサイトから送られてしまう。
  */
-const baseDomain = (process.env['BASE_DOMAIN'] ?? 'lvh.me').replace(/\./g, '\\.');
+// 正規表現の特別な文字をすべてエスケープする（`.` だけでは足りない。CodeQL の js/incomplete-sanitization）
+const baseDomain = (process.env['BASE_DOMAIN'] ?? 'lvh.me').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const allowedOrigin = new RegExp(`^https?://[a-z0-9-]+\\.(${baseDomain}|localhost)(:\\d+)?$`);
 app.use('*', requestLogger(deps.log));
 app.onError(onUnexpectedError(deps.log));

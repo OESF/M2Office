@@ -20,6 +20,9 @@ import { readOrderByRule } from '../src/sales-docs/extract.js';
 import { parseTagRequest } from '../src/print-designs/service.js';
 import { weekdayChecks } from '../src/print-designs/checks.js';
 import { splitUnit } from '../src/inventory/service.js';
+import { readHtml, stripHidden } from '../src/competitors/html.js';
+import { externalRefs } from '../src/signage/service.js';
+import { guessInquiry } from '../src/inquiries/extract.js';
 
 /** かかった時間（ミリ秒）。 */
 const ms = (fn: () => unknown) => { const t = performance.now(); fn(); return performance.now() - t; };
@@ -62,4 +65,36 @@ test('外から届く文や上げた書類を読む正規表現は、読む長�
   // 区切っても、ふつうの文は読める
   assert.equal(partyFromText('山田と申します。taro@example.jp 03-1234-5678').email, 'taro@example.jp');
   assert.equal(noticeDaysOf('満了の 3 か月前までに申し出る'), 90);
+});
+
+test('上げたサイネージの HTML と外のサイトの HTML は、閉じの無い形が長く続いてもすぐ終わる。ふつうの HTML は前と同じに読む', () => {
+  const mb = 2 * 1024 * 1024;
+  const evil: [string, string][] = [
+    ['url( の後の空白', `url(${' '.repeat(mb)}`],
+    ['閉じの無い url(', 'url('.repeat(mb / 4)],
+    ['閉じの無い <meta', '<meta'.repeat(mb / 5)],
+    ['閉じの無いコメント', '<!--'.repeat(mb / 4)],
+    ['閉じの無い <script', '<script'.repeat(mb / 7)],
+  ];
+  for (const [name, html] of evil) {
+    const took = ms(() => { externalRefs(html); stripHidden(html); });
+    assert.ok(took < 1_000, `${name}（2 MB。${Math.round(took)} ms）`);
+  }
+  // サイネージ: 外への参照を、CSS の url(…) と移動の印からも拾う
+  const refs = externalRefs('<style>body{background:url( "https://cdn.example/a.png" )}</style><meta http-equiv="refresh" content="0; url=https://evil.example/x"><img src="/v1/files/x/view">');
+  assert.deepEqual(refs.sort(), ['https://cdn.example/a.png', 'https://evil.example/x']);
+  assert.deepEqual(externalRefs("<div style=\"background:url('img/local.png')\"></div>"), [], '中の参照は拾わない');
+  // 競合のサイト: コメント・スクリプト・スタイルの中身は読まず、見出しは読む
+  assert.equal(stripHidden('a<!-- x -->b<script>alert(1)</script >c<STYLE>p{}</STYLE>d'), 'a b c d');
+  assert.equal(stripHidden('a<script>never closed'), 'a ');
+  const page = readHtml('<title>見本</title><!-- <h1>隠れ</h1> --><h1>表の見出し</h1><script>var h="<h2>x</h2>"</script>', 'https://shop.example/');
+  assert.deepEqual([page.title, page.headings], ['見本', ['表の見出し']]);
+});
+
+test('問い合わせのメールの本文は 5,000 字で区切って連絡先を探す（長い本文でもすぐ終わる）', () => {
+  const today = { date: '2026-11-04', weekday: 3 } as unknown as Parameters<typeof guessInquiry>[1];
+  const took = ms(() => guessInquiry('%'.repeat(80_000), today));
+  assert.ok(took < 500, `${Math.round(took)} ms`);
+  const d = guessInquiry('見本商事の山田です。taro@example.jp 03-1234-5678 まで', today);
+  assert.equal(JSON.stringify(d).includes('taro@example.jp'), true);
 });

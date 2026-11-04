@@ -806,7 +806,8 @@ export function returnTo(c: Context<AppEnv>, path = ''): string {
     const ref = c.req.header('referer');
     try { return ref ? new URL(ref).origin : ''; } catch { return ''; }
   })();
-  const baseDomain = (process.env['BASE_DOMAIN'] ?? 'lvh.me').replace(/\./g, '\\.');
+  // 正規表現の特別な文字をすべてエスケープする（`.` だけでは足りない）
+  const baseDomain = (process.env['BASE_DOMAIN'] ?? 'lvh.me').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const ok = new RegExp(`^https?://([a-z0-9-]+\\.(${baseDomain}|localhost)|localhost)(:\\d+)?$`).test(origin);
   const tenantQuery = c.req.header('x-tenant') ? `?tenant=${encodeURIComponent(c.req.header('x-tenant')!)}` : '';
   return ok ? `${origin}${path || '/'}${tenantQuery}` : `${path || '/'}${tenantQuery}`;

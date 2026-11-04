@@ -868,13 +868,13 @@ while (running) {
       if (requested || due) {
         const rec = await runBackup(backupCfg, now);
         log.info(rec.ok ? 'バックアップを取りました' : 'バックアップを取れませんでした', { name: rec.name, bytes: rec.dbBytes, error: rec.error });
-        if (!rec.ok) await notifyMachine('バックアップを取れませんでした', `${rec.error ?? ''}。管理者ページの「サーバー」で確かめてください。`);
+        // 失敗は出来事として知らせず、警戒の知らせ（machineHealth の「毎晩のバックアップに失敗しました」。理由も添える）にまとめる（仕様書 第23.8.7節）
         if (rec.ok) startOffsite(backupCfg.dir, rec.name);
         const lastTest = status.restoreTest?.at ? new Date(Date.parse(status.restoreTest.at) + 9 * 3_600_000).toISOString().slice(0, 7) : null;
         if (rec.ok && lastTest !== jst.toISOString().slice(0, 7)) {
+          // 戻せなかったときも、警戒の知らせ（「戻せるかの確認に失敗しました」）にまとめる
           const t = await restoreTest(backupCfg, now);
           log.info(t?.ok ? 'バックアップを戻せることを確かめました' : 'バックアップを戻せませんでした', { tables: t?.tables, error: t?.error });
-          if (t && !t.ok) await notifyMachine('バックアップを戻せませんでした', `${t.error ?? ''}。管理者ページの「サーバー」で確かめてください。`);
         }
       }
     } catch (err) {

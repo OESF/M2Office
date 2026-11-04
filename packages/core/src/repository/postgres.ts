@@ -843,7 +843,7 @@ export class PostgresRepository implements Repository {
         order by a.occurred_at desc, a.id desc
         limit $6 offset $7`,
       [tenantId, q.from ?? null, q.to ?? null, q.userId ?? null,
-        q.actions && q.actions.length > 0 ? q.actions.map((x) => `${x.replace(/[%_]/g, '\\$&')}%`) : null,
+        q.actions && q.actions.length > 0 ? q.actions.map((x) => `${x.replace(/[\\%_]/g, '\\$&')}%`) : null,
         q.limit, q.offset ?? 0]);
   }
 
