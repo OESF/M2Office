@@ -129,7 +129,8 @@ export function matchTagItems(items: InventoryItem[], request: string): Inventor
 /** 頼みの「名前 450 円」の行を読む（在庫管理を使わないとき。純粋な関数）。 */
 export function parseTagRequest(request: string): { name: string; price: string }[] {
   const out: { name: string; price: string }[] = [];
-  for (const m of request.normalize('NFKC').matchAll(/([^\n、,。:：]+?)\s*[:：]?\s*([\d,]+)\s*円/g)) {
+  // 頼みの文の頭だけを読む（正規表現が長い文で遅くなるため。仕様書 第10.9.9節）
+  for (const m of request.slice(0, 2_000).normalize('NFKC').matchAll(/([^\n、,。:：]+?)\s*[:：]?\s*([\d,]+)\s*円/g)) {
     // 名前の頭に付いた「値札を」「在庫の」などだけを外す（名前の中の「の」は残す）
     const name = m[1]!.trim().replace(/^(?:(?:値札|在庫|品目|商品)\s*(?:の|を|は|:|：)?\s*)+/, '').trim();
     if (name) out.push({ name, price: `${Number(m[2]!.replace(/,/g, '')).toLocaleString('ja-JP')}円` });

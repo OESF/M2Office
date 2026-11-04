@@ -9,7 +9,7 @@
  */
 
 import { Hono } from 'hono';
-import { SECRETARY_FILES_MAX, type RequestContext } from '@m2office/shared';
+import { SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, SECRETARY_MESSAGE_TOO_LONG, type RequestContext } from '@m2office/shared';
 import { homeBriefPrompt, parseHomeBrief, pickSome, secretaryExamples, HOME_SUGGESTIONS_MAX, type HomeBrief } from '@m2office/core';
 import { claimUntold, listLookups } from '../secretary/lookups.js';
 import { homeFacts } from '../secretary/facts.js';
@@ -44,6 +44,8 @@ export function secretaryRoute(deps: AppDeps) {
     if (!message?.trim()) {
       return c.json({ error: '依頼の内容を入力してください' }, 400);
     }
+    // 長すぎる文は受け取らない（仕様書 第10.9.9節。見分けの正規表現が長い文で遅くなり、全社で分け合うプロセスを止めうる）
+    if (message.length > SECRETARY_MESSAGE_MAX) return c.json({ error: SECRETARY_MESSAGE_TOO_LONG }, 400);
     const started = Date.now();
     // デバッグモードでは、依頼と答えを記録に残す（仕様書 第20.4.1節「デバッグモード」）。振り分けの経過はその間に秘書が足す
     deps.debug?.add(ctx.tenant.id, ctx.user.id, 'secretary', `文字の依頼: ${message}`, { message, fileIds: files });

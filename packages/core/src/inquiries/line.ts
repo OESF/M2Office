@@ -208,7 +208,8 @@ export interface LineReading {
 
 /** メールアドレス・電話番号（数字 10〜11 桁）・「〇〇と申します」を取り出す（推論が使えないとき。第33.22節）。 */
 export function partyFromText(text: string): InquiryParty {
-  const t = text.normalize('NFKC');
+  // 社外の人が書いた文なので、読む長さを区切る（正規表現が長い文で遅くなるため。仕様書 第10.9.9節。LINE は 1 通 5,000 字まで）
+  const t = text.slice(0, 5_000).normalize('NFKC');
   const email = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(t)?.[0] ?? '';
   const phone = (/(?:\+81[-\s]?)?0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}/.exec(t)?.[0] ?? '').trim();
   const digits = phone.replace(/\D/g, '').replace(/^81/, '0');

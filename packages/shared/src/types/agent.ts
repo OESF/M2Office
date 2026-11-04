@@ -268,6 +268,18 @@ export function fileInputKey(def: Pick<AgentDefinition, 'inputs'>): string | nul
 /** 秘書に一度に渡せるファイルの数（仕様書 第10.10.2節・第10.10.7節）。 */
 export const SECRETARY_FILES_MAX = 5;
 
+/** 秘書への依頼の文の長さの上限（字。仕様書 第10.9.9節）。長い文書はファイルにして渡す。 */
+export const SECRETARY_MESSAGE_MAX = 20_000;
+
+/** 依頼の文が長すぎるときの答え（API と秘書の入口で同じ文を返す。仕様書 第10.9.9節）。 */
+export const SECRETARY_MESSAGE_TOO_LONG = `依頼の文が長すぎます（${SECRETARY_MESSAGE_MAX.toLocaleString('ja-JP')} 字まで）。長い文書はファイルにして渡してください`;
+
+/**
+ * 決まった言い回しで見分ける部分が見る、依頼の文の頭の長さ（字。仕様書 第10.9.9節）。
+ * 見分けに使う正規表現の中には、特定の文字が長く続くと時間が文の長さの 2 乗で伸びるものがあるため、頭だけを見る。
+ */
+export const SECRETARY_COMMAND_CHARS = 2_000;
+
 /**
  * 業務の入力のうち、2 つ目のファイルの欄の名前（契約書チェックの「前の版」など。仕様書 第28.13節）。無ければ `null`。
  *

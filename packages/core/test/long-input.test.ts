@@ -1,0 +1,65 @@
+/**
+ * @file 長い文で遅くならないこと（仕様書 第10.9.9節）の確かめ。秘書への依頼の文の上限と、決まった言い回しで見分ける部分が
+ * 文の頭だけを見ること、外から届く文や上げた書類を読む正規表現にかける長さを区切ったことを見る。
+ *
+ * 見分けの正規表現の中には、特定の文字が長く続くと時間が文の長さの 2 乗で伸びるものがある（CodeQL の js/polynomial-redos）。
+ * 区切らなければ 8 万字で 1 つあたり 5〜12 秒かかったので、ここでは区切った後に 1 秒より十分短く終わることを確かめる。
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { SECRETARY_COMMAND_CHARS, SECRETARY_MESSAGE_MAX, SECRETARY_MESSAGE_TOO_LONG } from '@m2office/shared';
+import { MockWorkspaceConnector, OFFICIAL_AGENTS, Secretary, UnconfiguredLlmProvider, commandText, type Repository } from '../src/index.js';
+import { signageRequest } from '../src/secretary/signage.js';
+import { attendanceRequest } from '../src/secretary/attendance.js';
+import { maybeReservation } from '../src/secretary/reservations.js';
+import { inventoryRequest } from '../src/secretary/inventory.js';
+import { partyFromText } from '../src/inquiries/line.js';
+import { noticeDaysOf, renewMonthsOf } from '../src/contracts/extract.js';
+import { readOrderByRule } from '../src/sales-docs/extract.js';
+import { parseTagRequest } from '../src/print-designs/service.js';
+import { weekdayChecks } from '../src/print-designs/checks.js';
+import { splitUnit } from '../src/inventory/service.js';
+
+/** かかった時間（ミリ秒）。 */
+const ms = (fn: () => unknown) => { const t = performance.now(); fn(); return performance.now() - t; };
+
+test('秘書への依頼の文は 20,000 字まで。超えたら AI を呼ばず、会話にも残さずに断る', async () => {
+  const repo = { appendConversation: async () => assert.fail('会話ログに残さない') } as unknown as Repository;
+  const s = new Secretary({ repo, llm: new UnconfiguredLlmProvider(), connector: new MockWorkspaceConnector(), agents: OFFICIAL_AGENTS });
+  const r = await s.respond('t', 'u', 'あ'.repeat(SECRETARY_MESSAGE_MAX + 1));
+  assert.equal(r.text, SECRETARY_MESSAGE_TOO_LONG);
+  assert.match(SECRETARY_MESSAGE_TOO_LONG, /20,000 字まで/);
+});
+
+test('決まった言い回しで見分ける部分は文の頭だけを見るので、上限いっぱいのいじわるな文でもすぐ終わる', () => {
+  assert.equal(commandText('今日の予定は？'), '今日の予定は？');
+  assert.equal(commandText('a'.repeat(SECRETARY_COMMAND_CHARS + 10)).length, SECRETARY_COMMAND_CHARS);
+  // 区切らなければ、1 つあたり数秒かかる形の文（CodeQL が挙げた繰り返し）
+  const evil = ['「'.repeat(SECRETARY_MESSAGE_MAX), '\t'.repeat(SECRETARY_MESSAGE_MAX), '0'.repeat(SECRETARY_MESSAGE_MAX), '!'.repeat(SECRETARY_MESSAGE_MAX)];
+  for (const m of evil) {
+    const head = commandText(m);
+    const took = ms(() => { signageRequest(head); attendanceRequest(head); maybeReservation(head); inventoryRequest(head); });
+    assert.ok(took < 500, `頭だけを見れば速い（${Math.round(took)} ms）`);
+  }
+});
+
+test('外から届く文や上げた書類を読む正規表現は、読む長さを区切るので、長い文でもすぐ終わる', () => {
+  const long = (c: string) => c.repeat(80_000);
+  const cases: [string, () => unknown][] = [
+    ['LINE の問い合わせ', () => partyFromText(long('%'))],
+    ['契約書の申し出の決まり', () => noticeDaysOf(long('0'))],
+    ['契約書の更新の文', () => renewMonthsOf(long('0'))],
+    ['注文書の長い 1 行', () => readOrderByRule(`a${' '.repeat(80_000)}x`, '例の会社')],
+    ['値札の頼み', () => parseTagRequest(long('+'))],
+    ['販促物の曜日の点検', () => weekdayChecks(long(' '), '2026-11-04')],
+    ['在庫の単位', () => splitUnit(`0${' '.repeat(80_000)}`)],
+  ];
+  for (const [name, fn] of cases) {
+    const took = ms(fn);
+    assert.ok(took < 500, `${name}（${Math.round(took)} ms）`);
+  }
+  // 区切っても、ふつうの文は読める
+  assert.equal(partyFromText('山田と申します。taro@example.jp 03-1234-5678').email, 'taro@example.jp');
+  assert.equal(noticeDaysOf('満了の 3 か月前までに申し出る'), 90);
+});

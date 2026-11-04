@@ -8,7 +8,7 @@
 import { autoMinutesRequest } from '../meetings/auto-minutes.js';
 import { AiLimitError } from '../usage/ai-usage.js';
 import { randomUUID } from 'node:crypto';
-import { SECRETARY_FILES_MAX, fileInputKey, secondFileInputKey, type AgentDefinition } from '@m2office/shared';
+import { SECRETARY_COMMAND_CHARS, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, SECRETARY_MESSAGE_TOO_LONG, fileInputKey, secondFileInputKey, type AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
@@ -183,6 +183,8 @@ export class Secretary {
   async respond(
     tenantId: string, userId: string, message: string, fileId?: string | string[], options: { record?: boolean } = {},
   ): Promise<SecretaryReply> {
+    // 長すぎる文は受け取らない（仕様書 第10.9.9節）。API のほか、秘書を呼ぶどの口からでも同じ
+    if (message.length > SECRETARY_MESSAGE_MAX) return { layer: 'direct', text: SECRETARY_MESSAGE_TOO_LONG, evidence: [], tokensUsed: 0 };
     // 推論が使えない会社では、何を聞かれても設定されていないことだけを伝える（仕様書 第20.2.4節、ADR-0030）
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
     if (!aiAvailable(llm)) return { layer: 'direct', text: AI_NOT_CONFIGURED_MESSAGE, evidence: [], tokensUsed: 0 };
@@ -224,7 +226,9 @@ export class Secretary {
   private async captureTodo(
     tenantId: string, userId: string, message: string, llm: LlmProvider,
   ): Promise<{ title: string; due: string | null } | null> {
-    if (!TODO_HINT.test(message) || ASKS_SECRETARY.test(message)) return null;
+    // 当たり付けは文の頭だけを見る（仕様書 第10.9.9節）
+    const head = commandText(message);
+    if (!TODO_HINT.test(head) || ASKS_SECRETARY.test(head)) return null;
     const prefs = await this.deps.repo.getUserSettings(tenantId, userId);
     if (prefs.secretary.proactivity === 'low') return null;
     const today = new Intl.DateTimeFormat('sv-SE', { timeZone: prefs.profile.timezone || 'Asia/Tokyo' }).format(new Date());
@@ -290,6 +294,9 @@ export class Secretary {
   private async reply(
     tenantId: string, userId: string, message: string, files: string[] = [],
   ): Promise<{ reply: SecretaryReply; keep: boolean }> {
+    // 決まった言い回しで見分ける部分は、文の頭だけを見る（長い文を貼られても止まらないように。仕様書 第10.9.9節）。
+    // 業務への取次・層 2 の判定・層 3 の対話には全文（message）を渡す
+    const cmd = commandText(message);
     // ファイルが付いていれば、この応答の中では読まない。後ろへ回す（仕様書 第10.11.3節）。
     // 大きさで分けない。小さいものだけここで読む、という例外を作らない（第10.11.2節）
     if (files.length > 1) {
@@ -300,7 +307,7 @@ export class Secretary {
     if (fileId) {
       await this.audit(tenantId, userId, 'secretary.file', fileId);
       // 「この画像をサイネージの流れに足して」は、その場で流れに足す（第31.11.2節。本人が渡した画像だけ）
-      const signFile = this.deps.signage ? signageFileRequest(message) : null;
+      const signFile = this.deps.signage ? signageFileRequest(cmd) : null;
       if (signFile && this.deps.signage && await this.deps.signage.access(tenantId, userId)) {
         const me = await this.deps.repo.findUserById(tenantId, userId);
         const text = await answerSignage(this.deps.signage, tenantId, userId, !!me?.roles.includes('admin'), signFile, fileId);
@@ -312,14 +319,14 @@ export class Secretary {
     }
 
     // 1 人の AI の上限の割合を変える（管理者だけ。第6.6.2節）。人に表を作らせず、会社の上限に対する割合だけを会話で変える
-    const share = AI_SHARE_SET.exec(message.normalize('NFKC'));
+    const share = AI_SHARE_SET.exec(cmd.normalize('NFKC'));
     if (share) {
       const text = await this.setAiShare(tenantId, userId, share[1] ? Number(share[1]) / 10 : Number(share[2]) / 100);
       return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
     }
 
     // 会議の後の議事録の入り切り・作らない会議（第9.5.2.1節）。本人の設定だけを変える
-    const minutesReq = autoMinutesRequest(message);
+    const minutesReq = autoMinutesRequest(cmd);
     if (minutesReq) {
       const cur = await this.deps.repo.getUserSettings(tenantId, userId);
       const sec = cur.secretary;
@@ -335,26 +342,26 @@ export class Secretary {
     }
 
     // 「技術部の共有は〇〇のスペースにして」は、グループに合う Chat のスペースを覚え直す（第16.7.12.1節、ADR-0076）
-    const told = GROUP_SPACE_SET.exec(message) ?? GROUP_SPACE_FORGET.exec(message);
+    const told = GROUP_SPACE_SET.exec(cmd) ?? GROUP_SPACE_FORGET.exec(cmd);
     if (told) {
-      const done = await this.setGroupSpace(tenantId, userId, told[1]!.trim(), GROUP_SPACE_SET.test(message) ? told[2]!.trim() : null);
+      const done = await this.setGroupSpace(tenantId, userId, told[1]!.trim(), GROUP_SPACE_SET.test(cmd) ? told[2]!.trim() : null);
       if (done) return { reply: done, keep: true };
     }
 
     // 「議事録の説明に〇〇と補足して」は、ヘルプの会社の補足を書く（管理者だけ。第6.10.7節）。使い方の質問より先に見る
-    if (this.deps.help && this.deps.helpNoteSet && NOTE_REQUEST.test(message)) {
-      const done = await this.writeHelpNote(tenantId, userId, message, this.deps.help);
+    if (this.deps.help && this.deps.helpNoteSet && NOTE_REQUEST.test(cmd)) {
+      const done = await this.writeHelpNote(tenantId, userId, cmd, this.deps.help);
       if (done) return { reply: done, keep: true };
     }
 
     // 使い方の質問は、定型の照会より先に見る。「承認はどうやるの？」を承認待ちの照会と取り違えないため
-    if (this.deps.help && HOW_TO.test(message)) {
+    if (this.deps.help && HOW_TO.test(cmd)) {
       return { reply: await this.answerHowTo(tenantId, userId, message, this.deps.help), keep: true };
     }
 
     // 「それは違う」「〇〇は忘れて」は、秘書が自分で記憶を直す（仕様書 第11.5.3節、ADR-0028）。
     // 記憶の話でなければ推論が「無し」と返し、ふつうの答えに進む
-    if (CORRECTION.test(message)) {
+    if (CORRECTION.test(cmd)) {
       const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
       if (llm.name !== 'stub') {
         const fixed = await correctMemory({ repo: this.deps.repo, llm }, tenantId, userId, message).catch(() => null);
@@ -406,15 +413,15 @@ export class Secretary {
     if (planned) return { reply: planned, keep: true };
 
     // 勤怠と有給（第30.20節）。「出勤」「有給あと何日？」「来週の金曜、有給で休みます」は推論に選ばせずに、本人の分だけ扱う
-    const att = this.deps.attendance ? attendanceRequest(message) : null;
+    const att = this.deps.attendance ? attendanceRequest(cmd) : null;
     if (att && this.deps.attendance && (await this.deps.attendance.settings(tenantId)).enabled) {
       const employee = await this.deps.attendance.selfEmployee(tenantId, userId);
-      const text = await answerAttendance(this.deps.attendance, tenantId, userId, employee, att, message);
+      const text = await answerAttendance(this.deps.attendance, tenantId, userId, employee, att, cmd);
       await this.audit(tenantId, userId, 'secretary.attendance', att.kind);
       return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
     }
     // 不正の兆しの見張り（第16.8.3節）。管理者の依頼だけを扱う（名前の人がいない「止めて」などは、ふつうの会話に回す）
-    const secReq = this.deps.security ? securityRequest(message) : null;
+    const secReq = this.deps.security ? securityRequest(cmd) : null;
     if (secReq && this.deps.security) {
       const text = await answerSecurity(this.deps.security, tenantId, userId, secReq);
       if (text !== null) {
@@ -423,7 +430,7 @@ export class Secretary {
       }
     }
     // 人事の担当者の依頼（第30.20.1節）。人事区画の人のときだけ。区画の外の人の依頼はふつうの会話に回す
-    const staffReq = this.deps.hrStaff ? hrStaffRequest(message, jstDate(new Date())) : null;
+    const staffReq = this.deps.hrStaff ? hrStaffRequest(cmd, jstDate(new Date())) : null;
     if (staffReq && this.deps.hrStaff && await this.deps.hrStaff.access(tenantId, userId)) {
       const text = await answerHrStaff(this.deps.hrStaff, tenantId, userId, staffReq);
       await this.audit(tenantId, userId, 'secretary.hr', staffReq.kind);
@@ -436,14 +443,14 @@ export class Secretary {
     let confirmed: SignageRequest | null = null;
     if (pend) {
       this.signagePending.delete(pendKey);
-      const said = message.normalize('NFKC').trim();
+      const said = cmd.normalize('NFKC').trim();
       if (pend.until > Date.now() && SIGNAGE_YES.test(said)) confirmed = pend.req;
       else if (pend.until > Date.now() && SIGNAGE_NO.test(said)) {
         await this.audit(tenantId, userId, 'secretary.signage', 'declined');
         return { reply: { layer: 'direct', text: pend.req.kind === 'clear' ? '消すのをやめました。' : '出すのをやめました。', evidence: [], tokensUsed: 0 }, keep: true };
       }
     }
-    const signReq = confirmed ?? (this.deps.signage ? signageRequest(message) : null);
+    const signReq = confirmed ?? (this.deps.signage ? signageRequest(cmd) : null);
     if (signReq && this.deps.signage && await this.deps.signage.access(tenantId, userId)) {
       // 会社の自動化ポリシーで社内への書き込みを確かめる会社では、出す・消す前に本人に確かめる（第31.17節 #8）
       const ask = confirmed ? null : signageConfirmText(signReq);
@@ -460,16 +467,16 @@ export class Secretary {
       }
     }
     // 会議室・社用車・備品の予約（第37.7節）。本人が秘書の欄で話した回にだけ届く。利用範囲の人だけ
-    if (this.deps.reservations && maybeReservation(message) && await this.deps.reservations.access(tenantId, userId)) {
+    if (this.deps.reservations && maybeReservation(cmd) && await this.deps.reservations.access(tenantId, userId)) {
       const me = await this.deps.repo.findUserById(tenantId, userId);
-      const r = await answerReservation(this.deps.reservations, tenantId, userId, !!me?.roles.includes('admin'), message);
+      const r = await answerReservation(this.deps.reservations, tenantId, userId, !!me?.roles.includes('admin'), cmd);
       if (r) {
         await this.audit(tenantId, userId, 'secretary.reservation', r.kind);
         return { reply: { layer: 'direct', text: r.text, evidence: [], tokensUsed: 0 }, keep: true };
       }
     }
     // 本人の給与明細（「今月の給与明細」「手取りが減ったのはなぜ？」）。本人の分だけ答える
-    if (this.deps.payroll && this.deps.attendance && payslipRequest(message) && (await this.deps.attendance.settings(tenantId)).enabled) {
+    if (this.deps.payroll && this.deps.attendance && payslipRequest(cmd) && (await this.deps.attendance.settings(tenantId)).enabled) {
       const employee = await this.deps.attendance.selfEmployee(tenantId, userId);
       const text = employee ? await this.deps.payroll.answerMySlip(tenantId, userId, employee) : '人事の台帳にあなたが載っていないため、給与明細はお答えできません。';
       await this.audit(tenantId, userId, 'secretary.payslip', employee ? 'self' : 'none');
@@ -478,11 +485,11 @@ export class Secretary {
 
     // 層 1: パターン一致で定型の照会に該当するか（LLM を使わない）
     // 「あの件の進み具合は」のような過去を指す問いは、実行の件数ではなく、覚えていることから答える（第10.7.3節）
-    const direct0 = this.matchDirect(message);
-    const direct = direct0?.id === 'recent-runs' && REFERS_TO_PAST.test(message) ? undefined : direct0;
+    const direct0 = this.matchDirect(cmd);
+    const direct = direct0?.id === 'recent-runs' && REFERS_TO_PAST.test(cmd) ? undefined : direct0;
     if (direct) {
       const answer = await direct.answer({
-        tenantId, userId, message, repo: this.deps.repo, connector: this.deps.connector,
+        tenantId, userId, message: cmd, repo: this.deps.repo, connector: this.deps.connector,
       });
       await this.audit(tenantId, userId, 'secretary.direct', direct.id);
       const { keep = true, ...rest } = answer;
@@ -500,25 +507,25 @@ export class Secretary {
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
     // 「あれ、どうなった」のような過去を指す問いは、業務へ取り次がず、記憶を使って答える（第10.7.3節）。
     // ただし「さっきの行程をカレンダーに入れて」のような作業の依頼は取り次ぐ（第10.9.6節）
-    const pastOnly = REFERS_TO_PAST.test(message) && !DOING.test(message);
+    const pastOnly = REFERS_TO_PAST.test(cmd) && !DOING.test(cmd);
     // 会社の接続（Slack など）の名前（第10.11.5.1節）。調べものの説明に入れ、名前が出る「探す・読む」依頼は推論に選ばせずに回す
     const connections = lookup ? await this.connectionNames(tenantId) : [];
-    if (lookup && !pastOnly && asksConnectionData(message, connections)) {
+    if (lookup && !pastOnly && asksConnectionData(cmd, connections)) {
       await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
       return this.delegate(tenantId, userId, message, lookup, '会社の接続のデータを探す依頼', llm);
     }
     // 在庫（第29.15節）。在庫管理を使える人の在庫の依頼は推論に選ばせない（組織知識の問いと取り違えないため）。
     // 数の問い・残りわずかはその場で答え、期間の記録は調べものへ、入庫・使用・移動は「在庫の記録」へ回す。
     // 「先週の使用」も過去の話ではなく在庫の記録の問いなので、pastOnly より先に見る
-    let invKind = this.deps.inventory ? inventoryRequest(message) : null;
+    let invKind = this.deps.inventory ? inventoryRequest(cmd) : null;
     // 「店頭のコピー用紙は？」のように、品目と場所の名前だけでできた短い問いも在庫の問い
-    if (!invKind && this.deps.inventory && message.length <= 40 && await this.deps.inventory.access(tenantId, userId)) {
+    if (!invKind && this.deps.inventory && cmd.length <= 40 && await this.deps.inventory.access(tenantId, userId)) {
       const [items, locations] = await Promise.all([this.deps.inventory.service.list(tenantId), this.deps.inventory.service.locations(tenantId)]);
-      if (bareStockQuestion(message, items, locations)) invKind = 'stock';
+      if (bareStockQuestion(cmd, items, locations)) invKind = 'stock';
     }
     if (invKind && this.deps.inventory && await this.deps.inventory.access(tenantId, userId)) {
       if (invKind === 'stock' || invKind === 'low') {
-        const answer = await answerStock(this.deps.inventory.service, tenantId, message, invKind);
+        const answer = await answerStock(this.deps.inventory.service, tenantId, cmd, invKind);
         await this.audit(tenantId, userId, 'secretary.inventory', invKind);
         return { reply: { layer: 'direct', text: answer.text, evidence: answer.evidence, tokensUsed: 0 }, keep: true };
       }
@@ -542,11 +549,11 @@ export class Secretary {
     const cardUpdate = enabled.find((a) => a.id === CARD_UPDATE.id);
     // 名刺の相手へのまとめてのメール（第27.9.1節）。宛先を集めて下書きを作り、本人の承認を待つ
     const bulkMail = enabled.find((a) => a.id === CARD_BULK_MAIL.id);
-    if (bulkMail && !pastOnly && bulkMailRequest(message)) {
+    if (bulkMail && !pastOnly && bulkMailRequest(cmd)) {
       await this.audit(tenantId, userId, 'secretary.route', bulkMail.id);
       return this.delegate(tenantId, userId, message, bulkMail, '名刺の相手へのまとめてのメールの依頼', llm);
     }
-    const contact = cardUpdate && !pastOnly ? contactRequest(message) : null;
+    const contact = cardUpdate && !pastOnly ? contactRequest(cmd) : null;
     if (contact === 'fix' && cardUpdate) {
       await this.audit(tenantId, userId, 'secretary.route', cardUpdate.id);
       return this.delegate(tenantId, userId, message, cardUpdate, '名刺を直す依頼', llm);
@@ -556,7 +563,7 @@ export class Secretary {
       return this.delegate(tenantId, userId, message, lookup, '名刺を探す依頼', llm);
     }
     // メールの確認（第10.9.6節）。件数だけでなく、未読を読んで振り分けて案内する。推論に選ばせずに見分け、その場で答える
-    if (!pastOnly && mailCheckRequest(message)) {
+    if (!pastOnly && mailCheckRequest(cmd)) {
       const answer = await this.answerMailCheck(tenantId, userId, llm);
       await this.audit(tenantId, userId, 'secretary.mail', 'check');
       return { reply: { layer: 'light', ...answer }, keep: true };
@@ -1355,6 +1362,14 @@ export class Secretary {
       occurredAt: new Date().toISOString(),
     });
   }
+}
+
+/**
+ * 決まった言い回しで見分けるときに見る、依頼の文の頭（仕様書 第10.9.9節）。
+ * 見分けの正規表現には文が長いと時間が 2 乗で伸びるものがあるので、頭の `SECRETARY_COMMAND_CHARS` 字だけを渡す。
+ */
+export function commandText(message: string): string {
+  return message.length > SECRETARY_COMMAND_CHARS ? message.slice(0, SECRETARY_COMMAND_CHARS) : message;
 }
 
 /** 録音のファイルの名前か（第9.4.5節）。 */

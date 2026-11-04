@@ -17,7 +17,8 @@ const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
  */
 export function weekdayChecks(text: string, today: string): PrintCheck[] {
   const out: PrintCheck[] = [];
-  const t = text.normalize('NFKC');
+  // 販促物の文は短い。長い文で遅くならないよう区切る（仕様書 第10.9.9節）
+  const t = text.slice(0, 5_000).normalize('NFKC');
   const re = /(?:(\d{4})\s*[年/.-]\s*)?(\d{1,2})\s*[月/.]\s*(\d{1,2})\s*日?\s*[（(]\s*([日月火水木金土])\s*[）)]/g;
   const [ty, tm] = today.split('-').map(Number) as [number, number];
   for (const m of t.matchAll(re)) {

@@ -96,7 +96,8 @@ const party = (name = ''): SalesParty => ({ name, department: '', person: '', ad
  */
 export function readOrderByRule(text: string, company: string): OrderReading {
   const t = text.normalize('NFKC');
-  const lines = t.split('\n').map((l) => l.trim()).filter(Boolean);
+  // 1 行が 1,000 字を超える行は、品目や見出しではないので読まない（正規表現が長い行で遅くなるため。仕様書 第10.9.9節）
+  const lines = t.split('\n').map((l) => l.trim()).filter((l) => l && l.length <= 1_000);
   const value = (re: RegExp) => lines.map((l) => re.exec(l)?.[1]?.trim() ?? '').find(Boolean) ?? '';
   // 会社名は 1 行ずつ見る（法人格を含む行。見出し・敬称は外す）。行をまたいで読まない
   // 名前は元の書き方のまま残す（全角の括弧などを半角に変えない）

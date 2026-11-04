@@ -62,7 +62,8 @@ export function noticeDeadline(endOn: string | null, noticeDays: number | null):
  * @returns 読めなければ `null`
  */
 export function noticeDaysOf(rule: string): number | null {
-  const t = rule.normalize('NFKC').replace(/\s+/g, '');
+  // 決まりの 1 文だけを読む。上げた書類の長い 1 文で遅くならないよう区切る（仕様書 第10.9.9節）
+  const t = rule.slice(0, 1_000).normalize('NFKC').replace(/\s+/g, '');
   const kanji: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十二: 12 };
   const num = (v: string) => (/^\d+$/.test(v) ? Number(v) : kanji[v] ?? NaN);
   const m = /([0-9一二三四五六七八九十]+)(か月|ヶ月|カ月|ケ月|箇月|ヵ月|月|日|週間|年)(以上)?前/.exec(t);
@@ -82,7 +83,8 @@ export function noticeDaysOf(rule: string): number | null {
  * @returns 読めなければ `null`
  */
 export function renewMonthsOf(text: string): number | null {
-  const t = text.normalize('NFKC').replace(/\s+/g, '');
+  // 更新の 1 文だけを読む。上げた書類の長い 1 文で遅くならないよう区切る（仕様書 第10.9.9節）
+  const t = text.slice(0, 1_000).normalize('NFKC').replace(/\s+/g, '');
   const m = /([0-9一二三]+)(年|か月|ヶ月|カ月|ケ月|箇月|ヵ月)(間)?(ずつ|ごと)?[^。]{0,12}(延長|更新|継続)/.exec(t)
     ?? /(延長|更新|継続)[^。]{0,12}?([0-9一二三]+)(年|か月|ヶ月|カ月|ケ月|箇月|ヵ月)/.exec(t);
   if (!m) return null;

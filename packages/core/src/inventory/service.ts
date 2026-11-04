@@ -232,7 +232,8 @@ export function toDate(v: unknown): string | null {
  * @remarks 単位の欄に数を入れてしまうことがある（第29.6節）。数が付いていなければ `qty` は `null`
  */
 export function splitUnit(raw: string): { unit: string; qty: number | null } {
-  const t = raw.normalize('NFKC').trim();
+  // 単位の欄は短い。長い文で遅くならないよう区切る（仕様書 第10.9.9節）
+  const t = raw.slice(0, 40).normalize('NFKC').trim();
   const m = t.match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
   if (!m) return { unit: t, qty: null };
   return { unit: m[2]!.trim(), qty: Number(m[1]) };
