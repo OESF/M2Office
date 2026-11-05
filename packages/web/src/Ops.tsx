@@ -707,9 +707,40 @@ function countryName(code: string): string {
   try { return new Intl.DisplayNames(['ja'], { type: 'region' }).of(code) ?? code; } catch { return code; }
 }
 
+/** 国の名前の並び（`CN,RU,KP` の形から）。 */
+function countryNames(codes: string): string {
+  return codes.split(/[,\s]+/).filter(Boolean).map(countryName).join('・');
+}
+
+/** 期限までの日数（切れていれば負）。 */
+function daysUntil(at: string): number {
+  return Math.floor((Date.parse(at) - Date.now()) / 86_400_000);
+}
+
 /**
- * 入口の守りと VPN の様子（仕様書 第23.8.7節「ネットワークの様子」）。VPS の上で root の仕組みが 5 分ごとに書いた数を出す。
- * 上にこの区分の対応が要るもの（すること付き。第23.8.7節「全体の状態」）、直近 24 時間に来たもの（攻撃の種類・国、WAF に当たった要求の種類）を出す（第23.8.7節「セキュリティの状態」）。
+ * 多い順の一覧を、件数に比べた横の棒で出す（攻撃の種類・国、WAF に当たった要求の種類）。
+ *
+ * @param ok 読めたか（読めなければ「取得できなかった」）
+ */
+function EdgeRank({ title, ok, rows }: { title: string; ok: boolean; rows: [string, number][] }) {
+  const max = Math.max(1, ...rows.map(([, c]) => c));
+  return (
+    <div className="edge-rank">
+      <h4>{title}</h4>
+      {!ok ? <p className="muted small">取得できなかった</p> : rows.length === 0 ? <p className="muted small">なし</p> : rows.map(([k, c]) => (
+        <div key={k} className="edge-rank-row">
+          <span className="edge-rank-name">{k}</span>
+          <div className="hbar" aria-hidden="true"><span style={{ width: `${Math.max(4, Math.round((c / max) * 100))}%` }} /></div>
+          <span className="num">{c.toLocaleString('ja-JP')}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 入口の守りと VPN の様子（仕様書 第23.8.7節「ネットワークの様子」「見せ方」）。VPS の上で root の仕組みが 5 分ごとに書いた数を出す。
+ * 上にこの区分の対応が要るもの（すること付き）と推移の図、その下に直近 24 時間の札 3 枚、攻撃の種類と国の棒、仕組みごとの守りの様子の表を出す。
  * 相手の IP アドレス・鍵・WAF の記録の中身は出さない。読めなかった値は「取得できなかった」と出す（推測で埋めない）。
  */
 function EdgeDetail({ e, health, onGuide }: { e: EdgeStatusViewRow; health: HealthViewRow | null; onGuide: (guide: string) => void }) {
@@ -718,13 +749,17 @@ function EdgeDetail({ e, health, onGuide }: { e: EdgeStatusViewRow; health: Heal
   if (!e.configured || !e.last) return <section id={healthAnchor('security')}>{title}{notes}</section>;
   const l = e.last;
   const NONE = <span className="muted">取得できなかった</span>;
-  const n = (v: number | null | undefined) => (v === null || v === undefined ? null : v.toLocaleString('ja-JP'));
+  const n = (v: number | null | undefined) => (v === null || v === undefined ? '—' : v.toLocaleString('ja-JP'));
   const engine: Record<string, string> = { DetectionOnly: '記録だけ', On: '止める' };
-  // 前の版の集める仕組みの結果には種類が無い（「取得できなかった」と出す）。種類が 1 つも無ければ「なし」
-  const list = (ok: boolean, rows: [string, number][]) => (!ok ? NONE
-    : rows.length === 0 ? 'なし' : rows.map(([k, c]) => `${k} ${c.toLocaleString('ja-JP')}`).join('・'));
   const csOk = !!l.crowdsec && l.crowdsec.alerts7d !== undefined;
   const wafOk = !!l.waf && typeof l.waf.hits7d === 'number';
+  const wafMode = l.waf?.engine ? engine[l.waf.engine] ?? l.waf.engine : null;
+  const cs = l.crowdsec;
+  const csTotal = cs && cs.local !== null && cs.shared !== null ? cs.local + cs.shared : null;
+  const certDays = l.certs?.nearest ? daysUntil(l.certs.nearest) : null;
+  // 証明書の状態: 期限切れは赤、30 日を切ったら黄（第23.8.7節「セキュリティの状態」と同じ目安）
+  const certBadge = certDays === null ? null : certDays < 0 ? <span className="badge danger">期限切れ</span>
+    : e.certSoon ? <span className="badge warn">期限が近い</span> : <span className="badge">正常</span>;
   return (
     <section id={healthAnchor('security')}>
       {title}
@@ -733,31 +768,37 @@ function EdgeDetail({ e, health, onGuide }: { e: EdgeStatusViewRow; health: Heal
       </p>
       {notes}
       <EdgeTrend trend={l.trend} />
-      <div className="table-scroll"><table className="table">
+      <h4>直近 24 時間</h4>
+      <div className="stats">
+        <div className="stat"><span>見つけて止めた攻撃</span><strong>{cs ? `${n(cs.alerts24h)} 件` : NONE}</strong><span>CrowdSec</span></div>
+        <div className="stat"><span>国の遮断で止めた通信</span>
+          {l.geo && l.geo.in24h !== undefined ? <>
+            <strong>{l.geo.in24h === null && l.geo.out24h === null ? '—' : `${n((l.geo.in24h ?? 0) + (l.geo.out24h ?? 0))} 件`}</strong>
+            <span>入ってくる {n(l.geo.in24h)}・出ていく {(l.geo.out24h ?? 0) > 0 ? <span className="badge danger">{n(l.geo.out24h)}</span> : n(l.geo.out24h)}</span>
+          </> : <strong>{NONE}</strong>}
+        </div>
+        <div className="stat"><span>WAF に当たった要求</span><strong>{l.waf ? `${n(l.waf.hits24h)} 件` : NONE}</strong><span>{wafMode ?? ''}</span></div>
+      </div>
+      <div className="edge-ranks">
+        <EdgeRank title="攻撃の種類" ok={csOk} rows={e.top.kinds.map((k) => [k.label, k.count])} />
+        <EdgeRank title="攻撃の国" ok={csOk} rows={e.top.countries.map((c) => [countryName(c.key), c.count])} />
+        {wafOk && e.top.waf.length > 0 && <EdgeRank title="WAF に当たった要求の種類" ok rows={e.top.waf.map((k) => [k.label, k.count])} />}
+      </div>
+      <h4>守りの様子</h4>
+      <div className="table-scroll"><table className="table edge-defense">
         <tbody>
-          <tr><th>攻撃の種類（24 時間）</th><td>{list(csOk, e.top.kinds.map((k) => [k.label, k.count]))}</td></tr>
-          <tr><th>攻撃の国（24 時間）</th><td>{list(csOk, e.top.countries.map((c) => [countryName(c.key), c.count]))}</td></tr>
-          <tr><th>WAF の種類（24 時間）</th><td>{list(wafOk, e.top.waf.map((k) => [k.label, k.count]))}</td></tr>
-        </tbody>
-      </table></div>
-      <div className="table-scroll"><table className="table">
-        <tbody>
-          <tr><th>CrowdSec</th><td>{l.crowdsec ? <>
-            いま止めている相手 このサーバーで見つけた {n(l.crowdsec.local) ?? '—'}・世界中で分け合う一覧 {n(l.crowdsec.shared) ?? '—'}・直近 24 時間に見つけた攻撃 {n(l.crowdsec.alerts24h) ?? '—'}
-          </> : NONE}</td></tr>
-          <tr><th>国の遮断</th><td>{l.geo ? (l.geo.countries ? <>
-            {l.geo.countries}・止めた通信 入ってくる {n(l.geo.inBlocked) ?? '—'}・出ていく {n(l.geo.outBlocked) ?? '—'}（表を入れてから）
-            {l.geo.in24h !== undefined && <>・直近 24 時間 入ってくる {n(l.geo.in24h) ?? '—'}・出ていく {n(l.geo.out24h) ?? '—'}</>}・一覧 {when(l.geo.listAt)}
-          </> : '止めていません') : NONE}</td></tr>
-          <tr><th>WAF</th><td>{l.waf ? <>
-            {l.waf.engine ? engine[l.waf.engine] ?? l.waf.engine : '—'}・直近 24 時間に規則に当たった要求 {n(l.waf.hits24h) ?? '—'}
-          </> : NONE}</td></tr>
-          <tr><th>証明書</th><td>{l.certs ? <>
-            {l.certs.count} 枚・いちばん近い期限 {e.certSoon ? <span className="badge warn">{when(l.certs.nearest)}</span> : when(l.certs.nearest)}
-          </> : NONE}</td></tr>
-          <tr><th>VPN</th><td>{e.peers.length === 0 ? NONE : e.peers.map((p) => (
-            <div key={p.address}><code>{p.address}</code> {p.connected ? <span className="badge ok">接続中</span> : <>最終接続 {p.lastHandshake ? when(p.lastHandshake) : 'まだありません'}</>}</div>
-          ))}</td></tr>
+          <tr><th>CrowdSec</th><td>{cs ? (cs.shared === 0 ? <span className="badge warn">中央とつながっていません</span> : <span className="badge">働いています</span>) : null}</td>
+            <td>{cs ? <>止めている相手 {n(csTotal)}（このサーバーで見つけた {n(cs.local)}・共有の一覧 {n(cs.shared)}）</> : NONE}</td></tr>
+          <tr><th>国の遮断</th><td>{l.geo ? (l.geo.countries ? <span className="badge">働いています</span> : <span className="badge muted-badge">止めていません</span>) : null}</td>
+            <td>{l.geo ? (l.geo.countries ? <>{countryNames(l.geo.countries)}（一覧の更新 {when(l.geo.listAt)}）</> : '—') : NONE}</td></tr>
+          <tr><th>WAF</th><td>{wafMode ? <span className={`badge ${l.waf?.engine === 'On' ? '' : 'warn'}`}>{wafMode}</span> : null}</td>
+            <td>{l.waf ? (l.waf.engine === 'On' ? '規則に当たった要求を止めます' : '当たっても止めていません') : NONE}</td></tr>
+          <tr><th>証明書</th><td>{certBadge}</td>
+            <td>{l.certs ? <>{l.certs.count} 枚・次の期限 {when(l.certs.nearest)}{certDays !== null && certDays >= 0 && <>（あと {certDays} 日）</>}</> : NONE}</td></tr>
+          <tr><th>VPN</th><td>{e.peers.length > 0 && (e.peers.every((p) => p.connected) ? <span className="badge">接続中</span> : e.peers.some((p) => p.connected) ? <span className="badge">一部が接続中</span> : <span className="badge muted-badge">未接続</span>)}</td>
+            <td>{e.peers.length === 0 ? NONE : e.peers.map((p) => (
+              <div key={p.address}><code>{p.address}</code> {p.connected ? '接続中' : <>最終接続 {p.lastHandshake ? when(p.lastHandshake) : 'まだありません'}</>}</div>
+            ))}</td></tr>
         </tbody>
       </table></div>
     </section>

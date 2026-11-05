@@ -3087,3 +3087,14 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 /* 文字の大きさの「小さく」「大きく」（個人設定の「表示」。仕様書 第6.1節） */
 .text-size-step { display: flex; align-items: center; gap: calc(12px * var(--space-scale)); flex-wrap: wrap; }
 .text-size-now { min-width: 4em; text-align: center; font-weight: 600; }
+
+/* 稼働状況の「セキュリティ」（仕様書 第23.8.7節「見せ方」）。攻撃の種類と国を横の棒で並べ、守りの様子の表は状態の列を細くそろえる */
+.edge-ranks { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: calc(8px * var(--space-scale)) calc(24px * var(--space-scale)); margin-bottom: calc(16px * var(--space-scale)); }
+.edge-rank { min-width: 0; }
+.edge-rank h4 { margin: 0 0 calc(6px * var(--space-scale)); }
+.edge-rank-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(60px, 120px) 3.5em; gap: calc(8px * var(--space-scale)); align-items: center; padding: calc(3px * var(--space-scale)) 0; }
+.edge-rank-row .hbar { margin: 0; }
+.edge-rank-row .num { text-align: right; }
+.edge-rank-name { overflow-wrap: anywhere; }
+.edge-defense th { width: 9em; }
+.edge-defense td:nth-child(2) { width: 12em; white-space: nowrap; }
