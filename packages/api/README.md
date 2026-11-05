@@ -141,7 +141,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/slide-themes/:id/thumbnail`・`/access`・`GET /v1/slide-themes/picker` | テーマの見本の縮小の絵、本人がファイルを開けるか（会社のテーマを初めて使うとき）、Google のファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン） |
 | `POST /v1/slide-decks/:id/share`・`DELETE /v1/slide-decks/:id` | 共有の範囲の切り替え（`sharing`: `private`・`company`。会社の Workspace のドメインへの閲覧だけ）と削除（ファイルはドライブのごみ箱へ）。作った人だけ。作り直しは業務「スライドの作成」の実行（`deckId`） |
 | `GET /v1/public/slide-images/:token` | ログイン不要: スライドの画像の使い捨ての道。Google スライドが画像を貼るときに 1 度だけ読む。鍵（32 バイトの乱数）が違う・5 分を過ぎた・貼り終えたものは 404（仕様書 第9.4.2節「段 2」） |
-| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）とその出どころ（`photoSource`: `upload`・`google`・`hr`・`null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節）。呼ばれたとき、まだなら朝のブリーフの定時実行（平日 7:30）を秘書が用意する（`secretary/morning.ts`。第9.5.5.1節） |
+| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）とその出どころ（`photoSource`: `upload`・`google`・`hr`・`null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節）・本人の文字の大きさ（`display.textSize`。70〜130。第6.1節）。呼ばれたとき、まだなら朝のブリーフの定時実行（平日 7:30）を秘書が用意する（`secretary/morning.ts`。第9.5.5.1節） |
 | `GET /v1/me/photo` | 本人のアバター（本人が入れた画像を先に、無ければ Google のプロフィール写真）。**本人の写真だけ**を返し、利用者の ID は受け取らない。`nosniff` と読み込みを禁じる CSP を付ける（仕様書 第6.5.1.1節・第6.5.1.2節） |
 | `PUT /v1/me/photo` | 本人のアバターを入れる（`file`。中身で PNG・JPEG を確かめる。1 MB まで。上書き）。`{ photo }` に新しい URL を返す（仕様書 第6.5.1.2節） |
 | `DELETE /v1/me/photo` | 本人が入れたアバターを削除する（Google の写真に戻る）。入れていなければ 404 |
@@ -527,7 +527,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/admin/knowledge/:id/retire` ／ `/restore` | 管理者: 社内規程・議事録を廃止する（消さない。秘書が学んだことは 409）／ 廃止した・しまったものを戻す（1 年を過ぎたら 409） |
 | `DELETE /v1/admin/knowledge/:id` | 管理者: 秘書が学んだことを消す（社内規程と議事録は 409） |
 | `GET /v1/me/settings` | 本人の個人設定 |
-| `PUT /v1/me/settings/:section` | 個人設定の 1 区分を保存（`profile`・`secretary`・`notifications`・`memory`・`menu`・`brief`・`launcher`）。`launcher`（アプリの一覧。第6.1.1.2節）は、出さない Google のサービスと登録したリンク（20 件まで・名前 20 字まで・https と http だけ・ID とパスワードを含む URL は断る）。`brief`（朝のブリーフの関心の分野と外した項目。第6.5.3.1節）は、秘書が最初の分野を選んだ印を画面から変えさせない |
+| `PUT /v1/me/settings/:section` | 個人設定の 1 区分を保存（`profile`・`secretary`・`notifications`・`memory`・`menu`・`brief`・`launcher`・`display`）。`display`（文字の大きさ。第6.1節）は `textSize` に 70〜130 の 10 刻みの数だけを受け、ほかは 400 で断る。`launcher`（アプリの一覧。第6.1.1.2節）は、出さない Google のサービスと登録したリンク（20 件まで・名前 20 字まで・https と http だけ・ID とパスワードを含む URL は断る）。`brief`（朝のブリーフの関心の分野と外した項目。第6.5.3.1節）は、秘書が最初の分野を選んだ印を画面から変えさせない |
 | `POST /v1/me/voice-test` | 声を試す。本文の秘書の設定（保存の前でもよい）で秘書に名乗らせ、話した文字と声（24 kHz・16 ビットの PCM を base64）を返す。保存しない（仕様書 第10.5.8節） |
 | `PATCH /v1/me/profile` | 表示名の変更 |
 | `GET /v1/me/sessions` | ログイン中の端末 |
