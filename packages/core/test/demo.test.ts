@@ -10,7 +10,8 @@ import type { Notification } from '@m2office/shared';
 import {
   AiUsageMeter, AI_LIMIT_TRIAL_MESSAGE, buildConnector, checkNewDemo, demoBlocked, demoRestrictionOf, demoSubdomain, demoWelcomeText,
   isDemoTenantId, isGuestLoginId, newGuestLoginId, newGuestPassword, seedDemoCompany, DEMO_CARDS, DEMO_COMPANY_NAME, DEMO_ITEMS, DEMO_QUOTES, DEMO_RULES,
-  type AiUsageEntry, type AiUsageStore, type DemoSeedDeps,
+  demoOfficialPackages, loadExtensions, BUILTIN_EXTENSIONS, BUILTIN_TOOLS, OFFICIAL_AGENTS, ToolRegistry,
+  type AiUsageEntry, type AiUsageStore, type DemoSeedDeps, type ExtensionPackage,
 } from '../src/index.js';
 import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
 
@@ -101,26 +102,47 @@ test('見本の会社のデータを入れる。1 つの業務の失敗で止め
   let cards = 0;
   const items: string[] = [];
   const quotes: string[] = [];
+  const enabled: string[] = [];
+  const installed: string[] = [];
+  const pkg = (id: string, connectors = 0) => ({ manifest: { id }, connectors: Array.from({ length: connectors }, () => ({})) }) as unknown as ExtensionPackage;
   const deps: DemoSeedDeps = {
-    settings: async () => ({ company: DEFAULT_TENANT_SETTINGS.company, inventory: DEFAULT_TENANT_SETTINGS.inventory, salesDocs: DEFAULT_TENANT_SETTINGS.salesDocs, onboarding: DEFAULT_TENANT_SETTINGS.onboarding }),
+    settings: async () => ({ company: DEFAULT_TENANT_SETTINGS.company, onboarding: DEFAULT_TENANT_SETTINGS.onboarding }),
     saveSettings: async (_t: string, section: string, value: unknown) => {
       saved.push(section);
       if (section === 'company') assert.equal((value as { legalName: string }).legalName, DEMO_COMPANY_NAME);
-      if (section === 'inventory' || section === 'salesDocs') assert.equal((value as { enabled: boolean }).enabled, true);
       if (section === 'onboarding') assert.ok((value as { agentsReviewedAt: string | null }).agentsReviewedAt);
     },
+    enableBuiltin: async (_t, _u, section) => {
+      // 在庫の品目・見積は、拡張機能を入れた後に入れる
+      assert.equal(items.length + quotes.length, 0);
+      if (section === 'signage') throw new Error('x');
+      enabled.push(section);
+    },
+    officialPackages: () => [pkg('jp.example.a'), pkg('jp.example.with-connector', 1), pkg('jp.example.b')],
+    installOfficial: async (_t, _u, p) => { installed.push(p.manifest.id); },
     saveRule: async (_t, _u, r) => { rules.push(r.title); },
     importCards: async (_t, _u, rows) => { cards = rows.length - 1; },
     createItem: async (_t, _u, i) => { if (i.sku === 'GRS-500') throw new Error('x'); items.push(i.sku); },
     createQuote: async (_t, _u, q) => { quotes.push(q.to); },
   };
   const r = await seedDemoCompany(deps, 'd-x', 'u-g');
-  assert.deepEqual(saved.sort(), ['company', 'inventory', 'onboarding', 'salesDocs']);
+  assert.deepEqual(saved.sort(), ['company', 'onboarding']);
+  // 内蔵の拡張機能はすべて入れる（第23.3.2節「拡張機能」）
+  assert.deepEqual(enabled, BUILTIN_EXTENSIONS.map((b) => b.section).filter((s) => s !== 'signage'));
+  // 公式の拡張機能は、同梱の接続を持つものを除いて導入する
+  assert.deepEqual(installed, ['jp.example.a', 'jp.example.b']);
   assert.equal(rules.length, DEMO_RULES.length);
   assert.equal(cards, DEMO_CARDS.length - 1);
   assert.equal(items.length, DEMO_ITEMS.length - 1);
   assert.equal(quotes.length, DEMO_QUOTES.length);
-  assert.deepEqual(r.failed, ['inventory-items']);
+  assert.deepEqual(r.failed, ['extension:signage', 'inventory-items']);
+});
+
+test('体験版に導入する公式の拡張機能は、同梱の接続を持たないもの（DeepWiki の調べものは除く）', () => {
+  const official = loadExtensions(new URL('../../../extensions', import.meta.url).pathname, new ToolRegistry(BUILTIN_TOOLS), OFFICIAL_AGENTS.map((a) => a.id)).packages;
+  const chosen = demoOfficialPackages(official).map((p) => p.manifest.id);
+  assert.ok(chosen.length > 0 && chosen.length < official.length);
+  for (const p of official) assert.equal(chosen.includes(p.manifest.id), p.connectors.length === 0, p.manifest.id);
 });
 
 function memoryStore() {

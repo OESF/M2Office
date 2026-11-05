@@ -22,5 +22,5 @@ export {
 } from './skill.js';
 export {
   ExtensionHub, bundledConnection, consentSnapshot, decodeFiles, encodeFiles, blockedByDisabledTool, BUILTIN_EXTENSIONS, builtinSection,
-  type TenantExtensions, type ExtensionEntry, type ConsentSnapshot, type ExtensionHubDeps,
+  type TenantExtensions, type ExtensionEntry, type ConsentSnapshot, type ExtensionHubDeps, type BuiltinSection,
 } from './hub.js';

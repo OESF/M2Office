@@ -13,16 +13,17 @@ import { randomUUID } from 'node:crypto';
 import { bodyLimit } from 'hono/body-limit';
 import { Hono } from 'hono';
 import { maskClientId,
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import { type BookingSourceRecord,
-  bundledConnection, builtinSection, consentSnapshot, encodeFiles, unpackExtension, EXTENSION_FILE_MAX_BYTES,
-  ensureHrCompartment, detectKind, MAX_FILE_BYTES, LAW_BOOK, itemRule, createPkce, buildGoogleAuthUrl, revokeGoogleToken, MAILBOX_SCOPES, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
+  builtinSection, encodeFiles, isDemoTenantId, unpackExtension, EXTENSION_FILE_MAX_BYTES,
+  detectKind, MAX_FILE_BYTES, LAW_BOOK, itemRule, createPkce, buildGoogleAuthUrl, revokeGoogleToken, MAILBOX_SCOPES, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { tenantOrigin } from '../tenant-origin.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 import { parseScope, saveScope } from './access.js';
+import { installExtensionPackage, setBuiltinEnabled } from '../extension-switch.js';
 import { googleClient, returnTo } from './connections.js';
 
 /** 危険度を利用者向けの言葉にする。 */
@@ -990,25 +991,11 @@ export function extensionsRoute(deps: AppDeps) {
     const parsed = body.scope === undefined ? null : await parseScope(deps, tenant.id, body.scope);
     if (parsed && 'error' in parsed) return c.json({ error: parsed.error }, 400);
     const { pkg } = entry;
-    const now = new Date().toISOString();
-    const consented = consentSnapshot(pkg);
-    await deps.repo.installExtension({
-      tenantId: tenant.id, extensionId: pkg.manifest.id, version: pkg.manifest.version,
-      consentedPermissions: consented, installedBy: user.id, installedAt: now, enabled: true,
-    });
-    // 同梱の接続を会社の接続として登録する。あれば使い回し、接続先が違えば置き換えずに知らせる（仕様書 第12.11.0節）
-    const connections = await deps.repo.listConnections(tenant.id);
-    const notices: string[] = [];
-    for (const decl of pkg.connectors) {
-      const have = connections.find((x) => x.id === decl.id);
-      if (!have) await deps.repo.saveConnection(bundledConnection(tenant.id, decl, pkg.manifest.id, user.id));
-      else if (have.url !== decl.url) notices.push(`会社の接続「${decl.id}」は別の接続先（${have.url}）で登録済みのため、そのまま使います`);
+    // 体験用の会社では会社の接続を作れない（データベースの仕掛けで断る）。同梱の接続を持つものは、導入の記録を残す前に断る（第23.3.2節）
+    if (isDemoTenantId(tenant.id) && pkg.connectors.length > 0) {
+      return c.json({ error: '体験版では、会社の接続が要る拡張機能は導入できません' }, 403);
     }
-    await deps.repo.appendAudit({
-      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'extension.install',
-      targetType: 'extension', targetId: pkg.manifest.id,
-      detail: { version: pkg.manifest.version, origin: entry.origin, permissions: consented }, occurredAt: now,
-    });
+    const notices = await installExtensionPackage(deps.repo, tenant.id, user.id, pkg, entry.origin);
     if (parsed) await saveScope(deps, tenant.id, user.id, pkg.manifest.id, parsed.scope);
     return c.json({ ok: true, notices });
   });
@@ -1066,67 +1053,7 @@ export function extensionsRoute(deps: AppDeps) {
     // 内蔵の拡張は会社の設定で入り切りする。切ってもデータは消さない（第12.13節）
     const section = entry.origin === 'builtin' ? builtinSection(id) : null;
     if (section) {
-      const settings = await deps.repo.getTenantSettings(tenant.id);
-      if (section === 'cards') await deps.repo.saveTenantSettings(tenant.id, 'cards', { ...settings.cards, enabled: body.enabled }, user.id);
-      else if (section === 'inventory') await deps.repo.saveTenantSettings(tenant.id, 'inventory', { ...settings.inventory, enabled: body.enabled }, user.id);
-      else if (section === 'webColumns') await deps.repo.saveTenantSettings(tenant.id, 'webColumns', { ...settings.webColumns, enabled: body.enabled }, user.id);
-      else if (section === 'inquiries') await deps.repo.saveTenantSettings(tenant.id, 'inquiries', { ...settings.inquiries, enabled: body.enabled }, user.id);
-      else if (section === 'competitors') await deps.repo.saveTenantSettings(tenant.id, 'competitors', { ...settings.competitors, enabled: body.enabled }, user.id);
-      else if (section === 'announcements') await deps.repo.saveTenantSettings(tenant.id, 'announcements', { ...settings.announcements, enabled: body.enabled }, user.id);
-      else if (section === 'webReview') await deps.repo.saveTenantSettings(tenant.id, 'webReview', { ...settings.webReview, enabled: body.enabled }, user.id);
-      else if (section === 'contracts') {
-        await deps.repo.saveTenantSettings(tenant.id, 'contracts', { ...settings.contracts, enabled: body.enabled }, user.id);
-        // 入れたら、入れた管理者のドライブに契約書の置き場を作る（まだ無ければ。作れなくても入れる。第38.7節）
-        if (body.enabled && !settings.contracts.storage) await deps.contracts.service.connectStorage({ tenantId: tenant.id, userId: user.id }).catch(() => null);
-      }
-      else if (section === 'salesDocs') {
-        await deps.repo.saveTenantSettings(tenant.id, 'salesDocs', { ...settings.salesDocs, enabled: body.enabled }, user.id);
-        // 初めて入れたときは、利用範囲を管理者だけにする（第42.9節。管理者は「利用できる人」で経理・営業などのグループに広げる）
-        if (body.enabled && !settings.access.scopes[SALES_DOCS_EXTENSION_ID]) {
-          const admins = (await deps.repo.listUsers(tenant.id)).filter((u) => u.status === 'active' && u.roles.includes('admin')).map((u) => u.id);
-          await deps.repo.saveTenantSettings(tenant.id, 'access', { ...settings.access, scopes: { ...settings.access.scopes, [SALES_DOCS_EXTENSION_ID]: { users: admins, groups: [] } } }, user.id);
-        }
-      }
-      else if (section === 'reservations') await deps.repo.saveTenantSettings(tenant.id, 'reservations', { ...settings.reservations, enabled: body.enabled }, user.id);
-      else if (section === 'members') await deps.repo.saveTenantSettings(tenant.id, 'members', { ...settings.members, enabled: body.enabled }, user.id);
-      else if (section === 'printDesigns') await deps.repo.saveTenantSettings(tenant.id, 'printDesigns', { ...settings.printDesigns, enabled: body.enabled }, user.id);
-      else if (section === 'subsidies') {
-        await deps.repo.saveTenantSettings(tenant.id, 'subsidies', { ...settings.subsidies, enabled: body.enabled }, user.id);
-        // 初めて入れたときは、利用範囲を管理者だけにする（第39.2節。管理者は「利用できる人」で広げられる）
-        if (body.enabled && !settings.access.scopes[SUBSIDIES_EXTENSION_ID]) {
-          const admins = (await deps.repo.listUsers(tenant.id)).filter((u) => u.status === 'active' && u.roles.includes('admin')).map((u) => u.id);
-          await deps.repo.saveTenantSettings(tenant.id, 'access', { ...settings.access, scopes: { ...settings.access.scopes, [SUBSIDIES_EXTENSION_ID]: { users: admins, groups: [] } } }, user.id);
-        }
-      }
-      else if (section === 'decisions') {
-        await deps.repo.saveTenantSettings(tenant.id, 'decisions', { ...settings.decisions, enabled: body.enabled }, user.id);
-        // 初めて入れたときは、利用範囲を管理者だけにする（第43.2節。経営の相談のため。管理者は「利用できる人」で広げられる）
-        if (body.enabled && !settings.access.scopes[DECISIONS_EXTENSION_ID]) {
-          const admins = (await deps.repo.listUsers(tenant.id)).filter((u) => u.status === 'active' && u.roles.includes('admin')).map((u) => u.id);
-          await deps.repo.saveTenantSettings(tenant.id, 'access', { ...settings.access, scopes: { ...settings.access.scopes, [DECISIONS_EXTENSION_ID]: { users: admins, groups: [] } } }, user.id);
-        }
-      }
-      else if (section === 'signage') {
-        await deps.repo.saveTenantSettings(tenant.id, 'signage', { ...settings.signage, enabled: body.enabled }, user.id);
-        // 切ったら、画面は無地にする（登録・素材・流れは消さない。第31.2節）
-        deps.signage.service.settingsChanged(tenant.id);
-      } else await deps.repo.saveTenantSettings(tenant.id, 'hr', { ...settings.hr, enabled: body.enabled }, user.id);
-      // 人事・給与を入れたら、人事区画を用意し、入れた管理者を区画に入れる（仕様書 第30.2節）
-      if (section === 'hr' && body.enabled) {
-        const prepared = await ensureHrCompartment(deps.repo, tenant.id, user.id);
-        if (prepared.created || prepared.added) {
-          await deps.repo.appendAudit({
-            id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
-            action: prepared.created ? 'compartment.create' : 'compartment.enter',
-            targetType: 'compartment', targetId: 'hr', detail: { by: 'hr.enable', member: user.id }, occurredAt: new Date().toISOString(),
-          });
-        }
-      }
-      await deps.repo.appendAudit({
-        id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
-        action: body.enabled ? 'extension.enable' : 'extension.disable',
-        targetType: 'extension', targetId: id, detail: { builtin: true }, occurredAt: new Date().toISOString(),
-      });
+      await setBuiltinEnabled(deps, tenant.id, user.id, id, section, body.enabled);
       return c.json({ ok: true, enabled: body.enabled });
     }
     if (body.enabled && entry.needsReconsent) {

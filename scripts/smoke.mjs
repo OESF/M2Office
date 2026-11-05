@@ -8845,7 +8845,23 @@ console.log('\n■ 133. 体験版（ゲストの表はアプリが読めない�
       wrong.status === 401 && good.status === 200 && me.status === 200 && me.body.tenant?.id === guest.tenant_id && me.body.demo?.terms?.length > 0 && seeded >= 3
         ? ok('ゲスト ID とパスワードでログインでき、ログイン状態から体験用の会社が決まり、最初のログインで見本のデータが入る')
         : ng('ゲストのログインが違う', JSON.stringify({ wrong: wrong.status, good: good.status, me: me.status, tenant: me.body?.tenant?.id, seeded }).slice(0, 300));
+      // 拡張機能はすべて入った状態で始まる。同梱の接続を持つもの（DeepWiki の調べもの）だけは入れない（第23.3.2節「拡張機能」）
+      const exts = await demoCall('/v1/admin/extensions', { cookie: good.cookie });
+      const items = exts.body.items ?? [];
+      const off = items.filter((e) => !e.active && !(e.connectors ?? []).length).map((e) => e.id);
+      const withConnector = items.filter((e) => (e.connectors ?? []).length > 0);
+      const hrRoom = (await owner.query(`select count(*)::int as n from compartments where tenant_id = $1 and name = 'hr'`, [guest.tenant_id]).catch(() => ({ rows: [{ n: -1 }] }))).rows[0].n;
+      exts.status === 200 && items.length > 16 && off.length === 0 && withConnector.length > 0 && withConnector.every((e) => !e.active) && hrRoom === 1
+        ? ok('体験版は拡張機能をすべて入れた状態で始まり（人事区画も用意する）、同梱の接続を持つものだけは入れない')
+        : ng('体験版の拡張機能の入り方が違う', JSON.stringify({ status: exts.status, count: items.length, off, withConnector: withConnector.map((e) => [e.id, e.active]), hrRoom }).slice(0, 400));
       const csrf = good.body.csrfToken;
+      // 同梱の接続を持つものは、体験版の中から導入しようとしても断り、導入の記録を残さない（一覧が作れなくならないように）
+      const wiki = withConnector[0];
+      const wikiInstall = wiki ? await demoCall(`/v1/admin/extensions/${wiki.id}/install`, { method: 'POST', body: { consent: true }, cookie: good.cookie, csrf }) : { status: 0 };
+      const afterList = await demoCall('/v1/admin/extensions', { cookie: good.cookie });
+      wikiInstall.status === 403 && afterList.status === 200 && !(afterList.body.items ?? []).find((e) => e.id === wiki?.id)?.installed
+        ? ok('体験版では、会社の接続が要る拡張機能の導入を断り、拡張機能の一覧はそのまま見られる')
+        : ng('体験版で接続の要る拡張機能の導入が断られない', JSON.stringify({ install: wikiInstall.status, list: afterList.status }));
       const mcp = await demoCall('/v1/admin/connections/mcp', { method: 'POST', body: { name: 'x', url: 'https://example.com/mcp' }, cookie: good.cookie, csrf });
       const invite = await demoCall('/v1/admin/users', { method: 'POST', body: { email: 'friend@example.co.jp' }, cookie: good.cookie, csrf });
       const google = await demoCall('/v1/auth/google/start', {});

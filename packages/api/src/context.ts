@@ -20,7 +20,7 @@ import {
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
   InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
-  PostgresDemoStore, demoSubdomain, isDemoTenantId, seedDemoCompany, type DemoStore,
+  PostgresDemoStore, demoSubdomain, isDemoTenantId, seedDemoCompany, BUILTIN_EXTENSIONS, type DemoStore,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
 import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, fileInputKey } from '@m2office/shared';
@@ -34,6 +34,7 @@ import { HandoffStore } from './auth/handoff.js';
 import { DebugLog, debugEnabled } from './debug/log.js';
 import { QUIET_TRACES, traceTitle } from './debug/trace.js';
 import { printDriveFor } from './print-drive.js';
+import { installExtensionPackage, setBuiltinEnabled } from './extension-switch.js';
 
 /** API プロセス全体で共有する依存。 */
 export interface AppDeps {
@@ -975,7 +976,14 @@ export function buildDeps(): AppDeps {
       challengeSecret: createHash('sha256').update(`demo-challenge|${process.env['M2OFFICE_SECRET_KEY'] ?? 'development-only'}`).digest('hex'),
       seed: (tenantId, userId) => seedDemoCompany({
         settings: (t) => repo.getTenantSettings(t),
-        saveSettings: (t: string, section: 'company' | 'inventory' | 'salesDocs' | 'onboarding', value: never, by: string) => repo.saveTenantSettings(t, section, value, by),
+        saveSettings: (t: string, section: 'company' | 'onboarding', value: never, by: string) => repo.saveTenantSettings(t, section, value, by),
+        // 拡張機能は、管理者がスイッチを入れたとき・導入したときと同じ道で入れる（第23.3.2節）
+        enableBuiltin: (t, by, section) => {
+          const id = BUILTIN_EXTENSIONS.find((b) => b.section === section)!.pkg.manifest.id;
+          return setBuiltinEnabled({ repo, contracts, signage }, t, by, id, section, true);
+        },
+        officialPackages: () => hub.officialPackages(),
+        installOfficial: async (t, by, pkg) => { await installExtensionPackage(repo, t, by, pkg, 'official'); },
         saveRule: async (t, by, r) => {
           const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
           await repo.saveRuleVersion({

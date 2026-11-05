@@ -4,9 +4,12 @@
  * 見本の中身はこのファイルで持つ。実在の会社や人の名前を使わず、会社名には「見本」を入れ、アドレスは `.example` のドメインにする。
  * 予定・メール・タスク・チャットは見本の接続口（ADR-0003）が出すので、ここでは入れない。
  * 入れるのは、会社情報・社内規程・名刺（会社で共有）・在庫の品目・見積と受注。各業務のいつもの口を通して入れる（表に直接は書かない）。
+ * 拡張機能はすべて入れた状態にする（第 0.519.0 版。同梱の接続を持つものは、体験用の会社では会社の接続を作れないため除く）。
  */
 
-import type { CompanyInfo, InventorySettings, SalesDocsSettings, SalesItem, TenantOnboarding } from '@m2office/shared';
+import type { CompanyInfo, SalesItem, TenantOnboarding } from '@m2office/shared';
+import { BUILTIN_EXTENSIONS, type BuiltinSection } from '../extensions/hub.js';
+import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 見本の会社名（体験用の会社の名前。画面の左上とログインの画面に出る）。 */
 export const DEMO_COMPANY_NAME = '見本精工株式会社';
@@ -106,11 +109,17 @@ export const DEMO_QUOTES: readonly { to: string; items: SalesItem[]; order: bool
 export interface DemoSeedDeps {
   /** 会社の設定の 1 区分を保存する。 */
   saveSettings(tenantId: string, section: 'company', value: CompanyInfo, by: string): Promise<void>;
-  saveSettings(tenantId: string, section: 'inventory', value: InventorySettings, by: string): Promise<void>;
-  saveSettings(tenantId: string, section: 'salesDocs', value: SalesDocsSettings, by: string): Promise<void>;
   saveSettings(tenantId: string, section: 'onboarding', value: TenantOnboarding, by: string): Promise<void>;
   /** いまの設定（既定と合わせたもの）。 */
-  settings(tenantId: string): Promise<{ company: CompanyInfo; inventory: InventorySettings; salesDocs: SalesDocsSettings; onboarding: TenantOnboarding }>;
+  settings(tenantId: string): Promise<{ company: CompanyInfo; onboarding: TenantOnboarding }>;
+  /**
+   * 内蔵の拡張機能を入れる。管理者がスイッチを入れたときと同じ道を通す（初めて入れたときの利用範囲・人事区画の用意を含む）。
+   */
+  enableBuiltin(tenantId: string, userId: string, section: BuiltinSection): Promise<void>;
+  /** 公式の配布元の拡張機能。 */
+  officialPackages(): readonly ExtensionPackage[];
+  /** 公式の配布元の拡張機能を、同意して導入した状態にする（体験の管理者が使う）。 */
+  installOfficial(tenantId: string, userId: string, pkg: ExtensionPackage): Promise<void>;
   /** 社内規程を登録する。 */
   saveRule(tenantId: string, userId: string, rule: { title: string; body: string }): Promise<void>;
   /** 名刺を表から取り込む（会社で共有）。 */
@@ -119,6 +128,15 @@ export interface DemoSeedDeps {
   createItem(tenantId: string, userId: string, item: (typeof DEMO_ITEMS)[number]): Promise<void>;
   /** 見積を作る。受注にするなら、見積から受注を作る。 */
   createQuote(tenantId: string, userId: string, quote: (typeof DEMO_QUOTES)[number]): Promise<void>;
+}
+
+/**
+ * 体験用の会社に導入する公式の拡張機能を選ぶ。
+ *
+ * @remarks 同梱の接続を持つものは除く。体験用の会社では、会社の接続をデータベースの仕掛けで断るため（第23.3.2節）
+ */
+export function demoOfficialPackages(packages: readonly ExtensionPackage[]): ExtensionPackage[] {
+  return packages.filter((p) => p.connectors.length === 0);
 }
 
 /**
@@ -136,8 +154,9 @@ export async function seedDemoCompany(deps: DemoSeedDeps, tenantId: string, user
   await step('company', () => deps.saveSettings(tenantId, 'company', { ...s.company, ...DEMO_COMPANY }, userId));
   // はじめの案内（業務の見直し・従業員への案内）は済んだことにする。招待はできないため
   await step('onboarding', () => deps.saveSettings(tenantId, 'onboarding', { ...s.onboarding, agentsReviewedAt: now, employeesNotifiedAt: now }, userId));
-  await step('inventory', () => deps.saveSettings(tenantId, 'inventory', { ...s.inventory, enabled: true }, userId));
-  await step('salesDocs', () => deps.saveSettings(tenantId, 'salesDocs', { ...s.salesDocs, enabled: true }, userId));
+  // 拡張機能はすべて入れる。在庫の品目・見積を入れる前に入れておく（第 0.519.0 版）
+  for (const { section } of BUILTIN_EXTENSIONS) await step(`extension:${section}`, () => deps.enableBuiltin(tenantId, userId, section));
+  for (const pkg of demoOfficialPackages(deps.officialPackages())) await step(`extension:${pkg.manifest.id}`, () => deps.installOfficial(tenantId, userId, pkg));
   for (const r of DEMO_RULES) await step('rules', () => deps.saveRule(tenantId, userId, r));
   await step('cards', () => deps.importCards(tenantId, userId, DEMO_CARDS.map((r) => [...r])));
   for (const i of DEMO_ITEMS) await step('inventory-items', () => deps.createItem(tenantId, userId, i));

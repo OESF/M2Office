@@ -13,5 +13,5 @@ export {
   demoSignupSource, verifyDemoChallenge, type DemoChallenge, type DemoChallengeSolution, type DemoSignupInput, type DemoSignupRefusal,
 } from './signup.js';
 export {
-  DEMO_COMPANY_NAME, DEMO_COMPANY, DEMO_RULES, DEMO_CARDS, DEMO_ITEMS, DEMO_QUOTES, seedDemoCompany, type DemoSeedDeps,
+  DEMO_COMPANY_NAME, DEMO_COMPANY, DEMO_RULES, DEMO_CARDS, DEMO_ITEMS, DEMO_QUOTES, demoOfficialPackages, seedDemoCompany, type DemoSeedDeps,
 } from './sample.js';
