@@ -45,10 +45,27 @@ const KIND_BY_LABEL = new Map<string, DecisionClaimKind>(
 const HEADER = /^\s*【([^】\n]{1,300})】\s*$/;
 /** 要旨の区切りの行。 */
 const GIST_START = /^\s*要旨\s*[:：]\s*$/;
-/** 要旨の行（`A3-1: …`）。 */
-const GIST_LINE = /^\s*([AB]\d{1,2}-\d)\s*[:：]\s*(.+)$/;
+/** 要旨の行の頭（`A3-1:`）。要旨の文は、頭の後ろを切り出して読む（正規表現で文の終わりまで読ませると、長い空白で遅くなる）。 */
+const GIST_HEAD = /^\s*([AB]\d{1,2}-\d)\s*[:：]/;
 /** 主張の番号。 */
 export const CLAIM_CODE = /^(?:\d:)?(?:[AB]\d{1,2}-\d|人\d{1,3})$/;
+
+/**
+ * 欄の頭の言葉（「論点」など）の後ろを返す。頭の言葉の後ろの「:」は省いてよい。
+ *
+ * @remarks 正規表現の `\s*[:：]?\s*(.+)$` は、空白が長く続くと時間が長さの 2 乗で伸びる（CodeQL の js/polynomial-redos）。文字で比べて切り出す
+ * @returns 頭の言葉で始まらないか、後ろが空なら `null`
+ */
+export function afterLabel(field: string, labels: readonly string[], colon = true): string | null {
+  for (const label of labels) {
+    if (!field.startsWith(label)) continue;
+    let rest = field.slice(label.length).trimStart();
+    if (colon && (rest.startsWith(':') || rest.startsWith('：'))) rest = rest.slice(1);
+    rest = rest.trim();
+    return rest || null;
+  }
+  return null;
+}
 
 /** 見出しの欄の区切り（全角・半角の縦線）。 */
 const splitFields = (inside: string) => inside.split(/[｜|]/).map((f) => f.trim()).filter(Boolean);
@@ -86,12 +103,17 @@ export function parseHeader(line: string): Omit<ParsedClaim, 'body' | 'gist'> | 
   let issue = '';
   let grounds: string[] = [];
   for (const f of fields.slice(2)) {
-    const t = /^(?:対象|→|↩)\s*(.+)$/.exec(f);
-    if (t) { target = t[1]!.replace(/\s+/g, '').replace(/への.*$/, ''); continue; }
-    const i = /^(?:論点|観点)\s*[:：]?\s*(.+)$/.exec(f);
-    if (i) { issue = i[1]!.trim().slice(0, 40); continue; }
-    const g = /^根拠\s*[:：]?\s*(.+)$/.exec(f);
-    if (g) { grounds = splitGrounds(g[1]!); continue; }
+    const t = afterLabel(f, ['対象', '→', '↩'], false);
+    if (t !== null) {
+      const code = t.replace(/\s+/g, '');
+      const to = code.indexOf('への');
+      target = to === -1 ? code : code.slice(0, to);
+      continue;
+    }
+    const i = afterLabel(f, ['論点', '観点']);
+    if (i !== null) { issue = i.slice(0, 40); continue; }
+    const g = afterLabel(f, ['根拠']);
+    if (g !== null) { grounds = splitGrounds(g); continue; }
   }
   return { code, kind, target, issue, grounds };
 }
@@ -112,8 +134,9 @@ export function parseSpeech(text: string, expectedPrefix: string, knownCodes: Re
   for (const line of lines) {
     if (GIST_START.test(line)) { inGists = true; current = null; continue; }
     if (inGists) {
-      const g = GIST_LINE.exec(line);
-      if (g) gists.set(g[1]!, g[2]!.trim().slice(0, 120));
+      const g = GIST_HEAD.exec(line);
+      const gist = g ? line.slice(g[0].length).trim() : '';
+      if (g && gist) gists.set(g[1]!, gist.slice(0, 120));
       continue;
     }
     const h = parseHeader(line);
@@ -163,9 +186,11 @@ export function splitReport(text: string): { heading: string; body: string }[] {
   const out: { heading: string; body: string }[] = [];
   let current: { heading: string; body: string } | null = null;
   for (const line of text.split('\n')) {
-    const h = /^\s*#{2,3}\s*(.+?)\s*$/.exec(line);
-    if (h) {
-      current = { heading: h[1]!.slice(0, 40), body: '' };
+    // 見出しの頭（`##`）だけを正規表現で見て、題は切り出して整える（`(.+?)\s*$` は長い空白で遅くなる）
+    const h = /^\s*#{2,3}/.exec(line);
+    const heading = h ? line.slice(h[0].length).trim() : '';
+    if (h && heading) {
+      current = { heading: heading.slice(0, 40), body: '' };
       out.push(current);
       continue;
     }

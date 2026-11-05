@@ -23,6 +23,7 @@ import { splitUnit } from '../src/inventory/service.js';
 import { readHtml, stripHidden } from '../src/competitors/html.js';
 import { externalRefs } from '../src/signage/service.js';
 import { guessInquiry } from '../src/inquiries/extract.js';
+import { afterLabel, parseHeader, parseSpeech, splitReport } from '../src/decisions/format.js';
 
 /** かかった時間（ミリ秒）。 */
 const ms = (fn: () => unknown) => { const t = performance.now(); fn(); return performance.now() - t; };
@@ -106,4 +107,30 @@ test('問い合わせのメールの本文は 5,000 字で区切って連絡先�
   assert.ok(took < 500, `${Math.round(took)} ms`);
   const d = guessInquiry('見本商事の山田です。taro@example.jp 03-1234-5678 まで', today);
   assert.equal(JSON.stringify(d).includes('taro@example.jp'), true);
+});
+
+test('意思決定支援の発言と報告の読み取りは、空白が長く続く行でもすぐ終わり、ふつうの行は前と同じに読む', () => {
+  const spaces = ' '.repeat(100_000);
+  // 見出しの題・要旨・欄の頭の言葉の後ろに、長い空白をはさんだ行
+  const report = `## 見立て${spaces}x${spaces}y\n本文`;
+  const speech = `【A1-1｜新しい論点｜論点 客離れ｜根拠 材料 4】\n本文\n要旨:\nA1-1:${spaces}a${spaces}b`;
+  for (const [name, fn] of [
+    ['報告の見出し', () => splitReport(report)],
+    ['要旨の行', () => parseSpeech(speech, 'A1-', new Set())],
+    ['欄の頭の言葉', () => afterLabel(`論点${spaces}：${spaces}x${spaces}y`, ['論点'])],
+  ] as const) {
+    const t = ms(fn);
+    assert.ok(t < 300, `${name}（${Math.round(t)} ms）`);
+  }
+  // ふつうの行は前と同じに読む
+  assert.deepEqual(splitReport('前置き\n## 見立て \n値上げは見送る\n### 分かれ目\n客数'), [
+    { heading: '見立て', body: '値上げは見送る' }, { heading: '分かれ目', body: '客数' },
+  ]);
+  assert.deepEqual(parseHeader('【A3-1｜反論｜対象 B2-2への反論｜論点：客離れ｜根拠 材料 4・推測】'), {
+    code: 'A3-1', kind: 'rebut', target: 'B2-2', issue: '客離れ', grounds: ['材料 4', '推測'],
+  });
+  const parsed = parseSpeech('【A1-1｜新しい論点｜論点 競合】\n本文です。\n要旨:\nA1-1： 競合が近くにある', 'A1-', new Set());
+  assert.equal(parsed.claims[0]?.gist, '競合が近くにある');
+  assert.equal(afterLabel('論点', ['論点']), null);
+  assert.equal(afterLabel('対象 B1-1', ['対象'], false), 'B1-1');
 });
