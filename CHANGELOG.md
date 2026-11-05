@@ -8,6 +8,27 @@ M2Office のサービス本体の版ごとの変更を、開発者と拡張機�
 
 仕様書・エージェント定義スキーマ・公開 API・拡張機能の版は、サービス本体の版とは独立しています（リリース規定 第2章）。
 
+## v0.33.0 意思決定支援（2026-11-04）
+
+### 配備で行うこと
+- `npm run db:migrate`（移行 `180_decisions.sql`。表 `decision_sessions`・`decision_materials`・`decision_turns`・`decision_claims`・`decision_issue_states`・`decision_shares`、シーケンス `decision_rev`、`tenant_settings.decisions` の列）
+- 環境変数を追加（どれも任意）: `DECISIONS_POLL_MS`（既定 2000）・`DECISIONS_MAX_CONCURRENT`（既定 3）・`DECISIONS_STREAM_TICK_MS`（既定 500）
+- Google の権限の変更はなし
+- クラウドの形（VPS）: `update.sh` で入れる。`setup.sh` の走らせ直しは要らない。SSE（`GET /v1/decisions/:id/stream`）は `x-accel-buffering: no` を付けて返すので、串の設定はそのままでよい
+- 意思決定支援は会社ごとの内蔵の拡張で、はじめは切ってある。入れると、利用範囲は管理者だけから始まる
+- 巻き戻し: v0.32.1 に戻せば動く（足した表と列は読まれないだけ）。消すなら `drop table decision_shares, decision_issue_states, decision_claims, decision_turns, decision_materials, decision_sessions; drop sequence decision_rev; alter table tenant_settings drop column decisions;`。巻き戻せない変更はなし
+
+### 追加
+- **意思決定支援（AI の討論）** — 経営の判断のお題について、慎重の役と推進の役の AI が社内の材料で討論し、判定の役が見立て・論点の流れ・分かれ目・第三の案・やめる目安を報告する（仕様書 第43章・ADR-0121）。ターン数は 1〜30（既定 10。`DECISION_LIMITS`）。本討論は指定の 7 割までにし、判定の役が決着していない論点を 3 つまで選んで、その論点だけを短く討論する（深掘り）。主張の形から決まりで早めの終わりを見る（新しい論点・修正案・まだ使っていない材料の根拠のどれも無いターンが、本討論は 2 回、深掘りは 1 回続いたら終える）。始め方を変えた 2 つの討論の突き合わせ（討論 2 は推進の役から話し、観点を逆にする。既定は切り）では、割れた論点を「本当の争点」として報告する
+- **討論の推移を見る 3 つの見せ方** — 論点の流れ（主張のつながり・崩された主張・答えの無い主張・分かれ目）、発言の順（全文）、優勢の推移（どの主張で優勢が変わったか）。返しが 1 つだけ続くあいだは字下げせず、分かれたときだけ 2 段まで下げる（`flowRows`）。画面は `packages/web/src/Decisions.tsx`
+- **発言を書かれるそばから流す** — 推論の口に `completeStream?(req, onText)` と `completeStreaming()` を足した（Gemini とローカル AI。OpenAI 互換の SSE は `llm/stream.ts` の `readChatStream`）。ワーカーは 0.5 秒ごとに置き場へ書き足し、行ごとに通し番号 `rev` を振り直す。API の `GET /v1/decisions/:id/stream` は差分を SSE で流し、切れたら `Last-Event-ID`（か `since`）より後からつなぎ直す（第43.11.2節）
+- **意思決定支援の API** — `GET/POST /v1/decisions`、`GET /v1/decisions/people`、`GET /v1/decisions/:id`、`GET /v1/decisions/:id/stream`、`POST /v1/decisions/:id/{interject,stop,continue,dig,materials}`、`PUT /v1/decisions/:id/shares`、`DELETE /v1/decisions/:id`（ゴミ箱。30 日後に消す）。中身は始めた人と共有された人だけに返し、操作は始めた人だけ
+- **材料集めと秘書の取り次ぎ** — 付属の業務 `decisions:gather` を、相談を始めた人の依頼として動かす（人事・給与と、会員の個人を返すツールは持たない）。秘書のツール `decisions.start`・`decisions.add_material`・`decisions.interject`・`decisions.find` を足し、「討論して」「議論して」「賛否を」「相談したい」「突き合わせ」を含む頼みは、照会でなく意思決定支援に回す
+- **ワーカーの DecisionRunner** — 同時に 3 つまで進め、印を 30 秒ごとに新しくし、90 秒で古いとみなして別のワーカーが引き継ぐ。AI の費用は始めた人の `worker:decisions` に付け、上限に当たったら「止めた」にして、報告をまとめられないことを残す。終わったらお知らせ（種類 `decision`）を送る
+
+### 変更
+- **一覧へ戻るボタン** — 戻る印のついた、色を敷いた丸いボタン「〇〇の一覧へ戻る」にした。上のボタンは業務の題名の行の右端に出す（業務の題名は `ViewTitle` で出し、`BackButton` は `createPortal` でその右端の枠に入る。題名の行が無い画面では、その場の左）。すべての業務の詳しい画面に当たる。問い合わせのまとめての削除の後のリンクも、同じボタンにした（仕様書 第6.1.2.2節）
+
 ## v0.32.1 WAF の数の直し（2026-11-04）
 
 ### 配備で行うこと
