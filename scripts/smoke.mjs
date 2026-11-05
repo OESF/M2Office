@@ -8916,5 +8916,136 @@ console.log('\n■ 134. 本人が入れるアバター（入れた画像を先�
   }
 }
 
+console.log('\n■ 135. 意思決定支援（入り切り・利用範囲は管理者だけから・お題の確かめ・ターン数の上限・止める・一言・共有は見るだけ・順次の差分・ゴミ箱・会社の境界。第43章）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const TOPIC = '新しい店を出すか（smoke の確認）';
+  const { rows: [{ now: t0 }] } = await owner.query('select now()');
+  const { rows: saved } = await owner.query(`select tenant_id, decisions, access from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  /** 順次の差分（SSE）の最初の塊だけを読んで閉じる */
+  const firstChunk = async (tenant, path, who = 'admin') => {
+    const ac = new AbortController();
+    const res = await fetch(`${API}${path}`, { signal: ac.signal, headers: { 'x-tenant': tenant, 'x-user': `${who}@${tenant === 'a' ? 'alpha' : 'beta'}.example.jp` } });
+    let text = '';
+    if (res.ok && res.body) {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      const until = Date.now() + 5000;
+      while (Date.now() < until && !/event: change/.test(text)) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        text += dec.decode(value, { stream: true });
+      }
+    }
+    ac.abort();
+    return { status: res.status, type: res.headers.get('content-type') ?? '', buffering: res.headers.get('x-accel-buffering'), text };
+  };
+  try {
+    await owner.query(`update tenant_settings set decisions = null where tenant_id in ('t-alpha', 't-beta')`);
+    const off = await call('a', '/v1/decisions');
+    off.status === 403 ? ok('意思決定支援を切っている会社では使わせない') : ng(`切っているのに使えた（${off.status}）`);
+    const on = await call('a', '/v1/admin/extensions/decisions/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const meAdmin = await call('a', '/v1/me');
+    const meMember = await call('a', '/v1/me', {}, 'member');
+    const memberList = await call('a', '/v1/decisions', {}, 'member');
+    on.status === 200 && meAdmin.body.decisions === true && meMember.body.decisions === false && memberList.status === 403
+      ? ok('初めて入れると、利用範囲は管理者だけ（管理者のメニューにだけ「意思決定支援」が出る）') : ng('利用範囲が違う', JSON.stringify({ on: on.status, admin: meAdmin.body.decisions, member: meMember.body.decisions, list: memberList.status }));
+
+    const empty = await call('a', '/v1/decisions', { method: 'POST', body: JSON.stringify({ topic: '  ' }) });
+    const long = await call('a', '/v1/decisions', { method: 'POST', body: JSON.stringify({ topic: 'あ'.repeat(2001) }) });
+    const strange = await call('a', '/v1/decisions', { method: 'POST', body: JSON.stringify({ topic: TOPIC, fileIds: ['f-none'] }) });
+    empty.status === 400 && long.status === 400 && strange.status === 404
+      ? ok('お題が空・2,000 字を超える・自分のものでない添付は断る') : ng('始める前の確かめが違う', JSON.stringify({ empty: empty.status, long: long.status, file: strange.status }));
+
+    const made = await call('a', '/v1/decisions', { method: 'POST', body: JSON.stringify({ topic: TOPIC, turns: 99 }) });
+    const id = made.body.id ?? '';
+    // 討論はワーカーが進めるので、すぐ止める（見本の推論で討論を回さない）
+    const stop = await call('a', `/v1/decisions/${id}/stop`, { method: 'POST', body: '{}' });
+    const detail = await call('a', `/v1/decisions/${id}`);
+    const ses = detail.body.session ?? {};
+    made.status === 201 && ses.topic === TOPIC && ses.turns === 30 && detail.body.mine === true
+      && !('fileIds' in ses) && !('stopRequested' in ses) && !('workerAt' in ses)
+      ? ok('相談を始められ、ターン数は 30 までに収める（中の印は返さない）') : ng('始めた相談が違う', JSON.stringify({ made: made.status, ses }).slice(0, 400));
+    stop.status === 200 && (ses.status === 'stopped' || ses.progress === '止めています')
+      ? ok(`始めた人は止められる（${ses.status === 'stopped' ? '始める前に止めた' : '止めている'}）`) : ng('止められない', JSON.stringify({ stop: stop.status, status: ses.status, progress: ses.progress }));
+
+    const say = await call('a', `/v1/decisions/${id}/interject`, { method: 'POST', body: JSON.stringify({ text: '家賃は月 30 万円です' }) });
+    const sayEmpty = await call('a', `/v1/decisions/${id}/interject`, { method: 'POST', body: JSON.stringify({ text: '' }) });
+    const afterSay = await call('a', `/v1/decisions/${id}`);
+    const human = (afterSay.body.claims ?? []).find((c) => c.role === 'human');
+    say.status === 200 && sayEmpty.status === 400 && human?.code === '人1' && (afterSay.body.materials ?? []).some((m) => m.kind === 'human')
+      ? ok('経営者の一言は、討論の主張（人1）と材料の両方に残す（空は断る）') : ng('一言の残り方が違う', JSON.stringify({ say: say.status, empty: sayEmpty.status, human }));
+
+    const stream = await firstChunk('a', `/v1/decisions/${id}/stream`);
+    stream.status === 200 && stream.type.startsWith('text/event-stream') && stream.buffering === 'no' && /retry: 2000/.test(stream.text) && /event: change/.test(stream.text)
+      ? ok('順次の差分を SSE で流す（串に溜めさせない印つき）') : ng('順次の差分が違う', JSON.stringify({ ...stream, text: stream.text.slice(0, 200) }));
+
+    // 共有（見るだけ）。一般利用者にも使えるようにしてから確かめる
+    await call('a', '/v1/admin/access/decisions', { method: 'PUT', body: JSON.stringify({ scope: 'all' }) });
+    const beforeShare = await call('a', `/v1/decisions/${id}`, {}, 'member');
+    const people = await call('a', '/v1/decisions/people');
+    const badShare = await call('a', `/v1/decisions/${id}/shares`, { method: 'PUT', body: JSON.stringify({ userIds: ['u-b-member'] }) });
+    const share = await call('a', `/v1/decisions/${id}/shares`, { method: 'PUT', body: JSON.stringify({ userIds: ['u-a-member'] }) });
+    const shared = await call('a', `/v1/decisions/${id}`, {}, 'member');
+    const sharedList = await call('a', '/v1/decisions', {}, 'member');
+    beforeShare.status === 404 && people.body.items?.some((u) => u.id === 'u-a-member') && !people.body.items?.some((u) => u.id === 'u-a-admin')
+      && badShare.status === 400 && share.status === 200 && shared.status === 200 && shared.body.mine === false && sharedList.body.items?.some((x) => x.id === id)
+      ? ok('共有した人だけが見られる（共有の前は 404。ほかの会社の人には共有できない）') : ng('共有の見え方が違う', JSON.stringify({ before: beforeShare.status, bad: badShare.status, share: share.status, shared: shared.status, mine: shared.body.mine }));
+    const memberStop = await call('a', `/v1/decisions/${id}/stop`, { method: 'POST', body: '{}' }, 'member');
+    const memberSay = await call('a', `/v1/decisions/${id}/interject`, { method: 'POST', body: JSON.stringify({ text: 'x' }) }, 'member');
+    const memberShare = await call('a', `/v1/decisions/${id}/shares`, { method: 'PUT', body: JSON.stringify({ userIds: [] }) }, 'member');
+    const memberDel = await call('a', `/v1/decisions/${id}`, { method: 'DELETE' }, 'member');
+    [memberStop, memberSay, memberShare, memberDel].every((r) => r.status === 403)
+      ? ok('共有された人は見るだけ（止める・一言・共有・削除は 403）') : ng('共有された人が操作できた', JSON.stringify([memberStop.status, memberSay.status, memberShare.status, memberDel.status]));
+    await call('a', `/v1/decisions/${id}/shares`, { method: 'PUT', body: JSON.stringify({ userIds: [] }) });
+    const unshared = await call('a', `/v1/decisions/${id}`, {}, 'member');
+    unshared.status === 404 ? ok('共有を外すと、見られなくなる') : ng(`共有を外しても見えた（${unshared.status}）`);
+
+    await call('b', '/v1/admin/extensions/decisions/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const other = await call('b', `/v1/decisions/${id}`);
+    const otherList = await call('b', '/v1/decisions');
+    const otherStream = await firstChunk('b', `/v1/decisions/${id}/stream`);
+    const otherDel = await call('b', `/v1/decisions/${id}`, { method: 'DELETE' });
+    other.status === 404 && !otherList.body.items?.some((x) => x.id === id) && otherStream.status === 404 && otherDel.status === 404
+      ? ok('ほかの会社の相談は見えず、差分も流れず、削除もできない') : ng('ほかの会社の相談に触れた', JSON.stringify({ get: other.status, stream: otherStream.status, del: otherDel.status }));
+
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+      const { rows: seen } = await app.query('select id from decision_sessions where id = $1', [id]);
+      let refused = false;
+      try {
+        await app.query(`insert into decision_sessions (id, tenant_id, created_by, topic) values ('dcs-smoke', 't-alpha', 'u', 'x')`);
+      } catch { refused = true; }
+      await app.query('rollback');
+      seen.length === 0 && refused ? ok('相談の表は、ほかの会社の行を読めず、書けない（行単位の制限）') : ng('ほかの会社の相談の行に触れた', JSON.stringify({ seen: seen.length, refused }));
+    } finally {
+      await app.end();
+    }
+
+    const del = await call('a', `/v1/decisions/${id}`, { method: 'DELETE' });
+    const gone = await call('a', `/v1/decisions/${id}`);
+    const goneList = await call('a', '/v1/decisions');
+    const { rows: kept } = await owner.query('select trashed_at from decision_sessions where id = $1', [id]);
+    del.status === 200 && gone.status === 404 && !goneList.body.items?.some((x) => x.id === id) && kept[0]?.trashed_at
+      ? ok('削除するとゴミ箱に入り、一覧からも消える（30 日は行を残す）') : ng('削除のあとが違う', JSON.stringify({ del: del.status, gone: gone.status, kept: kept.length }));
+  } catch (err) {
+    ng('意思決定支援の確認が途中で止まった', String(err));
+  } finally {
+    await owner.query(`delete from decision_sessions where tenant_id in ('t-alpha', 't-beta') and topic = $1`, [TOPIC]);
+    await owner.query(`delete from jobs where tenant_id = 't-alpha' and agent_id = 'decisions:gather' and created_at >= $1`, [t0]);
+    await owner.query(`delete from notifications where tenant_id = 't-alpha' and kind = 'decision' and created_at >= $1`, [t0]).catch(() => undefined);
+    for (const r of saved) {
+      await owner.query(`update tenant_settings set decisions = $2, access = $3 where tenant_id = $1`,
+        [r.tenant_id, r.decisions ? JSON.stringify(r.decisions) : null, r.access ? JSON.stringify(r.access) : null]);
+    }
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');
