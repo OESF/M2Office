@@ -24,6 +24,7 @@ import {
   PostgresDemoStore, isDemoTenantId,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
+import { patrolLoop } from './patrol.js';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 
@@ -809,7 +810,13 @@ const RECRUITING_PURGE_INTERVAL_MS = 6 * 3_600_000;
 /** 社外との日程調整の返事を見る間隔（第9.5.3.1節。既定 15 分）。 */
 const SCHEDULE_REPLY_INTERVAL_MS = Number(process.env['SCHEDULE_REPLY_INTERVAL_MS'] ?? 15 * 60_000);
 
-while (running) {
+/**
+ * 見回りの 1 回分（定時実行・通知・各業務の見回り・待ち行列の 1 件）。{@link patrolLoop} が止める合図まで繰り返す。
+ *
+ * @remarks 中で投げられた例外は patrolLoop が受け止めて、少し待ってから次の回へ進む（仕様書 第8.6.7.1節「止まらないように」）。
+ * 見回りごとの try・catch は、ほかの見回りを飛ばさないために残す。
+ */
+async function patrolOnce(): Promise<void> {
   let handled = false;
 
   if (Date.now() - lastScheduleCheck >= SCHEDULE_INTERVAL_MS) {
@@ -1235,7 +1242,7 @@ while (running) {
     if (publicationRefreshedOn !== today) {
       publicationRefreshedOn = today;
       try {
-        const n = await inventoryPublisher.refreshAll(new Date());
+        const n = (await inventoryPublisher?.refreshAll(new Date())) ?? 0;
         if (n > 0) log.info('在庫の公開を作り直しました', { tenants: n });
       } catch (err) {
         log.error('在庫の公開の作り直しで例外が発生しました', { err });
@@ -1250,7 +1257,7 @@ while (running) {
     if (inventoryWatchedOn !== today && jst.getUTCHours() >= INVENTORY_WATCH_HOUR) {
       inventoryWatchedOn = today;
       try {
-        const n = await inventoryWatch.dailyAll(new Date());
+        const n = (await inventoryWatch?.dailyAll(new Date())) ?? 0;
         if (n > 0) log.info('在庫の見張りの知らせを送りました', { notifications: n });
       } catch (err) {
         log.error('在庫の見張りで例外が発生しました', { err });
@@ -1262,10 +1269,14 @@ while (running) {
   {
     const jst = new Date(Date.now() + 9 * 3_600_000);
     const today = jst.toISOString().slice(0, 10);
-    if (leaveWatchedOn !== today && jst.getUTCHours() >= INVENTORY_WATCH_HOUR) {
+    // 会社の一覧が読めたときだけ「今日は済んだ」にする（データベースが切れていたら、次の回に見回り直す）
+    const tenants = leaveWatchedOn !== today && jst.getUTCHours() >= INVENTORY_WATCH_HOUR
+      ? await repo.listTenantIds().catch((err) => { log.warn('有給と労務の期限の見回りで、会社の一覧を読めませんでした。次の回に見回り直します', { err }); return null; })
+      : null;
+    if (tenants) {
       leaveWatchedOn = today;
       let n = 0;
-      for (const tenantId of await repo.listTenantIds()) {
+      for (const tenantId of tenants) {
         try {
           n += await attendance.daily(tenantId);
           n += await laborCalendar.daily(tenantId);
@@ -1280,7 +1291,7 @@ while (running) {
   // サイネージの見回り（第31.5.1節）。ふだん動いている時間帯に 5 分つながらない画面を知らせる。会社ごとの失敗はほかの会社を止めない
   if (Date.now() - lastSignageCheck >= SIGNAGE_INTERVAL_MS) {
     lastSignageCheck = Date.now();
-    for (const tenantId of await repo.listTenantIds()) {
+    for (const tenantId of await repo.listTenantIds().catch(() => [] as string[])) {
       try {
         const r = await signage.sweep(tenantId);
         if (r.notified > 0) log.info('つながらないサイネージの画面を知らせました', { tenantId, screens: r.notified });
@@ -1309,7 +1320,7 @@ while (running) {
   // 問い合わせの窓口のアカウントのメールを読む（第33.18節）。会社ごとの失敗はほかの会社を止めない
   if (Date.now() - lastInquiryMailCheck >= INQUIRY_MAIL_INTERVAL_MS) {
     lastInquiryMailCheck = Date.now();
-    for (const tenantId of await repo.listTenantIds()) {
+    for (const tenantId of await repo.listTenantIds().catch(() => [] as string[])) {
       try {
         const r = await inquiries.ingest(tenantId, new Date());
         if (r.created + r.appended + r.skipped + r.sent > 0) log.info('問い合わせの窓口のメールを読みました', { tenantId, ...r });
@@ -1481,7 +1492,7 @@ while (running) {
   // 秘書が学んだことの整理（第11.11.4節）。会社ごとの失敗はほかの会社を止めない
   if (Date.now() - lastConsolidateCheck >= CONSOLIDATE_INTERVAL_MS) {
     lastConsolidateCheck = Date.now();
-    for (const tenantId of await repo.listTenantIds()) {
+    for (const tenantId of await repo.listTenantIds().catch(() => [] as string[])) {
       try {
         const now = new Date();
         if (!(await consolidator.due(tenantId, now))) continue;
@@ -1535,6 +1546,8 @@ while (running) {
 
   if (!handled) await sleep(POLL_INTERVAL_MS);
 }
+
+await patrolLoop({ running: () => running, once: patrolOnce, sleep, log });
 
 log.info('停止しました');
 await repo.close();
