@@ -13,7 +13,7 @@ import type {
   Approval, Artifact, AuditEvent, Brief, Job, Notification, Run, RunStep, Schedule, Session,
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings,
 } from '@m2office/shared';
-import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS, isTextSize } from '@m2office/shared';
+import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, STANDARD_SYNONYMS, normalizeTextSize } from '@m2office/shared';
 import type { AgentEvent, Plan, PlanStep, DecidedApproval, AuditQuery, CompartmentAssignment, Conversation, ConversationDigest, MemoryCandidate, Promotion, CredentialKind, GoogleConnection, UserPhoto, TenantCredential, TenantConnection, ConnectionSecret, UserConnection, DisabledConnectorTool, InstalledExtension, PrivateExtension, KnowledgeEmbedItem, KnowledgeEmbedStatus, KnowledgeItem, KnowledgeSearchOptions, KnowledgeSearchResult, KnowledgeSectionView, KnowledgeStatus, KnowledgeVersion, Memory, MemoryEmbedItem, CaseNote, LiveRecording, QuoteRecord, ScheduleRequest, Repository, RunStatRow, UserProfile } from './types.js';
 import { SPLIT_VERSION, citationOf, splitKnowledge } from '../knowledge/sections.js';
 import { FUSION_DEPTH, SEARCH_CANDIDATES, SEMANTIC_THRESHOLD, asksOldVersion, bigrams, expandTerms, extractTerms, fuseRankings, limitSections, normalizeForSearch, orderSections, rankSections, rewritesOf } from '../knowledge/search.js';
@@ -1881,8 +1881,8 @@ export class PostgresRepository implements Repository {
       // 朝のブリーフの中身（移行 037。仕様書 第9.5.5.1.1節）
       brief: { ...d.brief, ...(r.brief ?? {}) },
       onboarding: { ...d.onboarding, ...(r.onboarding ?? {}) },
-      // 文字の大きさ（移行 181。仕様書 第6.1節）。知らない値は既定に戻す
-      display: { textSize: isTextSize((r.display as Partial<UserSettings['display']> | null)?.textSize) ? (r.display as UserSettings['display']).textSize : d.display.textSize },
+      // 文字の大きさ（移行 181。仕様書 第6.1節）。3 段の頃の値は近い段に読み替え、知らない値は既定に戻す
+      display: { textSize: normalizeTextSize((r.display as { textSize?: unknown } | null)?.textSize) ?? d.display.textSize },
     };
   }
 

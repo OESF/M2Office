@@ -576,24 +576,36 @@ export interface UserSettings {
   };
 }
 
-/** 文字の大きさの段（仕様書 第6.1節、ADR-0122）。小さい順に並べる。 */
-export type TextSize = 'small' | 'normal' | 'large';
+/** 文字の大きさの段（仕様書 第6.1節、ADR-0122）。標準を 100 とした百分率で、10 ずつ 70 から 130 まで。 */
+export type TextSize = 70 | 80 | 90 | 100 | 110 | 120 | 130;
+
+/** 標準の文字の大きさ（既定。「標準」のボタンで戻る段）。 */
+export const TEXT_SIZE_STANDARD: TextSize = 100;
 
 /**
- * 文字の大きさの段と、その呼び方・倍率（仕様書 第6.1節の表）。
+ * 文字の大きさの段と、その呼び方・倍率（仕様書 第6.1節の表）。小さい順に並べる。
  *
  * 画面は `font`・`line`・`space` を CSS の `--font-scale`・`--line-scale`・`--space-scale` に入れる。
+ * 文字と余白は同じ割合で変え、行間の割合は変えない（行間は文字に合わせて広がる）。
  * 「小さく」「大きく」は、この並びで 1 段ずつ動かす（{@link stepTextSize}）。
  */
-export const TEXT_SIZES: readonly { id: TextSize; label: string; font: number; line: number; space: number }[] = [
-  { id: 'small', label: '小さい', font: 0.875, line: 0.9, space: 0.9 },
-  { id: 'normal', label: '標準', font: 1, line: 1, space: 1 },
-  { id: 'large', label: '大きい', font: 1.2, line: 1, space: 1.2 },
-];
+export const TEXT_SIZES: readonly { id: TextSize; label: string; font: number; line: number; space: number }[] =
+  ([70, 80, 90, 100, 110, 120, 130] as const).map((id) => ({ id, label: `${id}%`, font: id / 100, line: 1, space: id / 100 }));
 
-/** 文字の大きさの段か。保存された値や頼まれた値を確かめるのに使う。 */
+/** 文字の大きさの段か。頼まれた値を確かめるのに使う。 */
 export function isTextSize(v: unknown): v is TextSize {
   return TEXT_SIZES.some((t) => t.id === v);
+}
+
+/**
+ * 保存された値を段にそろえる。第 0.518.0 版の 3 段の呼び方（`small`・`normal`・`large`）は、近い段に読み替える。
+ *
+ * @returns 段。知らない値なら `null`（呼ぶ側で標準に戻す）
+ */
+export function normalizeTextSize(v: unknown): TextSize | null {
+  if (isTextSize(v)) return v;
+  if (typeof v === 'string' && /^\d+$/.test(v) && isTextSize(Number(v))) return Number(v) as TextSize;
+  return v === 'small' ? 90 : v === 'normal' ? 100 : v === 'large' ? 120 : null;
 }
 
 /**
@@ -605,7 +617,8 @@ export function isTextSize(v: unknown): v is TextSize {
  */
 export function stepTextSize(from: TextSize, dir: 1 | -1): TextSize {
   const i = TEXT_SIZES.findIndex((t) => t.id === from);
-  const next = Math.min(TEXT_SIZES.length - 1, Math.max(0, (i === -1 ? 1 : i) + dir));
+  const base = i === -1 ? TEXT_SIZES.findIndex((t) => t.id === TEXT_SIZE_STANDARD) : i;
+  const next = Math.min(TEXT_SIZES.length - 1, Math.max(0, base + dir));
   return TEXT_SIZES[next]!.id;
 }
 
@@ -730,7 +743,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   launcher: { hidden: [], links: [] },
   menu: { hidden: [], order: [], pinned: null, categories: [], categoryOf: {} },
   brief: { topics: [], omit: [], weeklyOmit: [], seededAt: null, seedNote: false },
-  display: { textSize: 'normal' },
+  display: { textSize: 100 },
   onboarding: { tourCompletedAt: null, morningBriefAt: null, weeklyBriefAt: null },
 };
 

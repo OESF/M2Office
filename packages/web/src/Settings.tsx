@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { AVATAR_PRESETS, TEXT_SIZES, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type AppBindingView, type BriefSettings, type UserSettings } from '@m2office/shared';
+import { AVATAR_PRESETS, TEXT_SIZES, TEXT_SIZE_STANDARD, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type AppBindingView, type BriefSettings, type UserSettings } from '@m2office/shared';
 import {
   api, describeError, type MyConnectionView,
   type AgentSummary, type ConversationView, type Me, type MemoryView,
@@ -821,8 +821,9 @@ function DisplaySettings() {
       <h4>文字の大きさ</h4>
       <div className="text-size-step" role="group" aria-label="文字の大きさ">
         <button type="button" className="btn ghost" disabled={at <= 0} onClick={() => text.step(-1)}>小さく</button>
-        <span className="text-size-now" aria-live="polite">{TEXT_SIZES[at]?.label ?? '標準'}</span>
+        <span className="text-size-now" aria-live="polite">{TEXT_SIZES[at]?.label ?? `${text.size}%`}</span>
         <button type="button" className="btn ghost" disabled={at >= TEXT_SIZES.length - 1} onClick={() => text.step(1)}>大きく</button>
+        <button type="button" className="btn ghost" disabled={text.size === TEXT_SIZE_STANDARD} onClick={text.reset}>標準</button>
       </div>
       {text.error && <p className="error small">{text.error}</p>}
     </div>

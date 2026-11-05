@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { canDecide, TEXT_SIZES, stepTextSize, type UserSettings } from '@m2office/shared';
+import { canDecide, TEXT_SIZES, TEXT_SIZE_STANDARD, stepTextSize, type TextSize, type UserSettings } from '@m2office/shared';
 import { withCompartments } from '../engine/run-access.js';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
@@ -312,9 +312,13 @@ const TEXT_SMALLER = [
   new RegExp(TEXT_LEAD + String.raw`(?:小さく(?!て)|縮小)`),
   new RegExp(TEXT_LEAD + String.raw`大き(?:すぎ|過ぎ)`),
 ];
+/** 「文字の大きさを標準に戻して」「字を元の大きさに」。標準（100%）に戻す。 */
+const TEXT_RESET = [
+  new RegExp(TEXT_LEAD + String.raw`(?:標準|元|もと|普通|ふつう|100\s*[%％])(?:の大きさ|のサイズ)?\s*に`),
+];
 
 /**
- * 「文字を大きくして」「字を小さく」に応える。本人の文字の大きさを 1 段ずつ変える（仕様書 第6.1節、ADR-0122）。
+ * 「文字を大きくして」「字を小さく」「文字を標準に戻して」に応える。本人の文字の大きさを 10% ずつ変える・標準に戻す（仕様書 第6.1節、ADR-0122）。
  *
  * @remarks
  * 危険度は本人の表示の設定を変えるだけ（社外にも、ほかの人にも出ない）。変えた後の段を `display` で返し、画面がすぐに当てる。
@@ -323,19 +327,21 @@ const TEXT_SMALLER = [
 const textSize: DirectQuery = {
   id: 'text-size',
   label: '文字の大きさ',
-  patterns: [...TEXT_BIGGER, ...TEXT_SMALLER],
+  patterns: [...TEXT_RESET, ...TEXT_BIGGER, ...TEXT_SMALLER],
   compartment: null,
   async answer(ctx) {
     const settings = await ctx.repo.getUserSettings(ctx.tenantId, ctx.userId);
-    const dir = TEXT_BIGGER.some((p) => p.test(ctx.message)) ? 1 : -1;
     const from = settings.display.textSize;
-    const to = stepTextSize(from, dir);
-    const label = (id: string) => TEXT_SIZES.find((t) => t.id === id)?.label ?? '標準';
+    const reset = TEXT_RESET.some((p) => p.test(ctx.message));
+    const dir = TEXT_BIGGER.some((p) => p.test(ctx.message)) ? 1 : -1;
+    const to = reset ? TEXT_SIZE_STANDARD : stepTextSize(from, dir);
+    const label = (id: TextSize) => TEXT_SIZES.find((t) => t.id === id)?.label ?? `${id}%`;
     if (to === from) {
       return {
-        text: dir === 1
-          ? `いまがいちばん大きい「${label(to)}」です。もっと大きくするときは、ブラウザの拡大をお使いください。`
-          : `いまがいちばん小さい「${label(to)}」です。`,
+        text: reset ? `いまが標準の「${label(to)}」です。`
+          : dir === 1
+            ? `いまがいちばん大きい「${label(to)}」です。もっと大きくするときは、ブラウザの拡大をお使いください。`
+            : `いまがいちばん小さい「${label(to)}」です。`,
         evidence: [],
       };
     }

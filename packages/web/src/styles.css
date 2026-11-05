@@ -3,7 +3,7 @@
   /* 色はすべてここで名前を付けて持つ。画面ごとに直書きしない（仕様書 第6.1.2節） */
   color-scheme: light;
   /* 文字の大きさ・行間・余白の倍率。画面の文字・行間・余白（padding・margin・gap）はすべてこれを掛ける（仕様書 第6.1節）。
-     ここは標準の段。小さい・大きいは下の [data-text-size]（値は shared の TEXT_SIZES とそろえる。ADR-0122） */
+     ここは標準の段（100%）。ほかの段は下の [data-text-size]（値は shared の TEXT_SIZES とそろえる。ADR-0122） */
   --font-scale: 1;
   --line-scale: 1;
   --space-scale: 1;
@@ -45,8 +45,12 @@
 }
 
 /* 文字の大きさの段（個人設定の「表示」。仕様書 第6.1節）。標準は属性を付けない */
-:root[data-text-size="small"] { --font-scale: 0.875; --line-scale: 0.9; --space-scale: 0.9; }
-:root[data-text-size="large"] { --font-scale: 1.2; --line-scale: 1; --space-scale: 1.2; }
+:root[data-text-size="70"] { --font-scale: 0.7; --line-scale: 1; --space-scale: 0.7; }
+:root[data-text-size="80"] { --font-scale: 0.8; --line-scale: 1; --space-scale: 0.8; }
+:root[data-text-size="90"] { --font-scale: 0.9; --line-scale: 1; --space-scale: 0.9; }
+:root[data-text-size="110"] { --font-scale: 1.1; --line-scale: 1; --space-scale: 1.1; }
+:root[data-text-size="120"] { --font-scale: 1.2; --line-scale: 1; --space-scale: 1.2; }
+:root[data-text-size="130"] { --font-scale: 1.3; --line-scale: 1; --space-scale: 1.3; }
 
 /* ダーク。上部のボタンか個人設定で選んだとき（data-theme="dark"）と、
    「端末の設定に合わせる」で端末がダークのときに使う（仕様書 第6.1.2節） */
