@@ -21,6 +21,7 @@ import { MobileSignage } from './MobileSignage.js';
 import { api, ApiError, setUnauthorizedHandler, type Me } from './api.js';
 import './styles.css';
 import { applyTheme } from './theme.js';
+import { applyTextSize, resetTextSizeForLogin } from './text-size.js';
 import { DebugOverlay } from './DebugPanel.js';
 import { setDebugMode } from './debug.js';
 
@@ -58,6 +59,9 @@ function Root() {
       const got = await api.me();
       // デバッグモード（仕様書 第20.4.1節「デバッグモード」）。画面から呼んだ API を記録し始める
       setDebugMode(!!got.debug);
+      // 本人の文字の大きさ（仕様書 第6.1節）。代理アクセスと掛け通しの画面は標準のまま
+      if (got.display && !got.proxy && !location.pathname.startsWith('/board')) applyTextSize(got.display.textSize);
+      else resetTextSizeForLogin();
       setMe(got);
       // ログインの前に開こうとしていたページ（スマホ用の在庫のページなど）へ戻す（仕様書 第29.11.1節）
       const back = takeReturnPath();
@@ -67,6 +71,7 @@ function Root() {
       setState('ready');
     } catch (err) {
       if (err instanceof ApiError && err.needsLogin) {
+        resetTextSizeForLogin();
         setState('login');
       } else {
         setError(err instanceof Error ? err.message : '読み込みに失敗しました');
@@ -76,7 +81,7 @@ function Root() {
   }, []);
 
   useEffect(() => {
-    setUnauthorizedHandler(() => { setMe(null); setState('login'); });
+    setUnauthorizedHandler(() => { resetTextSizeForLogin(); setMe(null); setState('login'); });
     void load();
   }, [load]);
 
@@ -86,6 +91,7 @@ function Root() {
 
   const logout = async () => {
     await api.logout().catch(() => undefined);
+    resetTextSizeForLogin();
     setMe(null);
     setState('login');
   };

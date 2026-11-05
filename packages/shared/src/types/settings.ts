@@ -561,6 +561,11 @@ export interface UserSettings {
    * @remarks 秘書が選び、本人が会話で直す。個人設定では見て消す・戻すだけ（第6.5.3.1節）
    */
   brief: BriefSettings;
+  /** 画面の表示（第6.1節・第6.5.6節）。明るさは端末ごとに覚えるので、ここには持たない。 */
+  display: {
+    /** 文字の大きさの段。文字・行間・余白をそろえて変える（ADR-0122）。 */
+    textSize: TextSize;
+  };
   /** 初回の案内を見終えた（または飛ばした）日時。`null` なら次のログインで案内する（第6.10.3節）。 */
   onboarding: {
     tourCompletedAt: string | null;
@@ -569,6 +574,39 @@ export interface UserSettings {
     /** 週次ブリーフの定時実行を秘書が用意した時刻（第9.5.5節、ADR-0048）。朝のブリーフと同じく、作り直さない。 */
     weeklyBriefAt?: string | null;
   };
+}
+
+/** 文字の大きさの段（仕様書 第6.1節、ADR-0122）。小さい順に並べる。 */
+export type TextSize = 'small' | 'normal' | 'large';
+
+/**
+ * 文字の大きさの段と、その呼び方・倍率（仕様書 第6.1節の表）。
+ *
+ * 画面は `font`・`line`・`space` を CSS の `--font-scale`・`--line-scale`・`--space-scale` に入れる。
+ * 「小さく」「大きく」は、この並びで 1 段ずつ動かす（{@link stepTextSize}）。
+ */
+export const TEXT_SIZES: readonly { id: TextSize; label: string; font: number; line: number; space: number }[] = [
+  { id: 'small', label: '小さい', font: 0.875, line: 0.9, space: 0.9 },
+  { id: 'normal', label: '標準', font: 1, line: 1, space: 1 },
+  { id: 'large', label: '大きい', font: 1.2, line: 1, space: 1.2 },
+];
+
+/** 文字の大きさの段か。保存された値や頼まれた値を確かめるのに使う。 */
+export function isTextSize(v: unknown): v is TextSize {
+  return TEXT_SIZES.some((t) => t.id === v);
+}
+
+/**
+ * 文字の大きさを 1 段動かす。端の段から先へは動かさず、同じ段を返す。
+ *
+ * @param from いまの段
+ * @param dir 大きくするなら `1`、小さくするなら `-1`
+ * @returns 動かした後の段
+ */
+export function stepTextSize(from: TextSize, dir: 1 | -1): TextSize {
+  const i = TEXT_SIZES.findIndex((t) => t.id === from);
+  const next = Math.min(TEXT_SIZES.length - 1, Math.max(0, (i === -1 ? 1 : i) + dir));
+  return TEXT_SIZES[next]!.id;
 }
 
 /** 朝のブリーフで外せる項目（仕様書 第9.5.5.1.1節）。社内のお知らせは外せない。 */
@@ -692,6 +730,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   launcher: { hidden: [], links: [] },
   menu: { hidden: [], order: [], pinned: null, categories: [], categoryOf: {} },
   brief: { topics: [], omit: [], weeklyOmit: [], seededAt: null, seedNote: false },
+  display: { textSize: 'normal' },
   onboarding: { tourCompletedAt: null, morningBriefAt: null, weeklyBriefAt: null },
 };
 

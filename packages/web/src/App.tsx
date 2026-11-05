@@ -24,6 +24,7 @@ import {
 import { BriefScreen } from './Briefs.js';
 import { AgentHelpTip, HelpCenter, HelpRating, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
 import { ViewTitle } from './back-button.js';
+import { applyTextSize } from './text-size.js';
 import { AppLauncher, AppVersionBadge } from './launcher.js';
 import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
@@ -1445,12 +1446,15 @@ function SecretaryBar({ drive, lookups, avatar, captions, request, onRequestTake
       onHeard: (t) => setCaption((c) => (c.reply ? { heard: t, reply: '' } : { ...c, heard: c.heard + t })),
       onReply: (t) => setCaption((c) => ({ ...c, reply: c.reply + t })),
       // 大きい答えと「画面に出して」と頼まれたものだけが届く。画面の入力と同じ形で出す（仕様書 第6.2.0節）
-      onAnswer: ({ request, reply }) => onResult({
+      onAnswer: ({ request, reply }) => {
+        if (reply.display) applyTextSize(reply.display.textSize);
+        onResult({
         request, text: reply.text, via: 'voice',
         ...(reply.suggestedAgent ? { suggestedAgent: { id: reply.suggestedAgent.id, name: reply.suggestedAgent.name }, fileId: null } : {}),
         ...(reply.helpArticles ? { helpArticles: reply.helpArticles } : {}),
         ...(reply.evidence.length > 0 ? { evidence: reply.evidence } : {}),
-      }),
+        });
+      },
       onState: (state, note) => {
         setHint(note ?? { connecting: 'つないでいます…', listening: '聞いています（もう一度押すと終わります）', closed: '音声を終わりました' }[state]);
         if (state === 'closed') setCall(null);
@@ -1516,6 +1520,8 @@ function SecretaryBar({ drive, lookups, avatar, captions, request, onRequestTake
       setHint('考えています…');
       // 書いた依頼には、文字で秘書のキャンバスに返す。音声で話している最中でも読み上げない（第6.2.0節）
       const reply = await api.ask(asked, withFiles.map((f) => f.id));
+      // 秘書が文字の大きさを変えたら、開いている画面にすぐ当てる（仕様書 第6.1節・第10.9.2節）
+      if (reply.display) applyTextSize(reply.display.textSize);
       onResult({
         request: withFiles.length ? `${asked}（渡した書類: ${withFiles.map((f) => f.name).join('、')}）` : asked,
         text: reply.text,

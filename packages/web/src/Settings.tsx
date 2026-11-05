@@ -5,13 +5,14 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { AVATAR_PRESETS, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type AppBindingView, type BriefSettings, type UserSettings } from '@m2office/shared';
+import { AVATAR_PRESETS, TEXT_SIZES, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type AppBindingView, type BriefSettings, type UserSettings } from '@m2office/shared';
 import {
   api, describeError, type MyConnectionView,
   type AgentSummary, type ConversationView, type Me, type MemoryView,
   type MyGoogle, type PromotionView, type CardsGoogle,
 } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
+import { useTextSize } from './text-size.js';
 import { statusLabel } from './components.js';
 import { Icon, SecretaryAvatar } from './nav.js';
 import { shrinkPhoto } from './photo.js';
@@ -796,13 +797,19 @@ export function orderAgents<T extends { id: string }>(agents: T[], order: string
   return [...agents].sort((a, b) => rank(a.id) - rank(b.id));
 }
 
-/** 表示（画面の明るさ）。端末ごとに覚え、保存の操作は要らない（仕様書 第6.1.2節）。 */
+/**
+ * 表示（画面の明るさと文字の大きさ）。どちらも保存の操作は要らない。
+ * 明るさは端末ごと（仕様書 第6.1.2節）、文字の大きさはその人の設定として覚える（第6.1節、ADR-0122）。
+ */
 function DisplaySettings() {
   const { choice, set } = useTheme();
+  const text = useTextSize();
   const options: [ThemeChoice, string][] = [['system', '端末の設定に合わせる'], ['light', 'ライト'], ['dark', 'ダーク']];
+  const at = TEXT_SIZES.findIndex((t) => t.id === text.size);
   return (
     <div className="card">
       <h3>表示</h3>
+      <h4>明るさ</h4>
       <p className="muted small">この端末にだけ効きます</p>
       <div className="row">
         {options.map(([v, label]) => (
@@ -811,6 +818,13 @@ function DisplaySettings() {
           </label>
         ))}
       </div>
+      <h4>文字の大きさ</h4>
+      <div className="text-size-step" role="group" aria-label="文字の大きさ">
+        <button type="button" className="btn ghost" disabled={at <= 0} onClick={() => text.step(-1)}>小さく</button>
+        <span className="text-size-now" aria-live="polite">{TEXT_SIZES[at]?.label ?? '標準'}</span>
+        <button type="button" className="btn ghost" disabled={at >= TEXT_SIZES.length - 1} onClick={() => text.step(1)}>大きく</button>
+      </div>
+      {text.error && <p className="error small">{text.error}</p>}
     </div>
   );
 }

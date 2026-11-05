@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { canDecide } from '@m2office/shared';
+import { canDecide, TEXT_SIZES, stepTextSize, type UserSettings } from '@m2office/shared';
 import { withCompartments } from '../engine/run-access.js';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
@@ -70,6 +70,8 @@ export interface DirectAnswer {
   keep?: boolean;
   /** 根拠。その応答に添えて会話ペインに表示する（仕様書 第6.2節）。 */
   evidence: EvidenceItem[];
+  /** 文字の大きさを変えたとき、変えた後の値（仕様書 第6.1節）。画面はすぐに当てる。 */
+  display?: UserSettings['display'];
 }
 
 /** 根拠 1 件。`kind: 'source'` は社内の知識の出典（題名と抜き出しの 2 段で出す。仕様書 第6.2節「出典の見せ方」）。 */
@@ -294,6 +296,63 @@ const memoryForget: DirectQuery = {
   },
 };
 
+/**
+ * 文字の大きさを頼む言い回し（仕様書 第6.1節・第10.9.2節）。頼みの頭に「文字」「字」が来るものだけを拾う。
+ *
+ * @remarks
+ * 「スライドの文字を大きくして」「チラシの字を小さく」は書類への作業の頼みなので、頭が「文字」でないものは拾わない。
+ * 「字が小さくて見にくい」は大きくしてほしいという意味として扱う。
+ */
+const TEXT_LEAD = String.raw`^\s*(?:(?:もう)?(?:少し|ちょっと|すこし|一段)\s*)?(?:画面の|表示の)?(?:文字|字|フォント)(?:の大きさ|のサイズ)?\s*(?:を|が|は)?\s*(?:もう)?(?:少し|ちょっと|すこし|一段)?\s*`;
+const TEXT_BIGGER = [
+  new RegExp(TEXT_LEAD + String.raw`(?:大きく|拡大)`),
+  new RegExp(TEXT_LEAD + String.raw`(?:小さ|細か)くて\s*(?:見|読)(?:にく|づら)い`),
+];
+const TEXT_SMALLER = [
+  new RegExp(TEXT_LEAD + String.raw`(?:小さく(?!て)|縮小)`),
+  new RegExp(TEXT_LEAD + String.raw`大き(?:すぎ|過ぎ)`),
+];
+
+/**
+ * 「文字を大きくして」「字を小さく」に応える。本人の文字の大きさを 1 段ずつ変える（仕様書 第6.1節、ADR-0122）。
+ *
+ * @remarks
+ * 危険度は本人の表示の設定を変えるだけ（社外にも、ほかの人にも出ない）。変えた後の段を `display` で返し、画面がすぐに当てる。
+ * いちばん端の段から先へは変えず、ブラウザの拡大を案内する。
+ */
+const textSize: DirectQuery = {
+  id: 'text-size',
+  label: '文字の大きさ',
+  patterns: [...TEXT_BIGGER, ...TEXT_SMALLER],
+  compartment: null,
+  async answer(ctx) {
+    const settings = await ctx.repo.getUserSettings(ctx.tenantId, ctx.userId);
+    const dir = TEXT_BIGGER.some((p) => p.test(ctx.message)) ? 1 : -1;
+    const from = settings.display.textSize;
+    const to = stepTextSize(from, dir);
+    const label = (id: string) => TEXT_SIZES.find((t) => t.id === id)?.label ?? '標準';
+    if (to === from) {
+      return {
+        text: dir === 1
+          ? `いまがいちばん大きい「${label(to)}」です。もっと大きくするときは、ブラウザの拡大をお使いください。`
+          : `いまがいちばん小さい「${label(to)}」です。`,
+        evidence: [],
+      };
+    }
+    await ctx.repo.saveUserSettings(ctx.tenantId, ctx.userId, 'display', { ...settings.display, textSize: to });
+    await ctx.repo.appendAudit({
+      id: randomUUID(), tenantId: ctx.tenantId, actorType: 'user', actorId: ctx.userId,
+      action: 'me.settings.update', targetType: 'user_settings', targetId: 'display', detail: { textSize: to },
+      occurredAt: new Date().toISOString(),
+    });
+    return {
+      text: `文字の大きさを「${label(to)}」にしました。個人設定の「表示」でも変えられます。`,
+      evidence: [],
+      display: { textSize: to },
+    };
+  },
+};
+
 /** 「何を覚えてる？」に応える。本人の記憶だけを返す（仕様書 第11.5節）。 */
 const memoryList: DirectQuery = {
   id: 'memory-list',
@@ -364,6 +423,6 @@ const recentRuns: DirectQuery = {
  * 根拠にその旨を示す（仕様書 第10.9.2節の表）。
  */
 export const DIRECT_QUERIES: DirectQuery[] = [
-  conversationForget, memoryForget, memoryRemember, memoryList,
+  conversationForget, memoryForget, memoryRemember, memoryList, textSize,
   pendingApprovals, schedule, unreadMail, todayTasks, recentRuns,
 ];

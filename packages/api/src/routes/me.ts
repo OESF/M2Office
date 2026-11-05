@@ -10,7 +10,7 @@ import {
   agentDisplayName, needsCompartments,
   BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, type MenuCategory,
   CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
-  GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink,
+  GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink, isTextSize,
 } from '@m2office/shared';
 import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE, photoMime, HR_PHOTO_MAX_BYTES } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -677,6 +677,11 @@ function validate(
       const weeklyIn = Array.isArray(o['weeklyOmit']) ? o['weeklyOmit'].map(String) : [];
       const weeklyOmit = WEEKLY_SECTIONS.map((x) => x.id).filter((id) => weeklyIn.includes(id));
       return { section, value: { topics, omit, weeklyOmit } };
+    }
+    case 'display': {
+      // 文字の大きさ（第6.1節）。知らない段は断る（黙って既定に戻すと、押したのに変わらないように見える）
+      if (!isTextSize(o['textSize'])) return { error: '文字の大きさの段が正しくありません' };
+      return { section, value: { textSize: o['textSize'] } };
     }
     default:
       return { error: `不明な設定の区分です: ${section}` };

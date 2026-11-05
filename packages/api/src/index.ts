@@ -280,6 +280,8 @@ app.get('/v1/me', async (c) => {
     debug: !!deps.debug,
     // 体験版の様子（期限・規約への同意・AI の上限。第23.3.2節）。体験用の会社でなければ null
     demo: await demoView(deps, ctx.tenant.id),
+    // 文字の大きさ（個人設定の「表示」。仕様書 第6.1節、ADR-0122）。画面は読み込んですぐに当てる
+    display: (await deps.repo.getUserSettings(ctx.tenant.id, ctx.user.id)).display,
   });
 });
 app.route('/v1/me/google', myGoogleRoute(deps));

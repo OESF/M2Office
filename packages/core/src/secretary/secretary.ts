@@ -8,7 +8,7 @@
 import { autoMinutesRequest } from '../meetings/auto-minutes.js';
 import { AiLimitError } from '../usage/ai-usage.js';
 import { randomUUID } from 'node:crypto';
-import { SECRETARY_COMMAND_CHARS, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, SECRETARY_MESSAGE_TOO_LONG, fileInputKey, secondFileInputKey, type AgentDefinition } from '@m2office/shared';
+import { SECRETARY_COMMAND_CHARS, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, SECRETARY_MESSAGE_TOO_LONG, fileInputKey, secondFileInputKey, type AgentDefinition, type UserSettings } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
@@ -68,6 +68,8 @@ export interface SecretaryReply {
    * **これがあるときは、まだ結果が出ていない。** 画面は処理中として示す。
    */
   lookup?: { runId: string; request: string };
+  /** 文字の大きさを変えたとき、変えた後の値（仕様書 第6.1節・第10.9.2節）。画面はすぐに当てる。 */
+  display?: UserSettings['display'];
   tokensUsed: number;
 }
 

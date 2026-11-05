@@ -2,10 +2,11 @@
 :root {
   /* 色はすべてここで名前を付けて持つ。画面ごとに直書きしない（仕様書 第6.1.2節） */
   color-scheme: light;
-  /* 文字の大きさ・行間・余白の倍率。画面の文字・行間・余白（padding・margin・gap）はすべてこれを掛ける（仕様書 第6.1節。第 0.136.3 版で 0.875・0.9・0.9） */
-  --font-scale: 0.875;
-  --line-scale: 0.9;
-  --space-scale: 0.9;
+  /* 文字の大きさ・行間・余白の倍率。画面の文字・行間・余白（padding・margin・gap）はすべてこれを掛ける（仕様書 第6.1節）。
+     ここは標準の段。小さい・大きいは下の [data-text-size]（値は shared の TEXT_SIZES とそろえる。ADR-0122） */
+  --font-scale: 1;
+  --line-scale: 1;
+  --space-scale: 1;
   --bg: #f6f7f8;
   --panel: #ffffff;
   --line: #d8dee2;
@@ -42,6 +43,10 @@
   font-size: calc(14px * var(--font-scale));
   color: var(--ink);
 }
+
+/* 文字の大きさの段（個人設定の「表示」。仕様書 第6.1節）。標準は属性を付けない */
+:root[data-text-size="small"] { --font-scale: 0.875; --line-scale: 0.9; --space-scale: 0.9; }
+:root[data-text-size="large"] { --font-scale: 1.2; --line-scale: 1; --space-scale: 1.2; }
 
 /* ダーク。上部のボタンか個人設定で選んだとき（data-theme="dark"）と、
    「端末の設定に合わせる」で端末がダークのときに使う（仕様書 第6.1.2節） */
@@ -690,6 +695,8 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 */
 .board {
   --board-scale: 1;
+  /* 中のカードの倍率は、見る人の文字の大きさの設定によらず固定する（仕様書 第6.1節「当てない画面」） */
+  --font-scale: 0.875; --line-scale: 0.9; --space-scale: 0.9;
   min-height: 100vh; display: flex; flex-direction: column; background: var(--bg);
   font-size: calc(14px * var(--board-scale));
 }
@@ -3072,3 +3079,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   .dcs-speech { max-width: 100%; }
   .dcs-flow { grid-template-columns: 1fr; }
 }
+
+/* 文字の大きさの「小さく」「大きく」（個人設定の「表示」。仕様書 第6.1節） */
+.text-size-step { display: flex; align-items: center; gap: calc(12px * var(--space-scale)); flex-wrap: wrap; }
+.text-size-now { min-width: 4em; text-align: center; font-weight: 600; }

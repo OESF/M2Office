@@ -26,7 +26,7 @@ import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSam
   Contract, ContractSettings, SalesDocsSettings, SalesDocument, SalesOrder, SalesSuggestions, TaxRateEntry, ReservableItem, ReservableKind, Reservation, ReservationRule, ReservationSeries, Subsidy, SubsidyContact, SubsidyProfile, SubsidyStatus, Member, MemberPoint, MemberRank, MemberReward, MemberSettings, MemberAudience, MemberMessage,
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
   EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckFormat, SlideDeckKind, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
-  DecisionDetail, DecisionMaterial, DecisionStreamEvent, DecisionSummary,
+  DecisionDetail, DecisionMaterial, DecisionStreamEvent, DecisionSummary, TextSize,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 import type { HealthViewRow } from './health-panel.js';
@@ -434,6 +434,8 @@ export interface Me {
   hrSelf?: boolean;
   /** デバッグモードか（`M2O_DEBUG=true`。仕様書 第20.4.1節「デバッグモード」）。 */
   debug?: boolean;
+  /** 文字の大きさ（個人設定の「表示」。仕様書 第6.1節）。代理アクセスでは無い。 */
+  display?: { textSize: TextSize };
   /** 体験版の様子（体験用の会社だけ。仕様書 第23.3.2節）。 */
   demo?: DemoTrialView | null;
 }
@@ -1262,6 +1264,8 @@ export interface SecretaryReply {
    * @remarks **これがあるときは、まだ結果が出ていない。** 結果として扱わないこと。
    */
   lookup?: { runId: string; request: string };
+  /** 秘書が文字の大きさを変えたとき、変えた後の値（仕様書 第6.1節・第10.9.2節）。画面はすぐに当てる。 */
+  display?: { textSize: TextSize };
   tokensUsed: number;
   elapsedMs: number;
 }

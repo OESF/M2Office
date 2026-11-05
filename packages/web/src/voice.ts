@@ -8,6 +8,9 @@
  * 個人設定の「声を試す」（第10.5.8節）の音を鳴らすのもここで行う（`playSample`）。
  */
 
+import type { TextSize } from '@m2office/shared';
+import { applyTextSize } from './text-size.js';
+
 /** 送りの標本化周波数（サーバーと合わせる）。 */
 const INPUT_HZ = 16_000;
 /** 受けの標本化周波数。 */
@@ -40,6 +43,8 @@ export interface VoiceAnswer {
     suggestedAgent?: { id: string; version: number; name: string };
     helpArticles?: { id: string; title: string }[];
     lookup?: { runId: string; request: string };
+    /** 秘書が文字の大きさを変えたとき、変えた後の値（仕様書 第6.1節）。 */
+    display?: { textSize: TextSize };
   };
 }
 
@@ -182,7 +187,9 @@ export async function startVoice(handlers: VoiceHandlers): Promise<VoiceCall> {
       return;
     }
     try {
-      const message = JSON.parse(String(ev.data)) as { type: string; text?: string; reason?: string; message?: string } & Partial<VoiceAnswer>;
+      const message = JSON.parse(String(ev.data)) as { type: string; text?: string; reason?: string; message?: string; display?: { textSize: TextSize } } & Partial<VoiceAnswer>;
+      // 秘書が文字の大きさを変えた（画面に出さない答えのとき。仕様書 第6.1節）
+      if (message.type === 'display' && message.display) applyTextSize(message.display.textSize);
       if (message.type === 'secretary' && message.reply && typeof message.request === 'string') {
         handlers.onAnswer?.({ request: message.request, reply: message.reply });
       }

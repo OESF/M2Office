@@ -435,6 +435,8 @@ async function start(
           last = { request, reply };
           const why = needsCanvas(reply);
           if (why) showOnCanvas(request, reply);
+          // 文字の大きさを変えたら、画面に出さない答えでも、開いている画面にすぐ当てさせる（仕様書 第6.1節）
+          else if (reply.display) send({ type: 'display', display: reply.display });
           dbg(`ツール handle_request の答え（${reply.layer ?? ''}${why ? '・画面に出した' : ''}）: ${reply.text}`, reply);
           return {
             answer: reply.text,
@@ -522,7 +524,7 @@ async function start(
 
 /** 秘書のキャンバスに出す答え。画面の入力に答えたときと同じ形（第6.2.0節）。 */
 type CanvasReply = Pick<SecretaryReply, 'text' | 'evidence'>
-  & Partial<Pick<SecretaryReply, 'layer' | 'suggestedAgent' | 'helpArticles' | 'lookup'>>;
+  & Partial<Pick<SecretaryReply, 'layer' | 'suggestedAgent' | 'helpArticles' | 'lookup' | 'display'>>;
 
 /** 取次の答えから、画面に出す分だけを取り出す。 */
 function canvasReply(reply: SecretaryReply): CanvasReply {
@@ -531,5 +533,6 @@ function canvasReply(reply: SecretaryReply): CanvasReply {
     ...(reply.suggestedAgent ? { suggestedAgent: reply.suggestedAgent } : {}),
     ...(reply.helpArticles ? { helpArticles: reply.helpArticles } : {}),
     ...(reply.lookup ? { lookup: reply.lookup } : {}),
+    ...(reply.display ? { display: reply.display } : {}),
   };
 }

@@ -15,6 +15,11 @@
       try {
         var t = localStorage.getItem('m2office.theme');
         if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+        // 文字の大きさも描画の前に当てる（仕様書 第6.1節）。眺めるための画面・端末の画面・運営の画面には当てない
+        var z = localStorage.getItem('m2office.textSize');
+        var p = location.pathname;
+        if ((z === 'small' || z === 'large') && location.hostname.indexOf('ops.') !== 0
+          && !/^\/(board|signage\/play|hr\/terminal|machine)(\/|$)/.test(p)) document.documentElement.setAttribute('data-text-size', z);
       } catch (e) {}
     </script>
   </head>
