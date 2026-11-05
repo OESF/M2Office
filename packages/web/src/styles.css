@@ -130,7 +130,10 @@
 body { margin: 0; background: var(--bg); font-size: calc(16px * var(--font-scale)); line-height: calc(1.5 * var(--line-scale)); }
 button { font: inherit; cursor: pointer; }
 
-.app { display: flex; flex-direction: column; height: 100vh; }
+/* 画面の土台は 1 画面ぶんで止め、ページ全体は動かさない（送るのは各ペインの中だけ）。
+   基準の親を持たない絶対配置の要素（読み上げ用の .sr-only など）が長い一覧の下に置かれると、
+   ページの外にはみ出して、ペインを送り切ったときにページ全体が動いてしまうため、ここを基準にして切る */
+.app { display: flex; flex-direction: column; height: 100vh; position: relative; overflow: hidden; }
 .topbar {
   display: flex; align-items: center; gap: calc(12px * var(--space-scale));
   padding: calc(8px * var(--space-scale)) calc(16px * var(--space-scale)); background: var(--panel); border-bottom: 1px solid var(--line);
@@ -155,6 +158,8 @@ button { font: inherit; cursor: pointer; }
 }
 .topbar-popover {
   position: absolute; z-index: 60; top: calc(100% + 8px);
+  /* 画面の土台ははみ出しを切るので、背の低い画面では中を送る */
+  max-height: calc(100vh - 80px); overflow-y: auto;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: 0 8px 24px var(--shadow-sm); padding: calc(10px * var(--space-scale));
 }
