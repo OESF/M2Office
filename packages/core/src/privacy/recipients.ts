@@ -42,7 +42,9 @@ export function buildDataRecipients(f: DataRecipientFacts): DataRecipient[] {
       : { id: 'hosting', name: f.hosting.provider ?? `インフラ事業者${UNSET}`, purpose: 'M2Office を動かし、データを置く', data: 'すべての業務のデータ（通信と保管を暗号化。預かった鍵はさらに暗号化）', location: f.hosting.location ?? UNSET, contract: 'operator', active: true },
     {
       id: 'gemini', name: 'Google（Gemini API）', purpose: '秘書と業務の推論（文の読み書き・画像と音声の読み取り・Web の調べもの）',
-      data: '依頼の文と、業務が読んだ文・画像・音声（会社の AI の方針で外部の AI に渡さないものは除く）。M2Office は学習に使わせない（第11.9.3節）',
+      data: `依頼の文と、業務が読んだ文・画像・音声（会社の AI の方針で外部の AI に渡さないものは除く）。${f.ai.geminiSource === 'tenant'
+        ? '扱いは自社と Google の契約による。無料枠では、送った内容が Google の製品の改善に使われる'
+        : 'M2Office は学習に使わせない（第11.9.3節）'}`,
       location: '国外を含む（Google の設備）', contract: f.ai.geminiSource === 'tenant' ? 'company' : 'operator', active: cloudAi,
     },
     ...(f.ai.localConfigured ? [{ id: 'local-ai', name: '社内の AI（ローカル AI）', purpose: '外部の AI に渡さない推論', data: '会社の AI の方針で社外に出さない文', location: '会社の中', contract: 'machine' as const, active: f.ai.policy !== 'cloud' }] : []),
