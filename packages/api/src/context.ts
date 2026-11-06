@@ -14,7 +14,7 @@ import {
   HelpFeedback, PostgresHelpFeedbackStore, PostgresHelpNoteStore, noteText, type HelpNoteStore,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS, GoogleDataRetention, GoogleRevocation, agentUsesGoogle,
   RunEngine, Secretary, OFFICIAL_AGENTS, buildConnector, LocalFileStore,
-  createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, keepAliveOnTransientErrors, workerDown, PostgresApiGapStore, installApiGapSink, createPool, OpsAppSide, ProxyAccessStore, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
+  BillingAppStore, paymentProviderName, createLoggerFromEnv, HelpCatalog, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, keepAliveOnTransientErrors, workerDown, PostgresApiGapStore, installApiGapSink, createPool, OpsAppSide, ProxyAccessStore, type HealthStore, parseArticle, parseManual, ExtensionHub, HttpMcpClient, loadExtensions,
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
@@ -39,6 +39,8 @@ import { installExtensionPackage, setBuiltinEnabled } from './extension-switch.j
 /** API プロセス全体で共有する依存。 */
 export interface AppDeps {
   repo: Repository;
+  /** 料金と支払い（第23.4.5節）。`cardReady` は支払いの口が設定されているか（鍵は申し込みの口だけが持つ）。 */
+  billing: { store: BillingAppStore; cardReady: boolean };
   /** 運営主体の設定を読む口（第23.8.14節。内蔵の拡張の提供者の表記）。 */
   opsSide: OpsAppSide;
   /** 消費税の税率の表（運営がマスター管理画面で直したもの。無ければ同梱の表。仕様書 第15.1.1.1節）。会社は読むだけ */
@@ -408,7 +410,11 @@ export function buildDeps(): AppDeps {
     },
   });
   setEnqueueAiGuard((tenantId, userId) => aiMeter.assert(tenantId, userId));
+  // 料金と支払い（第23.4.5節）。本番で支払いの口に mock を指定していたら、ここで起動を止める
+  const billingStore = new BillingAppStore(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 2, name: 'billing' }));
+  const cardReady = paymentProviderName(process.env) !== null;
   const ai = new TenantAiResolver({
+    platformAllowed: async (tenantId) => (await billingStore.category(tenantId)) === 'none',
     repo, box, fallbackLlm: llm, fallbackResearch: research, meter: aiMeter,
     platformKey: platform.platformKey, platformKeyOf: () => platformSource.key(), testMode: platform.testMode,
     defaults: defaultGeminiModels(),
@@ -969,6 +975,7 @@ export function buildDeps(): AppDeps {
     repo, llm, connector, files, registry, engine, secretary, auth: loadAuthConfig(), log, health, debug, help, helpManuals: manuals.list, apiDocs, apps, appLinks, appKnowledge, security, helpFeedback, knowledgeGaps, systemLogs, helpNotes, retention, revocation,
     hub, tenantView, agentsFor, canUse, isAvailable, box, ai, connections,
     onsiteTenant: ai.deployment() === 'onsite' ? (process.env['M2O_ONSITE_TENANT']?.trim() || null) : null,
+    billing: { store: billingStore, cardReady },
     demo: {
       store: demoStore,
       // ローカルの形では体験版を使わない（クラウドの形の入口だけ）

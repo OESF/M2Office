@@ -2,7 +2,7 @@
  * @file マスター管理画面（仕様書 第23.8.15節）が呼ぶ運営の API（`/v1/ops`）。顧客の API（`api.ts`）とは別の口と別のログイン状態を使う。
  */
 
-import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint } from '@m2office/shared';
+import type { BillingCategory, ContractTerm, InvoiceView, RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint } from '@m2office/shared';
 import { logQuery, type EvidenceView, type SystemLogDigestView, type SystemLogPage, type SystemLogQuery } from './api.js';
 import type { HealthViewRow } from './health-panel.js';
 
@@ -46,6 +46,36 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 const send = (method: string, body?: unknown): RequestInit => ({ method, body: JSON.stringify(body ?? {}) });
 
 export type OperatorRole = 'admin' | 'support' | 'monitor';
+
+/** 料金の設定（第23.4.5節）。 */
+export interface OpsBillingSettingsView {
+  signupOpen: boolean;
+  monthlyPriceJpy: number;
+  annualPriceJpy: number;
+  taxPercent: number;
+  registrationNo: string;
+  bankAccount: string;
+  termsVersion: string;
+}
+
+/** 請求の一覧の 1 社分。 */
+export interface OpsBillingRowView {
+  tenantId: string;
+  subdomain: string;
+  name: string;
+  status: string;
+  category: BillingCategory;
+  cancelOn: string | null;
+  seats: number;
+  billingClass: 'small_business' | 'business' | 'enterprise';
+  contractTerm: ContractTerm | null;
+  termStart: string | null;
+  termEnd: string | null;
+  paidSeats: number;
+  seatLimit: number | null;
+  fixedAnnualJpy: number | null;
+  invoices: InvoiceView[];
+}
 
 export interface OperatorView {
   id: string;
@@ -359,6 +389,12 @@ export const opsApi = {
   resetDemoPassword: (id: string) => call<{ password: string }>(`/demos/${encodeURIComponent(id)}/password`, send('POST')),
   endDemo: (id: string) => call<{ ok: true }>(`/demos/${encodeURIComponent(id)}/end`, send('POST')),
   setDemoDefaults: (b: DemoDefaults) => call<DemoDefaults>('/settings/demo', send('PUT', b)),
+  billing: () => call<{ rows: OpsBillingRowView[]; settings: OpsBillingSettingsView }>('/billing'),
+  setBillingSettings: (b: OpsBillingSettingsView) => call<{ settings: OpsBillingSettingsView }>('/billing/settings', send('PUT', b)),
+  setBillingContract: (tenantId: string, b: { billingClass: string; seatLimit: number | null; annualJpy: number | null; start: string | null }) => call<{ ok: boolean }>(`/billing/tenants/${encodeURIComponent(tenantId)}/contract`, send('PUT', b)),
+  setBillingCancel: (tenantId: string, cancel: boolean) => call<{ cancelOn: string | null }>(`/billing/tenants/${encodeURIComponent(tenantId)}/cancel`, send('PUT', { cancel })),
+  markInvoicePaid: (id: string) => call<{ ok: boolean }>(`/billing/invoices/${encodeURIComponent(id)}/paid`, send('POST')),
+  setBillingCategory: (tenantId: string, category: BillingCategory) => call<{ ok: boolean }>(`/billing/tenants/${encodeURIComponent(tenantId)}/category`, send('PUT', { category })),
   operatorProfile: () => call<{ profile: OperatorProfileView }>('/settings/operator'),
   setOperatorProfile: (p: OperatorProfileView) => call<{ profile: OperatorProfileView }>('/settings/operator', send('PUT', p)),
   statusRequests: (tenantId?: string) => call<{ requests: StatusRequestRow[]; solo: boolean }>(`/status-requests${tenantId ? `?tenant=${encodeURIComponent(tenantId)}` : ''}`),

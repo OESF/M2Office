@@ -17,6 +17,7 @@ import { semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
   describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, purposeLabel,
   detectKind, readQuoteSample, MAX_FILE_BYTES, serviceReport, monthRange,
+  billingRefusal,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -398,7 +399,15 @@ export function adminRoute(deps: AppDeps) {
       displayName: (body.displayName ?? '').trim() || email.split('@')[0]!,
       roles: roles.value, status: 'active',
     };
-    await deps.repo.createUser(created);
+    try {
+      await deps.repo.createUser(created);
+    } catch (err) {
+      // スターターは 1 人だけ（第23.4.5節）。支払いの方法を登録してから招く
+      if (billingRefusal(err) === 'starter_limit') return c.json({ error: '2 人目を招くには、支払いの方法の登録が必要です', code: 'payment_required' }, 402);
+      // クラスの上限（第23.4.5節）。上のクラスは運営との契約になる
+      if (billingRefusal(err) === 'class_limit') return c.json({ error: 'いまのクラスの人数の上限に達しています。「ご利用料金」から上のクラスをお問い合わせください', code: 'class_limit' }, 402);
+      throw err;
+    }
     await audit(deps, tenant.id, user.id, 'user.invite', 'user', created.id, { roles: created.roles });
     return c.json(created, 201);
   });
@@ -441,7 +450,14 @@ export function adminRoute(deps: AppDeps) {
       return c.json({ error: '利用中の管理者が 1 人もいなくなるため、変更できません' }, 409);
     }
 
-    await deps.repo.updateUser(next);
+    try {
+      await deps.repo.updateUser(next);
+    } catch (err) {
+      // スターターは 1 人だけ（第23.4.5節）。止めた人を利用中に戻すときも同じ
+      if (billingRefusal(err) === 'starter_limit') return c.json({ error: '2 人目を使うには、支払いの方法の登録が必要です', code: 'payment_required' }, 402);
+      if (billingRefusal(err) === 'class_limit') return c.json({ error: 'いまのクラスの人数の上限に達しています。「ご利用料金」から上のクラスをお問い合わせください', code: 'class_limit' }, 402);
+      throw err;
+    }
     // 利用を停止したら、その人の Google を使う動いている途中の業務を止める（仕様書 第6.5.2.1節）
     let stoppedRuns = 0;
     // 自分だけの名刺の数（止めてから 30 日で削除される。第27.7節、Q-94）。管理者には件数だけを示す

@@ -6,13 +6,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { BillingCategory, InvoiceView } from '@m2office/shared';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { copyText } from './clipboard.js';
 import { SystemLogs, type LogSource } from './SystemLogs.js';
 import { NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import {
-  opsApi, OpsApiError, setOpsSignedOutHandler, TENANTS_CSV_URL, type OperatorProfileView, type OpsAiSettingsView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
+  opsApi, OpsApiError, setOpsSignedOutHandler, TENANTS_CSV_URL, type OpsBillingRowView, type OpsBillingSettingsView, type OperatorProfileView, type OpsAiSettingsView, type TaxRateRow, type OperatorRole, type OperatorView, type OpsAuditRow, type OpsMe,
   type CloudBackupViewRow, type EdgeStatusViewRow, type IncidentRow, type ProxyGrantRow, type ServerStatusView, type StatusRequestRow, type TenantDetailView, type TenantRow,
 } from './ops-api.js';
 import { BackButton } from './back-button.js';
@@ -26,6 +27,7 @@ import { EdgeTrend } from './edge-trend.js';
 const STATUS_LABEL: Record<TenantRow['status'], string> = { trial: '試用', active: '稼働中', suspended: '停止', locked: '緊急停止', cancelled: '解約済み' };
 const ROLE_LABEL: Record<OperatorRole, string> = { admin: '運営管理者', support: 'サポート', monitor: '監視' };
 const ACTION_LABEL: Record<string, string> = {
+  'billing.paid': '入金済みにした', 'billing.category': '請求の区分を変えた', 'billing.contract': 'クラスの契約を入れた', 'billing.cancel': '定額の契約を更新しないことにした', 'billing.settings': '料金の設定を変えた',
   'ops.login': 'ログイン', 'ops.logout': 'ログアウト', 'tenant.create': '会社を作った', 'tenant.status': '状態を変えた',
   'log.view': 'システムログを見た', 'log.download': 'システムログをダウンロードした', 'evidence.create': '証拠保全を始めた', 'evidence.download': '保全したものをダウンロードした', 'evidence.delete': '保全したものを削除した',
   'operator.add': '運営者を足した', 'operator.update': '運営者を変えた',
@@ -135,9 +137,10 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'demos' | 'requests' | 'server' | 'incidents' | 'logs' | 'operators' | 'audit' | 'law' | 'settings' | 'help';
+type OpsPage = 'tenants' | 'billing' | 'demos' | 'requests' | 'server' | 'incidents' | 'logs' | 'operators' | 'audit' | 'law' | 'settings' | 'help';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
+  { id: 'billing', label: '請求', icon: 'report' },
   { id: 'demos', label: '体験版', icon: 'sample' },
   { id: 'requests', label: '停止と再開', icon: 'approvals' },
   { id: 'server', label: '稼働状況', icon: 'usage' },
@@ -253,6 +256,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           {page === 'law' && <LawTables me={me} />}
           {page === 'operators' && <Operators me={me} />}
           {page === 'audit' && <Audit />}
+          {page === 'billing' && <OpsBilling me={me} />}
           {page === 'help' && <OpsHelp chapter={helpChapter} onChapter={setHelpChapter} />}
         </main>
       </SideNavLayout>
@@ -511,6 +515,144 @@ function OpsLogs({ me }: { me: OpsMe }) {
 }
 
 /** 運営の操作履歴。 */
+/** 請求の画面（第23.4.5節「画面」）。全社の請求・入金の確定・区分・料金の設定。金額と状態だけで、業務の中身は出さない。 */
+function OpsBilling({ me }: { me: OpsMe }) {
+  const [rows, setRows] = useState<OpsBillingRowView[] | null>(null);
+  const [settings, setSettings] = useState<OpsBillingSettingsView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const manage = !!me.can['settings.manage'];
+  const fail = (e: unknown) => setError(e instanceof OpsApiError ? e.message : 'できませんでした');
+  const load = () => opsApi.billing().then((r) => { setRows(r.rows); setSettings(r.settings); }).catch(fail);
+  useEffect(() => { void load(); }, []);
+  const today = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  const overdueDays = (i: InvoiceView) => Math.floor((Date.parse(today) - Date.parse(i.dueDate)) / 86_400_000);
+  const open = (rows ?? []).flatMap((r) => r.invoices.filter((i) => i.status === 'open').map((i) => ({ r, i })));
+  const contractPeriod = (r: OpsBillingRowView) => {
+    if (r.category === 'starter' || r.category === 'none') return '—';
+    if (r.billingClass !== 'small_business') return `定額 ${(r.fixedAnnualJpy ?? 0).toLocaleString('ja-JP')} 円・${r.termStart ?? ''} 〜 ${r.termEnd ?? ''}`;
+    if (r.contractTerm !== 'annual') return '月間';
+    return r.termStart ? `年間 ${r.paidSeats} 席・${r.termStart} 〜 ${r.termEnd}` : '年間（1 人の間は始まらない）';
+  };
+  return (
+    <>
+      <OpsTitle title="請求" help={{ chapter: '19-billing', text: '全社の請求を見て、振込の入金を確定し、料金を設定します。' }} />
+      {error && <p className="error">{error}</p>}
+      {msg && <p className="ok-msg" role="status">{msg}</p>}
+      <div className="card">
+        <h3>未入金</h3>
+        {open.length === 0 ? <p className="muted small">ありません</p> : (
+          <div className="table-scroll"><table className="table">
+            <thead><tr><th>会社</th><th>請求書番号</th><th>発行の月</th><th>金額</th><th>方法</th><th>期限</th><th /></tr></thead>
+            <tbody>
+              {open.map(({ r, i }) => (
+                <tr key={i.id}>
+                  <td>{r.name}</td><td>{i.number}</td><td>{i.month}</td><td>{i.totalJpy.toLocaleString('ja-JP')} 円</td>
+                  <td>{i.method === 'card' ? (i.chargeState === 'failed' ? 'カード（失敗）' : 'カード') : '振込'}</td>
+                  <td>{i.dueDate}{overdueDays(i) >= 14 && <> <span className="badge danger">停止の候補</span></>}</td>
+                  <td>{manage && <button className="btn ghost small" onClick={() => {
+                    if (!confirm(`${r.name}の ${i.totalJpy.toLocaleString('ja-JP')} 円を入金済みにしますか。`)) return;
+                    void opsApi.markInvoicePaid(i.id).then(() => { setMsg('入金済みにしました'); return load(); }).catch(fail);
+                  }}>入金済みにする</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        )}
+      </div>
+      <div className="card">
+        <h3>会社ごとの区分</h3>
+        <div className="table-scroll"><table className="table">
+          <thead><tr><th>会社</th><th>サブドメイン</th><th>状態</th><th>人数</th><th>クラス</th><th>区分</th><th>契約</th><th>解約</th></tr></thead>
+          <tbody>
+            {(rows ?? []).map((r) => (
+              <tr key={r.tenantId}>
+                <td>{r.name}</td><td>{r.subdomain}</td><td>{r.status === 'trial' ? 'スターター' : r.status}</td><td>{r.seats}{r.seatLimit !== null && ` / ${r.seatLimit}`}</td>
+                <td>{r.category === 'none' ? '—' : r.category === 'starter' ? 'スターター' : BILLING_CLASS_LABEL[r.billingClass]}</td>
+                <td>
+                  <select aria-label={`${r.name}の区分`} disabled={!manage} value={r.category} onChange={(e) => {
+                    void opsApi.setBillingCategory(r.tenantId, e.target.value as BillingCategory).then(load).catch(fail);
+                  }}>
+                    <option value="starter">スターター</option>
+                    <option value="card">カード</option>
+                    <option value="transfer">銀行振込</option>
+                    <option value="none">請求しない</option>
+                  </select>
+                </td>
+                <td>{contractPeriod(r)}</td>
+                <td>
+                  {r.cancelOn ?? '—'}
+                  {manage && r.billingClass !== 'small_business' && (
+                    <> <button className="btn ghost small" onClick={() => void opsApi.setBillingCancel(r.tenantId, !r.cancelOn).then(load).catch(fail)}>{r.cancelOn ? '取り下げる' : '更新しない'}</button></>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      </div>
+      {manage && rows && <OpsBillingContract rows={rows} onDone={() => { setMsg('契約を入れました'); void load(); }} onError={fail} />}
+      {settings && manage && (
+        <div className="card">
+          <h3>料金の設定</h3>
+          <label className="check"><input type="checkbox" checked={settings.signupOpen} onChange={(e) => setSettings({ ...settings, signupOpen: e.target.checked })} /> 申し込みを受け付ける</label>
+          <div className="grid2">
+            <label className="field">月間契約の単価（1 人 1 か月・税別・円）<input type="number" value={settings.monthlyPriceJpy} onChange={(e) => setSettings({ ...settings, monthlyPriceJpy: Number(e.target.value) })} /></label>
+            <label className="field">年間契約の単価（1 人 1 か月・税別・円）<input type="number" value={settings.annualPriceJpy} onChange={(e) => setSettings({ ...settings, annualPriceJpy: Number(e.target.value) })} /></label>
+            <label className="field">消費税の率（%）<input type="number" value={settings.taxPercent} onChange={(e) => setSettings({ ...settings, taxPercent: Number(e.target.value) })} /></label>
+            <label className="field">適格請求書の登録番号<input value={settings.registrationNo} placeholder="T1234567890123" onChange={(e) => setSettings({ ...settings, registrationNo: e.target.value })} /></label>
+            <label className="field">利用規約の版<input value={settings.termsVersion} onChange={(e) => setSettings({ ...settings, termsVersion: e.target.value })} /></label>
+          </div>
+          <label className="field">振込先の口座<textarea rows={3} value={settings.bankAccount} onChange={(e) => setSettings({ ...settings, bankAccount: e.target.value })} /></label>
+          <button className="btn" onClick={() => void opsApi.setBillingSettings(settings).then(() => setMsg('保存しました')).catch(fail)}>保存</button>
+        </div>
+      )}
+    </>
+  );
+}
+
+const BILLING_CLASS_LABEL: Record<OpsBillingRowView['billingClass'], string> = { small_business: 'スモールビジネス', business: 'ビジネス', enterprise: 'エンタープライズ' };
+
+/** ビジネスとエンタープライズの契約を入れる（第23.4.5節）。金額は交渉で決まるので、運営者が契約ごとに入れる。 */
+function OpsBillingContract({ rows, onDone, onError }: { rows: OpsBillingRowView[]; onDone: () => void; onError: (e: unknown) => void }) {
+  const paying = rows.filter((r) => r.category === 'card' || r.category === 'transfer');
+  const [tenantId, setTenantId] = useState('');
+  const [billingClass, setBillingClass] = useState<OpsBillingRowView['billingClass']>('business');
+  const [limit, setLimit] = useState('');
+  const [annual, setAnnual] = useState('');
+  const [start, setStart] = useState('');
+  const target = paying.find((r) => r.tenantId === tenantId);
+  const save = () => {
+    const annualJpy = Number(annual) || null;
+    if (!target || !confirm(`${target.name}を${BILLING_CLASS_LABEL[billingClass]}にします${annualJpy ? `（年額 ${annualJpy.toLocaleString('ja-JP')} 円・税別）` : ''}。よろしいですか。`)) return;
+    void opsApi.setBillingContract(target.tenantId, { billingClass, seatLimit: billingClass === 'enterprise' ? Number(limit) || null : null, annualJpy, start: start || null }).then(onDone).catch(onError);
+  };
+  return (
+    <div className="card">
+      <h3>クラスの契約</h3>
+      <div className="grid2">
+        <label className="field">会社
+          <select value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
+            <option value="">選ぶ</option>
+            {paying.map((r) => <option key={r.tenantId} value={r.tenantId}>{r.name}</option>)}
+          </select>
+        </label>
+        <label className="field">クラス
+          <select value={billingClass} onChange={(e) => setBillingClass(e.target.value as OpsBillingRowView['billingClass'])}>
+            <option value="business">ビジネス（50 人まで）</option>
+            <option value="enterprise">エンタープライズ</option>
+            <option value="small_business">スモールビジネスに戻す（月間契約）</option>
+          </select>
+        </label>
+        {billingClass === 'enterprise' && <label className="field">人数の上限（空は上限なし）<input type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} /></label>}
+        {billingClass !== 'small_business' && <label className="field">年額（税別・円）<input type="number" min={1} value={annual} onChange={(e) => setAnnual(e.target.value)} /></label>}
+        {billingClass !== 'small_business' && <label className="field">契約した日（空は今日）<input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>}
+      </div>
+      <button className="btn" disabled={!target} onClick={save}>契約を入れる</button>
+    </div>
+  );
+}
+
 function Audit() {
   const [rows, setRows] = useState<OpsAuditRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);

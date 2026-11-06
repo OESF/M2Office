@@ -35,6 +35,8 @@ export function notificationPath(n: { kind: string; runId: string | null }): str
   if (n.kind === 'subsidy') return '/subsidies';
   // 意思決定支援の討論が終わった知らせは、意思決定支援を開く（第43.11.2節「終わったとき」）
   if (n.kind === 'decision') return '/decisions';
+  // ご利用料金の知らせは、管理者ページの「ご利用料金」を開く（第23.4.5節）
+  if (n.kind === 'billing') return '/admin/billing';
   // 会員の週の見立てと LINE の知らせの結果は、会員を開く（第40.18節）
   if (n.kind === 'member') return '/members';
   // 掲示の期間が終わった販促物の知らせは、販促物を開く（第41.8節）

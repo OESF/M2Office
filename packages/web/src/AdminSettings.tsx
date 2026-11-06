@@ -8,6 +8,7 @@
  */
 
 import { Fragment, useEffect, useState } from 'react';
+import { inviteEffect } from '@m2office/shared';
 import type {
   AutomationPolicy, CompanyInfo, Role, SlideTemplate, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
@@ -812,6 +813,14 @@ export function UserSettings({ meId, page }: { meId: string; page: string }) {
         </div>
         <button className="btn" disabled={saver.busy || !invite.email}
           onClick={() => void saver.run(async () => {
+            // 料金が増える招待のときだけ、金額を示して確かめる（第23.4.5節「招待の確かめ」）
+            const effect = inviteEffect(await api.admin.billing());
+            const yen = (n: number) => `${n.toLocaleString('ja-JP')} 円（税込）`;
+            // スターターの 2 人目は支払いの方法の登録が先。クラスの上限なら、上のクラスの問い合わせ先へ
+            if (effect.kind === 'payment_required' || effect.kind === 'class_limit') { location.href = '/admin/billing'; return; }
+            if (effect.kind === 'monthly' && !confirm(`今月の料金は有料の ${effect.paidSeats} 人分で ${yen(effect.totalJpy)}になります。招待しますか。`)) return;
+            if (effect.kind === 'annual_start' && !confirm(`この方が使い始めた日から 12 か月の年間契約が始まります。${yen(effect.totalJpy)}を請求します。招待しますか。`)) return;
+            if (effect.kind === 'annual_add' && !confirm(`席が増え、残り ${effect.months} か月分の ${yen(effect.totalJpy)}を翌月 1 日に請求します。招待しますか。`)) return;
             await api.admin.inviteUser(invite.email, invite.displayName, ['member']);
             setInvite({ email: '', displayName: '' });
             await load();

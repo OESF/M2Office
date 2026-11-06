@@ -17,6 +17,7 @@ import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage, a
 import { buildDeps, companyView, fileStorageDir } from './context.js';
 import { authenticate, demoRestrictions, resolveTenant, type AppEnv } from './middleware/tenant.js';
 import { demoLoginRoute, demoSignupRoute, demoTermsRoute, demoView } from './demo.js';
+import { billingRoute } from './routes/billing.js';
 import { attachVoiceRelay } from './voice/relay.js';
 import { onUnexpectedError, requestLogger } from './middleware/logging.js';
 import { agentsRoute } from './routes/agents.js';
@@ -236,6 +237,8 @@ app.get('/v1/me', async (c) => {
     serverVersion: SERVER_VERSION,
     // 配備の形（ローカルの形なら、管理者ページに「機械」を出す。第8.6.7節）
     deployment: deps.ai.deployment(),
+    // 請求の区分（第23.4.5節）。読めなくても画面は開く（ご利用料金の区分が出ないだけ）
+    billingCategory: await deps.billing.store.category(ctx.tenant.id).catch(() => undefined),
     auth: { method: auth.method },
     csrfToken: auth.method === 'session' ? auth.csrfToken : null,
     // 値の出どころは会社ごと（ADR-0022）
@@ -328,6 +331,7 @@ app.route('/v1/hr', hrRoute(deps));
 // 従業員の顔写真（社内の全員が見られる。第30.5.4節）
 app.route('/v1/hr-photos', hrPhotosRoute(deps));
 app.route('/v1/notices', noticesRoute(deps));
+app.route('/v1/admin/billing', billingRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
 // 効果の欄と効果のレポート（第6.7.13節。管理者だけ）
 app.route('/v1/admin/effect', effectRoute(deps));

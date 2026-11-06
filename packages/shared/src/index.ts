@@ -31,6 +31,7 @@ export * from './types/tax.js';
 export * from './types/reservations.js';
 export * from './types/subsidies.js';
 export * from './types/decisions.js';
+export * from './types/billing.js';
 export * from './types/print-designs.js';
 export * from './types/members.js';
 export * from './types/web-review.js';

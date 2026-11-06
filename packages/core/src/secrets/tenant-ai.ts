@@ -76,6 +76,11 @@ export interface TenantAiResolverDeps {
   testMode?: boolean;
   /** 配備の形（仕様書 第8.6節）。既定はクラウド。 */
   deployment?: Deployment;
+  /**
+   * その会社が運営の鍵を使えるか（第23.4.5節「運営の鍵を使える範囲」）。省略すると、どの会社も使える。
+   * スターターと有料の会社は自社の鍵だけで動き、既定の推論（運営の鍵で動く）へも落ちない
+   */
+  platformAllowed?: (tenantId: string) => Promise<boolean>;
   /** ローカル AI（ローカル LLM）の口。ローカルの形で、ローカルの方針の会社が使う（第16.3.7.1節）。無ければ `null`。 */
   local?: LocalLlmConfig | null;
   /** ローカル AI の代わり（自動テスト用）。与えれば `local` より優先する。 */
@@ -127,6 +132,12 @@ export class TenantAiResolver {
     return !!this.platformKey();
   }
 
+  /** その会社が運営の鍵を使えるか。確かめられなければ使わせない（運営が AI の費用を負わないため）。 */
+  private async platformAllowed(tenantId: string): Promise<boolean> {
+    if (!this.deps.platformAllowed) return true;
+    return this.deps.platformAllowed(tenantId).catch(() => false);
+  }
+
   /** いまの運営の鍵。 */
   private platformKey(): string | null {
     return this.deps.platformKeyOf ? this.deps.platformKeyOf() : this.deps.platformKey;
@@ -140,7 +151,7 @@ export class TenantAiResolver {
     if (meta.mode === 'byok' && cred?.secretEnc) {
       return { source: 'tenant', apiKey: this.deps.box.decrypt(cred.secretEnc), models };
     }
-    const platformKey = this.platformKey();
+    const platformKey = (await this.platformAllowed(tenantId)) ? this.platformKey() : null;
     return { source: platformKey ? 'platform' : 'none', apiKey: platformKey, models };
   }
 
@@ -231,7 +242,9 @@ export class TenantAiResolver {
 
   /** クラウドの AI（Gemini）。会社の鍵があればその鍵、無ければ既定。 */
   private async cloudLlm(tenantId: string): Promise<LlmProvider> {
-    return (await this.entry(tenantId))?.llm ?? this.deps.fallbackLlm;
+    const own = await this.entry(tenantId);
+    if (own) return own.llm;
+    return (await this.platformAllowed(tenantId)) ? this.deps.fallbackLlm : new UnconfiguredLlmProvider();
   }
 
   /**
@@ -272,7 +285,8 @@ export class TenantAiResolver {
     if ((await this.policyFor(tenantId)) === 'local-only') {
       return new PolicyBlockedResearchProvider('ローカルだけの方針のため、Web の調べものは使えません');
     }
-    const research = (await this.entry(tenantId))?.research ?? this.deps.fallbackResearch;
+    const own = await this.entry(tenantId);
+    const research = own?.research ?? ((await this.platformAllowed(tenantId)) ? this.deps.fallbackResearch : new UnconfiguredResearchProvider());
     return this.deps.meter ? meterResearch(tenantId, research, this.deps.meter, (await this.geminiFor(tenantId)).models.research) : research;
   }
 

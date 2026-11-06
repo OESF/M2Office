@@ -22,11 +22,12 @@ import { DataRecipients } from './DataRecipients.js';
 import { ServiceReport } from './ServiceReport.js';
 import { HelpCenter, PageTitle, useOpenHelp } from './help.js';
 import { AppVersionBadge } from './launcher.js';
+import { BillingSettings } from './BillingSettings.js';
 import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
 
 type Tab =
   | 'dashboard' | 'usage' | 'runs' | 'schedules' | 'company' | 'agents' | 'extensions' | 'users' | 'knowledge' | 'audit'
-  | 'connectors' | 'setup' | 'help' | 'helpReview' | 'machine' | 'support' | 'service';
+  | 'connectors' | 'setup' | 'help' | 'helpReview' | 'machine' | 'support' | 'service' | 'billing';
 
 /**
  * 管理者ページの左ペインの項目。説明はマウスを重ねたときに出す（仕様書 第6.1.1節）。
@@ -104,6 +105,7 @@ const TABS: {
       { id: 'gaps', label: '答えられなかった問い' },
     ],
   },
+  { id: 'billing', label: 'ご利用料金', icon: 'report', description: '今月の人数と金額・支払いの方法・請求書・解約', group: '設定' },
   { id: 'setup', label: 'はじめに行う設定', icon: 'help', description: '導入の流れと、残っている設定', group: '設定' },
   { id: 'machine', label: 'サーバー', icon: 'usage', description: '社内に置いたサーバーの様子とバックアップ（ローカルの形だけ）', group: '記録' },
   { id: 'usage', label: '利用状況', icon: 'usage', description: '業務ごとの実行の件数と費用', group: '記録' },
@@ -211,7 +213,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const isAdmin = me.user.roles.includes('admin');
   // 左のメニュー。上の段は設定まで、下の段は記録から（ワークスペースと同じく上下に分け、それぞれスクロールする。仕様書 第6.1節）
   // すべて済んだ会社では「はじめに行う設定」を出さない（仕様書 第6.10.3.1節）
-  const navTabs = TABS.filter((t) => (t.id !== 'setup' || setup) && (t.id !== 'machine' || me.deployment === 'onsite') && (t.id !== 'service' || me.deployment !== 'onsite') && (t.id !== 'support' || !me.proxy));
+  const navTabs = TABS.filter((t) => (t.id !== 'setup' || setup) && (t.id !== 'billing' || (me.billingCategory ?? 'none') !== 'none') && (t.id !== 'machine' || me.deployment === 'onsite') && (t.id !== 'service' || me.deployment !== 'onsite') && (t.id !== 'support' || !me.proxy));
   const recordsAt = Math.max(0, navTabs.findIndex((t) => t.group === '記録'));
   const navList = (list: typeof navTabs) => (
     <>
@@ -299,6 +301,7 @@ export function Admin({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {tab === 'company' && <CompanySettings page={page} />}
             {tab === 'agents' && <AgentSettings page={page} />}
             {tab === 'extensions' && <ExtensionSettings focus={extFocus} />}
+            {tab === 'billing' && <BillingSettings />}
             {tab === 'users' && <UserSettings meId={me.user.id} page={page} />}
             {tab === 'knowledge' && <KnowledgeSettings page={page} />}
             {tab === 'audit' && <Audit />}

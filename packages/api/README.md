@@ -501,6 +501,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/compartments/:id/assignment` | 管理者: 区画に入れるグループと人を置き換える。入れる人が変われば記録し、管理者全員に通知する |
 | `GET /v1/admin/access` | 管理者: 業務・拡張機能ごとの利用範囲と、選択肢（グループ・利用者・対象） |
 | `PUT /v1/admin/access/:target` | 管理者: 1 つの業務（または拡張機能）の利用範囲。本文 `{ scope: "all" \| { groups, users } }` |
+| `GET /v1/admin/billing` | 管理者: ご利用料金（クラスと人数・契約の形・支払いの方法・請求書。第23.4.5節） |
+| `POST /v1/admin/billing/term` | 管理者: 契約の形を選ぶ（本文 `term`。`monthly`・`annual`。年間へは翌月 1 日から、月間へは更新のときだけ） |
+| `POST /v1/admin/billing/transfer` | 管理者: 銀行振込を選ぶ（本文 `billingName`。スターターは `term` も） |
+| `POST /v1/admin/billing/card` | 管理者: カードの登録へ移る 1 回限りの URL を返す（本文 `billingName`。スターターは `term` も） |
+| `POST /v1/admin/billing/cancel` | 管理者: 解約を申し出る・取り下げる（本文 `cancel`。月間はその月の末、年間は契約の終わりの日まで。応答 `cancelOn`） |
 | `GET /v1/admin/dashboard/live` | 管理者: ダッシュボードの「いま」（数値・業務の流れ・承認の滞留・出来事・本人と秘書の 1 組・接続先 `connections`）。業務の状態の各行にまとまり（`group`。仕事の分野。どの分野にも入らなければ拡張機能か業務の分野。第6.7.4.2.1節）を付ける。中身は返さない |
 | `GET /v1/admin/dashboard/connections` | 管理者: 接続先（AI・Google の各サービス・会社の接続）の直近 15 分の状態（`ok`・`slow`・`fail`・`off`）・呼び出し中か・回数・平均の時間・失敗の数と種類。中身と誰の呼び出しかは持たない（仕様書 第6.7.6節） |
 | `GET /v1/admin/effect?period=thisMonth\|lastMonth\|all` | 管理者: 効果の欄の数字（推計の削減時間・完了の件数・すべての AI の費用・削減 1 時間あたりの AI の費用・業務ごと・用途ごと・前の期間・使われなかった業務）。人ごとの数字は返さない（仕様書 第6.7.13節） |
@@ -592,6 +597,7 @@ src/voice/            音声の中継（Gemini Live）、秘書の名乗りの�
 src/audit/            監査ログの見せ方（人の名前・業務の言葉・CSV。仕様書 第6.6.8.1節）
 src/debug/            デバッグモードの記録（メモリーだけ・本人の分だけ）と、秘書の振り分けの 1 行（仕様書 第20.4.1節）
 src/ops/              マスター管理画面の API（別のプロセス。仕様書 第23.8.15節）。下の「マスター管理画面の API」
+src/signup/           申し込みの口（別のプロセス。仕様書 第23.3.1節）。専用のロールで接続し、カードの課金もここで行う
 ```
 
 ## マスター管理画面の API
@@ -628,6 +634,12 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 | PUT・DELETE | `/v1/ops/settings/ai/key` | 運営の鍵を入れる（Gemini に試して、通ったときだけ暗号化して保存）・削除する | 運営管理者 |
 | POST | `/v1/ops/settings/ai/test` | いま効いている運営の鍵で Gemini に問い合わせる | すべて |
 | PUT | `/v1/ops/settings/ai/limits` | 会社ごとの上限の既定と、運営の鍵の全体の月の上限（円。空なら決めない） | 運営管理者 |
+| GET | `/v1/ops/billing` | 全社の請求の一覧と料金の設定（第23.4.5節） | 見る人 |
+| PUT | `/v1/ops/billing/settings` | 料金の設定（受付・月間と年間の単価・税率・登録番号・振込先・利用規約の版） | 運営管理者 |
+| POST | `/v1/ops/billing/invoices/:id/paid` | 請求を入金済みにする | 運営管理者 |
+| PUT | `/v1/ops/billing/tenants/:id/category` | 請求の区分を変える | 運営管理者 |
+| PUT | `/v1/ops/billing/tenants/:id/contract` | ビジネスとエンタープライズの契約を入れる（`billingClass`・`seatLimit`・`annualJpy`・`start`） | 運営管理者 |
+| PUT | `/v1/ops/billing/tenants/:id/cancel` | 定額の契約を更新しない・取り下げる（本文 `cancel`） | 運営管理者 |
 | GET | `/v1/ops/demos` | 体験の一覧（相手の情報と数・出し方）・既定・入口と申し込みの画面の URL・体験版全体の今月の AI の利用（第23.3.2節） | すべて |
 | POST | `/v1/ops/demos` | 体験を出す（ゲストの ID とパスワードを 1 度だけ返し、相手に送る案内の文を添える） | 運営管理者・サポート |
 | POST | `/v1/ops/demos/:id/extend`・`/password`・`/end` | 期限を延ばす（1 回に 7 日まで）・パスワードを出し直す（ログイン状態も切る）・早く終える（体験用の会社をすぐ消す） | 運営管理者・サポート |
@@ -651,3 +663,19 @@ src/ops/              マスター管理画面の API（別のプロセス。仕
 
 - 仕様書 第13章 プラットフォーム API とエコシステム
 - [ADR-0002 API フレームワークに Hono を採用する](../../docs/adr/0002-api-framework-hono.md)
+
+## 申し込みの口（第23.3.1節）
+
+`signup.` のホストだけで受ける別のプロセスです（開発は 3103 番）。書き換える要求は同じ所のページからだけ受けます。
+
+| 方法 | 道 | 内容 |
+|---|---|---|
+| GET | `/v1/signup/status` | 受付の様子・料金・ログインした人 |
+| GET | `/v1/signup/subdomain?name=` | サブドメインの空き |
+| GET | `/v1/signup/challenge` | ロボットよけの問題 |
+| GET | `/v1/signup/auth/google/start`・`/v1/signup/auth/callback` | Google のログイン（Google Workspace のアカウントだけ） |
+| POST | `/v1/signup/auth/exchange`・`/v1/signup/auth/dev-login`・`/v1/signup/auth/logout` | ログイン状態を作る・消す |
+| POST | `/v1/signup/provision` | 会社をスターターで作る（本文 `subdomain`・`name`・`termsVersion`・`challenge`）。同じ送り元から 1 時間に 5 件まで |
+| POST | `/v1/signup/billing/card` | カードの登録を始める（本文 `ticket`。1 回限り） |
+| POST | `/v1/signup/billing/mock-card` | ダミーのカードの登録（支払いの口が `mock` のときだけ） |
+| POST | `/v1/signup/stripe/webhook` | 支払いの口からの知らせ。署名を確かめ、同じ知らせは 1 度だけ扱う |

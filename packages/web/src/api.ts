@@ -27,6 +27,7 @@ import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSam
   WebReviewCandidates, WebReviewReport, WebReviewReportBrief, WebReviewSettings, WebReviewStatus, WebReviewFinding, WebReviewFindingStatus, WebPageMetrics,
   EffectFigures, EffectPeriod, EffectReport, EffectReportBrief, SlideDeckFormat, SlideDeckKind, SlideDeckSharing, SlideDeckSummary, SlideThemeSummary,
   DecisionDetail, DecisionMaterial, DecisionStreamEvent, DecisionSummary, TextSize,
+  BillingCategory, BillingView, ContractTerm,
 } from '@m2office/shared';
 import { debugMode, recordCall } from './debug.js';
 import type { HealthViewRow } from './health-panel.js';
@@ -379,6 +380,8 @@ export interface ChecklistItem {
 }
 
 export interface Me {
+  /** 請求の区分（第23.4.5節）。`none` の会社には「ご利用料金」を出さない。 */
+  billingCategory?: BillingCategory;
   /** 会社。`name` は正式な会社名、`shortName` は略称、`logo` は会社のロゴの URL（仕様書 第6.6.1節）。 */
   tenant: Tenant & { shortName?: string; logo?: string | null; suspendAt?: string | null };
   user: User;
@@ -2830,6 +2833,12 @@ export const api = {
       form.append('file', file);
       return postForm<{ quote: TenantSettings['invoice']['quote'] }>('/admin/settings/invoice/quote-sample', form);
     },
+    /** ご利用料金（第23.4.5節）。 */
+    billing: () => call<BillingView>('/admin/billing'),
+    billingTerm: (term: ContractTerm) => call<{ ok: boolean }>('/admin/billing/term', { method: 'POST', body: JSON.stringify({ term }) }),
+    billingTransfer: (billingName: string, term?: ContractTerm) => call<{ ok: boolean }>('/admin/billing/transfer', { method: 'POST', body: JSON.stringify({ billingName, term }) }),
+    billingCard: (billingName: string, term?: ContractTerm) => call<{ url: string }>('/admin/billing/card', { method: 'POST', body: JSON.stringify({ billingName, term }) }),
+    billingCancel: (cancel: boolean) => call<{ cancelOn: string | null }>('/admin/billing/cancel', { method: 'POST', body: JSON.stringify({ cancel }) }),
     inviteUser: (email: string, displayName: string, roles: string[]) =>
       call<User>('/admin/users', { method: 'POST', body: JSON.stringify({ email, displayName, roles }) }),
     /** 利用者を直す。止めたときは、止めた業務の数と、30 日後に削除される自分だけの名刺の数を返す（仕様書 第27.7節）。 */

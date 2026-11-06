@@ -230,6 +230,9 @@ docs/            開発規約・リリース規定・設計判断記録
 | `CONNECTOR_MOCK_TENANTS` | （なし） | **開発だけ。** `google` のとき、見本のまま動かす会社のテナント ID（カンマ区切り）。smoke の会社を見本に保つ（例: `t-alpha,t-beta`）。本番で設定すると起動を拒否する |
 | `OPS_PORT`・`OPS_DATABASE_URL` | 3102・開発の既定 | マスター管理画面の API（別のプロセス）のポートと、運営の専用のロール `m2office_ops` の接続。本番では `OPS_DATABASE_URL` が必須（仕様書 第23.8.15節） |
 | `OPS_GOOGLE_REDIRECT_URI`・`OPS_GOOGLE_DOMAIN`・`OPS_SESSION_TTL_HOURS` | `http://localhost:<OPS_PORT>/v1/ops/auth/callback`・（なし）・12 | 運営者の Google のログインの戻り先（運営の OAuth クライアントに足して登録する）・運営者にできるドメイン・ログイン状態の時間 |
+| `SIGNUP_PORT`・`SIGNUP_DATABASE_URL`・`SIGNUP_SECRET`・`SIGNUP_GOOGLE_REDIRECT_URI` | 3103・開発の既定 | 申し込みの口（別のプロセス。第23.3.1節）。本番ではデータベースと鍵が必須 |
+| `M2O_PAYMENT_PROVIDER` | 開発 `mock`・本番は無し | 支払いの口（第23.4.5節）。本番で `mock` は起動を止める。`stripe` はアカウントができてから |
+| `SIGNUP_CHARGE_INTERVAL_MS`・`BILLING_INTERVAL_MS` | 60 秒・1 時間 | カードの課金を見る間隔・料金の見回りの間隔 |
 | `DEMO_SUBDOMAIN` | （なし） | 体験版の入口の名前（`demo` なら `demo.<BASE_DOMAIN>`、開発は `demo.localhost`）。空なら体験版を使わない。API と運営の API が読む（仕様書 第23.3.2節） |
 | `AUTH_DEV_LOGIN` | false | 開発用ログインを許す。`.env.example` では true |
 | `AUTH_DEV_HEADERS` | false | `X-Tenant`・`X-User` ヘッダーでの指定を許す。動作確認用 |

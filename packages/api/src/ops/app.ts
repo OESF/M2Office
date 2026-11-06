@@ -834,6 +834,93 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
   });
 
   // 運営主体の設定（第23.8.14節）
+  // ---- 料金と請求（第23.4.5節） ----
+  app.get('/v1/ops/billing', async (c) => c.json({ rows: await store.billingList(), settings: await store.billingSettings() }));
+
+  app.put('/v1/ops/billing/settings', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const s = (k: string, max: number) => (typeof b[k] === 'string' ? (b[k] as string).trim().slice(0, max) : '');
+    const monthly = Number(b['monthlyPriceJpy']);
+    const annual = Number(b['annualPriceJpy']);
+    const tax = Number(b['taxPercent']);
+    if (!Number.isInteger(monthly) || monthly < 0 || !Number.isInteger(annual) || annual < 0 || !Number.isInteger(tax) || tax < 0 || tax > 100) return c.json({ error: '単価と税率は整数で入れてください' }, 400);
+    const registrationNo = s('registrationNo', 20);
+    if (registrationNo && !/^T\d{13}$/.test(registrationNo)) return c.json({ error: '登録番号は T と 13 桁の数字で入れてください' }, 400);
+    const settings = { signupOpen: b['signupOpen'] === true, monthlyPriceJpy: monthly, annualPriceJpy: annual, taxPercent: tax, registrationNo, bankAccount: s('bankAccount', 500), termsVersion: s('termsVersion', 40) };
+    await store.saveBillingSettings(settings, c.get('operator').id);
+    await store.audit(c.get('operator').id, 'billing.settings', 'settings', 'billing', { signupOpen: settings.signupOpen, monthlyPriceJpy: monthly, annualPriceJpy: annual, taxPercent: tax, termsVersion: settings.termsVersion });
+    return c.json({ settings });
+  });
+
+  // 入金済みにする（お金の確定は人が行う）
+  app.post('/v1/ops/billing/invoices/:id/paid', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    const id = c.req.param('id');
+    try {
+      await store.markInvoicePaid(id, c.get('operator').id);
+    } catch (err) {
+      if (err instanceof OpsRuleError) return c.json({ error: 'この請求は、もう入金済みにできません' }, 409);
+      throw err;
+    }
+    await store.audit(c.get('operator').id, 'billing.paid', 'invoice', id);
+    return c.json({ ok: true });
+  });
+
+  // 請求の区分を変える（「請求しない」は運営者が作った会社に使う）
+  app.put('/v1/ops/billing/tenants/:id/category', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    const { category } = await c.req.json<{ category?: string }>().catch(() => ({} as { category?: string }));
+    const id = c.req.param('id');
+    try {
+      await store.setBillingCategory(id, category ?? '', c.get('operator').id);
+    } catch (err) {
+      if (err instanceof OpsRuleError) return c.json({ error: tenantErrorText(err.code) }, 409);
+      throw err;
+    }
+    await store.audit(c.get('operator').id, 'billing.category', 'tenant', id, { category });
+    return c.json({ ok: true });
+  });
+
+  // ビジネスとエンタープライズの契約を入れる（金額は交渉で決まるので、運営者が契約ごとに入れる）
+  app.put('/v1/ops/billing/tenants/:id/contract', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    const id = c.req.param('id');
+    const whole = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null);
+    const start = typeof b['start'] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b['start']) ? b['start'] : null;
+    const contract = { billingClass: typeof b['billingClass'] === 'string' ? b['billingClass'] : '', seatLimit: whole(b['seatLimit']), annualJpy: whole(b['annualJpy']), start };
+    try {
+      await store.setBillingContract(id, contract, c.get('operator').id);
+    } catch (err) {
+      if (err instanceof OpsRuleError) {
+        const text: Record<string, string> = {
+          class_invalid: 'クラスの値が違います', not_found: '請求の相手が見つかりません', method_required: '先に区分をカードか銀行振込にしてください',
+          over_limit: 'いまの人数が上限を超えています', amount_required: '年額を入れてください',
+        };
+        return c.json({ error: text[err.code] ?? 'できませんでした', code: err.code }, 409);
+      }
+      throw err;
+    }
+    await store.audit(c.get('operator').id, 'billing.contract', 'tenant', id, contract);
+    return c.json({ ok: true });
+  });
+
+  // 定額の契約を更新しない・取り下げる
+  app.put('/v1/ops/billing/tenants/:id/cancel', async (c) => {
+    if (!can(c, 'settings.manage')) return denied(c);
+    const { cancel } = await c.req.json<{ cancel?: boolean }>().catch(() => ({} as { cancel?: boolean }));
+    const id = c.req.param('id');
+    try {
+      const cancelOn = await store.setBillingCancel(id, cancel !== false, c.get('operator').id);
+      await store.audit(c.get('operator').id, 'billing.cancel', 'tenant', id, { cancelOn });
+      return c.json({ cancelOn });
+    } catch (err) {
+      if (err instanceof OpsRuleError) return c.json({ error: '請求の相手が見つかりません', code: err.code }, 409);
+      throw err;
+    }
+  });
+
   app.get('/v1/ops/settings/operator', async (c) => c.json({ profile: await store.operatorProfile() }));
   app.put('/v1/ops/settings/operator', async (c) => {
     if (!can(c, 'settings.manage')) return denied(c);

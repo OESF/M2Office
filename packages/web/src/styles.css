@@ -3103,3 +3103,17 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .edge-rank-name { overflow-wrap: anywhere; }
 .edge-defense th { width: 9em; }
 .edge-defense td:nth-child(2) { width: 12em; white-space: nowrap; }
+
+/* 申し込みのページと請求書（仕様書 第23.3.1節・第23.4.5節） */
+.signup-card { width: min(520px, 100%); display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); }
+.signup-sub { display: flex; align-items: center; gap: calc(4px * var(--space-scale)); }
+.signup-sub input { flex: 1; min-width: 0; }
+.invoice-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0, 0, 0, .5); overflow-y: auto; padding: calc(24px * var(--space-scale)); }
+.invoice-sheet { background: var(--panel); color: var(--ink); max-width: 720px; margin: 0 auto; padding: calc(24px * var(--space-scale)); border-radius: 8px; }
+@media print {
+  body * { visibility: hidden; }
+  .invoice-sheet, .invoice-sheet * { visibility: visible; }
+  .invoice-overlay { position: absolute; background: none; padding: 0; overflow: visible; }
+  .invoice-sheet { background: #fff; color: #000; }
+  .invoice-actions { display: none; }
+}

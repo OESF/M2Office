@@ -41,7 +41,7 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'server'), { recursive: true });
 
 // 1. API とワーカーと運営の API をまとめる
-for (const [name, entry] of [['api', 'packages/api/src/index.ts'], ['worker', 'packages/worker/src/index.ts'], ['ops', 'packages/api/src/ops/index.ts']]) {
+for (const [name, entry] of [['api', 'packages/api/src/index.ts'], ['worker', 'packages/worker/src/index.ts'], ['ops', 'packages/api/src/ops/index.ts'], ['signup', 'packages/api/src/signup/index.ts']]) {
   await build({
     entryPoints: [join(root, entry)],
     outfile: join(out, 'server', `${name}.js`),
@@ -85,6 +85,7 @@ writeFileSync(join(out, 'package.json'), `${JSON.stringify({
     'start:api': 'node --env-file-if-exists=m2office.env server/api.js',
     'start:worker': 'node --env-file-if-exists=m2office.env server/worker.js',
     'start:ops': 'node --env-file-if-exists=m2office.env server/ops.js',
+    'start:signup': 'node --env-file-if-exists=m2office.env server/signup.js',
     'db:migrate': 'node --env-file-if-exists=m2office.env scripts/migrate.mjs',
     'tenant:create': 'node --env-file-if-exists=m2office.env scripts/create-tenant.mjs',
     'ops:operator': 'node --env-file-if-exists=m2office.env scripts/create-operator.mjs',

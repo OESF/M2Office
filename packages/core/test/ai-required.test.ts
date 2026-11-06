@@ -62,3 +62,28 @@ test('鍵の無い会社では音声を始めない。見本の音声は自動�
   await assert.rejects(new TenantAiResolver(base).voiceFor('t'), AiNotConfiguredError);
   assert.equal((await new TenantAiResolver({ ...base, testMode: true }).voiceFor('t')).name, 'mock');
 });
+
+test('スターターと有料の会社は運営の鍵を使わない。自社の鍵だけで動く（第23.4.5節）。確かめられないときも使わない', async () => {
+  const repo = { getTenantCredential: async () => null, getTenantSettings: async () => ({}) } as unknown as Repository;
+  const platform = { name: 'platform' } as unknown as LlmProvider;
+  const base = {
+    repo, box: new SecretBox('k'), fallbackLlm: platform, fallbackResearch: platformAi({}).research, platformKey: 'operator-key',
+    defaults: { fast: 'f', standard: 's', advanced: 'a', research: 'r', live: 'l' }, baseUrl: 'http://x',
+  };
+  const of = async (platformAllowed?: (t: string) => Promise<boolean>) => {
+    const r = new TenantAiResolver({ ...base, platformAllowed });
+    return { source: (await r.geminiFor('t')).source, llm: await (r as unknown as { cloudLlm(t: string): Promise<LlmProvider> }).cloudLlm('t') };
+  };
+  const allowed = await of(async () => true);
+  assert.equal(allowed.source, 'platform');
+  assert.equal(allowed.llm, platform);
+  const denied = await of(async () => false);
+  assert.equal(denied.source, 'none');
+  assert.equal(denied.llm.name, 'unconfigured');
+  const failed = await of(async () => { throw new Error('読めない'); });
+  assert.equal(failed.source, 'none');
+  assert.equal(failed.llm.name, 'unconfigured');
+  // 指定が無ければ、これまでどおり（ローカルの形・運営者が作った会社）
+  assert.equal((await of()).source, 'platform');
+});
+

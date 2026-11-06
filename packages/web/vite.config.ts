@@ -54,6 +54,11 @@ const apiProxy = {
     // 運営の API は名前が ops. で始まる要求だけを受けるため、元のホスト名を保つ
     changeOrigin: false,
   },
+  // 申し込みの口（別のプロセス。仕様書 第23.3.1節）。名前が signup. で始まる要求だけを受けるため、元のホスト名を保つ
+  '/v1/signup': {
+    target: `http://127.0.0.1:${env('SIGNUP_PORT') ?? 3103}`,
+    changeOrigin: false,
+  },
   '/v1': {
     target: `http://127.0.0.1:${env('API_PORT') ?? 3101}`,
     // テナント解決のため、元のホスト名を保つ

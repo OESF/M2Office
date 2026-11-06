@@ -157,7 +157,7 @@ git clone --branch <リリースのタグ> https://github.com/OESF/M2Office.git 
 
 | # | 確かめること | 命令・操作 | よい結果 |
 |---|---|---|---|
-| 1 | 動いている | `systemctl is-active m2office-api m2office-worker m2office-ops caddy crowdsec` | すべて `active` |
+| 1 | 動いている | `systemctl is-active m2office-api m2office-worker m2office-ops m2office-signup caddy crowdsec` | すべて `active` |
 | 2 | API はサーバーの中だけ | `sudo ss -tlnp \| grep -E ':310[12]'` | `127.0.0.1:3101` と `127.0.0.1:3102` だけ |
 | 3 | 開いている口 | `sudo ufw status verbose` | `80/tcp`・`443/tcp`・`51820/udp`・`22/tcp on wg0` だけ |
 | 4 | 紹介のページ | 手元のブラウザで `https://m2office.net` | 鍵のマークが出て開ける |

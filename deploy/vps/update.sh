@@ -39,6 +39,8 @@ LOG_FILE=/var/log/m2office/update.log
 SERVICE_USER=m2office
 PG_BIN=/usr/lib/postgresql/17/bin
 SERVICES='m2office-api m2office-worker m2office-ops'
+# 申し込みの口は setup.sh を走らせ直すと入る。入っていれば一緒に止めて動かす（v0.35 までの機械でも更新が止まらないように）
+systemctl cat m2office-signup >/dev/null 2>&1 && SERVICES="$SERVICES m2office-signup"
 API_PORT=$(grep -E '^API_PORT=' "$ENV_FILE" | cut -d= -f2-); API_PORT=${API_PORT:-3101}
 OPS_PORT=$(grep -E '^OPS_PORT=' "$ENV_FILE" | cut -d= -f2-); OPS_PORT=${OPS_PORT:-3102}
 OWNER=$(stat -c %U "$REPO_DIR")

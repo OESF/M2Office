@@ -42,7 +42,13 @@ export function onboardingRoute(deps: AppDeps) {
       deps.repo.listKnowledge(tenant.id).then((ks) => ks.filter((k) => k.category === 'rule').length),
       deps.repo.listUsers(tenant.id),
     ]);
+    // スターターと有料の会社は自社の鍵で動く（第23.4.5節）。鍵を入れるまで AI が動かないので、いちばん上に出す
+    const needsOwnKey = deps.ai.deployment() === 'cloud' && (await deps.billing.store.category(tenant.id).catch(() => 'none')) !== 'none';
+    const aiItems = needsOwnKey
+      ? [{ id: 'ai', label: 'Gemini の鍵を入れる', done: (await deps.ai.geminiFor(tenant.id)).source === 'tenant', go: 'connectors', help: 'admin-gemini-key', important: true }]
+      : [];
     const items = [
+      ...aiItems,
       { id: 'company', label: '会社情報を入力する', done: settings.company.legalName.trim() !== '', go: 'company', help: 'admin-setup' },
       {
         id: 'google', label: 'Google Workspace を接続する', done: deps.connector.sourceFor(tenant.id) === 'google', go: 'connectors',

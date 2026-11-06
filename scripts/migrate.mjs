@@ -55,5 +55,15 @@ if (opsUrl) {
   }
   await client.query(`alter role m2office_ops login password '${decodeURIComponent(ops.password).replace(/'/g, "''")}'`);
 }
+// 申し込みの口のロール（仕様書 第23.3.1節、移行 182）。運営の画面のロールと同じ扱い
+const signupUrl = process.env.SIGNUP_DATABASE_URL ?? (process.env.NODE_ENV === 'production' ? null : 'postgres://m2office_signup:m2office_signup@localhost:3105/m2office');
+if (signupUrl) {
+  const signup = new URL(signupUrl);
+  if (decodeURIComponent(signup.username) !== 'm2office_signup') {
+    console.error(`SIGNUP_DATABASE_URL の利用者は m2office_signup にしてください（現在: ${signup.username}）。`);
+    process.exit(1);
+  }
+  await client.query(`alter role m2office_signup login password '${decodeURIComponent(signup.password).replace(/'/g, "''")}'`);
+}
 await client.end();
 console.log('マイグレーションが完了しました。');

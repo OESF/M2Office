@@ -125,7 +125,7 @@ gcloud iam service-accounts keys create m2office-backup-key.json --iam-account=m
 4. **止めて、鍵と設定を置きます**
 
 ```bash
-sudo systemctl stop m2office-api m2office-worker m2office-ops
+sudo systemctl stop m2office-api m2office-worker m2office-ops m2office-signup
 sudo install -d -m 750 -o root -g postgres /etc/pgbackrest
 sudo install -m 640 -o root -g postgres ~/m2office-backup-key.json /etc/pgbackrest/gcs-key.json && rm ~/m2office-backup-key.json
 sudo install -d -m 770 -o postgres -g postgres /var/log/pgbackrest /var/spool/pgbackrest
@@ -216,7 +216,7 @@ gcloud storage operations describe <Created: の後の名前> --format='value(do
 止めてから戻します。`--delta` は、いまあるファイルを使って違うところだけを書き換えます。
 
 ```bash
-sudo systemctl stop m2office-api m2office-worker m2office-ops
+sudo systemctl stop m2office-api m2office-worker m2office-ops m2office-signup
 sudo systemctl stop postgresql
 ```
 
@@ -237,7 +237,7 @@ sudo -u postgres pgbackrest --stanza=m2office --delta --type=name --target=updat
 ```bash
 sudo systemctl start postgresql
 cd / && sudo -u postgres psql -tAc 'select pg_is_in_recovery()'    # f になるまで待つ（変更の記録を読み終えるまで数分かかることがある）
-sudo systemctl start m2office-api m2office-worker m2office-ops
+sudo systemctl start m2office-api m2office-worker m2office-ops m2office-signup
 sudo systemctl start m2office-backup     # 戻した後の新しいまるごとのバックアップを取る
 ```
 

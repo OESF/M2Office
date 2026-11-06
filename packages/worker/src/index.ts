@@ -21,7 +21,7 @@ import {
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
   defaultGeminiModels, warnHotSwapModels, ProactiveWatcher, ConnectionCredentials, Consolidator, ProfileBuilder, CaseNoteBuilder, KnowledgeGaps, PostgresKnowledgeGapStore, aiUsageMeterFromEnv, enterAiUsage, withAiUsage, setEnqueueAiGuard, AutoMinutes, MINUTES_AGENT_ID, appPath, backupConfigFromEnv, machineDir, readBackupStatus, takeUnnotifiedUpdateFailure, machineStatus, machineConfigFromEnv, machineHealth, HealthAlerter, HEALTH_ALERT_INTERVAL_MS, runtimeEnvironment, inferenceText, restoreTest, runBackup, takeBackupRequest, writeWorkerBeat, OpsAppSide, createPool, offsiteConfigFromEnv, readOffsiteStatus, runOffsite, checkOffsite,
   SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, DeliveryService, PostgresDeliveryStore, PostgresSlideImageHost, isPublicImageBase, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, PostgresRuntimeBeatStore, writeRuntimeBeat, WORKER_BEAT_INTERVAL_MS, keepAliveOnTransientErrors,
-  PostgresDemoStore, isDemoTenantId,
+  PostgresDemoStore, isDemoTenantId, BillingAppStore, billingWatchTick,
 } from '@m2office/core';
 import { canRunAgent, fileInputKey } from '@m2office/shared';
 import { patrolLoop } from './patrol.js';
@@ -119,7 +119,10 @@ const aiMeter = aiUsageMeterFromEnv({
 });
 setEnqueueAiGuard((tenantId, userId) => aiMeter.assert(tenantId, userId));
 enterAiUsage({ purpose: 'worker' });
+// 料金と支払い（第23.4.5節）。スターターと有料の会社は自社の鍵だけで動く
+const billingStore = new BillingAppStore(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'billing' }));
 const ai = new TenantAiResolver({
+  platformAllowed: async (tenantId) => (await billingStore.category(tenantId)) === 'none',
   repo, box, fallbackLlm: llm, fallbackResearch: research, meter: aiMeter,
   platformKey: platform.platformKey, platformKeyOf: () => platformSource.key(), testMode: platform.testMode,
   defaults: models,
@@ -767,6 +770,9 @@ let lastBackupCheck = 0;
 const opsSide = onsite ? null : new OpsAppSide(createPool(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office', { max: 1, name: 'ops' }));
 const workerBeatId = `${hostname()}-${process.pid}`;
 let lastOpsBeat = 0;
+/** 料金の見回りの間隔（1 時間。第23.4.5節）。 */
+const BILLING_INTERVAL_MS = Number(process.env['BILLING_INTERVAL_MS'] ?? 3_600_000);
+let lastBillingWatch = 0;
 let lastDailyRecorded = '';
 
 /** 機械の知らせを、会社の管理者に届ける（ローカルの形は 1 社。第8.6.7節）。 */
@@ -1088,6 +1094,24 @@ async function patrolOnce(): Promise<void> {
       if (dropped || sealed) log.info('システムログを入れ替え、日ごとの値を残しました', { dropped, sealed });
     } catch (err) {
       log.error('システムログの入れ替えで例外が発生しました', { err });
+    }
+  }
+  // 料金の見回り（第23.4.5節）。今月の人数を置き、先月までの請求を作り、督促と解約を進める。クラウドの形だけ
+  if (!onsite && Date.now() - lastBillingWatch >= BILLING_INTERVAL_MS) {
+    lastBillingWatch = Date.now();
+    try {
+      const r = await billingWatchTick({
+        store: billingStore, log,
+        notifyAdmins: async (tenantId, title, body) => {
+          for (const u of (await repo.listUsers(tenantId)).filter((x) => x.status === 'active' && x.roles.includes('admin'))) {
+            await repo.createNotification({ id: randomUUID(), tenantId, userId: u.id, kind: 'billing', title, body, runId: null, readAt: null, createdAt: new Date().toISOString() });
+          }
+        },
+      });
+      if (r.issued + r.dunned + r.cancelled + r.idle > 0) log.info('料金の見回りを行いました', { ...r });
+      if (r.issuerMissing) log.debug('運営主体か登録番号が未設定のため、請求書を発行していません');
+    } catch (err) {
+      log.warn('料金の見回りに失敗しました', { err });
     }
   }
   // 待っている証拠保全を 1 つずつ作る（待ち行列を止めないよう並べて行う。第16.10.5節）

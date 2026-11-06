@@ -9063,5 +9063,294 @@ console.log('\n■ 135. 意思決定支援（入り切り・利用範囲は管�
   }
 }
 
+console.log('\n■ 136. 料金と申し込み（ロールの分け方・スターターは 1 人・札は 1 回限り・人数の最大・締め・課金・督促・解約・クラスの上限・年間契約・定額）');
+{
+  const { default: pg } = await import('pg');
+  const { createHash } = await import('node:crypto');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+  const signup = new pg.Client({ connectionString: process.env.SIGNUP_DATABASE_URL ?? 'postgres://m2office_signup:m2office_signup@localhost:3105/m2office' });
+  const opsDb = new pg.Client({ connectionString: process.env.OPS_DATABASE_URL ?? 'postgres://m2office_ops:m2office_ops@localhost:3105/m2office' });
+  await Promise.all([owner.connect(), app.connect(), signup.connect(), opsDb.connect()]);
+  const tag = Math.random().toString(36).slice(2, 8).replace(/[^a-z0-9]/g, 'x');
+  const subA = `smoke-bill-a${tag}`;
+  const subB = `smoke-bill-b${tag}`;
+  const domA = `${subA}.example`;
+  const domB = `${subB}.example`;
+  const [settings] = (await owner.query('select * from ops.billing_settings where id = 1')).rows;
+  const [profile] = (await owner.query('select name_ja from ops.operator_profile where id = 1')).rows;
+  const made = [];
+  const code = (e) => (e.code === 'P0001' ? e.message : e.code ?? e.message);
+  const addUser = (t, id, email) => owner.query(`insert into users (id, tenant_id, email, display_name, roles) values ($1, $2, $3, $3, array['member'])`, [id, t, email]);
+  const login = (t, u) => owner.query(`insert into sessions (id, tenant_id, user_id, csrf_token, provider, expires_at) values ($1, $2, $3, 'x', 'dev', now() + interval '1 hour')`, [`smoke-${u}-${Math.random()}`, t, u]);
+  const peakOf = async (t, m = null) => (await owner.query('select peak from ops.billing_seat_peaks where tenant_id = $1 and month = coalesce($2, ops.billing_month())', [t, m])).rows[0]?.peak ?? null;
+  try {
+    await owner.query(`update ops.billing_settings set signup_open = false, terms_version = 'smoke-terms', registration_no = 'T1234567890123', bank_account = 'スモーク銀行 普通 1234567' where id = 1`);
+    await owner.query(`update ops.operator_profile set name_ja = coalesce(nullif(name_ja, ''), 'スモークの運営') where id = 1`);
+
+    const direct = await signup.query('select * from tenants').then(() => 'read', code);
+    const directOps = await signup.query('select * from ops.billing_invoices').then(() => 'read', code);
+    direct === '42501' && directOps === '42501' ? ok('申し込みのロールは、業務の表も運営の表も直接は読めない') : ng('申し込みのロールが読めてしまう', `${direct} ${directOps}`);
+    const appOps = await app.query('select * from ops.billing_invoices').then(() => 'read', code);
+    appOps === '42501' ? ok('アプリのロールは、請求の表を直接は読めない') : ng('アプリのロールが請求の表を読めてしまう', appOps);
+
+    const closed = await signup.query(`select ops.signup_provision($1, 'スモーク A', $2, $3, 'smoke-terms')`, [subA, domA, `admin@${domA}`]).then(() => 'made', code);
+    closed === 'signup_closed' ? ok('受付を閉じている間は、データベースも会社を作らない') : ng('受付を閉じているのに作れた', closed);
+    await owner.query('update ops.billing_settings set signup_open = true where id = 1');
+    const changed = await signup.query(`select ops.signup_provision($1, 'スモーク A', $2, $3, 'old-terms')`, [subA, domA, `admin@${domA}`]).then(() => 'made', code);
+    changed === 'terms_changed' ? ok('利用規約の版が変わっていれば作らない') : ng('古い利用規約で作れた', changed);
+
+    const tA = (await signup.query(`select ops.signup_provision($1, 'スモーク A', $2, $3, 'smoke-terms') as t`, [subA, domA, `admin@${domA}`])).rows[0].t;
+    made.push(tA);
+    const tB = (await signup.query(`select ops.signup_provision($1, 'スモーク B', $2, $3, 'smoke-terms') as t`, [subB, domB, `admin@${domB}`])).rows[0].t;
+    made.push(tB);
+    const [rowA] = (await owner.query('select t.status, a.category, a.terms_version from tenants t join ops.billing_accounts a on a.tenant_id = t.id where t.id = $1', [tA])).rows;
+    rowA.status === 'trial' && rowA.category === 'starter' && rowA.terms_version === 'smoke-terms'
+      ? ok('申し込むと、その場でスターターができ、利用規約の版を残す') : ng('スターターの作られ方が違う', JSON.stringify(rowA));
+    const free = (await signup.query('select ops.signup_subdomain_free($1) as f', [subA])).rows[0].f;
+    const dup = await signup.query(`select ops.signup_provision($1, 'x', $2, $3, 'smoke-terms')`, [`${subA}x`, domA, `b@${domA}`]).then(() => 'made', code);
+    free === false && dup === 'domain_taken' ? ok('サブドメインは重ねず、1 つのドメインに 1 社') : ng('重ねて作れた', `${free} ${dup}`);
+
+    const second = await addUser(tA, `${tA}-u2`, `two@${domA}`).then(() => 'added', code);
+    second === 'starter_limit' ? ok('スターターは 1 人だけ。2 人目をデータベースが断る') : ng('スターターに 2 人目が入った', second);
+    const [admA] = (await owner.query('select id from users where tenant_id = $1', [tA])).rows;
+    (await peakOf(tA)) !== 1 ? null : ng('招待中の人を数えている', '');
+    await login(tA, admA.id);
+    const firstAt = (await owner.query('select first_login_at from users where id = $1', [admA.id])).rows[0].first_login_at;
+    firstAt && (await peakOf(tA)) === 1 ? ok('初めてログインすると数え始める（招待中は数えない）') : ng('人数の数え始めが違う', String(firstAt));
+    const category = (await app.query('select m2o_billing_category($1) as c', [tA])).rows[0].c;
+    category === 'starter' ? ok('請求の区分を読める（AI は運営の鍵に落ちない）') : ng('請求の区分が違う', category);
+
+    // カードの登録の札は 1 回限り
+    const hash = createHash('sha256').update(`ticket-${tag}`).digest('hex');
+    await app.query('select m2o_billing_card_ticket($1, $2, $3, $4, $5)', [tA, admA.id, hash, 'https://x.example/admin/billing', '株式会社スモーク']);
+    const take1 = (await signup.query('select * from ops.signup_card_take($1)', [hash])).rows;
+    const take2 = (await signup.query('select * from ops.signup_card_take($1)', [hash])).rows;
+    take1.length === 1 && take1[0].tenant_id === tA && take2.length === 0 ? ok('カードの登録の札は 1 回限り') : ng('札が 1 回限りでない', JSON.stringify([take1, take2]));
+    await signup.query('select ops.signup_card_done($1, $2)', [tA, `mock_cus_${tag}`]);
+    const [paid] = (await owner.query('select t.status, a.category, a.customer_id, a.billing_name, a.billed_from from tenants t join ops.billing_accounts a on a.tenant_id = t.id where t.id = $1', [tA])).rows;
+    paid.status === 'active' && paid.category === 'card' && paid.customer_id === `mock_cus_${tag}` && paid.billing_name === '株式会社スモーク'
+      ? ok('カードを登録すると有料に移り、2 人目を招ける') : ng('有料への移り方が違う', JSON.stringify(paid));
+
+    // 人数の最大（減らしても、その月は下がらない）
+    await addUser(tA, `${tA}-u2`, `two@${domA}`);
+    await addUser(tA, `${tA}-u3`, `three@${domA}`);
+    await login(tA, `${tA}-u2`);
+    await login(tA, `${tA}-u3`);
+    const up = await peakOf(tA);
+    await owner.query(`update users set status = 'disabled' where id = $1`, [`${tA}-u3`]);
+    const view = (await app.query('select m2o_billing_view($1) as v', [tA])).rows[0].v;
+    up === 3 && view.peak === 3 && view.seats === 2 ? ok('人数の最大は、減らしてもその月は下がらない') : ng('人数の最大が違う', JSON.stringify({ up, peak: view.peak, seats: view.seats }));
+    // 入れ替えなら増えない
+    await addUser(tA, `${tA}-u4`, `four@${domA}`);
+    await login(tA, `${tA}-u4`);
+    (await peakOf(tA)) === 3 ? ok('入れ替えなら、人数の最大は増えない') : ng('入れ替えで増えた', String(await peakOf(tA)));
+
+    // 締め（先月の人数で請求を作る。二度作らない。1 人の月は作らない）
+    const prev = (await owner.query(`select to_char((now() at time zone 'Asia/Tokyo') - interval '1 month', 'YYYY-MM') as m`)).rows[0].m;
+    await owner.query('update ops.billing_accounts set billed_from = $2 where tenant_id = $1', [tA, prev]);
+    await owner.query(`insert into ops.billing_seat_peaks (tenant_id, month, peak) values ($1, $2, 3) on conflict (tenant_id, month) do update set peak = 3`, [tA, prev]);
+    await signup.query('select ops.signup_card_done($1, $2)', [tB, 'mock_cus_b']).catch(() => undefined);
+    await owner.query('update ops.billing_accounts set category = $2, billed_from = $3 where tenant_id = $1', [tB, 'transfer', prev]);
+    await owner.query(`insert into ops.billing_seat_peaks (tenant_id, month, peak) values ($1, $2, 1) on conflict (tenant_id, month) do update set peak = 1`, [tB, prev]);
+    const closes = (await app.query('select m2o_billing_close() as v')).rows.map((r) => r.v).filter((v) => made.includes(v.tenantId));
+    const inv = closes.find((v) => v.tenantId === tA);
+    // 最初の 1 人は無料なので、先月 3 人なら有料は 2 人
+    inv && inv.kind === 'monthly' && inv.seats === 2 && inv.subtotalJpy === settings.monthly_price_jpy * 2 && inv.taxJpy === Math.floor(settings.monthly_price_jpy * 2 * settings.tax_percent / 100) && inv.chargeState === 'pending' && inv.issuer.registrationNo === 'T1234567890123' && inv.recipient.name === '株式会社スモーク'
+      ? ok('締めで、先月の人数の最大から無料の 1 人を引いて請求を作り、発行者と宛名を写す') : ng('請求の作られ方が違う', JSON.stringify(inv));
+    !closes.some((v) => v.tenantId === tB) ? ok('有料の人数が 0 人の月は請求しない') : ng('1 人の月に請求した', JSON.stringify(closes));
+    (await app.query('select m2o_billing_close() as v')).rows.filter((r) => r.v.tenantId === tA).length === 0 ? ok('同じ月の請求を二度作らない') : ng('同じ月の請求を二度作った', '');
+
+    // 課金（知らせは 1 度だけ扱う）
+    const due = (await signup.query('select * from ops.signup_charges_due(1000)')).rows.find((r) => r.id === inv.id);
+    due && due.customer_id === `mock_cus_${tag}` ? ok('課金する請求を読める') : ng('課金する請求が読めない', JSON.stringify(due));
+    const fail = (await signup.query('select ops.signup_charge_result($1, $2, false, null, $3) as r', [`evt-f-${tag}`, inv.id, '残高不足'])).rows[0].r;
+    const [failedRow] = (await owner.query('select status, charge_state, charge_error from ops.billing_invoices where id = $1', [inv.id])).rows;
+    fail === true && failedRow.status === 'open' && failedRow.charge_state === 'failed' ? ok('課金の失敗を残す') : ng('課金の失敗の残り方が違う', JSON.stringify(failedRow));
+    await signup.query('select ops.signup_card_done($1, $2)', [tA, `mock_cus_${tag}`]);
+    (await owner.query('select charge_state from ops.billing_invoices where id = $1', [inv.id])).rows[0].charge_state === 'pending'
+      ? ok('カードを登録し直すと、失敗した請求を課金し直す') : ng('課金し直さない', '');
+    const once = (await signup.query('select ops.signup_charge_result($1, $2, true, $3, null) as r', [`evt-${tag}`, inv.id, 'pay-1'])).rows[0].r;
+    const twice = (await signup.query('select ops.signup_charge_result($1, $2, true, $3, null) as r', [`evt-${tag}`, inv.id, 'pay-1'])).rows[0].r;
+    const [paidRow] = (await owner.query('select status, paid_by from ops.billing_invoices where id = $1', [inv.id])).rows;
+    once === true && twice === false && paidRow.status === 'paid' && paidRow.paid_by === 'card' ? ok('課金の成功で入金済みになり、同じ知らせは 1 度だけ扱う') : ng('課金の成功の扱いが違う', JSON.stringify({ once, twice, paidRow }));
+
+    // 振込（期限は翌月末払い・督促は段を進める・入金の確定は運営者）
+    await owner.query(`insert into ops.billing_seat_peaks (tenant_id, month, peak) values ($1, $2, 2) on conflict (tenant_id, month) do update set peak = 2`, [tB, prev]);
+    const invB = (await app.query('select m2o_billing_close() as v')).rows.map((r) => r.v).find((v) => v.tenantId === tB);
+    const endOfMonth = (await owner.query(`select to_char((date_trunc('month', (now() at time zone 'Asia/Tokyo')::date) + interval '1 month' - interval '1 day')::date, 'YYYY-MM-DD') as d`)).rows[0].d;
+    invB && invB.method === 'transfer' && invB.dueDate === endOfMonth && invB.chargeState === null && invB.issuer.bankAccount !== ''
+      ? ok('振込の請求は、出した月の末日が期限で、振込先を載せる') : ng('振込の請求が違う', JSON.stringify(invB));
+    await owner.query(`update ops.billing_invoices set due_date = (now() at time zone 'Asia/Tokyo')::date - 15 where id = $1`, [invB.id]);
+    const dun1 = (await app.query('select * from m2o_billing_dunning()')).rows.filter((r) => r.invoice_id === invB.id);
+    const dun2 = (await app.query('select * from m2o_billing_dunning()')).rows.filter((r) => r.invoice_id === invB.id);
+    dun1.length === 1 && dun1[0].stage === 3 && dun2.length === 0 ? ok('督促は段を進め、同じ段を二度知らせない') : ng('督促の進み方が違う', JSON.stringify([dun1, dun2]));
+    const appPaid = await app.query(`select ops.billing_mark_paid($1, 'x')`, [invB.id]).then(() => 'done', code);
+    appPaid === '42501' ? ok('アプリのロールは入金済みにできない') : ng('アプリのロールが入金済みにできた', appPaid);
+    await opsDb.query(`select ops.billing_mark_paid($1, 'smoke-operator')`, [invB.id]);
+    const twicePaid = await opsDb.query(`select ops.billing_mark_paid($1, 'smoke-operator')`, [invB.id]).then(() => 'done', code);
+    const [rowB] = (await owner.query('select status, paid_by from ops.billing_invoices where id = $1', [invB.id])).rows;
+    rowB.status === 'paid' && rowB.paid_by === 'smoke-operator' && twicePaid === 'not_open' ? ok('運営者が入金を確定する（二度はできない）') : ng('入金の確定が違う', JSON.stringify(rowB));
+
+    // 解約（その月の末まで使え、月が過ぎたら解約済み）
+    const cancel = (await app.query('select m2o_billing_set_cancel($1, $2, true) as m', [tB, 'smoke'])).rows[0].m;
+    const lastDay = (await owner.query(`select to_char((date_trunc('month', (now() at time zone 'Asia/Tokyo')::date) + interval '1 month' - interval '1 day')::date, 'YYYY-MM-DD') as d`)).rows[0].d;
+    cancel === lastDay ? ok('月間契約の解約は、その月の末まで使える') : ng('月間契約の解約の日が違う', String(cancel));
+    await app.query('select m2o_billing_apply_cancels()');
+    const stillOn = (await owner.query('select status from tenants where id = $1', [tB])).rows[0].status;
+    await owner.query(`update ops.billing_accounts set cancel_on = (now() at time zone 'Asia/Tokyo')::date - 1 where tenant_id = $1`, [tB]);
+    await app.query('select m2o_billing_apply_cancels()');
+    const gone = (await owner.query('select status from tenants where id = $1', [tB])).rows[0].status;
+    cancel && stillOn !== 'cancelled' && gone === 'cancelled' ? ok('解約は申し出た日が過ぎると効く') : ng('解約の効き方が違う', JSON.stringify({ cancel, stillOn, gone }));
+
+    // ---- クラスの上限・年間契約・定額（第 0.525.0 版） ----
+    const subC = `smoke-bill-c${tag}`;
+    const domC = `${subC}.example`;
+    const tC = (await signup.query(`select ops.signup_provision($1, 'スモーク C', $2, $3, 'smoke-terms') as t`, [subC, domC, `admin@${domC}`])).rows[0].t;
+    made.push(tC);
+    const admC = (await owner.query('select id from users where tenant_id = $1', [tC])).rows[0].id;
+    await login(tC, admC);
+    const todayIso = (await owner.query(`select to_char((now() at time zone 'Asia/Tokyo')::date, 'YYYY-MM-DD') as d`)).rows[0].d;
+    const termEndIso = (await owner.query(`select to_char(ops.billing_term_end((now() at time zone 'Asia/Tokyo')::date), 'YYYY-MM-DD') as d`)).rows[0].d;
+    const acct = async (t) => (await owner.query(`select contract_term, to_char(term_start, 'YYYY-MM-DD') as term_start, to_char(term_end, 'YYYY-MM-DD') as term_end, paid_seats, annual_unit_jpy, annual_start_on, next_term, billing_class, seat_limit, monthly_until, billed_from, cancel_on from ops.billing_accounts where tenant_id = $1`, [t])).rows[0];
+    (await owner.query(`select ops.billing_term_months('2027-03-10', '2027-11-19') as a, ops.billing_term_months('2027-03-20', '2027-11-19') as b, ops.billing_term_months('2026-11-20', '2027-11-19') as c, to_char(ops.billing_term_end('2026-11-20'), 'YYYY-MM-DD') as d`)).rows.map((r) => (r.a === 9 && r.b === 8 && r.c === 12 && r.d === '2027-11-19' ? ok('年間契約は契約した日から 12 か月で、残りの月数は切り上げる') : ng('月数の計算が違う', JSON.stringify(r))));
+
+    // 年間契約は、2 人目が使い始めた日に始まる
+    await app.query('select m2o_billing_set_term($1, $2, $3)', [tC, admC, 'annual']);
+    await signup.query('select ops.signup_card_done($1, $2)', [tC, `mock_cus_c${tag}`]);
+    const beforeStart = await acct(tC);
+    beforeStart.contract_term === 'annual' && beforeStart.term_start === null && beforeStart.paid_seats === 0
+      ? ok('年間契約を選んでも、1 人の間は期間が始まらない') : ng('1 人の間に期間が始まった', JSON.stringify(beforeStart));
+    await addUser(tC, `${tC}-u2`, `two@${domC}`);
+    (await acct(tC)).term_start === null ? ok('招待中は期間が始まらない') : ng('招待中に期間が始まった', '');
+    await login(tC, `${tC}-u2`);
+    const started = await acct(tC);
+    started.term_start === todayIso && started.term_end === termEndIso && started.paid_seats === 1 && started.annual_unit_jpy === settings.annual_price_jpy
+      ? ok('2 人目が使い始めた日から 12 か月の期間が始まり、単価を写す') : ng('期間の始まりが違う', JSON.stringify(started));
+    !(await app.query('select m2o_billing_close() as v')).rows.some((r) => r.v.tenantId === tC) ? ok('今月始まった期間は、次の 1 日まで請求しない') : ng('今月始まった期間を請求した', '');
+
+    // 先月始まった形にする（締めで 12 か月分を作る。二度作らない。月間の請求は作らない）
+    await owner.query(`update ops.billing_accounts set term_start = date_trunc('month', (now() at time zone 'Asia/Tokyo')::date)::date - 10, term_end = ops.billing_term_end(date_trunc('month', (now() at time zone 'Asia/Tokyo')::date)::date - 10), billed_from = $2 where tenant_id = $1`, [tC, prev]);
+    const closeC = (await app.query('select m2o_billing_close() as v')).rows.map((r) => r.v).filter((v) => v.tenantId === tC);
+    closeC.length === 1 && closeC[0].kind === 'annual' && closeC[0].seats === 1 && closeC[0].months === 12 && closeC[0].subtotalJpy === settings.annual_price_jpy * 12 && closeC[0].termStart && closeC[0].termEnd
+      ? ok('締めで、年間契約の 12 か月分を 1 通作り、月間の請求は作らない') : ng('年間の請求が違う', JSON.stringify(closeC));
+    (await app.query('select m2o_billing_close() as v')).rows.filter((r) => r.v.tenantId === tC).length === 0 ? ok('同じ期間の請求を二度作らない') : ng('同じ期間を二度請求した', '');
+
+    // 席が増えた分（請求を出した後）。入れ替えでは増えない
+    await addUser(tC, `${tC}-u3`, `three@${domC}`);
+    await login(tC, `${tC}-u3`);
+    const added = (await owner.query('select seats, months, unit_price_jpy from ops.billing_seat_adds where tenant_id = $1', [tC])).rows;
+    const afterAdd = await acct(tC);
+    const expectMonths = (await owner.query(`select ops.billing_term_months((now() at time zone 'Asia/Tokyo')::date, $1::date) as m`, [afterAdd.term_end])).rows[0].m;
+    added.length === 1 && added[0].seats === 1 && added[0].months === expectMonths && afterAdd.paid_seats === 2
+      ? ok('請求の後に増えた席を、残りの月数で記録する') : ng('増えた席の記録が違う', JSON.stringify({ added, afterAdd }));
+    await owner.query(`update users set status = 'disabled' where id = $1`, [`${tC}-u3`]);
+    const reduced = await acct(tC);
+    await addUser(tC, `${tC}-u4`, `four@${domC}`);
+    await login(tC, `${tC}-u4`);
+    const swap = (await owner.query('select count(*)::int as n from ops.billing_seat_adds where tenant_id = $1', [tC])).rows[0].n;
+    reduced.paid_seats === 2 && swap === 1 ? ok('減らしても席は減らず、空いた席に招いても増えない') : ng('席の減り方が違う', JSON.stringify({ reduced, swap }));
+    !(await app.query('select m2o_billing_close() as v')).rows.some((r) => r.v.tenantId === tC) ? ok('今月増えた席は、翌月 1 日まで請求しない') : ng('今月増えた席を請求した', '');
+    await owner.query(`update ops.billing_seat_adds set added_on = date_trunc('month', (now() at time zone 'Asia/Tokyo')::date)::date - 1 where tenant_id = $1`, [tC]);
+    const closeAdd = (await app.query('select m2o_billing_close() as v')).rows.map((r) => r.v).filter((v) => v.tenantId === tC);
+    closeAdd.length === 1 && closeAdd[0].kind === 'annual_add' && closeAdd[0].seats === 1 && closeAdd[0].months === expectMonths && closeAdd[0].subtotalJpy === settings.annual_price_jpy * expectMonths
+      ? ok('先月増えた席を、席 × 単価 × 残りの月数で請求する') : ng('増えた席の請求が違う', JSON.stringify(closeAdd));
+    (await app.query('select m2o_billing_close() as v')).rows.filter((r) => r.v.tenantId === tC).length === 0 ? ok('増えた席を二度請求しない') : ng('増えた席を二度請求した', '');
+
+    // 解約は契約の終わりの日まで
+    const cancelC = (await app.query('select m2o_billing_set_cancel($1, $2, true) as m', [tC, admC])).rows[0].m;
+    cancelC === (await acct(tC)).term_end ? ok('年間契約の解約は、契約の終わりの日まで使える') : ng('年間契約の解約の日が違う', String(cancelC));
+    await app.query('select m2o_billing_set_cancel($1, $2, false)', [tC, admC]);
+
+    // 更新の知らせ（1 度だけ）と更新（更新の日の人数で席が決まり、単価を写し直す）
+    await owner.query(`update ops.billing_accounts set term_end = (now() at time zone 'Asia/Tokyo')::date + 10 where tenant_id = $1`, [tC]);
+    const notice1 = (await app.query('select * from m2o_billing_renewal_notices()')).rows.filter((r) => r.tenant_id === tC);
+    const notice2 = (await app.query('select * from m2o_billing_renewal_notices()')).rows.filter((r) => r.tenant_id === tC);
+    notice1.length === 1 && notice2.length === 0 ? ok('更新の知らせは、終わる 30 日前から期間ごとに 1 度だけ') : ng('更新の知らせが違う', JSON.stringify([notice1, notice2]));
+    await owner.query(`update ops.billing_accounts set term_end = (now() at time zone 'Asia/Tokyo')::date - 1 where tenant_id = $1`, [tC]);
+    await app.query('select m2o_billing_roll()');
+    const renewed = await acct(tC);
+    renewed.term_start === todayIso && renewed.term_end === termEndIso && renewed.paid_seats === 2
+      ? ok('自動で更新し、更新の日の人数を席にする') : ng('更新が違う', JSON.stringify(renewed));
+    // 1 人なら更新しない
+    await owner.query(`update users set status = 'disabled' where tenant_id = $1 and id <> $2`, [tC, admC]);
+    await owner.query(`update ops.billing_accounts set term_end = (now() at time zone 'Asia/Tokyo')::date - 1 where tenant_id = $1`, [tC]);
+    await app.query('select m2o_billing_roll()');
+    const single = await acct(tC);
+    single.term_start === null && single.paid_seats === 0 && single.contract_term === 'annual' ? ok('更新の日に 1 人なら更新せず、請求しない') : ng('1 人の更新が違う', JSON.stringify(single));
+
+    // 年間から月間へは更新のときだけ（期間の終わりの翌月から月間の請求を始める）
+    await login(tC, `${tC}-u2`).catch(() => undefined);
+    await owner.query(`update users set status = 'active' where id = $1`, [`${tC}-u2`]);
+    const restart = await acct(tC);
+    await app.query('select m2o_billing_set_term($1, $2, $3)', [tC, admC, 'monthly']);
+    const asked = await acct(tC);
+    await owner.query(`update ops.billing_accounts set term_end = (now() at time zone 'Asia/Tokyo')::date - 1 where tenant_id = $1`, [tC]);
+    await app.query('select m2o_billing_roll()');
+    const toMonthly = await acct(tC);
+    const nextMonthOfEnd = (await owner.query(`select to_char(date_trunc('month', (now() at time zone 'Asia/Tokyo')::date - 1) + interval '1 month', 'YYYY-MM') as m`)).rows[0].m;
+    restart.term_start === todayIso && asked.next_term === 'monthly' && asked.contract_term === 'annual' && toMonthly.contract_term === 'monthly' && toMonthly.term_start === null && toMonthly.billed_from === nextMonthOfEnd
+      ? ok('年間から月間へは更新のときだけで、期間の終わりの翌月から月間の請求を始める') : ng('年間から月間への移りが違う', JSON.stringify({ restart, asked, toMonthly }));
+
+    // 月間から年間へは翌月 1 日から（その月までは月間で請求する）
+    await app.query('select m2o_billing_set_term($1, $2, $3)', [tC, admC, 'annual']);
+    const pending = await acct(tC);
+    const firstOfNext = (await owner.query(`select to_char(date_trunc('month', (now() at time zone 'Asia/Tokyo')::date) + interval '1 month', 'YYYY-MM-DD') as d`)).rows[0].d;
+    const pendingOn = pending.annual_start_on && (await owner.query(`select to_char($1::date, 'YYYY-MM-DD') as d`, [pending.annual_start_on])).rows[0].d;
+    pending.contract_term === 'monthly' && pendingOn === firstOfNext ? ok('月間から年間へは翌月 1 日から') : ng('月間から年間への予約が違う', JSON.stringify(pending));
+    await owner.query(`update ops.billing_accounts set annual_start_on = (now() at time zone 'Asia/Tokyo')::date where tenant_id = $1`, [tC]);
+    await app.query('select m2o_billing_roll()');
+    const toAnnual = await acct(tC);
+    toAnnual.contract_term === 'annual' && toAnnual.term_start === todayIso && toAnnual.paid_seats === 1 && toAnnual.monthly_until
+      ? ok('移る日に年間の期間が始まり、前の月までを月間の最後にする') : ng('月間から年間への移りが違う', JSON.stringify(toAnnual));
+
+    // クラスの上限（スモールビジネスは 21 人。招待中も数える）
+    await owner.query(`insert into users (id, tenant_id, email, display_name, roles) select $3 || g, $1, 'bulk' || g || '@' || $2, 'bulk', array['member'] from generate_series(1, 19) g`, [tC, domC, `${tC}-b`]);
+    const n21 = (await owner.query(`select count(*)::int as n from users where tenant_id = $1 and status = 'active'`, [tC])).rows[0].n;
+    const over22 = await addUser(tC, `${tC}-over`, `over@${domC}`).then(() => 'added', code);
+    n21 === 21 && over22 === 'class_limit' ? ok('スモールビジネスの 22 人目をデータベースが断る') : ng('スモールビジネスの上限が違う', JSON.stringify({ n21, over22 }));
+    const backOn = await owner.query(`update users set status = 'active' where id = $1`, [`${tC}-u3`]).then(() => 'on', code);
+    backOn === 'class_limit' ? ok('止めた人を戻すときも上限で断る') : ng('止めた人が上限を超えて戻った', backOn);
+
+    // ビジネス（定額・50 人まで）とエンタープライズ
+    const noAmount = await opsDb.query(`select ops.billing_set_contract($1, 'business', null, null, null, 'smoke')`, [tC]).then(() => 'set', code);
+    noAmount === 'amount_required' ? ok('定額の契約には年額が要る') : ng('年額なしで契約できた', noAmount);
+    const appContract = await app.query(`select ops.billing_set_contract($1, 'business', null, 500000, null, 'x')`, [tC]).then(() => 'set', code);
+    appContract === '42501' ? ok('アプリのロールは定額の契約を入れられない') : ng('アプリのロールが契約を入れた', appContract);
+    await opsDb.query(`select ops.billing_set_contract($1, 'business', 999, 500000, $2::date - 40, 'smoke')`, [tC, todayIso]);
+    const biz = await acct(tC);
+    biz.billing_class === 'business' && biz.seat_limit === 50 && biz.contract_term === 'annual' ? ok('ビジネスは 50 人までの年間契約になる（上限は変えられない）') : ng('ビジネスの契約が違う', JSON.stringify(biz));
+    const room = await addUser(tC, `${tC}-over`, `over@${domC}`).then(() => 'added', code);
+    room === 'added' ? ok('ビジネスなら 22 人目を招ける') : ng('ビジネスで 22 人目を招けない', room);
+    await owner.query(`update ops.billing_accounts set term_start = date_trunc('month', (now() at time zone 'Asia/Tokyo')::date)::date - 11, term_end = ops.billing_term_end(date_trunc('month', (now() at time zone 'Asia/Tokyo')::date)::date - 11) where tenant_id = $1`, [tC]);
+    const closeBiz = (await app.query('select m2o_billing_close() as v')).rows.map((r) => r.v).filter((v) => v.tenantId === tC && v.kind === 'fixed');
+    closeBiz.length === 1 && closeBiz[0].subtotalJpy === 500000 && closeBiz[0].seats === 50
+      ? ok('ビジネスは人数によらず、運営者が入れた年額を請求する') : ng('定額の請求が違う', JSON.stringify(closeBiz));
+    const refuseTerm = await app.query('select m2o_billing_set_term($1, $2, $3)', [tC, admC, 'monthly']).then(() => 'set', code);
+    refuseTerm === 'contract_by_operator' ? ok('定額の契約は、会社の画面から変えられない') : ng('定額の契約を会社が変えた', refuseTerm);
+    const overBack = await opsDb.query(`select ops.billing_set_contract($1, 'small_business', null, null, null, 'smoke')`, [tC]).then(() => 'set', code);
+    overBack === 'over_limit' ? ok('人数が多いままでは、スモールビジネスへ戻せない') : ng('上限を超えたまま戻せた', overBack);
+    await opsDb.query(`select ops.billing_set_contract($1, 'enterprise', null, 900000, null, 'smoke')`, [tC]);
+    const ent = await acct(tC);
+    const entAdd = await addUser(tC, `${tC}-e1`, `e1@${domC}`).then(() => 'added', code);
+    ent.billing_class === 'enterprise' && ent.seat_limit === null && entAdd === 'added' ? ok('エンタープライズは上限なしにできる') : ng('エンタープライズが違う', JSON.stringify({ ent, entAdd }));
+
+    // 行の無い会社は請求しない
+    (await app.query('select m2o_billing_category($1) as c', ['t-a'])).rows[0].c === 'none' ? ok('運営者が作った会社は請求しない（運営の鍵を使える）') : ng('請求しない会社の区分が違う', '');
+  } finally {
+    await owner.query('update ops.billing_settings set signup_open = $1, terms_version = $2, registration_no = $3, bank_account = $4 where id = 1', [settings.signup_open, settings.terms_version, settings.registration_no, settings.bank_account]).catch(() => undefined);
+    await owner.query('update ops.operator_profile set name_ja = $1 where id = 1', [profile.name_ja]).catch(() => undefined);
+    for (const t of made) {
+      await owner.query('delete from ops.billing_invoices where tenant_id = $1', [t]).catch(() => undefined);
+      await owner.query('delete from ops.billing_accounts where tenant_id = $1', [t]).catch(() => undefined);
+      await owner.query('delete from ops.billing_seat_peaks where tenant_id = $1', [t]).catch(() => undefined);
+      await owner.query('delete from ops.billing_seat_adds where tenant_id = $1', [t]).catch(() => undefined);
+      await owner.query('delete from ops.audit where target_id = $1', [t]).catch(() => undefined);
+      await owner.query('delete from tenants where id = $1', [t]).catch(() => undefined);
+    }
+    await Promise.all([owner.end(), app.end(), signup.end(), opsDb.end()]);
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

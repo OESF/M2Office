@@ -148,6 +148,35 @@
 	}
 }
 
+# 申し込みのページ（仕様書 第23.3.1節）。誰でも開ける。API は申し込みの口だけへ渡し、ほかの /v1/ は通さない
+signup.{{BASE_DOMAIN}} {
+	import on_demand_cert
+	import cloudflare_only
+	import security_headers
+	import access_log
+	import no_internal
+	import no_probe
+	import maintenance_page
+	encode zstd gzip
+	request_body {
+		max_size 1MB
+	}
+	handle /v1/signup/* {
+		import waf
+		reverse_proxy 127.0.0.1:{{SIGNUP_PORT}}
+	}
+	handle /v1/* {
+		respond 404
+	}
+	handle {
+		root * {{RELEASE_DIR}}/web
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		try_files {path} /index.html
+		file_server
+	}
+}
+
 # マスター管理画面（WireGuard の網から来た通信だけ。網の外には 404）
 ops.{{BASE_DOMAIN}} {
 	import on_demand_cert

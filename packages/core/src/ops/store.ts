@@ -8,6 +8,7 @@
 import type { EvidencePackage, SystemLogDigest, SystemLogFilter, SystemLogLine } from '../log/store.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type pg from 'pg';
+import type { BillingCategory, ContractTerm, InvoiceView } from '@m2office/shared';
 import type { RuntimeBeat, RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, TaxRateEntry } from '@m2office/shared';
 import { beatFromRow, databaseFromRow, DATABASE_USAGE_SQL, netTotalFromRow, samplePointFromRow } from '../machine/runtime.js';
 import type { NewTenantInput, OperatorRole } from './rules.js';
@@ -261,6 +262,49 @@ function enrollCode(): string {
 }
 
 /** データベースの関数が出した理由（`raise exception '…'`）。 */
+/** 料金の設定（第23.4.5節）。 */
+export interface OpsBillingSettings {
+  signupOpen: boolean;
+  /** 月間契約の単価（1 人 1 か月。税別）。 */
+  monthlyPriceJpy: number;
+  /** 年間契約の単価（1 人 1 か月。税別）。 */
+  annualPriceJpy: number;
+  taxPercent: number;
+  /** 適格請求書の登録番号。 */
+  registrationNo: string;
+  /** 振込先の口座（請求書に載せる）。 */
+  bankAccount: string;
+  /** 利用規約の版。空のあいだは申し込みを受けない。 */
+  termsVersion: string;
+}
+
+/** 請求の一覧の 1 社分。 */
+export interface OpsBillingRow {
+  tenantId: string;
+  subdomain: string;
+  name: string;
+  status: string;
+  category: BillingCategory;
+  /** 解約の申し出があるとき、使える最後の日。 */
+  cancelOn: string | null;
+  seats: number;
+  billingClass: 'small_business' | 'business' | 'enterprise';
+  contractTerm: ContractTerm | null;
+  termStart: string | null;
+  termEnd: string | null;
+  paidSeats: number;
+  seatLimit: number | null;
+  fixedAnnualJpy: number | null;
+  invoices: InvoiceView[];
+}
+
+/** 料金の関数が断った理由を、運営の決まりの例外に換える。 */
+function rethrowBilling(err: unknown): never {
+  const msg = err instanceof Error ? err.message : '';
+  if (['not_open', 'category_invalid', 'not_found', 'class_invalid', 'method_required', 'over_limit', 'amount_required'].includes(msg)) throw new OpsRuleError(msg);
+  throw err;
+}
+
 export class OpsRuleError extends Error {
   constructor(readonly code: string) { super(code); }
 }
@@ -891,6 +935,68 @@ export class OpsStore {
       reason: r.reason, state: r.state, requestedAt: iso(r.requested_at)!, decidedAt: iso(r.decided_at), hours: r.hours,
       expiresAt: iso(r.expires_at), endedAt: iso(r.ended_at), views: Number(r.views),
     }));
+  }
+
+  /** 料金の設定（第23.4.5節）。 */
+  async billingSettings(): Promise<OpsBillingSettings> {
+    const { rows } = await this.pool.query('select signup_open, monthly_price_jpy, annual_price_jpy, tax_percent, registration_no, bank_account, terms_version from ops.billing_settings where id = 1');
+    const r = rows[0];
+    return { signupOpen: r.signup_open, monthlyPriceJpy: r.monthly_price_jpy, annualPriceJpy: r.annual_price_jpy, taxPercent: r.tax_percent, registrationNo: r.registration_no, bankAccount: r.bank_account, termsVersion: r.terms_version };
+  }
+
+  /** 料金の設定を変える。 */
+  async saveBillingSettings(v: OpsBillingSettings, operatorId: string): Promise<void> {
+    await this.pool.query(
+      `update ops.billing_settings set signup_open = $1, monthly_price_jpy = $2, annual_price_jpy = $3, tax_percent = $4, registration_no = $5, bank_account = $6, terms_version = $7, updated_by = $8, updated_at = now() where id = 1`,
+      [v.signupOpen, v.monthlyPriceJpy, v.annualPriceJpy, v.taxPercent, v.registrationNo, v.bankAccount, v.termsVersion, operatorId],
+    );
+  }
+
+  /** 全社の請求の一覧（会社ごとの区分と直近の請求）。 */
+  async billingList(): Promise<OpsBillingRow[]> {
+    const { rows } = await this.pool.query('select * from ops.billing_list()');
+    return rows.map((r) => ({ tenantId: r.tenant_id, subdomain: r.subdomain, name: r.name, status: r.status, category: r.category, cancelOn: r.cancel_on, seats: r.seats, billingClass: r.billing_class, contractTerm: r.contract_term, termStart: r.term_start, termEnd: r.term_end, paidSeats: r.paid_seats, seatLimit: r.seat_limit, fixedAnnualJpy: r.fixed_annual_jpy, invoices: r.invoices }));
+  }
+
+  /**
+   * 請求を入金済みにする（お金の確定は人が行う）。
+   *
+   * @throws {OpsRuleError} `not_open`（未入金でない）
+   */
+  async markInvoicePaid(invoiceId: string, operatorId: string): Promise<void> {
+    await this.pool.query('select ops.billing_mark_paid($1, $2)', [invoiceId, operatorId]).catch(rethrowBilling);
+  }
+
+  /**
+   * 請求の区分を変える。
+   *
+   * @throws {OpsRuleError} `category_invalid`・`not_found`
+   */
+  async setBillingCategory(tenantId: string, category: string, operatorId: string): Promise<void> {
+    await this.pool.query('select ops.billing_set_category($1, $2, $3)', [tenantId, category, operatorId]).catch(rethrowBilling);
+  }
+
+  /**
+   * ビジネスとエンタープライズの契約を入れる（第23.4.5節）。スモールビジネスへ戻すと月間契約になる。
+   *
+   * @param v.seatLimit 人数の上限。ビジネスは 50 に固定。エンタープライズの null は上限なし
+   * @param v.annualJpy 定額の年額（税別）
+   * @param v.start 契約した日（YYYY-MM-DD。null は今日）
+   * @throws {OpsRuleError} `class_invalid`・`not_found`・`method_required`（支払いの方法が未登録）・`over_limit`（いまの人数が上限を超える）・`amount_required`
+   */
+  async setBillingContract(tenantId: string, v: { billingClass: string; seatLimit: number | null; annualJpy: number | null; start: string | null }, operatorId: string): Promise<void> {
+    await this.pool.query('select ops.billing_set_contract($1, $2, $3, $4, $5, $6)', [tenantId, v.billingClass, v.seatLimit, v.annualJpy, v.start, operatorId]).catch(rethrowBilling);
+  }
+
+  /**
+   * 定額の契約を更新しない・取り下げる。
+   *
+   * @returns 使える最後の日（取り下げたら null）
+   * @throws {OpsRuleError} `not_found`
+   */
+  async setBillingCancel(tenantId: string, cancel: boolean, operatorId: string): Promise<string | null> {
+    const { rows } = await this.pool.query<{ d: string | null }>('select ops.billing_set_cancel($1, $2, $3) as d', [tenantId, cancel, operatorId]).catch(rethrowBilling);
+    return rows[0]?.d ?? null;
   }
 
   /** 会社ごとの数（その場で数える）。 */

@@ -233,14 +233,16 @@ export async function googleGrantedScopes(accessToken: string, endpoints: Google
  */
 export async function googleUserInfo(
   accessToken: string, endpoints: GoogleOAuthEndpoints = GOOGLE_OAUTH_ENDPOINTS,
-): Promise<{ email: string | null; picture: string | null; emailVerified: boolean | null }> {
+): Promise<{ email: string | null; picture: string | null; emailVerified: boolean | null; hostedDomain: string | null }> {
   const res = await fetch(endpoints.userinfo, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) return { email: null, picture: null, emailVerified: null };
+  if (!res.ok) return { email: null, picture: null, emailVerified: null, hostedDomain: null };
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   return {
     email: typeof json['email'] === 'string' ? json['email'] : null,
     picture: typeof json['picture'] === 'string' ? json['picture'] : null,
     emailVerified: typeof json['email_verified'] === 'boolean' ? json['email_verified'] : null,
+    // Google Workspace のドメイン。個人のアカウントには無い（申し込みで見分ける。第23.3.1節）
+    hostedDomain: typeof json['hd'] === 'string' ? json['hd'] : null,
   };
 }
 

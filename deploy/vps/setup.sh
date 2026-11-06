@@ -35,6 +35,7 @@ NODE_MAJOR=24
 PG_MAJOR=17
 API_PORT=3101
 OPS_PORT=3102
+SIGNUP_PORT=3103
 WG_NETWORK_DEFAULT=10.66.0.0/24
 WG_PORT=51820
 # 社外バックアップ（第20.4.6節「控え」）。鍵と合言葉は root だけ（pgBackRest の設定と鍵は postgres も読む）。
@@ -286,6 +287,8 @@ SECRET_KEY=$(env_value M2OFFICE_SECRET_KEY); [ -n "$SECRET_KEY" ] || SECRET_KEY=
 DB_OWNER_PASSWORD=$(env_value MIGRATION_DATABASE_URL | sed -E 's#^postgres://[^:]+:([^@]+)@.*#\1#'); [ -n "$DB_OWNER_PASSWORD" ] || DB_OWNER_PASSWORD=$(rand_hex 24)
 DB_APP_PASSWORD=$(env_value DATABASE_URL | sed -E 's#^postgres://[^:]+:([^@]+)@.*#\1#'); [ -n "$DB_APP_PASSWORD" ] || DB_APP_PASSWORD=$(rand_hex 24)
 DB_OPS_PASSWORD=$(env_value OPS_DATABASE_URL | sed -E 's#^postgres://[^:]+:([^@]+)@.*#\1#'); [ -n "$DB_OPS_PASSWORD" ] || DB_OPS_PASSWORD=$(rand_hex 24)
+DB_SIGNUP_PASSWORD=$(env_value SIGNUP_DATABASE_URL | sed -E 's#^postgres://[^:]+:([^@]+)@.*#\1#'); [ -n "$DB_SIGNUP_PASSWORD" ] || DB_SIGNUP_PASSWORD=$(rand_hex 24)
+SIGNUP_SECRET=$(env_value SIGNUP_SECRET); [ -n "$SIGNUP_SECRET" ] || SIGNUP_SECRET=$(rand_hex 32)
 
 # ---- 6. 設定のファイルを雛形から作る ----
 say '設定のファイルを作ります'
@@ -315,6 +318,8 @@ SECRET_KEY=$SECRET_KEY
 DB_OWNER_PASSWORD=$DB_OWNER_PASSWORD
 DB_APP_PASSWORD=$DB_APP_PASSWORD
 DB_OPS_PASSWORD=$DB_OPS_PASSWORD
+DB_SIGNUP_PASSWORD=$DB_SIGNUP_PASSWORD
+SIGNUP_SECRET=$SIGNUP_SECRET
 RELEASE_DIR=$RELEASE_DIR
 DATA_DIR=$DATA_DIR
 LOG_DIR=$LOG_DIR
@@ -322,6 +327,7 @@ CADDY_LOG_DIR=$CADDY_LOG_DIR
 SITE_DIR=$SITE_DIR
 API_PORT=$API_PORT
 OPS_PORT=$OPS_PORT
+SIGNUP_PORT=$SIGNUP_PORT
 ANSWERS
 umask 022
 render_all "$answers" "$work/out" "$(command -v node)"
@@ -414,7 +420,7 @@ fi
 say 'M2Office を動かします'
 for f in "$work"/out/systemd/*.service; do sudo install -m 644 "$f" "/etc/systemd/system/$(basename "$f")"; done
 sudo systemctl daemon-reload
-for s in m2office-api m2office-worker m2office-ops; do sudo systemctl enable "$s" >/dev/null 2>&1; sudo systemctl restart "$s"; done
+for s in m2office-api m2office-worker m2office-ops m2office-signup; do sudo systemctl enable "$s" >/dev/null 2>&1; sudo systemctl restart "$s"; done
 sudo install -m 644 "$work/out/Caddyfile" /etc/caddy/Caddyfile
 sudo -u caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || die 'Caddy の設定が通りません（sudo -u caddy caddy validate --config /etc/caddy/Caddyfile で理由を見てください）'
 sudo systemctl enable caddy >/dev/null 2>&1; sudo systemctl reload-or-restart caddy
@@ -467,6 +473,7 @@ say '動きを確かめます'
 ok=0
 for _ in $(seq 1 60); do curl -fsS "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && { ok=1; break; }; sleep 1; done
 [ "$ok" = 1 ] && info 'API: 動いています' || warn 'API が答えません（journalctl -u m2office-api -n 50 を見てください）'
+curl -fsS "http://127.0.0.1:$SIGNUP_PORT/health" >/dev/null 2>&1 && info '申し込みの口: 動いています' || warn '申し込みの口が答えません'
 curl -fsS "http://127.0.0.1:$OPS_PORT/health" >/dev/null 2>&1 && info '運営の API: 動いています' || warn '運営の API が答えません（journalctl -u m2office-ops -n 50）'
 systemctl is-active --quiet m2office-worker && info 'ワーカー: 動いています' || warn 'ワーカーが動いていません（journalctl -u m2office-worker -n 50）'
 systemctl is-active --quiet caddy && info 'Caddy: 動いています' || warn 'Caddy が動いていません（journalctl -u caddy -n 50）'
@@ -484,7 +491,7 @@ elif sudo nft list table inet m2office_geo >/dev/null 2>&1; then
 else
   warn '国で通信を止める表が入っていません（sudo m2office-geo-update で入れ、journalctl -u m2office-geo-update で理由を見てください）'
 fi
-if ss -tln | grep -E "0\.0\.0\.0:($API_PORT|$OPS_PORT)|\[::\]:($API_PORT|$OPS_PORT)" >/dev/null; then
+if ss -tln | grep -E "0\.0\.0\.0:($API_PORT|$OPS_PORT|$SIGNUP_PORT)|\[::\]:($API_PORT|$OPS_PORT|$SIGNUP_PORT)" >/dev/null; then
   warn 'API がサーバーの外でも待ち受けています（M2O_LISTEN_HOST を確かめてください）'
 else
   info 'API と運営の API は 127.0.0.1 だけで待ち受けています'
@@ -494,7 +501,7 @@ say '残りの作業'
 info "1. Xserver の DNS に、${BASE_DOMAIN}・www・*.$BASE_DOMAIN の A の記録（この VPS の IP）を作る"
 info '2. Xserver の管理画面のパケットフィルターで、TCP 80・443 を開ける（UDP 51820 は第 12 章で開けてある）'
 info "3. 開けたら https://$BASE_DOMAIN を開いて確かめる。運営者の端末の hosts に「10.66.0.1 ops.${BASE_DOMAIN}」を足し、WireGuard を入れて https://ops.$BASE_DOMAIN を開く"
-info '4. Google のログインの OAuth クライアントに、戻り先（m2office.env の GOOGLE_LOGIN_REDIRECT_URI と OPS_GOOGLE_REDIRECT_URI）を登録する'
+info '4. Google のログインの OAuth クライアントに、戻り先（m2office.env の GOOGLE_LOGIN_REDIRECT_URI と OPS_GOOGLE_REDIRECT_URI と SIGNUP_GOOGLE_REDIRECT_URI）を登録する'
 info "   最初の運営管理者を作る: cd / && sudo -u $SERVICE_USER node --env-file=$ENV_FILE $REPO_DIR/scripts/create-operator.mjs --email <アドレス> --name <名前> --role admin"
 [ -n "$SITE_PREVIEW_HASH" ] && info "紹介のページは公開前の確認の BASIC 認証で守っています（利用者 ${SITE_PREVIEW_USER}）。公開するときは、利用者の名前とハッシュを - で外して走らせ直す"
 [ "$WAF_ENGINE" = DetectionOnly ] && info '5. WAF は記録だけです。誤りが無いことを確かめたら、WAF の動きを On にして走らせ直す'

@@ -195,6 +195,7 @@ export * from './sales-docs/index.js';
 export * from './reservations/index.js';
 export * from './subsidies/index.js';
 export * from './decisions/index.js';
+export * from './billing/index.js';
 export * from './print-designs/index.js';
 export * from './members/index.js';
 export * from './web-review/index.js';

@@ -9,7 +9,7 @@ import type { LlmProvider, LlmResponse } from './provider.js';
 import type { ResearchProvider, ResearchResult } from '../research/provider.js';
 
 /** 推論が使えないときに、利用者へ伝える文（仕様書 第20.2.4節）。 */
-export const AI_NOT_CONFIGURED_MESSAGE = 'Gemini の接続が設定されていません。管理者ページの「接続」で設定してください';
+export const AI_NOT_CONFIGURED_MESSAGE = 'Gemini の接続が設定されていません。管理者ページの「接続」で設定してください（鍵の取り方はヘルプの「Gemini の鍵の取り方」にあります）';
 
 /** 推論が設定されていない。呼び出し側は、この文をそのまま利用者に伝える。 */
 export class AiNotConfiguredError extends Error {
