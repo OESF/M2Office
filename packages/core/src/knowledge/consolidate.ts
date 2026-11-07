@@ -177,7 +177,8 @@ export class Consolidator {
     const { repo } = this.deps;
     const at = now.toISOString();
     const counts: ConsolidationCounts = { merged: 0, stale: 0, unused: 0, conflict: 0 };
-    let items = (await repo.listKnowledge(tenantId)).filter((k) => k.category === 'learned').slice(0, CONSOLIDATE_LIMITS.knowledge);
+    // 資料から本人が会社の知識にしたもの（種類 library。第44.8節）は、本人が確かめたものなのでまとめない・しまわない
+    let items = (await repo.listKnowledge(tenantId)).filter((k) => k.category === 'learned' && k.kind !== 'library').slice(0, CONSOLIDATE_LIMITS.knowledge);
     // 半年使われないもの（推論を使わない）
     const cutoff = now.getTime() - UNUSED_DAYS * 86_400_000;
     for (const k of items) {

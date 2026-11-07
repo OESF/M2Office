@@ -146,13 +146,71 @@ export interface LibraryItem {
   readScope: string;
   /** 人が直した項目。 */
   edited: string[];
+  /** 共有の範囲（第44.8節）。 */
+  shareScope: LibraryShareScope;
+  /** 会社の知識にしたなら、その知識の ID と日時（第44.8節）。 */
+  knowledgeId: string | null;
+  verifiedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** 共有の範囲（第44.8節）。 */
+export type LibraryShareScope = 'self' | 'group' | 'company';
+
+/** 共有の範囲の呼び名。 */
+export const LIBRARY_SHARE_LABELS: Record<LibraryShareScope, string> = { self: '自分だけ', group: 'グループ', company: '会社で共有' };
+
+/** 一覧と 1 件で返す形。`mine` が偽なら、共有された他人の資料（見るだけ）。 */
+export interface LibraryItemView extends LibraryItem {
+  mine: boolean;
+  /** 他人の資料なら、持ち主の名前。 */
+  ownerName: string | null;
 }
 
 /** 1 件の詳しい形。 */
 export interface LibraryItemDetail extends LibraryItem {
   origins: LibraryOrigin[];
+}
+
+/** 1 件の画面に出す形（共有の相手と、ほかの版。第44.8節）。 */
+export interface LibraryItemPage extends LibraryItemDetail {
+  mine: boolean;
+  ownerName: string | null;
+  /** 共有したグループの名前（持ち主にだけ返す）。 */
+  sharedGroups: string[];
+  /** 題名・取引先・種類が同じで中身が違う資料（新しい順）。 */
+  versions: { id: string; title: string; docDate: string | null; receivedAt: string }[];
+}
+
+/** 共有の結果（第44.8節）。`held` は機微なものとして止めた理由（もう一度頼まれたら共有する）。 */
+export type LibraryShareResult =
+  | { item: LibraryItem; scope: LibraryShareScope; people: number }
+  | { held: string }
+  | { error: string };
+
+/** OKF の書き出しの様子（本人ごと。第44.16節）。 */
+export interface LibraryOkfState {
+  enabled: boolean;
+  writtenAt: string | null;
+  files: number;
+  error: string;
+}
+
+/** OKF で書き出し直す間隔（第44.16節「週に 1 回」）。 */
+export const LIBRARY_OKF_INTERVAL_MS = 7 * 86_400_000;
+
+/** 機微な資料らしい言葉（第44.8節。会社で共有の前に止める・会社の知識にしない）。 */
+const SENSITIVE = /(給与|給料|賃金|賞与|源泉徴収|年末調整|人事評価|人事考課|人事|評価|査定|個人番号|マイナンバー|健康診断|診断書|履歴書|職務経歴|雇用契約|身分証|住民票|扶養)/;
+
+/**
+ * 機微な資料らしいか（第44.8節）。題名・種類・語・元の名前・要約を見る。推論は使わない。
+ *
+ * @returns 理由（当たった言葉を含む）。当たらなければ `null`
+ */
+export function librarySensitiveReason(i: Pick<LibraryItem, 'title' | 'docType' | 'keywords' | 'originalName' | 'summary'>): string | null {
+  const hit = SENSITIVE.exec([i.title, i.docType, ...i.keywords, i.originalName, i.summary].join('\n'));
+  return hit ? `「${hit[1]}」に関わる資料のようです` : null;
 }
 
 /** 目録の絞り込み（第44.7節）。 */

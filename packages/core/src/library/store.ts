@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import { LIBRARY_LIMITS, type LibraryEntry, type LibraryFacets, type LibraryFilter, type LibraryFormat, type LibraryItem, type LibraryItemDetail, type LibraryOrigin, type LibraryReadState } from '@m2office/shared';
+import { LIBRARY_LIMITS, type LibraryEntry, type LibraryFacets, type LibraryFilter, type LibraryFormat, type LibraryItem, type LibraryItemDetail, type LibraryOrigin, type LibraryReadState, type LibraryShareScope } from '@m2office/shared';
 import { createPool } from '../repository/pool.js';
 import { normalizeForSearch } from '../knowledge/search.js';
 
@@ -15,7 +15,42 @@ import { normalizeForSearch } from '../knowledge/search.js';
 export interface LibraryViewer {
   tenantId: string;
   userId: string;
+  /**
+   * 見る人のグループ。渡したときだけ、一覧・選択肢・{@link LibraryStore.view} に共有された資料を含める（第44.8節）。
+   * 直す・削除・共有などの持ち主の操作には渡さない（本人の資料だけに絞る）。
+   */
+  groups?: string[];
 }
+
+/** 共有の相手の 1 行（第44.14節 `library_shares`）。 */
+export interface LibraryShareRow {
+  scope: 'group' | 'company';
+  groupId: string | null;
+  /** M2Office が足したドライブの権限（外すときに使う）。 */
+  emails: string[];
+  domain: string | null;
+}
+
+/** 持ち主ごとの様子（第44.14節 `library_owner_state`）。 */
+export interface LibraryOwnerStateRow {
+  okfEnabled: boolean;
+  okfWrittenAt: string | null;
+  okfError: string;
+  /** もう知らせた版の組（題名・取引先・種類の鍵）。 */
+  versionsNotified: string[];
+  versionsNoticedAt: string | null;
+}
+
+/** OKF で書き出したファイル（第44.14節 `library_okf_files`）。 */
+export interface LibraryOkfFileRow {
+  key: string;
+  driveId: string;
+  digest: string;
+}
+
+/** 版の組の鍵（題名・取引先・種類が同じものを同じ資料の版とみなす。第44.8節）。題名が無ければ `null`。 */
+export const libraryVersionKey = (i: Pick<LibraryItem, 'title' | 'counterparty' | 'docType'>): string | null =>
+  i.title.trim() ? [i.title, i.counterparty, i.docType].map(libraryNormal).join('|') : null;
 
 /** 新しい資料。 */
 export interface NewLibraryItem {
@@ -119,6 +154,25 @@ export interface LibraryStore {
   setFolder(who: LibraryViewer, key: string, driveId: string): Promise<void>;
   /** 本人の目録を消す（連携の解除・削除の求め・退職。第44.9節）。ドライブのファイルは本人のものなので消さない。メールの取り込みも止める。 */
   purgeOwner(tenantId: string, userId: string): Promise<number>;
+  /** 見る人に見える 1 件（本人の資料と、本人に共有された資料。`who.groups` を渡す）。 */
+  view(who: LibraryViewer, id: string): Promise<LibraryItemDetail | null>;
+  /** 共有の相手（持ち主だけ）。 */
+  shares(who: LibraryViewer, itemId: string): Promise<LibraryShareRow[]>;
+  /** 共有の範囲と相手を置き換える（持ち主だけ。`self` なら相手を消す）。 */
+  setShares(who: LibraryViewer, itemId: string, scope: 'self' | 'group' | 'company', rows: LibraryShareRow[]): Promise<LibraryItem | null>;
+  /** 会社の知識にした記録を残す（持ち主だけ）。 */
+  setKnowledge(who: LibraryViewer, itemId: string, knowledgeId: string, at: string): Promise<void>;
+  /** 本人の資料のうち、版の鍵が同じもの（新しい順）。 */
+  versionsOf(who: LibraryViewer, item: LibraryItem): Promise<LibraryItem[]>;
+  /** 本人の資料のすべて（OKF の書き出しと版の知らせ。新しい順）。 */
+  allOf(tenantId: string, ownerId: string): Promise<LibraryItem[]>;
+  /** 資料を持っている人。 */
+  owners(tenantId: string): Promise<string[]>;
+  ownerState(tenantId: string, ownerId: string): Promise<LibraryOwnerStateRow | null>;
+  saveOwnerState(tenantId: string, ownerId: string, row: LibraryOwnerStateRow): Promise<void>;
+  okfFiles(tenantId: string, ownerId: string): Promise<LibraryOkfFileRow[]>;
+  saveOkfFile(tenantId: string, ownerId: string, row: LibraryOkfFileRow): Promise<void>;
+  deleteOkfFile(tenantId: string, ownerId: string, key: string): Promise<void>;
   /** メールの添付の取り込みの様子（第44.4節）。一度もオンにしていなければ `null`。 */
   mailWatch(who: LibraryViewer): Promise<LibraryMailWatchRow | null>;
   saveMailWatch(who: LibraryViewer, row: LibraryMailWatchRow): Promise<void>;
@@ -158,12 +212,13 @@ export function librarySearchText(i: { originalName: string; title: string; docT
 }
 
 const COLS = `id, owner_id, drive_file_id, drive_url, placed, file_id, original_name, format, mime, size_bytes, sha256, entry, title, doc_type, counterparty, contact_id,
-  doc_date::text as doc_date, received_at, summary, keywords, read_state, read_note, read_scope, edited, attempts, created_at, updated_at`;
+  doc_date::text as doc_date, received_at, summary, keywords, read_state, read_note, read_scope, edited, attempts, share_scope, knowledge_id, verified_at, created_at, updated_at`;
 
 interface Row extends pg.QueryResultRow {
   id: string; owner_id: string; drive_file_id: string | null; drive_url: string | null; placed: boolean; file_id: string | null; original_name: string; format: LibraryFormat; mime: string;
   size_bytes: string | number; sha256: string | null; entry: LibraryEntry; title: string; doc_type: string; counterparty: string; contact_id: string | null; doc_date: string | null;
-  received_at: Date | string; summary: string; keywords: string[]; read_state: LibraryReadState; read_note: string; read_scope: string; edited: string[]; attempts: number; created_at: Date | string; updated_at: Date | string;
+  received_at: Date | string; summary: string; keywords: string[]; read_state: LibraryReadState; read_note: string; read_scope: string; edited: string[]; attempts: number;
+  share_scope: LibraryShareScope; knowledge_id: string | null; verified_at: Date | string | null; created_at: Date | string; updated_at: Date | string;
 }
 
 /** 日時を ISO の形にする（接続の設定により、文字か Date で返る）。 */
@@ -173,8 +228,14 @@ const toItem = (r: Row): LibraryItem => ({
   id: r.id, ownerId: r.owner_id, driveFileId: r.drive_file_id, driveUrl: r.drive_url, placed: r.placed, originalName: r.original_name, format: r.format, mime: r.mime,
   sizeBytes: Number(r.size_bytes), entry: r.entry, title: r.title, docType: r.doc_type, counterparty: r.counterparty, contactId: r.contact_id, docDate: r.doc_date,
   receivedAt: iso(r.received_at), summary: r.summary, keywords: r.keywords, readState: r.read_state, readNote: r.read_note, readScope: r.read_scope, edited: r.edited,
+  shareScope: r.share_scope, knowledgeId: r.knowledge_id, verifiedAt: r.verified_at === null ? null : iso(r.verified_at),
   createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
 });
+
+/** 見る人に見える資料の条件（`$1` は会社、`$2` は本人、`g` はグループの引数の番号）。グループを渡さなければ本人の資料だけ。 */
+const visibleSql = (who: LibraryViewer, g: number) => (who.groups
+  ? `(owner_id = $2 or share_scope = 'company' or (share_scope = 'group' and exists (select 1 from library_shares s where s.tenant_id = library_items.tenant_id and s.item_id = library_items.id and s.group_id = any($${g}))))`
+  : 'owner_id = $2');
 const toWork = (r: Row): LibraryWork => ({ ...toItem(r), fileId: r.file_id, sha256: r.sha256, attempts: r.attempts });
 
 /** LIKE の語の中の記号を逃がす。 */
@@ -239,6 +300,18 @@ export class PostgresLibraryStore implements LibraryStore {
     }
   }
 
+  async view(who: LibraryViewer, id: string): Promise<LibraryItemDetail | null> {
+    const rows = await this.q<Row>(who.tenantId, `select ${COLS} from library_items where tenant_id = $1 and ${visibleSql({ ...who, groups: who.groups ?? [] }, 4)} and id = $3`, [who.tenantId, who.userId, id, who.groups ?? []]);
+    return rows[0] ? this.withOrigins(who.tenantId, rows[0]) : null;
+  }
+
+  private async withOrigins(tenantId: string, row: Row): Promise<LibraryItemDetail> {
+    const id = row.id;
+    const origins = await this.q<{ entry: LibraryEntry; folder: string; sender: string; subject: string; created_at: Date | string }>(tenantId,
+      `select entry, folder, sender, subject, created_at from library_item_origins where tenant_id = $1 and item_id = $2 order by created_at`, [tenantId, id]);
+    return { ...toItem(row), origins: origins.map((o): LibraryOrigin => ({ entry: o.entry, folder: o.folder, sender: o.sender, subject: o.subject, at: iso(o.created_at) })) };
+  }
+
   async get(who: LibraryViewer, id: string): Promise<LibraryItemDetail | null> {
     const rows = await this.q<Row>(who.tenantId, `select ${COLS} from library_items where tenant_id = $1 and owner_id = $2 and id = $3`, [who.tenantId, who.userId, id]);
     if (!rows[0]) return null;
@@ -248,9 +321,10 @@ export class PostgresLibraryStore implements LibraryStore {
   }
 
   async list(who: LibraryViewer, f: LibraryFilter, terms: string[], limit: number, offset: number): Promise<{ items: LibraryItem[]; total: number }> {
-    const where = ['tenant_id = $1', 'owner_id = $2'];
+    const where = ['tenant_id = $1'];
     const params: unknown[] = [who.tenantId, who.userId];
     const add = (sql: (n: string) => string, v: unknown) => { params.push(v); where.push(sql(`$${params.length}`)); };
+    if (who.groups) { params.push(who.groups); where.push(visibleSql(who, params.length)); } else where.push('owner_id = $2');
     if (f.docType) add((n) => `doc_type = ${n}`, f.docType);
     if (f.counterparty) add((n) => `counterparty = ${n}`, f.counterparty);
     if (f.entry) add((n) => `entry = ${n}`, f.entry);
@@ -264,11 +338,12 @@ export class PostgresLibraryStore implements LibraryStore {
   }
 
   async facets(who: LibraryViewer): Promise<LibraryFacets> {
-    const p = [who.tenantId, who.userId];
+    const p = [who.tenantId, who.userId, who.groups ?? []];
+    const mine = visibleSql(who, 3);
     const [types, parties, years] = await Promise.all([
-      this.q<{ v: string }>(who.tenantId, `select doc_type as v from library_items where tenant_id = $1 and owner_id = $2 and doc_type <> '' group by doc_type order by count(*) desc limit 40`, p),
-      this.q<{ v: string }>(who.tenantId, `select counterparty as v from library_items where tenant_id = $1 and owner_id = $2 and counterparty <> '' group by counterparty order by count(*) desc limit 100`, p),
-      this.q<{ v: number }>(who.tenantId, `select distinct extract(year from coalesce(doc_date, (received_at at time zone 'Asia/Tokyo')::date))::int as v from library_items where tenant_id = $1 and owner_id = $2 order by v desc limit 40`, p),
+      this.q<{ v: string }>(who.tenantId, `select doc_type as v from library_items where tenant_id = $1 and ${mine} and doc_type <> '' and $3::text[] is not null group by doc_type order by count(*) desc limit 40`, p),
+      this.q<{ v: string }>(who.tenantId, `select counterparty as v from library_items where tenant_id = $1 and ${mine} and counterparty <> '' and $3::text[] is not null group by counterparty order by count(*) desc limit 100`, p),
+      this.q<{ v: number }>(who.tenantId, `select distinct extract(year from coalesce(doc_date, (received_at at time zone 'Asia/Tokyo')::date))::int as v from library_items where tenant_id = $1 and ${mine} and $3::text[] is not null order by v desc limit 40`, p),
     ]);
     return { docTypes: types.map((r) => r.v), counterparties: parties.map((r) => r.v), years: years.map((r) => r.v) };
   }
@@ -346,7 +421,99 @@ export class PostgresLibraryStore implements LibraryStore {
     await this.q(tenantId, `delete from library_tombstones where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     await this.q(tenantId, `delete from library_folders where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     await this.q(tenantId, `delete from library_mail_watch where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
+    await this.q(tenantId, `delete from library_owner_state where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
+    await this.q(tenantId, `delete from library_okf_files where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     return rows.length;
+  }
+
+  async shares(who: LibraryViewer, itemId: string): Promise<LibraryShareRow[]> {
+    const rows = await this.q<{ scope: 'group' | 'company'; group_id: string | null; emails: string[]; domain: string | null }>(who.tenantId,
+      `select s.scope, s.group_id, s.emails, s.domain from library_shares s join library_items i on i.tenant_id = s.tenant_id and i.id = s.item_id
+       where s.tenant_id = $1 and s.item_id = $2 and i.owner_id = $3 order by s.created_at`, [who.tenantId, itemId, who.userId]);
+    return rows.map((r) => ({ scope: r.scope, groupId: r.group_id, emails: r.emails, domain: r.domain }));
+  }
+
+  async setShares(who: LibraryViewer, itemId: string, scope: 'self' | 'group' | 'company', rows: LibraryShareRow[]): Promise<LibraryItem | null> {
+    const c = await this.pool.connect();
+    try {
+      await c.query('begin');
+      await c.query(`select set_config('app.tenant_id', $1, true)`, [who.tenantId]);
+      const upd = await c.query<Row>(`update library_items set share_scope = $4, updated_at = now() where tenant_id = $1 and owner_id = $2 and id = $3 returning ${COLS}`,
+        [who.tenantId, who.userId, itemId, scope]);
+      if (!upd.rows[0]) { await c.query('rollback'); return null; }
+      await c.query('delete from library_shares where tenant_id = $1 and item_id = $2', [who.tenantId, itemId]);
+      for (const r of rows) {
+        await c.query(`insert into library_shares (id, tenant_id, item_id, scope, group_id, emails, domain, created_by) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [`lsh-${randomUUID()}`, who.tenantId, itemId, r.scope, r.groupId, r.emails, r.domain, who.userId]);
+      }
+      await c.query('commit');
+      return toItem(upd.rows[0]);
+    } catch (err) {
+      await c.query('rollback').catch(() => undefined);
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  async setKnowledge(who: LibraryViewer, itemId: string, knowledgeId: string, at: string): Promise<void> {
+    await this.q(who.tenantId, `update library_items set knowledge_id = $4, verified_at = $5, updated_at = now() where tenant_id = $1 and owner_id = $2 and id = $3`,
+      [who.tenantId, who.userId, itemId, knowledgeId, at]);
+  }
+
+  async versionsOf(who: LibraryViewer, item: LibraryItem): Promise<LibraryItem[]> {
+    if (!libraryVersionKey(item)) return [];
+    const rows = await this.q<Row>(who.tenantId,
+      `select ${COLS} from library_items where tenant_id = $1 and owner_id = $2 and id <> $3 and title = $4 and counterparty = $5 and doc_type = $6
+       order by coalesce(doc_date, (received_at at time zone 'Asia/Tokyo')::date) desc, received_at desc limit 20`,
+      [who.tenantId, who.userId, item.id, item.title, item.counterparty, item.docType]);
+    return rows.map(toItem);
+  }
+
+  async allOf(tenantId: string, ownerId: string): Promise<LibraryItem[]> {
+    const rows = await this.q<Row>(tenantId, `select ${COLS} from library_items where tenant_id = $1 and owner_id = $2 order by received_at desc limit 20000`, [tenantId, ownerId]);
+    return rows.map(toItem);
+  }
+
+  async owners(tenantId: string): Promise<string[]> {
+    const rows = await this.q<{ owner_id: string }>(tenantId, `select distinct owner_id from library_items where tenant_id = $1`, [tenantId]);
+    return rows.map((r) => r.owner_id);
+  }
+
+  async ownerState(tenantId: string, ownerId: string): Promise<LibraryOwnerStateRow | null> {
+    const rows = await this.q<{ okf_enabled: boolean; okf_written_at: Date | string | null; okf_error: string; versions_notified: string[]; versions_noticed_at: Date | string | null }>(tenantId,
+      `select okf_enabled, okf_written_at, okf_error, versions_notified, versions_noticed_at from library_owner_state where tenant_id = $1 and owner_id = $2`, [tenantId, ownerId]);
+    const r = rows[0];
+    if (!r) return null;
+    return {
+      okfEnabled: r.okf_enabled, okfWrittenAt: r.okf_written_at === null ? null : iso(r.okf_written_at), okfError: r.okf_error,
+      versionsNotified: r.versions_notified, versionsNoticedAt: r.versions_noticed_at === null ? null : iso(r.versions_noticed_at),
+    };
+  }
+
+  async saveOwnerState(tenantId: string, ownerId: string, w: LibraryOwnerStateRow): Promise<void> {
+    await this.q(tenantId,
+      `insert into library_owner_state (tenant_id, owner_id, okf_enabled, okf_written_at, okf_error, versions_notified, versions_noticed_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, now())
+       on conflict (tenant_id, owner_id) do update set okf_enabled = excluded.okf_enabled, okf_written_at = excluded.okf_written_at, okf_error = excluded.okf_error,
+         versions_notified = excluded.versions_notified, versions_noticed_at = excluded.versions_noticed_at, updated_at = now()`,
+      [tenantId, ownerId, w.okfEnabled, w.okfWrittenAt, w.okfError.slice(0, 300), w.versionsNotified.slice(-2000), w.versionsNoticedAt]);
+  }
+
+  async okfFiles(tenantId: string, ownerId: string): Promise<LibraryOkfFileRow[]> {
+    const rows = await this.q<{ key: string; drive_id: string; digest: string }>(tenantId, `select key, drive_id, digest from library_okf_files where tenant_id = $1 and owner_id = $2`, [tenantId, ownerId]);
+    return rows.map((r) => ({ key: r.key, driveId: r.drive_id, digest: r.digest }));
+  }
+
+  async saveOkfFile(tenantId: string, ownerId: string, f: LibraryOkfFileRow): Promise<void> {
+    await this.q(tenantId,
+      `insert into library_okf_files (tenant_id, owner_id, key, drive_id, digest, updated_at) values ($1, $2, $3, $4, $5, now())
+       on conflict (tenant_id, owner_id, key) do update set drive_id = excluded.drive_id, digest = excluded.digest, updated_at = now()`,
+      [tenantId, ownerId, f.key, f.driveId, f.digest]);
+  }
+
+  async deleteOkfFile(tenantId: string, ownerId: string, key: string): Promise<void> {
+    await this.q(tenantId, `delete from library_okf_files where tenant_id = $1 and owner_id = $2 and key = $3`, [tenantId, ownerId, key]);
   }
 
   async mailWatch(who: LibraryViewer): Promise<LibraryMailWatchRow | null> {
@@ -444,24 +611,32 @@ export class MemoryLibraryStore implements LibraryStore {
   readonly tombstones = new Set<string>();
   readonly folders = new Map<string, string>();
   private mine = (who: LibraryViewer) => [...this.rows.values()].filter((r) => r.tenantId === who.tenantId && r.ownerId === who.userId);
-  private view = (r: LibraryWork): LibraryItem => {
+  readonly shareRows = new Map<string, LibraryShareRow[]>();
+  readonly ownerStates = new Map<string, LibraryOwnerStateRow>();
+  readonly okf = new Map<string, LibraryOkfFileRow>();
+  /** 見る人に見えるか（本人の資料と、本人に共有された資料）。 */
+  private visible = (who: LibraryViewer, r: { tenantId: string; ownerId: string; id: string; shareScope: string }) => r.tenantId === who.tenantId && (r.ownerId === who.userId
+    || (!!who.groups && (r.shareScope === 'company' || (r.shareScope === 'group' && (this.shareRows.get(r.id) ?? []).some((x) => !!x.groupId && who.groups!.includes(x.groupId))))));
+  private seen = (who: LibraryViewer) => [...this.rows.values()].filter((r) => this.visible(who, r));
+  private toView = (r: LibraryWork): LibraryItem => {
     const { fileId: _f, sha256: _s, attempts: _a, tenantId: _t, nextTryAt: _n, searchText: _x, origins: _o, ...item } = r as LibraryWork & { tenantId: string; nextTryAt: number; searchText: string; origins: unknown };
     return item;
   };
 
   async insert(who: LibraryViewer, i: NewLibraryItem): Promise<{ item: LibraryItem; created: boolean }> {
     const same = this.mine(who).find((r) => (i.sha256 && r.sha256 === i.sha256) || (i.driveFileId && r.driveFileId === i.driveFileId));
-    if (same) return { item: this.view(same), created: false };
+    if (same) return { item: this.toView(same), created: false };
     const now = new Date().toISOString();
     const row = {
       id: `lib-${randomUUID()}`, tenantId: who.tenantId, ownerId: who.userId, driveFileId: i.driveFileId, driveUrl: i.driveUrl, placed: i.placed, fileId: i.fileId, originalName: i.originalName,
       format: i.format, mime: i.mime, sizeBytes: i.sizeBytes, sha256: i.sha256, entry: i.entry, title: i.title ?? '', docType: '', counterparty: '', contactId: null, docDate: null, receivedAt: i.receivedAt ?? now,
-      summary: '', keywords: [], readState: i.readState ?? 'pending' as LibraryReadState, readNote: i.readNote ?? '', readScope: '', edited: [], attempts: 0, createdAt: now, updatedAt: now,
+      summary: '', keywords: [], readState: i.readState ?? 'pending' as LibraryReadState, readNote: i.readNote ?? '', readScope: '', edited: [], attempts: 0,
+      shareScope: 'self' as LibraryShareScope, knowledgeId: null as string | null, verifiedAt: null as string | null, createdAt: now, updatedAt: now,
       nextTryAt: 0, searchText: '', origins: [],
     };
     row.searchText = librarySearchText(row, []);
     this.rows.set(row.id, row);
-    return { item: this.view(row), created: true };
+    return { item: this.toView(row), created: true };
   }
 
   async addOrigin(who: LibraryViewer, itemId: string, o: NewLibraryOrigin): Promise<void> {
@@ -479,20 +654,26 @@ export class MemoryLibraryStore implements LibraryStore {
   async get(who: LibraryViewer, id: string): Promise<LibraryItemDetail | null> {
     const r = this.rows.get(id);
     if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return null;
-    return { ...this.view(r), origins: r.origins.map(({ artifactId: _a, messageId: _m, ...o }) => o) };
+    return { ...this.toView(r), origins: r.origins.map(({ artifactId: _a, messageId: _m, ...o }) => o) };
+  }
+
+  async view(who: LibraryViewer, id: string): Promise<LibraryItemDetail | null> {
+    const r = this.rows.get(id);
+    if (!r || !this.visible({ ...who, groups: who.groups ?? [] }, r)) return null;
+    return { ...this.toView(r), origins: r.origins.map(({ artifactId: _a, messageId: _m, ...o }) => o) };
   }
 
   async list(who: LibraryViewer, f: LibraryFilter, terms: string[], limit: number, offset: number): Promise<{ items: LibraryItem[]; total: number }> {
-    const hits = this.mine(who).filter((r) =>
+    const hits = this.seen(who).filter((r) =>
       (!f.docType || r.docType === f.docType) && (!f.counterparty || r.counterparty === f.counterparty) && (!f.entry || r.entry === f.entry)
       && (!f.year || Number((r.docDate ?? r.receivedAt).slice(0, 4)) === f.year)
       && (terms.length === 0 || terms.some((t) => r.searchText.includes(t))));
     hits.sort((a, b) => (b.docDate ?? b.receivedAt.slice(0, 10)).localeCompare(a.docDate ?? a.receivedAt.slice(0, 10)) || b.receivedAt.localeCompare(a.receivedAt));
-    return { items: hits.slice(offset, offset + limit).map(this.view), total: hits.length };
+    return { items: hits.slice(offset, offset + limit).map(this.toView), total: hits.length };
   }
 
   async facets(who: LibraryViewer): Promise<LibraryFacets> {
-    const rows = this.mine(who);
+    const rows = this.seen(who);
     return {
       docTypes: [...new Set(rows.map((r) => r.docType).filter(Boolean))],
       counterparties: [...new Set(rows.map((r) => r.counterparty).filter(Boolean))],
@@ -507,12 +688,12 @@ export class MemoryLibraryStore implements LibraryStore {
 
   async byHash(who: LibraryViewer, sha256: string): Promise<LibraryItem | null> {
     const r = this.mine(who).find((x) => x.sha256 === sha256);
-    return r ? this.view(r) : null;
+    return r ? this.toView(r) : null;
   }
 
   async byDriveFile(who: LibraryViewer, driveFileId: string): Promise<LibraryItem | null> {
     const r = this.mine(who).find((x) => x.driveFileId === driveFileId);
-    return r ? this.view(r) : null;
+    return r ? this.toView(r) : null;
   }
 
   async existingHashes(who: LibraryViewer, hashes: string[]): Promise<string[]> {
@@ -524,14 +705,14 @@ export class MemoryLibraryStore implements LibraryStore {
     if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return null;
     Object.assign(r, patch, { edited: [...new Set([...r.edited, ...Object.keys(patch)])] });
     r.searchText = librarySearchText(r, r.origins);
-    return this.view(r);
+    return this.toView(r);
   }
 
   async requeue(who: LibraryViewer, id: string): Promise<LibraryItem | null> {
     const r = this.rows.get(id);
     if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return null;
     Object.assign(r, { readState: 'pending', readNote: '', readScope: '', attempts: 0, nextTryAt: 0 });
-    return this.view(r);
+    return this.toView(r);
   }
 
   async remove(who: LibraryViewer, id: string): Promise<LibraryItem | null> {
@@ -539,7 +720,7 @@ export class MemoryLibraryStore implements LibraryStore {
     if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return null;
     this.rows.delete(id);
     if (r.sha256) this.tombstones.add(`${who.tenantId}:${who.userId}:${r.sha256}`);
-    return this.view(r);
+    return this.toView(r);
   }
 
   async isTombstoned(who: LibraryViewer, sha256: string): Promise<boolean> {
@@ -558,7 +739,65 @@ export class MemoryLibraryStore implements LibraryStore {
     const rows = this.mine({ tenantId, userId });
     for (const r of rows) this.rows.delete(r.id);
     this.mailWatches.delete(`${tenantId}:${userId}`);
+    this.ownerStates.delete(`${tenantId}:${userId}`);
+    for (const k of [...this.okf.keys()]) if (k.startsWith(`${tenantId}:${userId}:`)) this.okf.delete(k);
     return rows.length;
+  }
+
+  async shares(who: LibraryViewer, itemId: string): Promise<LibraryShareRow[]> {
+    const r = this.rows.get(itemId);
+    if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return [];
+    return (this.shareRows.get(itemId) ?? []).map((x) => ({ ...x, emails: [...x.emails] }));
+  }
+
+  async setShares(who: LibraryViewer, itemId: string, scope: LibraryShareScope, rows: LibraryShareRow[]): Promise<LibraryItem | null> {
+    const r = this.rows.get(itemId);
+    if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return null;
+    r.shareScope = scope;
+    r.updatedAt = new Date().toISOString();
+    if (scope === 'self' || rows.length === 0) this.shareRows.delete(itemId);
+    else this.shareRows.set(itemId, rows.map((x) => ({ ...x, emails: [...x.emails] })));
+    return this.toView(r);
+  }
+
+  async setKnowledge(who: LibraryViewer, itemId: string, knowledgeId: string, at: string): Promise<void> {
+    const r = this.rows.get(itemId);
+    if (r && r.tenantId === who.tenantId && r.ownerId === who.userId) Object.assign(r, { knowledgeId, verifiedAt: at });
+  }
+
+  async versionsOf(who: LibraryViewer, item: LibraryItem): Promise<LibraryItem[]> {
+    if (!libraryVersionKey(item)) return [];
+    return this.mine(who).filter((r) => r.id !== item.id && r.title === item.title && r.counterparty === item.counterparty && r.docType === item.docType)
+      .sort((a, b) => (b.docDate ?? b.receivedAt).localeCompare(a.docDate ?? a.receivedAt)).map(this.toView);
+  }
+
+  async allOf(tenantId: string, ownerId: string): Promise<LibraryItem[]> {
+    return this.mine({ tenantId, userId: ownerId }).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).map(this.toView);
+  }
+
+  async owners(tenantId: string): Promise<string[]> {
+    return [...new Set([...this.rows.values()].filter((r) => r.tenantId === tenantId).map((r) => r.ownerId))];
+  }
+
+  async ownerState(tenantId: string, ownerId: string): Promise<LibraryOwnerStateRow | null> {
+    const w = this.ownerStates.get(`${tenantId}:${ownerId}`);
+    return w ? { ...w, versionsNotified: [...w.versionsNotified] } : null;
+  }
+
+  async saveOwnerState(tenantId: string, ownerId: string, row: LibraryOwnerStateRow): Promise<void> {
+    this.ownerStates.set(`${tenantId}:${ownerId}`, { ...row, versionsNotified: [...row.versionsNotified] });
+  }
+
+  async okfFiles(tenantId: string, ownerId: string): Promise<LibraryOkfFileRow[]> {
+    return [...this.okf.entries()].filter(([k]) => k.startsWith(`${tenantId}:${ownerId}:`)).map(([, v]) => ({ ...v }));
+  }
+
+  async saveOkfFile(tenantId: string, ownerId: string, row: LibraryOkfFileRow): Promise<void> {
+    this.okf.set(`${tenantId}:${ownerId}:${row.key}`, { ...row });
+  }
+
+  async deleteOkfFile(tenantId: string, ownerId: string, key: string): Promise<void> {
+    this.okf.delete(`${tenantId}:${ownerId}:${key}`);
   }
 
   async mailWatch(who: LibraryViewer): Promise<LibraryMailWatchRow | null> {
@@ -583,7 +822,7 @@ export class MemoryLibraryStore implements LibraryStore {
     const rows = [...this.rows.values()].filter((r) => r.tenantId === tenantId && r.readState === 'pending' && r.nextTryAt <= now && (!placeOnly || !r.driveFileId))
       .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(0, limit);
     for (const r of rows) r.nextTryAt = now + leaseMs;
-    return rows.map((r) => ({ ...this.view(r), fileId: r.fileId, sha256: r.sha256, attempts: r.attempts }));
+    return rows.map((r) => ({ ...this.toView(r), fileId: r.fileId, sha256: r.sha256, attempts: r.attempts }));
   }
 
   async finishRead(tenantId: string, id: string, x: LibraryReadResult): Promise<void> {

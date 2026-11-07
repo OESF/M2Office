@@ -7,8 +7,8 @@
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import {
-  isRefusedLibraryName, LIBRARY_ENTRY_LABELS, LIBRARY_FORMAT_LABELS, LIBRARY_LIMITS, libraryTitleOf,
-  type LibraryEntry, type LibraryFacets, type LibraryItem, type LibraryItemDetail, type LibraryMailState, type LibraryProgress,
+  isRefusedLibraryName, LIBRARY_ENTRY_LABELS, LIBRARY_FORMAT_LABELS, LIBRARY_LIMITS, LIBRARY_SHARE_LABELS, libraryTitleOf,
+  type LibraryEntry, type LibraryFacets, type LibraryItemPage, type LibraryItemView, type LibraryMailState, type LibraryOkfState, type LibraryProgress, type LibraryShareScope,
 } from '@m2office/shared';
 import { api, ApiError, describeError } from './api.js';
 import { BackButton } from './back-button.js';
@@ -68,7 +68,7 @@ export function Library({ itemId, onOpen, changeKey }: {
   changeKey: string;
 }) {
   return itemId
-    ? <LibraryDetail key={itemId} id={itemId} onBack={() => onOpen(null)} />
+    ? <LibraryDetail key={itemId} id={itemId} onBack={() => onOpen(null)} onOpen={(id) => onOpen(id)} />
     : <LibraryList onOpen={onOpen} changeKey={changeKey} />;
 }
 
@@ -76,7 +76,7 @@ export function Library({ itemId, onOpen, changeKey }: {
 interface Upload { total: number; done: number; same: number; failed: { name: string; why: string }[]; skipped: number; running: boolean; checking: boolean }
 
 function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: string }) {
-  const [items, setItems] = useState<(LibraryItem & { why: string[] })[] | null>(null);
+  const [items, setItems] = useState<(LibraryItemView & { why: string[] })[] | null>(null);
   const [total, setTotal] = useState(0);
   const [facets, setFacets] = useState<LibraryFacets>({ docTypes: [], counterparties: [], years: [] });
   const [progress, setProgress] = useState<LibraryProgress | null>(null);
@@ -251,6 +251,7 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       </div>
 
       <MailIntake google={google} onImported={load} />
+      <OkfExport google={google} />
 
       {confirm && (
         <div className="card library-confirm" role="alertdialog" aria-label="取り込みの確かめ">
@@ -328,6 +329,8 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
                   {i.readState === 'unreadable' && <span className="badge warn">読めなかった</span>}
                   {i.readState === 'too_large' && <span className="badge warn">大きいため読まず</span>}
                   {(i.readState === 'pending' || i.readState === 'paused') && <span className="badge">読む前</span>}
+                  {!i.mine && <span className="badge">共有: {i.ownerName ?? '同じ会社の人'}</span>}
+                  {i.mine && i.shareScope !== 'self' && <span className="badge">{LIBRARY_SHARE_LABELS[i.shareScope]}</span>}
                 </span>
                 <span className="library-meta small muted">
                   {[i.counterparty, i.docType, dayLabel(i.docDate ?? i.receivedAt), LIBRARY_ENTRY_LABELS[i.entry]].filter(Boolean).join(' ・ ')}
@@ -341,6 +344,38 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       )}
       {items && items.length < total && <button className="btn ghost small" onClick={more}>続きを見る（残り {(total - items.length).toLocaleString('ja-JP')} 件）</button>}
       {dragging && <div className="library-drop" aria-hidden="true">ここに入れる</div>}
+    </div>
+  );
+}
+
+/**
+ * OKF での書き出し（第44.16節）。本人が入れたときだけ、本人のドライブの「M2Office 資料/OKF」に書き出し、週に 1 回書き直す。自動で共有しない。
+ */
+function OkfExport({ google }: { google: boolean }) {
+  const [state, setState] = useState<LibraryOkfState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { api.library.okf.get().then(setState).catch((e) => setError(describeError(e, '書き出しの様子を読めませんでした'))); }, []);
+  if (!state) return error ? <p className="small error" role="alert">{error}</p> : null;
+  const toggle = async () => {
+    setBusy(true);
+    setError(null);
+    try { setState(await api.library.okf.set(!state.enabled)); } catch (e) { setError(describeError(e, '変えられませんでした')); } finally { setBusy(false); }
+  };
+  return (
+    <div className="library-mail">
+      <label className="switch-label">
+        <span>OKF で書き出す</span>
+        <button type="button" role="switch" aria-checked={state.enabled} aria-label={state.enabled ? 'OKF での書き出しをやめる' : 'OKF で書き出す'}
+          className={state.enabled ? 'switch on' : 'switch'} disabled={busy || (!google && !state.enabled)} onClick={() => void toggle()}><span /></button>
+      </label>
+      {state.enabled && (
+        <span className="small muted" role="status">
+          {state.writtenAt ? `${dayLabel(new Date(state.writtenAt).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }))} に ${state.files.toLocaleString('ja-JP')} 件を書き出しました` : '書き出しています'}
+        </span>
+      )}
+      {state.enabled && state.error && <p className="small error library-mail-note" role="alert">書き出せませんでした（{state.error}）</p>}
+      {error && <p className="small error library-mail-note" role="alert">{error}</p>}
     </div>
   );
 }
@@ -426,9 +461,9 @@ function MailIntake({ google, onImported }: { google: boolean; onImported: () =>
   );
 }
 
-/** 1 件。題名などを直す・開く・もう一度読む・削除。 */
-function LibraryDetail({ id, onBack }: { id: string; onBack: () => void }) {
-  const [item, setItem] = useState<LibraryItemDetail | null>(null);
+/** 1 件。題名などを直す・開く・もう一度読む・削除・共有・会社の知識（持ち主だけ）。共有された資料は見るだけ。 */
+function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; onOpen: (id: string) => void }) {
+  const [item, setItem] = useState<LibraryItemPage | null>(null);
   const [form, setForm] = useState({ title: '', docType: '', counterparty: '', docDate: '' });
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -457,7 +492,7 @@ function LibraryDetail({ id, onBack }: { id: string; onBack: () => void }) {
   };
 
   const save = () => {
-    if (!item) return;
+    if (!item?.mine) return;
     const patch: Record<string, string | null> = {};
     if (form.title.trim() !== libraryTitleOf(item)) patch['title'] = form.title;
     if (form.docType !== item.docType) patch['docType'] = form.docType;
@@ -469,43 +504,107 @@ function LibraryDetail({ id, onBack }: { id: string; onBack: () => void }) {
 
   if (error && !item) return <div><BackButton label="資料の一覧へ" onClick={onBack} /><p className="error" role="alert">{error}</p></div>;
   if (!item) return <p className="muted">読み込んでいます…</p>;
+  const mine = item.mine;
   return (
     <div className="library-detail">
       <BackButton label="資料の一覧へ" onClick={onBack} />
       <div className="row wrap library-actions">
         {item.driveUrl && <a className="btn" href={item.driveUrl} target="_blank" rel="noreferrer">開く</a>}
-        <button className="btn ghost" disabled={busy} onClick={() => void act(async () => { await api.library.reread(id); load(); }, 'もう一度読みます')}>もう一度読む</button>
-        <button className="btn ghost danger" disabled={busy} onClick={() => {
+        {mine && <button className="btn ghost" disabled={busy} onClick={() => void act(async () => { await api.library.reread(id); load(); }, 'もう一度読みます')}>もう一度読む</button>}
+        {mine && (item.knowledgeId
+          ? <span className="badge">会社の知識</span>
+          : <button className="btn ghost" disabled={busy || !item.driveFileId} onClick={() => void act(async () => { await api.library.knowledge(id); load(); }, '会社の知識にしました。全員の秘書が参照できます')}>会社の知識にする</button>)}
+        {mine && <button className="btn ghost danger" disabled={busy} onClick={() => {
           const text = item.placed
             ? 'この資料を削除しますか。ドライブのファイルはごみ箱へ移ります。'
             : 'この資料を目録から削除しますか。ドライブのファイルはそのまま残ります。';
           if (window.confirm(text)) void act(async () => { await api.library.remove(id); onBack(); }, '削除しました');
-        }}>削除</button>
+        }}>削除</button>}
       </div>
+      {!mine && <p className="small muted" role="status">{item.ownerName ?? '同じ会社の人'}さんが共有した資料です</p>}
       {note && <p className="small" role="status">{note}</p>}
       {error && <p className="error" role="alert">{error}</p>}
       {(item.readState === 'unreadable' || item.readState === 'too_large') && <p className="small" role="status"><span className="badge warn">読めなかった</span> {item.readNote}</p>}
       {(item.readState === 'pending' || item.readState === 'paused') && <p className="small muted" role="status">まだ中身を読んでいません。</p>}
+      {mine && <ShareBox item={item} onChanged={load} />}
       <div className="card library-form">
-        <label>題名<input value={form.title} maxLength={LIBRARY_LIMITS.titleChars} onChange={(e) => setForm({ ...form, title: e.target.value })} onBlur={save} /></label>
-        <label>種類<input value={form.docType} maxLength={LIBRARY_LIMITS.typeChars} onChange={(e) => setForm({ ...form, docType: e.target.value })} onBlur={save} /></label>
-        <label>取引先<input value={form.counterparty} maxLength={LIBRARY_LIMITS.counterpartyChars} onChange={(e) => setForm({ ...form, counterparty: e.target.value })} onBlur={save} /></label>
-        <label>書類の日付<input type="date" value={form.docDate} onChange={(e) => setForm({ ...form, docDate: e.target.value })} onBlur={save} /></label>
+        <label>題名<input value={form.title} readOnly={!mine} maxLength={LIBRARY_LIMITS.titleChars} onChange={(e) => setForm({ ...form, title: e.target.value })} onBlur={save} /></label>
+        <label>種類<input value={form.docType} readOnly={!mine} maxLength={LIBRARY_LIMITS.typeChars} onChange={(e) => setForm({ ...form, docType: e.target.value })} onBlur={save} /></label>
+        <label>取引先<input value={form.counterparty} readOnly={!mine} maxLength={LIBRARY_LIMITS.counterpartyChars} onChange={(e) => setForm({ ...form, counterparty: e.target.value })} onBlur={save} /></label>
+        <label>書類の日付<input type="date" value={form.docDate} readOnly={!mine} onChange={(e) => setForm({ ...form, docDate: e.target.value })} onBlur={save} /></label>
       </div>
       {item.summary && <p>{item.summary}</p>}
       {item.keywords.length > 0 && <p className="small muted">{item.keywords.join('・')}</p>}
+      {item.versions.length > 0 && (
+        <div className="library-versions">
+          <h3 className="small">ほかの版</h3>
+          <ul className="library-mails">
+            {item.versions.map((v) => <li key={v.id}><button className="link-btn library-version-link" onClick={() => onOpen(v.id)}>{v.title}</button> <span className="small muted">{dayLabel(v.docDate ?? v.receivedAt)}</span></li>)}
+          </ul>
+        </div>
+      )}
       <dl className="library-facts small">
         <dt>元の名前</dt><dd>{item.originalName}</dd>
         <dt>形式</dt><dd>{LIBRARY_FORMAT_LABELS[item.format]}{item.sizeBytes > 0 ? `（${sizeLabel(item.sizeBytes)}）` : ''}</dd>
         <dt>{item.entry === 'mail' ? '受け取った日' : '入れた日'}</dt><dd>{dayLabel(item.receivedAt)}</dd>
         {item.readScope && <><dt>読んだ範囲</dt><dd>{item.readScope}</dd></>}
-        {item.origins.some((o) => o.folder) && <><dt>元のフォルダ</dt><dd>{[...new Set(item.origins.map((o) => o.folder).filter(Boolean))].join('、')}</dd></>}
-        {item.origins.some((o) => o.entry === 'mail') && <><dt>届いたメール</dt><dd>
+        {mine && item.origins.some((o) => o.folder) && <><dt>元のフォルダ</dt><dd>{[...new Set(item.origins.map((o) => o.folder).filter(Boolean))].join('、')}</dd></>}
+        {mine && item.origins.some((o) => o.entry === 'mail') && <><dt>届いたメール</dt><dd>
           <ul className="library-mails">
             {item.origins.filter((o) => o.entry === 'mail').map((o, i) => <li key={i}>{[o.sender, o.subject].filter(Boolean).join(' ・ ')}</li>)}
           </ul>
         </dd></>}
       </dl>
+    </div>
+  );
+}
+
+/**
+ * 共有の範囲（第44.8節）。選べば、そのまま共有する（確かめのボタンは足さない。ADR-0028）。共有した先の人数と、自分だけに戻す操作を示す。
+ * 機微な資料は会社で共有の前に止め、理由を示す。もう一度押したときだけ共有する。
+ */
+function ShareBox({ item, onChanged }: { item: LibraryItemPage; onChanged: () => void }) {
+  const [groups, setGroups] = useState<{ id: string; name: string; members: number }[] | null>(null);
+  const [groupId, setGroupId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [held, setHeld] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { api.library.groups().then(setGroups).catch(() => setGroups([])); }, []);
+
+  const apply = async (scope: LibraryShareScope, groupIds: string[] = [], again = false) => {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const r = await api.library.share(item.id, { scope, groupIds, again });
+      setHeld(null);
+      setResult(scope === 'self' ? '自分だけに戻しました' : `${r.people.toLocaleString('ja-JP')} 人に共有しました`);
+      onChanged();
+    } catch (e) {
+      const why = e instanceof ApiError && typeof e.body['held'] === 'string' ? e.body['held'] : null;
+      if (why) setHeld(why);
+      else setError(describeError(e, '共有を変えられませんでした'));
+    }
+    setBusy(false);
+  };
+
+  const ready = !!item.driveFileId;
+  return (
+    <div className="card library-share">
+      <span className="small">共有: {LIBRARY_SHARE_LABELS[item.shareScope]}{item.sharedGroups.length > 0 ? `（${item.sharedGroups.join('、')}）` : ''}</span>
+      <div className="row wrap">
+        <select value={groupId} aria-label="共有するグループ" disabled={busy || !ready} onChange={(e) => setGroupId(e.target.value)}>
+          <option value="">グループを選ぶ</option>
+          {(groups ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}（{g.members} 人）</option>)}
+        </select>
+        <button className="btn ghost small" disabled={busy || !ready || !groupId} onClick={() => void apply('group', [groupId])}>グループに共有</button>
+        <button className="btn ghost small" disabled={busy || !ready} onClick={() => void apply('company', [], !!held)}>{held ? 'それでも会社で共有' : '会社で共有'}</button>
+        {item.shareScope !== 'self' && <button className="btn ghost small" disabled={busy} onClick={() => void apply('self')}>自分だけに戻す</button>}
+      </div>
+      {held && <p className="small error" role="alert">{held}</p>}
+      {result && <p className="small" role="status">{result}</p>}
+      {error && <p className="small error" role="alert">{error}</p>}
     </div>
   );
 }

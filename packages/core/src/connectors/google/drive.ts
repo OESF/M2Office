@@ -215,12 +215,39 @@ export function googleDrive(ctx: Ctx): DriveConnector {
       const sharedWith: string[] = [];
       for (const email of s.emails.map((e) => e.trim()).filter(Boolean)) {
         // 指定した人にだけ。リンクによる公開（type: anyone）は作らない（仕様書 第9.4.4節）
-        await api(p, `/files/${encodeURIComponent(f.id)}/permissions?sendNotificationEmail=true&fields=id`, {
+        await api(p, `/files/${encodeURIComponent(f.id)}/permissions?sendNotificationEmail=${s.notify === false ? 'false' : 'true'}&fields=id`, {
           method: 'POST', body: { type: 'user', role: s.role, emailAddress: email },
         });
         sharedWith.push(email);
       }
       return { fileId: f.id, sharedWith };
+    },
+
+    unshare: async (p, s) => {
+      const f = await meta(p, s.fileId);
+      if (!f) return null;
+      const res = await api(p, `/files/${encodeURIComponent(f.id)}/permissions?fields=${encodeURIComponent('permissions(id,type,emailAddress,domain,role)')}`);
+      const emails = new Set(s.emails.map((e) => e.trim().toLowerCase()));
+      const domain = s.domain?.trim().toLowerCase() ?? null;
+      const perms = ((res?.['permissions'] ?? []) as { id: string; type?: string; emailAddress?: string; domain?: string; role?: string }[]);
+      let removed = 0;
+      for (const perm of perms) {
+        if (perm.role === 'owner') continue;
+        const hit = (perm.type === 'user' && emails.has((perm.emailAddress ?? '').toLowerCase())) || (perm.type === 'domain' && !!domain && (perm.domain ?? '').toLowerCase() === domain);
+        if (!hit) continue;
+        await api(p, `/files/${encodeURIComponent(f.id)}/permissions/${encodeURIComponent(perm.id)}`, { method: 'DELETE' });
+        removed += 1;
+      }
+      return removed;
+    },
+
+    replace: async (p, fileId, input) => {
+      const f = await meta(p, fileId);
+      if (!f) return null;
+      const res = (await callGoogle(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.driveUpload}/files/${encodeURIComponent(f.id)}?uploadType=media&fields=${FIELDS}`, {
+        method: 'PATCH', raw: { contentType: input.mimeType, data: input.bytes },
+      })) as DriveMeta | null;
+      return res ? toFile(res) : null;
     },
   };
 }

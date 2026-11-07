@@ -266,6 +266,10 @@ const ACTION_LABELS: Record<string, string> = {
   'library.mail.on': 'メールの添付を資料に集め始めた',
   'library.mail.off': 'メールの添付を資料に集めるのをやめた',
   'library.mail.extend': '資料に集めるメールを 1 年さかのぼった',
+  'library.share': '資料の共有の範囲を変えた',
+  'library.knowledge': '資料を会社の知識にした',
+  'library.okf.on': '資料の OKF での書き出しを始めた',
+  'library.okf.off': '資料の OKF での書き出しをやめた',
   'contract.create': '契約を台帳に入れた',
   'contract.update': '契約の台帳を直した',
   'contract.status': '契約の状態を変えた',
@@ -593,6 +597,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     // 資料の題名・送り主・件名は監査に出さない（第44.10節）
     case 'library_item': return `資料 ${id.slice(4, 12)}`;
     case 'library_mail': return 'メールの添付の取り込み';
+    case 'library_okf': return '資料の OKF での書き出し';
     case 'competitor': return id === 'settings' ? '競合の分析の設定' : id === 'map-key' ? '競合の分析の地図の鍵' : id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;
     case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : id === 'line' ? '問い合わせの LINE 公式アカウント' : `問い合わせ ${id.slice(4, 12)}`;
     case 'tool': {

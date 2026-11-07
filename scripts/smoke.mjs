@@ -9567,5 +9567,95 @@ console.log('\n■ 138. 資料のメールの添付（本人が入れる・直�
   }
 }
 
+console.log('\n■ 139. 資料の共有と OKF（グループ・会社で共有・機微なものを止める・見るだけ・自分だけに戻す・会社の知識・OKF の書き出し）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, library from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const stamp = Date.now().toString(36);
+  const made = [];
+  let groupId = null;
+  const put = async (name, body) => {
+    const form = new FormData();
+    form.append('file', new File([body], name));
+    const res = await fetch(`${API}/v1/library/items`, { method: 'POST', body: form, headers: { 'x-tenant': 'a', 'x-user': 'member@alpha.example.jp' } });
+    const json = await res.json().catch(() => ({}));
+    if (json.item?.id) made.push(json.item.id);
+    return json.item;
+  };
+  try {
+    await call('a', '/v1/admin/extensions/library/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const { body: users } = await call('a', '/v1/admin/users');
+    const adminId = users.items.find((u) => u.email.startsWith('admin@')).id;
+    const { body: g } = await call('a', '/v1/admin/groups', { method: 'POST', body: JSON.stringify({ name: `確認用-資料${stamp}` }) });
+    groupId = g.id;
+    await call('a', `/v1/admin/groups/${g.id}/members`, { method: 'PUT', body: JSON.stringify({ userIds: [adminId] }) });
+
+    const item = await put(`提案書_${stamp}.txt`, `提案書 ${stamp} の中身`);
+    const groups = await call('a', '/v1/library/groups', {}, 'member');
+    groups.body.groups?.some((x) => x.id === g.id) ? ok('共有の相手に選べるグループを返す') : ng('グループが出ない');
+    const shared = await call('a', `/v1/library/${item.id}/share`, { method: 'PUT', body: JSON.stringify({ scope: 'group', groupIds: [g.id] }) }, 'member');
+    shared.status === 200 && shared.body.people === 1 && shared.body.item?.shareScope === 'group' ? ok('グループに共有し、共有した先の人数を返す') : ng('グループに共有できない', JSON.stringify(shared.body));
+    const seen = await call('a', '/v1/library', {}, 'admin');
+    const mine = seen.body.items?.find((i) => i.id === item.id);
+    mine && mine.mine === false && typeof mine.ownerName === 'string' ? ok('グループの人には、持ち主の名前つきで見える') : ng('グループの人に見えない', JSON.stringify(seen.body.items?.length));
+    const edit = await call('a', `/v1/library/${item.id}`, { method: 'PATCH', body: JSON.stringify({ title: '盗む' }) }, 'admin');
+    const del = await call('a', `/v1/library/${item.id}`, { method: 'DELETE' }, 'admin');
+    const reshare = await call('a', `/v1/library/${item.id}/share`, { method: 'PUT', body: JSON.stringify({ scope: 'company' }) }, 'admin');
+    const know = await call('a', `/v1/library/${item.id}/knowledge`, { method: 'POST', body: '{}' }, 'admin');
+    edit.status === 404 && del.status === 404 && reshare.status === 404 && know.status === 404 ? ok('共有された人は直せず、消せず、共有し直せず、会社の知識にできない') : ng('共有された人が変えられた', `${edit.status} ${del.status} ${reshare.status} ${know.status}`);
+    const page = await call('a', `/v1/library/${item.id}`, {}, 'admin');
+    page.status === 200 && page.body.mine === false && page.body.sharedGroups?.length === 0 ? ok('1 件も見るだけで開け、共有の相手は持ち主にだけ見せる') : ng('1 件の形が違う', JSON.stringify(page.body).slice(0, 200));
+    const beta = await call('b', `/v1/library/${item.id}`, {}, 'member');
+    beta.status === 404 || beta.status === 403 ? ok('別の会社からは見えない') : ng('別の会社から見えた', String(beta.status));
+
+    const back = await call('a', `/v1/library/${item.id}/share`, { method: 'PUT', body: JSON.stringify({ scope: 'self' }) }, 'member');
+    const gone = await call('a', `/v1/library/${item.id}`, {}, 'admin');
+    back.body.item?.shareScope === 'self' && gone.status === 404 ? ok('自分だけに戻すと、ほかの人から見えなくなる') : ng('戻らない', JSON.stringify(back.body));
+
+    const pay = await put(`給与明細_${stamp}.txt`, `給与明細 ${stamp}`);
+    const held = await call('a', `/v1/library/${pay.id}/share`, { method: 'PUT', body: JSON.stringify({ scope: 'company' }) }, 'member');
+    const again = await call('a', `/v1/library/${pay.id}/share`, { method: 'PUT', body: JSON.stringify({ scope: 'company', again: true }) }, 'member');
+    held.status === 409 && typeof held.body.held === 'string' && again.status === 200 ? ok('給与らしい資料は会社で共有の前に止め、もう一度頼まれたら共有する') : ng('機微なものの扱いが違う', `${held.status} ${again.status}`);
+    const company = await call('a', '/v1/library', {}, 'admin');
+    company.body.items?.some((i) => i.id === pay.id) ? ok('会社で共有すると、会社の人に見える') : ng('会社で共有しても見えない');
+    const noKnow = await call('a', `/v1/library/${pay.id}/knowledge`, { method: 'POST', body: '{}' }, 'member');
+    noKnow.status === 400 ? ok('個人の情報に関わる資料は会社の知識にしない') : ng(`会社の知識にした（${noKnow.status}）`);
+    const bad = await call('a', `/v1/library/${item.id}/share`, { method: 'PUT', body: JSON.stringify({ scope: 'everyone' }) }, 'member');
+    bad.status === 400 ? ok('範囲の形が違えば断る') : ng('形の違う範囲を受けた');
+
+    const know2 = await call('a', `/v1/library/${item.id}/knowledge`, { method: 'POST', body: '{}' }, 'member');
+    const kid = know2.body.knowledgeId;
+    const k = kid ? await owner.query('select kind, category, google_derived from knowledge_items where id = $1', [kid]).catch(() => ({ rows: [] })) : { rows: [] };
+    know2.status === 201 && (k.rows.length === 0 || (k.rows[0].kind === 'library' && k.rows[0].category === 'learned')) ? ok('資料を会社の知識にできる（種類 library）') : ng('会社の知識にできない', JSON.stringify(know2.body));
+    if (kid) await owner.query('delete from knowledge_items where id = $1', [kid]).catch(() => undefined);
+
+    const okfOff = await call('a', '/v1/library/okf', {}, 'member');
+    const okfOn = await call('a', '/v1/library/okf', { method: 'PUT', body: JSON.stringify({ enabled: true }) }, 'member');
+    okfOff.body.enabled === false && okfOn.body.enabled === true ? ok('OKF の書き出しは本人が入れる') : ng('OKF を入れられない', JSON.stringify(okfOn.body));
+    let okf = okfOn.body;
+    for (let i = 0; i < 20 && !okf.writtenAt; i++) {
+      await sleep(1000);
+      okf = (await call('a', '/v1/library/okf', {}, 'member')).body;
+    }
+    okf.writtenAt && okf.files >= 2 ? ok('入れるとすぐに、本人の資料を OKF で書き出す') : ng('書き出さない', JSON.stringify(okf));
+    const okfAdmin = await call('a', '/v1/library/okf', {}, 'admin');
+    okfAdmin.body.enabled === false ? ok('OKF の書き出しは本人ごと') : ng('ほかの人の入り切りが変わった');
+    await call('a', '/v1/library/okf', { method: 'PUT', body: JSON.stringify({ enabled: false }) }, 'member');
+
+    const audits = await owner.query(`select action, detail::text as detail from audit_events where tenant_id = 't-alpha' and action in ('library.share', 'library.knowledge', 'library.okf.on', 'library.okf.off') and occurred_at > now() - interval '5 minutes'`);
+    audits.rows.length >= 5 && audits.rows.every((a) => !a.detail.includes(stamp)) ? ok('共有・会社の知識・OKF の入り切りを記録し、題名を残さない') : ng('記録が違う', JSON.stringify(audits.rows).slice(0, 300));
+  } finally {
+    if (made.length) await owner.query('delete from library_items where id = any($1)', [made]);
+    await owner.query(`delete from library_tombstones where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from library_owner_state where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from library_okf_files where tenant_id in ('t-alpha', 't-beta')`);
+    if (groupId) await call('a', `/v1/admin/groups/${groupId}`, { method: 'DELETE' });
+    for (const r of saved) await owner.query('update tenant_settings set library = $2 where tenant_id = $1', [r.tenant_id, r.library]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

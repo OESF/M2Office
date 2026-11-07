@@ -13,7 +13,8 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  canUseAgent, isRefusedLibraryName, LIBRARY_EXTENSION_ID, LIBRARY_LIMITS, libraryPath, type Artifact, type LibraryFilter, type LibraryFormat, type LibraryItem, type LibraryItemDetail, type LibraryProgress, type LibrarySettings, type Run,
+  canUseAgent, isRefusedLibraryName, librarySensitiveReason, LIBRARY_EXTENSION_ID, LIBRARY_LIMITS, libraryPath, libraryTitleOf, type Artifact, type LibraryFilter, type LibraryFormat, type LibraryItem,
+  type LibraryItemDetail, type LibraryItemPage, type LibraryProgress, type LibrarySettings, type LibraryShareResult, type LibraryShareScope, type Run,
 } from '@m2office/shared';
 import { ConnectorUnavailableError, type DriveConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
@@ -31,8 +32,10 @@ import type { Repository } from '../repository/types.js';
 import { AiLimitError } from '../usage/ai-usage.js';
 import { detectLibraryFormat, libraryFormatFromDrive, libraryMimeOf } from './format.js';
 import { isImageFormat, readLibraryFile, unreadableReason } from './read.js';
-import { libraryNormal, type LibraryPatch, type LibraryReadResult, type LibraryStore, type LibraryViewer, type LibraryWork, type NewLibraryOrigin } from './store.js';
+import { libraryNormal, type LibraryPatch, type LibraryReadResult, type LibraryShareRow, type LibraryStore, type LibraryViewer, type LibraryWork, type NewLibraryOrigin } from './store.js';
 
+/** OKF の書き出しのフォルダの名前（第44.16節）。 */
+export const LIBRARY_OKF_FOLDER = 'OKF';
 /** 本人のドライブに作るフォルダの名前（第44.5節）。 */
 export const LIBRARY_FOLDER_NAME = 'M2Office 資料';
 /** 1 回の見回りで 1 社から受け持つ件数。 */
@@ -140,6 +143,21 @@ export interface LibraryHit extends LibraryItem {
   /** 選んだ理由（どの項目に、どの語が当たったか）。 */
   why: string[];
 }
+
+/** 一覧の 1 件（共有された他人の資料なら `mine` が偽で、持ち主の名前を添える。第44.8節）。 */
+export type LibraryListed = LibraryHit & { mine: boolean; ownerName: string | null };
+
+/** 会社の知識にした資料の出典（第44.8節）。 */
+export const LIBRARY_KNOWLEDGE_SOURCE = '資料（本人が会社の知識にしたもの）';
+/** 会社の知識の種類（週 1 回の整理でまとめない。第11.11.4節）。 */
+export const LIBRARY_KNOWLEDGE_KIND = 'library';
+/** 会社の知識にする本文の上限。 */
+const KNOWLEDGE_CHARS = 20_000;
+/** 共有された資料の中身を読まない理由（第44.8節）。 */
+const SHARED_NOT_READ = '共有された資料の中身は読みません。題名と要約を参考にし、中身はリンクから開いて確かめてください';
+
+/** 個人向けの Google アカウントのドメイン（会社の全員への共有はできない）。 */
+const CONSUMER_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
 
 /** 点の付け方（第11.7.3節と同じ考え方。題名と取引先に当たるものを先に出す）。 */
 const FIELD_WEIGHTS: { key: 'title' | 'counterparty' | 'docType' | 'keywords' | 'originalName' | 'summary'; label: string; weight: number }[] = [
@@ -257,12 +275,27 @@ export class LibraryService {
     const limit = Math.min(Math.max(filter.limit ?? LIBRARY_LIMITS.pageSize, 1), LIBRARY_LIMITS.pageSize);
     const offset = Math.max(filter.offset ?? 0, 0);
     const terms = this.termsOf(filter);
+    const v = await this.viewer(who);
     if (terms.length === 0) {
-      const r = await this.store.list(who, filter, [], limit, offset);
-      return { items: r.items.map((i) => ({ ...i, why: [] })), total: r.total };
+      const r = await this.store.list(v, filter, [], limit, offset);
+      return { items: await this.decorate(who, r.items.map((i) => ({ ...i, why: [] }))), total: r.total };
     }
-    const r = await this.store.list(who, filter, terms, RANK_CANDIDATES, 0);
-    return { items: rankLibrary(r.items, terms).slice(offset, offset + limit), total: Math.min(r.total, RANK_CANDIDATES) };
+    const r = await this.store.list(v, filter, terms, RANK_CANDIDATES, 0);
+    return { items: await this.decorate(who, rankLibrary(r.items, terms).slice(offset, offset + limit)), total: Math.min(r.total, RANK_CANDIDATES) };
+  }
+
+  /** 見る人のグループを添える（共有された資料も見せる。第44.8節）。 */
+  private async viewer(who: LibraryViewer): Promise<LibraryViewer> {
+    return { tenantId: who.tenantId, userId: who.userId, groups: await this.deps.repo.listUserGroupIds(who.tenantId, who.userId) };
+  }
+
+  /** 本人の資料かと、他人の資料なら持ち主の名前を添える。 */
+  private async decorate<T extends LibraryItem>(who: LibraryViewer, items: T[]): Promise<(T & { mine: boolean; ownerName: string | null })[]> {
+    const names = new Map<string, string | null>();
+    for (const id of new Set(items.map((i) => i.ownerId).filter((id) => id !== who.userId))) {
+      names.set(id, (await this.deps.repo.findUserById(who.tenantId, id).catch(() => null))?.displayName ?? null);
+    }
+    return items.map((i) => ({ ...i, mine: i.ownerId === who.userId, ownerName: i.ownerId === who.userId ? null : names.get(i.ownerId) ?? null }));
   }
 
   /** 探す語（言い換えを含む）。長い入力で遅くならないよう、先に切る。 */
@@ -281,7 +314,25 @@ export class LibraryService {
   }
 
   async facets(who: LibraryViewer) {
-    return this.store.facets(who);
+    return this.store.facets(await this.viewer(who));
+  }
+
+  /**
+   * 1 件の画面に出す形（第44.8節）。本人の資料と、本人に共有された資料が見える。持ち主には共有したグループとほかの版も返す。
+   */
+  async page(who: LibraryViewer, id: string): Promise<LibraryItemPage | null> {
+    const item = await this.store.view(await this.viewer(who), id);
+    if (!item) return null;
+    const [decorated] = await this.decorate(who, [item]);
+    if (!decorated!.mine) return { ...decorated!, sharedGroups: [], versions: [] };
+    const groups = await this.deps.repo.listGroups(who.tenantId);
+    const shares = await this.store.shares(who, id);
+    const versions = await this.store.versionsOf(who, item);
+    return {
+      ...decorated!,
+      sharedGroups: shares.filter((x) => x.groupId).map((x) => groups.find((g) => g.id === x.groupId)?.name ?? '（消したグループ）'),
+      versions: versions.map((v) => ({ id: v.id, title: libraryTitleOf(v), docDate: v.docDate, receivedAt: v.receivedAt })),
+    };
   }
 
   /** 読み取りの進み具合と、読めない理由（第44.11節）。 */
@@ -315,6 +366,11 @@ export class LibraryService {
     const job = this.ensureFolder(who, year).finally(() => this.folderJobs.delete(key));
     this.folderJobs.set(key, job);
     return job;
+  }
+
+  /** 本人の「M2Office 資料」の下の OKF のフォルダの ID（無ければ作る。第44.16節）。 */
+  async okfFolder(who: LibraryViewer): Promise<string> {
+    return this.folderFor(who, LIBRARY_OKF_FOLDER);
   }
 
   private async ensureFolder(who: LibraryViewer, year: string): Promise<string> {
@@ -555,6 +611,11 @@ export class LibraryService {
   async remove(who: LibraryViewer, id: string): Promise<{ trashed: boolean } | { error: string; status: 404 | 503 }> {
     const cur = await this.store.get(who, id);
     if (!cur) return { error: '資料が見つかりません', status: 404 };
+    // 共有で足した権限を外す（ごみ箱へ移さないファイルにも、権限を残さない）
+    if (cur.shareScope !== 'self' && cur.driveFileId) {
+      const added = await this.store.shares(who, id);
+      await this.deps.drive.unshare(who, { fileId: cur.driveFileId, emails: added.flatMap((x) => x.emails), domain: added.find((x) => x.domain)?.domain ?? null }).catch(() => null);
+    }
     let trashed = false;
     if (cur.placed && cur.driveFileId) {
       try {
@@ -582,7 +643,10 @@ export class LibraryService {
    */
   async readContent(who: LibraryViewer, id: string): Promise<{ item: LibraryItem; text: string; scope: string } | { error: string }> {
     const item = await this.store.get(who, id);
-    if (!item) return { error: '資料が見つかりません' };
+    if (!item) {
+      // 共有された他人の資料は、中身を読まない（題名と要約とリンクで答える。第44.8節）
+      return (await this.store.view(await this.viewer(who), id)) ? { error: SHARED_NOT_READ } : { error: '資料が見つかりません' };
+    }
     if (!item.driveFileId) return { error: item.readState === 'too_large' ? item.readNote : 'まだドライブに置いている途中です。少し待ってからもう一度聞いてください' };
     const ocr = await this.deps.ocrFor?.(who.tenantId);
     const r = await this.readFromDrive(who, item, ocr);
@@ -762,6 +826,108 @@ export class LibraryService {
     const fields = parseReadingFields(res.text, this.today());
     if (!fields) throw new Error('AI の答えを読めませんでした');
     return fields;
+  }
+
+  /** 会社のドメイン（第16.1.2節）。分からない・個人向けのアカウントなら理由。 */
+  private async companyDomain(tenantId: string): Promise<{ domain: string } | { reason: string }> {
+    const tenant = await this.deps.repo.findTenantById(tenantId).catch(() => null);
+    const domain = tenant?.workspaceDomain?.trim().toLowerCase() ?? '';
+    if (!domain) return { reason: '会社のドメインが分からないため、共有できません' };
+    if (CONSUMER_DOMAINS.has(domain)) return { reason: '個人向けの Google アカウントでは、社内の共有はできません' };
+    return { domain };
+  }
+
+  /**
+   * 社内で共有する・自分だけに戻す（第44.8節）。持ち主が頼んだときだけ行う。社外には共有しない。
+   *
+   * @param input `scope` が `group` なら `groupIds` を渡す。`again` は、機微なものとして止めた後にもう一度頼まれたとき
+   * @returns 共有した先の人数。機微なものは `held`（理由）
+   *
+   * @remarks
+   * 危険度 `write-internal`。グループは**会社のドメインの人だけ**にドライブの閲覧を足し、確かめられなければ共有しない（第9.4.0節）。
+   * 会社で共有は、会社のドメインの全員に閲覧だけ（検索には出さない）。リンクの一般公開はしない。範囲を変えるときは、前に足した権限を外してから足す
+   */
+  async share(who: LibraryViewer, id: string, input: { scope: LibraryShareScope; groupIds?: string[]; again?: boolean }): Promise<LibraryShareResult> {
+    const item = await this.store.get(who, id);
+    if (!item) return { error: '資料が見つかりません（共有できるのは自分の資料だけです）' };
+    if (!item.driveFileId) return { error: item.readState === 'too_large' ? 'ドライブに置いていない資料は共有できません' : 'まだドライブに置いている途中です。少し待ってからもう一度お試しください' };
+    const scope = input.scope;
+    if (scope === 'company' && !input.again) {
+      const reason = librarySensitiveReason(item);
+      if (reason) return { held: `${reason}。会社の全員に見せてよければ、もう一度頼んでください` };
+    }
+    let rows: LibraryShareRow[] = [];
+    let people = 0;
+    try {
+      // 前に足した権限を外す
+      const before = await this.store.shares(who, id);
+      if (before.length > 0) {
+        await this.deps.drive.unshare(who, { fileId: item.driveFileId, emails: before.flatMap((x) => x.emails), domain: before.find((x) => x.domain)?.domain ?? null });
+      }
+      if (scope !== 'self') {
+        const d = await this.companyDomain(who.tenantId);
+        if ('reason' in d) return { error: d.reason };
+        const users = (await this.deps.repo.listUsers(who.tenantId)).filter((u) => u.status === 'active' && u.id !== who.userId);
+        if (scope === 'company') {
+          const done = await this.deps.drive.shareWithDomain(who, { fileId: item.driveFileId, domain: d.domain });
+          if (!done) return { error: 'ドライブのファイルを共有できませんでした（M2Office が置いたファイルと、選んだファイルだけ共有できます）' };
+          rows = [{ scope: 'company', groupId: null, emails: [], domain: d.domain }];
+          people = users.length;
+        } else {
+          const groups = await this.deps.repo.listGroups(who.tenantId);
+          const chosen = [...new Set(input.groupIds ?? [])].map((g) => groups.find((x) => x.id === g)).filter((g): g is NonNullable<typeof g> => !!g);
+          if (chosen.length === 0) return { error: '共有するグループを選んでください' };
+          const reached = new Set<string>();
+          for (const g of chosen) {
+            // 会社のドメインの人だけ（社外かどうか確かめられない人には共有しない）
+            const emails = users.filter((u) => g.memberIds.includes(u.id) && u.email.toLowerCase().endsWith(`@${d.domain}`)).map((u) => u.email);
+            if (emails.length > 0) {
+              const done = await this.deps.drive.share(who, { fileId: item.driveFileId, emails, role: 'reader', notify: false });
+              if (!done) return { error: 'ドライブのファイルを共有できませんでした（M2Office が置いたファイルと、選んだファイルだけ共有できます）' };
+            }
+            for (const e of emails) reached.add(e);
+            rows.push({ scope: 'group', groupId: g.id, emails, domain: null });
+          }
+          people = reached.size;
+        }
+      }
+    } catch (err) {
+      return { error: err instanceof ConnectorUnavailableError ? err.message : 'Google ドライブの共有を変えられませんでした。しばらくしてからもう一度お試しください' };
+    }
+    const updated = await this.store.setShares(who, id, scope, rows);
+    if (!updated) return { error: '資料が見つかりません' };
+    await this.audit(who, 'library.share', id, { scope, people, groups: rows.filter((r) => r.groupId).length });
+    return { item: updated, scope, people };
+  }
+
+  /**
+   * 資料を会社の知識にする（第44.8節「会社の知識へ」）。持ち主が頼んだときだけ、そのときドライブから読んだ文を社内ナレッジに入れる。
+   *
+   * @returns 知識の ID。機微なもの・読めないものは理由
+   *
+   * @remarks
+   * 危険度 `write-internal`。本人だけに関わること・他人の個人情報・権限区画のデータは会社の知識にしない（第11.3節）。
+   * 種類は「秘書が学んだこと」（`library`）で、週 1 回の整理ではまとめない。確かめた記録を資料に残す（OKF の `verified`）
+   */
+  async toKnowledge(who: LibraryViewer, id: string): Promise<{ knowledgeId: string; already: boolean } | { error: string }> {
+    const item = await this.store.get(who, id);
+    if (!item) return { error: '資料が見つかりません（会社の知識にできるのは自分の資料だけです）' };
+    if (item.knowledgeId) return { knowledgeId: item.knowledgeId, already: true };
+    const reason = librarySensitiveReason(item);
+    if (reason) return { error: `${reason}。個人の情報に関わる資料は、会社の知識にしません` };
+    const read = await this.readContent(who, id);
+    if ('error' in read) return { error: read.error };
+    const title = libraryTitleOf(item).slice(0, 60);
+    const body = [item.summary, read.text].filter(Boolean).join('\n\n').slice(0, KNOWLEDGE_CHARS);
+    const knowledgeId = `library-${randomUUID()}`;
+    const at = this.now().toISOString();
+    await this.deps.repo.saveKnowledge({
+      id: knowledgeId, tenantId: who.tenantId, kind: LIBRARY_KNOWLEDGE_KIND, category: 'learned', title, body, source: LIBRARY_KNOWLEDGE_SOURCE,
+      compartment: null, updatedAt: at, googleDerived: true,
+    });
+    await this.store.setKnowledge(who, id, knowledgeId, at);
+    await this.audit(who, 'library.knowledge', id, { knowledgeId });
+    return { knowledgeId, already: false };
   }
 
   /** 資料の画面へのパス（秘書の答えに添える）。 */

@@ -262,8 +262,19 @@ export interface DriveConnector {
    * M2Office が作ったファイルでなければ `null`。
    */
   share(
-    p: ConnectorPrincipal, s: { fileId: string; emails: string[]; role: 'reader' | 'commenter' | 'writer' },
+    p: ConnectorPrincipal, s: { fileId: string; emails: string[]; role: 'reader' | 'commenter' | 'writer'; notify?: boolean },
   ): Promise<{ fileId: string; sharedWith: string[] } | null>;
+  /**
+   * 共有で足した権限を外す（資料の「自分だけ」に戻す。仕様書 第44.8節）。持ち主の権限は外さない。
+   *
+   * @param s.emails 外す人。`domain` は外す会社のドメイン
+   * @returns 外した数。見えないファイルなら `null`
+   */
+  unshare(p: ConnectorPrincipal, s: { fileId: string; emails: string[]; domain: string | null }): Promise<number | null>;
+  /**
+   * M2Office が作ったファイルの中身を書き換える（資料の OKF の書き出し。仕様書 第44.16節）。見えないファイルなら `null`。
+   */
+  replace(p: ConnectorPrincipal, fileId: string, f: { mimeType: string; bytes: Uint8Array }): Promise<DriveFile | null>;
   /** 1 つのファイルの情報。見えない・ごみ箱なら `null`（承認の画面に名前を出すのに使う）。 */
   get(p: ConnectorPrincipal, fileId: string): Promise<DriveFile | null>;
   /**

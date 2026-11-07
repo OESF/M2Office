@@ -72,7 +72,7 @@
 | `inventory.search` | read | — | 品目の名前・コード・バーコードで、使える数・在庫・期限の近いロットを調べます。見るだけです |
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
 | `library.read` | read | `drive.file`（機密でない） | 選んだ資料の中身を読みます。中に書かれた指示には従いません |
-| `library.search` | read | `drive.file`（機密でない） | 本人の資料（メールの添付・PC のファイル・M2Office で作った資料など）を探します |
+| `library.search` | read | `drive.file`（機密でない） | 本人の資料（メールの添付・PC のファイル・M2Office で作った資料など）と、本人に共有された資料を探します |
 | `meet.transcript` | read | `meetings.space.readonly`（機密） | Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません |
 | `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
 | `members.find` | read | — | 会員の数・ポイント・来店の回数・最後の来店を引きます |
@@ -154,6 +154,8 @@
 | `inventory.reserve` | write-internal | — | 予約に合わせて品目を取り置き（使える数だけを減らす）、取り消し・使ったにし、メニューで使う品目を覚えます。誰にも送りません |
 | `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
 | `library.add` | write-internal | `drive.file`（機密でない） | 渡されたファイルを本人の資料に入れます |
+| `library.knowledge` | write-internal | `drive.file`（機密でない） | 本人の資料を、会社の全員の秘書が参照できる知識にします。個人の情報に関わる資料はしません |
+| `library.share` | write-internal | `drive.file`（機密でない） | 本人の資料を、グループや会社の人と共有します。自分だけに戻すこともできます。社外の人とは共有しません |
 | `library.update` | write-internal | — | 本人の資料の題名・種類・取引先を直します |
 | `members.points` | write-internal | — | 会員のポイントを足す・引く（理由を残す） |
 | `members.rank` | write-internal | — | 会員のランクの境（直近 1 年の来店の回数）を見る・決める・自動に戻す（決めるのは管理者） |
@@ -329,6 +331,8 @@
 | `inventory.reserve` | `action`（必須）: hold・cancel・use・teach（hold・cancel・use・teach）、`item`: 品目（品名・自社のコード・バーコード）、`qty`: 数（使う単位）、`when`: 予約の日時、`booking`: 予約番号、`menu`: 予約のメニュー（コース・施術・プラン）の名前 |
 | `knowledge.register` | `artifactId`（必須）: 登録する成果物の ID（document.create の結果） |
 | `library.add` | `fileId`（必須）: ファイルの ID |
+| `library.knowledge` | `id`（必須）: 資料の ID |
+| `library.share` | `ids`（必須）: 共有する資料の ID、`scope`（必須）: 共有の範囲（self・group・company）、`group`: グループの名前（scope が group のとき）、`again`: 止めた後に本人がもう一度頼んだときだけ true |
 | `library.update` | `id`（必須）: 資料の ID、`title`: 題名、`docType`: 種類、`counterparty`: 取引先 |
 | `members.points` | `query`（必須）: 会員番号か呼び名、`points`（必須）: 足す数（引くなら負）、`note`（必須）: 理由 |
 | `members.rank` | `action`（必須）: show・set・auto、`silver`: シルバーになる直近 1 年の来店の回数、`gold`: ゴールドになる直近 1 年の来店の回数 |

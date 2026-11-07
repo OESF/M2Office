@@ -1,7 +1,9 @@
 /**
- * @file 資料（内蔵の拡張）の API。一覧と絞り込み・ファイルを入れる・ドライブで選ぶ・1 件・直す・読み直す・削除・費用の目安・メールの添付の取り込み（第44章）。
+ * @file 資料（内蔵の拡張）の API。一覧と絞り込み・ファイルを入れる・ドライブで選ぶ・1 件・直す・読み直す・削除・費用の目安・メールの添付の取り込み・
+ * 社内の共有・会社の知識・OKF の書き出し（第44章）。
  *
- * 会社が切っているときと、利用範囲の外の人には、どの口も使わせない。見えるのは本人の資料だけで、管理者にも見せない（第44.8節）。
+ * 会社が切っているときと、利用範囲の外の人には、どの口も使わせない。見えるのは本人の資料と本人に共有された資料だけで、管理者にも見せない（第44.8節）。
+ * 直す・削除・共有・会社の知識・読み直しは持ち主だけ。
  * 運営の代理アクセスからは見せない（第23.6節）。監査ログは処理（LibraryService）が残す。
  *
  * @see 仕様書 第44章
@@ -26,7 +28,7 @@ const BODY_MAX = LIBRARY_LIMITS.placeBytes + 1024 * 1024;
  */
 export function libraryRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
-  const { service, mail } = deps.library;
+  const { service, mail, keeper } = deps.library;
   const drive = driveFilesFor(deps);
   const who = (c: Context<AppEnv>): LibraryViewer => {
     const { tenant, user } = c.get('ctx');
@@ -143,13 +145,48 @@ export function libraryRoute(deps: AppDeps) {
     return 'refused' in r ? c.json({ error: r.refused }, 409) : c.json({ ...r, gmail: true });
   });
 
+  /** 共有の相手に選べるグループ（第44.8節）。 */
+  app.get('/groups', async (c) => {
+    const groups = await deps.repo.listGroups(who(c).tenantId);
+    return c.json({ groups: groups.map((g) => ({ id: g.id, name: g.name, members: g.memberIds.length })) });
+  });
+
+  /** OKF の書き出しの様子（第44.16節）。 */
+  app.get('/okf', async (c) => c.json(await keeper.okfState(who(c))));
+
+  /** OKF の書き出しを入れる・切る（本文: `enabled`）。本人だけが入れられる。 */
+  app.put('/okf', async (c) => {
+    const b = await c.req.json<{ enabled?: unknown }>().catch(() => ({} as { enabled?: unknown }));
+    if (typeof b.enabled !== 'boolean') return c.json({ error: 'enabled を指定してください' }, 400);
+    return c.json(await keeper.setOkf(who(c), b.enabled));
+  });
+
   app.use('/:id/*', async (c, next) => (ID.test(c.req.param('id')) ? next() : notFound(c)));
 
-  /** 1 件（入口の記録つき）。 */
+  /** 1 件（入口の記録・共有したグループ・ほかの版つき）。共有された他人の資料も見られる（見るだけ）。 */
   app.get('/:id', async (c) => {
     if (!ID.test(c.req.param('id'))) return notFound(c);
-    const item = await service.get(who(c), c.req.param('id'));
+    const item = await service.page(who(c), c.req.param('id'));
     return item ? c.json(item) : notFound(c);
+  });
+
+  /** 社内で共有する・自分だけに戻す（本文: `scope`・`groupIds`・`again`）。機微なものは 409 で `held`（理由）を返す。 */
+  app.put('/:id/share', async (c) => {
+    const b = await c.req.json<{ scope?: unknown; groupIds?: unknown; again?: unknown }>().catch(() => ({} as Record<string, unknown>));
+    const scope = (['self', 'group', 'company'] as const).find((x) => x === b.scope);
+    if (!scope) return c.json({ error: 'scope は self・group・company のどれかです' }, 400);
+    const groupIds = Array.isArray(b.groupIds) ? b.groupIds.filter((g): g is string => typeof g === 'string').slice(0, 20) : [];
+    const r = await service.share(who(c), c.req.param('id'), { scope, groupIds, again: b.again === true });
+    if ('held' in r) return c.json(r, 409);
+    if ('error' in r) return c.json(r, r.error.includes('見つかりません') ? 404 : 400);
+    return c.json(r);
+  });
+
+  /** 会社の知識にする（第44.8節）。 */
+  app.post('/:id/knowledge', async (c) => {
+    const r = await service.toKnowledge(who(c), c.req.param('id'));
+    if ('error' in r) return c.json(r, r.error.includes('見つかりません') ? 404 : 400);
+    return c.json(r, r.already ? 200 : 201);
   });
 
   /** 題名・種類・取引先・日付を直す。 */

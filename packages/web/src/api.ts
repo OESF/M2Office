@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, LibraryFacets, LibraryItem, LibraryItemDetail, LibraryMailState, LibraryProgress, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
+import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, LibraryFacets, LibraryItem, LibraryItemPage, LibraryItemView, LibraryMailState, LibraryOkfState, LibraryProgress, LibraryShareScope, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemKind, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventoryOutPurpose, InventorySettings, InventoryStockRow,
@@ -1936,9 +1936,18 @@ export const api = {
   library: {
     list: (q: Record<string, string> = {}) => {
       const p = new URLSearchParams(q);
-      return call<{ items: (LibraryItem & { why: string[] })[]; total: number; facets: LibraryFacets; progress: LibraryProgress; google: boolean; picker: boolean }>(`/library${p.size ? `?${p}` : ''}`);
+      return call<{ items: (LibraryItemView & { why: string[] })[]; total: number; facets: LibraryFacets; progress: LibraryProgress; google: boolean; picker: boolean }>(`/library${p.size ? `?${p}` : ''}`);
     },
-    get: (id: string) => call<LibraryItemDetail>(`/library/${encodeURIComponent(id)}`),
+    get: (id: string) => call<LibraryItemPage>(`/library/${encodeURIComponent(id)}`),
+    /** 社内で共有する・自分だけに戻す（第44.8節）。機微なものは 409（`held`）。 */
+    share: (id: string, body: { scope: LibraryShareScope; groupIds?: string[]; again?: boolean }) =>
+      call<{ item: LibraryItem; scope: LibraryShareScope; people: number }>(`/library/${encodeURIComponent(id)}/share`, { method: 'PUT', body: JSON.stringify(body) }),
+    knowledge: (id: string) => call<{ knowledgeId: string; already: boolean }>(`/library/${encodeURIComponent(id)}/knowledge`, { method: 'POST', body: '{}' }),
+    groups: () => call<{ groups: { id: string; name: string; members: number }[] }>('/library/groups').then((r) => r.groups),
+    okf: {
+      get: () => call<LibraryOkfState>('/library/okf'),
+      set: (enabled: boolean) => call<LibraryOkfState>('/library/okf', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    },
     /** ファイルを 1 つ入れる。`folder` は元のフォルダの名前。 */
     upload: (file: File, folder: string) => {
       const form = new FormData();

@@ -57,7 +57,7 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
 
   /** 下書き・投稿の記録。動作確認で参照する。 */
   readonly outbox: {
-    kind: 'draft' | 'chat' | 'slides' | 'mail' | 'event.update' | 'event.cancel' | 'drive.share' | 'drive.share_company';
+    kind: 'draft' | 'chat' | 'slides' | 'mail' | 'event.update' | 'event.cancel' | 'drive.share' | 'drive.share_company' | 'drive.unshare';
     principal: ConnectorPrincipal; body: unknown;
   }[] = [];
   /** 完了にした ToDo（見本の ToDo にも効かせる）。 */
@@ -283,12 +283,26 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       this.outbox.push({ kind: 'drive.share_company', principal: p, body: s });
       return { fileId: s.fileId, domain: s.domain };
     },
-    share: async (p: ConnectorPrincipal, s: { fileId: string; emails: string[]; role: 'reader' | 'commenter' | 'writer' }) => {
+    share: async (p: ConnectorPrincipal, s: { fileId: string; emails: string[]; role: 'reader' | 'commenter' | 'writer'; notify?: boolean }) => {
       const f = this.driveFiles.get(s.fileId);
       // 共有できるのは本人が M2Office で作ったファイルだけ（drive.file の範囲を模す）
       if (!f || f.owner !== key(p)) return null;
       this.outbox.push({ kind: 'drive.share', principal: p, body: s });
       return { fileId: s.fileId, sharedWith: s.emails };
+    },
+    unshare: async (p: ConnectorPrincipal, s: { fileId: string; emails: string[]; domain: string | null }) => {
+      const f = this.driveFiles.get(s.fileId);
+      if (!f || f.owner !== key(p)) return null;
+      this.outbox.push({ kind: 'drive.unshare', principal: p, body: s });
+      return s.emails.length + (s.domain ? 1 : 0);
+    },
+    replace: async (p: ConnectorPrincipal, fileId: string, input: { mimeType: string; bytes: Uint8Array }) => {
+      const f = this.driveFiles.get(fileId);
+      if (!f || f.owner !== key(p)) return null;
+      f.bytes = input.bytes.slice();
+      f.mimeType = input.mimeType;
+      f.file = { ...f.file, modifiedAt: this.now().toISOString() };
+      return f.file;
     },
   };
 

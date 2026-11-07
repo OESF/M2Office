@@ -18,7 +18,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, withAiUsage, LibraryService, LibraryMailWatch, PostgresLibraryStore, libraryAccess, libraryReaderFor, libraryContactOf, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, withAiUsage, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, libraryAccess, libraryReaderFor, libraryContactOf, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   PostgresDemoStore, demoSubdomain, isDemoTenantId, seedDemoCompany, BUILTIN_EXTENSIONS, type DemoStore,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
@@ -258,10 +258,14 @@ export interface AppDeps {
     service: MemberService;
     access(tenantId: string, userId: string): Promise<MemberSettings | null>;
   };
-  /** 資料（内蔵の拡張。仕様書 第44章）。目録だけを持ち、本体は本人の Google ドライブ。`mail` はメールの添付の取り込み（段 2。第44.4節）。 */
+  /**
+   * 資料（内蔵の拡張。仕様書 第44章）。目録だけを持ち、本体は本人の Google ドライブ。
+   * `mail` はメールの添付の取り込み（段 2。第44.4節）、`keeper` は OKF の書き出しと古い版の知らせ（段 3・段 4。第44.8節・第44.16節）。
+   */
   library: {
     service: LibraryService;
     mail: LibraryMailWatch;
+    keeper: LibraryKeeper;
     access(tenantId: string, userId: string): Promise<LibrarySettings | null>;
   };
   /** 販促物の作成（内蔵の拡張。仕様書 第41章）。字は M2Office が組み、画像は生成 AI（文字の無い画像）か渡した写真。 */
@@ -782,6 +786,7 @@ export function buildDeps(): AppDeps {
     service: libraryService,
     // メールの添付の取り込み（段 2。第44.4節）。本物の会社はワーカーが見回り、ここでは入り切りと様子だけを扱う
     mail: new LibraryMailWatch({ service: libraryService, store: libraryStore, mail: connector.mail, repo, access: libraryAccess(repo), logger: log }),
+    keeper: new LibraryKeeper({ service: libraryService, store: libraryStore, drive: connector.drive, repo, access: libraryAccess(repo), logger: log }),
     access: libraryAccess(repo),
   };
   // 見本の接続口はプロセスごとのメモリーにあるので、見本の会社の資料はこのプロセスで置いて読む（本物の会社はワーカーが読む。第44.11節）
@@ -795,6 +800,7 @@ export function buildDeps(): AppDeps {
         if (connector.sourceFor(id) === 'mock' && (await repo.getTenantSettings(id)).library.enabled) tenants.push(id);
       }
       await library.mail.tick(tenants);
+      await library.keeper.tick(tenants);
       return library.service.tick(tenants);
     }).catch((err: unknown) => log.warn('見本の会社の資料の整理に失敗しました', { err })).finally(() => { libraryMockBusy = false; });
   }, Number(process.env['LIBRARY_POLL_MS'] ?? 5_000)).unref();

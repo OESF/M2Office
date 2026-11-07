@@ -507,7 +507,7 @@ export interface UserSettings {
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
-    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'decision' | 'member' | 'print', boolean>;
+    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'decision' | 'member' | 'print' | 'library', boolean>;
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
     /**
@@ -739,7 +739,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
-    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true, reservation: true, subsidy: true, decision: true, member: true, print: true },
+    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true, reservation: true, subsidy: true, decision: true, member: true, print: true, library: true },
     quietHours: null,
     channels: { chat: false },
   },
