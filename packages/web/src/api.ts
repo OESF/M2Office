@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, LibraryFacets, LibraryItem, LibraryItemDetail, LibraryProgress, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
+import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, LibraryFacets, LibraryItem, LibraryItemDetail, LibraryMailState, LibraryProgress, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemKind, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventoryOutPurpose, InventorySettings, InventoryStockRow,
@@ -1954,6 +1954,13 @@ export const api = {
     update: (id: string, patch: Record<string, unknown>) => call<LibraryItem>(`/library/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     reread: (id: string) => call<LibraryItem>(`/library/${encodeURIComponent(id)}/reread`, { method: 'POST', body: '{}' }),
     remove: (id: string) => call<{ ok: true; trashed: boolean }>(`/library/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** メールの添付の取り込み（第44.4節）。 */
+    mail: {
+      get: () => call<LibraryMailState & { gmail: boolean }>('/library/mail'),
+      set: (enabled: boolean) => call<LibraryMailState & { gmail: boolean }>('/library/mail', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+      estimate: (which: 'start' | 'extend') => call<{ messages: number | null; costJpy: number | null; confirm: boolean }>(`/library/mail/estimate?which=${which}`),
+      extend: () => call<LibraryMailState & { gmail: boolean }>('/library/mail/extend', { method: 'POST', body: '{}' }),
+    },
   },
   printDesigns: {
     /** 一覧（新しく直した順。掲示の状態つき）と、今日と、本人が管理者か。 */

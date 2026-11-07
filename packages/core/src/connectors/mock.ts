@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import type { SlidePlan } from '../slides/plan.js';
 import { renderSvgPng } from '../columns/cover.js';
 import type {
-  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailAttachment, MailMessage, TaskItem, WorkspaceConnector, EndedMeeting, PeoplePerson
+  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailAttachment, MailAttachmentList, MailAttachmentQuery, MailMessage, TaskItem, WorkspaceConnector, EndedMeeting, PeoplePerson
 } from './types.js';
 
 /**
@@ -89,6 +89,19 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       this.mails(p).find((m) => m.id === id) ?? null,
     // 見本のメールには添付が無い（受注の取り込みの確かめは、単体テストで偽の接続口を使う）
     attachments: async (_p: ConnectorPrincipal, id: string) => ({ messageId: `<${id}@mock.m2office>`, files: [] }),
+    // 資料の取り込み（第44.4節）の見本。添付のあるメールは受信箱の見本と別に持ち、ほかの確かめに混ぜない
+    attachmentPage: async (p: ConnectorPrincipal, q: MailAttachmentQuery) => {
+      const hits = this.attachmentMails(p).filter((m) => this.inRange(m.list.receivedAt, q));
+      const start = Number(q.pageToken ?? 0) || 0;
+      const limit = Math.min(Math.max(q.limit ?? 25, 1), 100);
+      return { ids: hits.slice(start, start + limit).map((m) => m.list.id), next: start + limit < hits.length ? String(start + limit) : null };
+    },
+    attachmentCount: async (p: ConnectorPrincipal, q: Pick<MailAttachmentQuery, 'after' | 'before'>) =>
+      this.attachmentMails(p).filter((m) => this.inRange(m.list.receivedAt, q)).length,
+    attachmentParts: async (p: ConnectorPrincipal, id: string): Promise<MailAttachmentList | null> =>
+      this.attachmentMails(p).find((m) => m.list.id === id)?.list ?? null,
+    attachmentBytes: async (p: ConnectorPrincipal, id: string, attachmentId: string) =>
+      this.attachmentMails(p).find((m) => m.list.id === id)?.bytes[attachmentId] ?? null,
     search: async (p: ConnectorPrincipal, q: { query: string; limit?: number }) => {
       // 見本では、件名・差出人・本文の部分一致で探す（Gmail の検索の書き方のうち、言葉だけを見る）
       const words = q.query.replace(/\b(from|subject|is|in|label):\S+/g, ' ').split(/\s+/).filter(Boolean);
@@ -517,6 +530,44 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       return { messageId: `mock-msg-${randomUUID().slice(0, 8)}` };
     },
   };
+
+  /** 範囲（秒）の中で受け取ったメールか。 */
+  private inRange(receivedAt: string, q: Pick<MailAttachmentQuery, 'after' | 'before'>): boolean {
+    const t = Date.parse(receivedAt) / 1000;
+    return (q.after === undefined || t > q.after) && (q.before === undefined || t < q.before);
+  }
+
+  /**
+   * 添付のある見本のメール（資料の取り込み。第44.4節）。新しい順。
+   * 取り込むもの（CSV・テキスト）、同じ中身の 2 通目、配信のメール、本文に埋め込まれた画像・予定の招待・小さい画像、1 年より前のものを混ぜる。
+   */
+  private attachmentMails(p: ConnectorPrincipal): { list: MailAttachmentList; bytes: Record<string, Uint8Array> }[] {
+    const now = this.now().getTime();
+    const ago = (days: number) => new Date(now - days * 86_400_000).toISOString();
+    const id = (n: number) => `mock-att-${p.tenantId}-${n}`;
+    const enc = (s: string) => new TextEncoder().encode(s);
+    const estimate = enc('品目,数量,単価\nサーバー保守,1,120000\nバックアップ装置,2,45000\n');
+    const png = (size: number) => { const b = new Uint8Array(size); b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); return b; };
+    const part = (attachmentId: string, name: string, mime: string, bytes: Uint8Array, embedded = false) => ({ attachmentId, name, mime, size: bytes.length, embedded });
+    const mail = (n: number, days: number, from: string, subject: string, bulk: boolean, parts: [string, string, string, Uint8Array, boolean?][]) => ({
+      list: { id: id(n), from, subject, receivedAt: ago(days), bulk, parts: parts.map(([a, name, mime, bytes, embedded]) => part(a, name, mime, bytes, embedded)) },
+      bytes: Object.fromEntries(parts.map(([a, , , bytes]) => [a, bytes])),
+    });
+    return [
+      mail(1, 1, '佐藤 一郎 <sato@customer.example.jp>', 'お見積りの送付（サーバー保守）', false, [
+        ['a1', '見積明細.csv', 'text/csv', estimate],
+        ['a2', 'logo.png', 'image/png', png(4000), true],
+      ]),
+      mail(2, 3, 'ニュース配信 <news@media.example.jp>', '今週のお知らせ', true, [['a1', '特集.txt', 'text/plain', enc('配信のメールの添付です')]]),
+      mail(3, 20, '田中 美咲 <tanaka@partner.example.jp>', '打ち合わせの議事録', false, [
+        ['a1', '議事録_定例.txt', 'text/plain', enc('定例の打ち合わせの議事録\n出席: 田中、佐藤\n決定: 来月から保守の範囲を広げる')],
+        ['a2', 'invite.ics', 'text/calendar', enc('BEGIN:VCALENDAR\nEND:VCALENDAR')],
+        ['a3', 'icon.png', 'image/png', png(2000)],
+      ]),
+      mail(4, 200, '佐藤 一郎 <sato@customer.example.jp>', 'Re: お見積りの送付', false, [['a1', '見積明細(再送).csv', 'text/csv', estimate]]),
+      mail(5, 500, '総務 <soumu@internal.example.jp>', '旧規程の写し', false, [['a1', '旧規程.txt', 'text/plain', enc('旧規程の写し（2 年前）')]]),
+    ];
+  }
 
   /** 受信箱の中身。今日を基準に、要返信・要対応・共有のみ・不要を混ぜる。 */
   private mails(p: ConnectorPrincipal): MailMessage[] {

@@ -38,6 +38,9 @@ export const LIBRARY_LIMITS = {
   keywordChars: 40,
   /** 元のフォルダの名前の上限 */
   folderChars: 200,
+  /** メールの送り主と件名の上限（入口の記録） */
+  senderChars: 200,
+  subjectChars: 200,
   /** 探す言葉の文字の上限 */
   queryChars: 300,
   /** 一覧の 1 ページの件数 */
@@ -45,6 +48,41 @@ export const LIBRARY_LIMITS = {
   /** 読み取りに失敗してもやり直す回数 */
   attempts: 6,
 } as const;
+
+/** メールの添付の取り込みの決まり（第44.4節）。 */
+export const LIBRARY_MAIL_LIMITS = {
+  /** 新しいメールを見る間隔（分。第42.13.1節と同じ） */
+  newMailMinutes: 15,
+  /** 過去のメールを 1 人 1 日に見る通数（案） */
+  backfillPerDay: 500,
+  /** 過去のメールを 1 回の見回りで見る通数 */
+  backfillBatch: 25,
+  /** 新しいメールを 1 回に見る通数の上限 */
+  newMailMax: 200,
+  /** 過去のメールを見る範囲の初め（年。決定）と、1 回で広げる幅 */
+  backfillYears: 1,
+  /** これより小さい画像は取り込まない（署名やアイコン） */
+  smallImageBytes: 10 * 1024,
+  /** 1 通から取り込む添付の数の上限 */
+  partsPerMessage: 20,
+} as const;
+
+/** メールの添付の取り込みの様子（本人ごと。第44.4節）。 */
+export interface LibraryMailState {
+  enabled: boolean;
+  /** 新しいメールを最後に見た時刻。 */
+  checkedAt: string | null;
+  /** 過去のメールを見る範囲（初めと終わり）。 */
+  backFrom: string | null;
+  backUntil: string | null;
+  /** 範囲の中を見終えたか。 */
+  backDone: boolean;
+  /** これまでに見た通数と、資料に入れた件数。 */
+  scanned: number;
+  imported: number;
+  /** 最後に Gmail を読めなかった理由。読めていれば空。 */
+  error: string;
+}
 
 /** 資料の入口（第44.3節）。 */
 export type LibraryEntry = 'pc' | 'run' | 'picker' | 'chat' | 'mail';

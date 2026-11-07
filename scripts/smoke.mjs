@@ -9495,5 +9495,77 @@ console.log('\n■ 137. 資料（入り切り・取り込み・同じ中身を�
   }
 }
 
+console.log('\n■ 138. 資料のメールの添付（本人が入れる・直近 1 年・除くもの・同じ中身をまとめる・本人の境界・1 年さかのぼる・切る・記録に送り主を残さない）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, library from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const clean = async () => {
+    await owner.query(`delete from library_items where tenant_id in ('t-alpha', 't-beta') and entry = 'mail'`);
+    await owner.query(`delete from library_mail_watch where tenant_id in ('t-alpha', 't-beta')`);
+    await owner.query(`delete from library_tombstones where tenant_id in ('t-alpha', 't-beta')`);
+  };
+  /** メールから来た資料の名前（新しい順）。 */
+  const mailNames = async (who = 'member', tenant = 'a') => ((await call(tenant, '/v1/library?entry=mail', {}, who)).body.items ?? []).map((i) => i.originalName).sort();
+  try {
+    await clean();
+    await call('a', '/v1/admin/extensions/library/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const first = await call('a', '/v1/library/mail', {}, 'member');
+    first.status === 200 && first.body.enabled === false && first.body.gmail === true ? ok('はじめは切ってあり、本人が入れるまで受信箱を見ない') : ng('はじめの様子が違う', JSON.stringify(first.body));
+    const bad = await call('a', '/v1/library/mail', { method: 'PUT', body: JSON.stringify({ enabled: 'yes' }) }, 'member');
+    bad.status === 400 ? ok('入り切りの形が違えば断る') : ng('形の違う入り切りを受けた', String(bad.status));
+    const est = await call('a', '/v1/library/mail/estimate?which=start', {}, 'member');
+    est.status === 200 && est.body.messages === 4 && est.body.confirm === false ? ok('入れる前に、添付のあるメールのおおよその数を返す（少なければ確かめない）') : ng('目安が違う', JSON.stringify(est.body));
+
+    const on = await call('a', '/v1/library/mail', { method: 'PUT', body: JSON.stringify({ enabled: true }) }, 'member');
+    const year = on.body.backFrom ? (Date.now() - Date.parse(on.body.backFrom)) / 86_400_000 : 0;
+    on.status === 200 && on.body.enabled === true && year > 364 && year < 367 ? ok('入れると、直近 1 年のメールを見始める') : ng('入れられない', JSON.stringify(on.body));
+    let state = on.body;
+    for (let i = 0; i < 30 && !state.backDone; i++) {
+      await sleep(1000);
+      state = (await call('a', '/v1/library/mail', {}, 'member')).body;
+    }
+    const got = await mailNames();
+    state.backDone && JSON.stringify(got) === JSON.stringify(['見積明細.csv', '議事録_定例.txt'])
+      ? ok('添付を資料に入れ、配信のメール・本文に埋め込まれた画像・予定の招待・小さい画像は入れない') : ng('入れたものが違う', JSON.stringify({ got, state }));
+    const list = await call('a', '/v1/library?entry=mail', {}, 'member');
+    const estimate = list.body.items?.find((i) => i.originalName === '見積明細.csv');
+    const detail = estimate ? await call('a', `/v1/library/${estimate.id}`, {}, 'member') : { body: {} };
+    detail.body.origins?.filter((o) => o.entry === 'mail').length === 2 && estimate.placed === true
+      ? ok('中身が同じ添付は 1 つにまとめ、届いたメールをすべて手がかりに残す') : ng('同じ中身がまとまらない', JSON.stringify(detail.body.origins));
+    const bySender = await call('a', `/v1/library?q=${encodeURIComponent('sato@customer.example.jp')}`, {}, 'member');
+    bySender.body.items?.some((i) => i.id === estimate?.id) ? ok('送り主で探せる') : ng('送り主で探せない');
+
+    // 本人の境界
+    const adminList = await mailNames('admin');
+    const adminState = await call('a', '/v1/library/mail', {}, 'admin');
+    const betaList = await call('b', '/v1/library?entry=mail', {}, 'member');
+    adminList.length === 0 && adminState.body.enabled === false && (betaList.status === 403 || (betaList.body.items ?? []).length === 0)
+      ? ok('入れた本人の資料にだけ入り、管理者にも別の会社にも見えない。入り切りも本人ごと') : ng('本人の境界が破れた', JSON.stringify({ adminList, admin: adminState.body.enabled }));
+
+    const ext = await call('a', '/v1/library/mail/extend', { method: 'POST', body: '{}' }, 'member');
+    let wider = ext.body;
+    for (let i = 0; i < 30 && ext.status === 200 && !wider.backDone; i++) {
+      await sleep(1000);
+      wider = (await call('a', '/v1/library/mail', {}, 'member')).body;
+    }
+    ext.status === 200 && (await mailNames()).includes('旧規程.txt') ? ok('さらに 1 年さかのぼって、古いメールの添付も入れる') : ng('さかのぼれない', JSON.stringify(ext.body));
+
+    const off = await call('a', '/v1/library/mail', { method: 'PUT', body: JSON.stringify({ enabled: false }) }, 'member');
+    const notYet = await call('a', '/v1/library/mail/extend', { method: 'POST', body: '{}' }, 'member');
+    off.body.enabled === false && notYet.status === 409 ? ok('切ればすぐ止まる') : ng('切れない', JSON.stringify(off.body));
+
+    const audits = await owner.query(`select action, detail::text as detail from audit_events where tenant_id = 't-alpha' and action like 'library.%' and occurred_at > now() - interval '5 minutes'`);
+    const actions = new Set(audits.rows.map((a) => a.action));
+    ['library.mail.on', 'library.mail.extend', 'library.mail.off', 'library.import'].every((a) => actions.has(a)) && audits.rows.every((a) => !/sato|見積|議事録/.test(a.detail))
+      ? ok('入り切りと取り込みを記録し、送り主・件名・名前を残さない') : ng('記録が違う', JSON.stringify(audits.rows).slice(0, 300));
+  } finally {
+    await clean();
+    for (const r of saved) await owner.query('update tenant_settings set library = $2 where tenant_id = $1', [r.tenant_id, r.library]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

@@ -1,6 +1,6 @@
 /**
- * @file 資料の画面（仕様書 第44.3節・第44.7節）。新しい順の一覧と絞り込み・ファイルやフォルダをドラッグして入れる・ドライブで選ぶ／
- * 1 件の題名などを直す・もう一度読む・削除。読み取りの途中はときどき読み直す。
+ * @file 資料の画面（仕様書 第44.3節・第44.4節・第44.7節）。新しい順の一覧と絞り込み・ファイルやフォルダをドラッグして入れる・ドライブで選ぶ・
+ * メールの添付の取り込みの入り切り／1 件の題名などを直す・もう一度読む・削除。読み取りの途中はときどき読み直す。
  *
  * 人に整理をさせない（ADR-0028）。読めなかった資料は「読めなかった」と示す。途切れても、同じファイルを入れ直せば続きから入る（同じ中身は入れ直さない）。
  */
@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import {
   isRefusedLibraryName, LIBRARY_ENTRY_LABELS, LIBRARY_FORMAT_LABELS, LIBRARY_LIMITS, libraryTitleOf,
-  type LibraryEntry, type LibraryFacets, type LibraryItem, type LibraryItemDetail, type LibraryProgress,
+  type LibraryEntry, type LibraryFacets, type LibraryItem, type LibraryItemDetail, type LibraryMailState, type LibraryProgress,
 } from '@m2office/shared';
 import { api, ApiError, describeError } from './api.js';
 import { BackButton } from './back-button.js';
@@ -250,6 +250,8 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
           }} />
       </div>
 
+      <MailIntake google={google} onImported={load} />
+
       {confirm && (
         <div className="card library-confirm" role="alertdialog" aria-label="取り込みの確かめ">
           <p>{confirm.queue.length.toLocaleString('ja-JP')} 件を取り込みます。{confirm.jpy !== null ? `AI の費用の目安は約 ${confirm.jpy.toLocaleString('ja-JP')} 円です。` : ''}</p>
@@ -305,7 +307,7 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
         </select>
         <select value={entry} aria-label="入口" onChange={(e) => setEntry(e.target.value)}>
           <option value="">入口: すべて</option>
-          {(Object.keys(LIBRARY_ENTRY_LABELS) as LibraryEntry[]).filter((k) => k !== 'mail').map((k) => <option key={k} value={k}>{LIBRARY_ENTRY_LABELS[k]}</option>)}
+          {(Object.keys(LIBRARY_ENTRY_LABELS) as LibraryEntry[]).map((k) => <option key={k} value={k}>{LIBRARY_ENTRY_LABELS[k]}</option>)}
         </select>
       </div>
 
@@ -339,6 +341,87 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       )}
       {items && items.length < total && <button className="btn ghost small" onClick={more}>続きを見る（残り {(total - items.length).toLocaleString('ja-JP')} 件）</button>}
       {dragging && <div className="library-drop" aria-hidden="true">ここに入れる</div>}
+    </div>
+  );
+}
+
+/** メールの添付の取り込みの様子（画面に出す形）。 */
+type MailView = LibraryMailState & { gmail: boolean };
+
+/** 取り込みの途中に様子を読み直す間隔。 */
+const MAIL_POLL_MS = 30_000;
+
+/**
+ * メールの添付の取り込み（第44.4節）。本人が 1 度入れれば、受け取ったメールの添付を自動で集める。切ればすぐ止まる。
+ * 件数が多いときだけ、入れる前に費用の目安を確かめる（第44.11節。お金に関わるため）。
+ */
+function MailIntake({ google, onImported }: { google: boolean; onImported: () => void }) {
+  const [state, setState] = useState<MailView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<{ which: 'start' | 'extend'; messages: number; jpy: number } | null>(null);
+  const imported = useRef<number | null>(null);
+
+  const show = useCallback((s: MailView) => {
+    setState(s);
+    // 新しく入ったら一覧を読み直す
+    if (imported.current !== null && s.imported > imported.current) onImported();
+    imported.current = s.imported;
+  }, [onImported]);
+  const load = useCallback(() => {
+    api.library.mail.get().then(show).catch((e) => setError(describeError(e, 'メールの取り込みの様子を読めませんでした')));
+  }, [show]);
+  useEffect(load, [load]);
+  const working = !!state?.enabled && !state.backDone;
+  useEffect(() => {
+    if (!working) return undefined;
+    const t = setInterval(load, MAIL_POLL_MS);
+    return () => clearInterval(t);
+  }, [working, load]);
+
+  const act = async (fn: () => Promise<MailView>) => {
+    setBusy(true);
+    setError(null);
+    try { show(await fn()); } catch (e) { setError(describeError(e, '変えられませんでした')); } finally { setBusy(false); }
+  };
+  /** 入れる・広げる前に、件数が多ければ費用の目安を確かめる。 */
+  const begin = async (which: 'start' | 'extend') => {
+    const est = await api.library.mail.estimate(which).catch(() => null);
+    if (est?.confirm && est.messages !== null && est.costJpy !== null) { setConfirm({ which, messages: est.messages, jpy: est.costJpy }); return; }
+    await act(which === 'start' ? () => api.library.mail.set(true) : api.library.mail.extend);
+  };
+
+  if (!state) return error ? <p className="error" role="alert">{error}</p> : null;
+  const from = state.backFrom ? dayLabel(new Date(state.backFrom).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })) : '';
+  const ready = google && state.gmail;
+  return (
+    <div className="library-mail">
+      <label className="switch-label">
+        <span>メールの添付を集める</span>
+        <button type="button" role="switch" aria-checked={state.enabled} aria-label={state.enabled ? 'メールの添付を集めるのをやめる' : 'メールの添付を集める'}
+          className={state.enabled ? 'switch on' : 'switch'} disabled={busy || (!ready && !state.enabled)}
+          onClick={() => void (state.enabled ? act(() => api.library.mail.set(false)) : begin('start'))}><span /></button>
+      </label>
+      {state.enabled && (
+        <span className="small muted" role="status">
+          {state.backDone
+            ? `${from} 以降のメールを見終えました。${state.imported.toLocaleString('ja-JP')} 件を入れました`
+            : `${from} 以降のメールを見ています（${state.scanned.toLocaleString('ja-JP')} 通を見て、${state.imported.toLocaleString('ja-JP')} 件を入れました）`}
+        </span>
+      )}
+      {state.enabled && state.backDone && <button className="btn ghost small" disabled={busy} onClick={() => void begin('extend')}>さらに 1 年さかのぼる</button>}
+      {!ready && <p className="small error library-mail-note">Gmail とドライブを読む許可がありません。個人設定の「Google 連携」で接続し直してください。</p>}
+      {state.enabled && state.error && <p className="small error library-mail-note" role="alert">Gmail を読めませんでした（{state.error}）</p>}
+      {error && <p className="small error library-mail-note" role="alert">{error}</p>}
+      {confirm && (
+        <div className="card library-confirm library-mail-note" role="alertdialog" aria-label="メールの取り込みの確かめ">
+          <p>{confirm.which === 'start' ? '直近 1 年' : 'さらに 1 年前'}に、添付のあるメールが約 {confirm.messages.toLocaleString('ja-JP')} 通あります。AI の費用の目安は約 {confirm.jpy.toLocaleString('ja-JP')} 円です。</p>
+          <div className="row">
+            <button className="btn" disabled={busy} onClick={() => { const c = confirm; setConfirm(null); void act(c.which === 'start' ? () => api.library.mail.set(true) : api.library.mail.extend); }}>集める</button>
+            <button className="btn ghost" onClick={() => setConfirm(null)}>キャンセル</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -414,9 +497,14 @@ function LibraryDetail({ id, onBack }: { id: string; onBack: () => void }) {
       <dl className="library-facts small">
         <dt>元の名前</dt><dd>{item.originalName}</dd>
         <dt>形式</dt><dd>{LIBRARY_FORMAT_LABELS[item.format]}{item.sizeBytes > 0 ? `（${sizeLabel(item.sizeBytes)}）` : ''}</dd>
-        <dt>入れた日</dt><dd>{dayLabel(item.receivedAt)}</dd>
+        <dt>{item.entry === 'mail' ? '受け取った日' : '入れた日'}</dt><dd>{dayLabel(item.receivedAt)}</dd>
         {item.readScope && <><dt>読んだ範囲</dt><dd>{item.readScope}</dd></>}
         {item.origins.some((o) => o.folder) && <><dt>元のフォルダ</dt><dd>{[...new Set(item.origins.map((o) => o.folder).filter(Boolean))].join('、')}</dd></>}
+        {item.origins.some((o) => o.entry === 'mail') && <><dt>届いたメール</dt><dd>
+          <ul className="library-mails">
+            {item.origins.filter((o) => o.entry === 'mail').map((o, i) => <li key={i}>{[o.sender, o.subject].filter(Boolean).join(' ・ ')}</li>)}
+          </ul>
+        </dd></>}
       </dl>
     </div>
   );

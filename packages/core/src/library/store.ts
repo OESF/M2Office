@@ -34,6 +34,8 @@ export interface NewLibraryItem {
   /** 読まないと分かっているものは、最初から読み取りの様子を決める。 */
   readState?: LibraryReadState;
   readNote?: string;
+  /** 受け取った日時（メールから来たものはメールの日時）。無ければ今。 */
+  receivedAt?: string;
 }
 
 /** 入口の記録。 */
@@ -42,6 +44,26 @@ export interface NewLibraryOrigin {
   folder?: string;
   artifactId?: string;
   runId?: string;
+  /** メールから来たとき（第44.4節）。Gmail の ID・送り主・件名。 */
+  messageId?: string;
+  sender?: string;
+  subject?: string;
+}
+
+/** メールの添付の取り込みの様子（持ち主ごと。第44.14節 `library_mail_watch`）。 */
+export interface LibraryMailWatchRow {
+  enabled: boolean;
+  checkedAt: string | null;
+  backFrom: string | null;
+  backUntil: string | null;
+  backToken: string | null;
+  backDone: boolean;
+  /** 過去のメールを見た日（日本時間の `YYYY-MM-DD`）と、その日に見た通数。 */
+  backDay: string | null;
+  backCount: number;
+  scanned: number;
+  imported: number;
+  error: string;
 }
 
 /** 読み取りの結果。 */
@@ -95,8 +117,15 @@ export interface LibraryStore {
   isTombstoned(who: LibraryViewer, sha256: string): Promise<boolean>;
   folder(who: LibraryViewer, key: string): Promise<string | null>;
   setFolder(who: LibraryViewer, key: string, driveId: string): Promise<void>;
-  /** 本人の目録を消す（連携の解除・削除の求め・退職。第44.9節）。ドライブのファイルは本人のものなので消さない。 */
+  /** 本人の目録を消す（連携の解除・削除の求め・退職。第44.9節）。ドライブのファイルは本人のものなので消さない。メールの取り込みも止める。 */
   purgeOwner(tenantId: string, userId: string): Promise<number>;
+  /** メールの添付の取り込みの様子（第44.4節）。一度もオンにしていなければ `null`。 */
+  mailWatch(who: LibraryViewer): Promise<LibraryMailWatchRow | null>;
+  saveMailWatch(who: LibraryViewer, row: LibraryMailWatchRow): Promise<void>;
+  /** 取り込みをオンにしている持ち主。 */
+  mailWatchers(tenantId: string): Promise<string[]>;
+  /** そのメールから、もう資料に入れたか（一度見たメールを読み直さない）。 */
+  seenMessage(who: LibraryViewer, messageId: string): Promise<boolean>;
 
   /**
    * 読み取りの順番が来たものを受け持つ（新しい順。第44.11節）。受け持つ間は、ほかのワーカーに渡さない。
@@ -183,10 +212,10 @@ export class PostgresLibraryStore implements LibraryStore {
     const id = `lib-${randomUUID()}`;
     const search = librarySearchText({ originalName: i.originalName, title: i.title ?? '', docType: '', counterparty: '', summary: '', keywords: [] }, []);
     const rows = await this.q<Row>(who.tenantId,
-      `insert into library_items (id, tenant_id, owner_id, drive_file_id, drive_url, placed, file_id, original_name, format, mime, size_bytes, sha256, entry, title, search_text, read_state, read_note)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      `insert into library_items (id, tenant_id, owner_id, drive_file_id, drive_url, placed, file_id, original_name, format, mime, size_bytes, sha256, entry, title, search_text, read_state, read_note, received_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, coalesce($18::timestamptz, now()))
        on conflict do nothing returning ${COLS}`,
-      [id, who.tenantId, who.userId, i.driveFileId, i.driveUrl, i.placed, i.fileId, i.originalName, i.format, i.mime, i.sizeBytes, i.sha256, i.entry, i.title ?? '', search, i.readState ?? 'pending', i.readNote ?? '']);
+      [id, who.tenantId, who.userId, i.driveFileId, i.driveUrl, i.placed, i.fileId, i.originalName, i.format, i.mime, i.sizeBytes, i.sha256, i.entry, i.title ?? '', search, i.readState ?? 'pending', i.readNote ?? '', i.receivedAt ?? null]);
     if (rows[0]) return { item: toItem(rows[0]), created: true };
     const same = (i.sha256 ? await this.byHash(who, i.sha256) : null) ?? (i.driveFileId ? await this.byDriveFile(who, i.driveFileId) : null);
     if (!same) throw new Error('資料を入れられませんでした');
@@ -195,16 +224,18 @@ export class PostgresLibraryStore implements LibraryStore {
 
   async addOrigin(who: LibraryViewer, itemId: string, o: NewLibraryOrigin): Promise<void> {
     const folder = (o.folder ?? '').slice(0, LIBRARY_LIMITS.folderChars);
+    const sender = (o.sender ?? '').slice(0, LIBRARY_LIMITS.senderChars);
+    const subject = (o.subject ?? '').slice(0, LIBRARY_LIMITS.subjectChars);
     await this.q(who.tenantId,
-      `insert into library_item_origins (id, tenant_id, item_id, entry, folder, artifact_id, run_id)
-       select $1, $2, i.id, $4, $5, $6, $7 from library_items i where i.tenant_id = $2 and i.owner_id = $8 and i.id = $3
+      `insert into library_item_origins (id, tenant_id, item_id, entry, folder, artifact_id, run_id, message_id, sender, subject)
+       select $1, $2, i.id, $4, $5, $6, $7, $9, $10, $11 from library_items i where i.tenant_id = $2 and i.owner_id = $8 and i.id = $3
        on conflict do nothing`,
-      [`lor-${randomUUID()}`, who.tenantId, itemId, o.entry, folder, o.artifactId ?? null, o.runId ?? null, who.userId]);
-    if (folder) {
-      // 元のフォルダの名前も探す手がかりにする
+      [`lor-${randomUUID()}`, who.tenantId, itemId, o.entry, folder, o.artifactId ?? null, o.runId ?? null, who.userId, o.messageId ?? null, sender, subject]);
+    // 元のフォルダの名前・送り主・件名も探す手がかりにする（第44.7節）
+    for (const hint of [folder, sender, subject].filter(Boolean).map(libraryNormal)) {
       await this.q(who.tenantId,
         `update library_items set search_text = search_text || E'\\n' || $4 where tenant_id = $1 and owner_id = $2 and id = $3 and position($4 in search_text) = 0`,
-        [who.tenantId, who.userId, itemId, libraryNormal(folder)]);
+        [who.tenantId, who.userId, itemId, hint]);
     }
   }
 
@@ -314,7 +345,46 @@ export class PostgresLibraryStore implements LibraryStore {
     const rows = await this.q<{ id: string }>(tenantId, `delete from library_items where tenant_id = $1 and owner_id = $2 returning id`, [tenantId, userId]);
     await this.q(tenantId, `delete from library_tombstones where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     await this.q(tenantId, `delete from library_folders where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
+    await this.q(tenantId, `delete from library_mail_watch where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     return rows.length;
+  }
+
+  async mailWatch(who: LibraryViewer): Promise<LibraryMailWatchRow | null> {
+    const rows = await this.q<{
+      enabled: boolean; checked_at: Date | string | null; back_from: Date | string | null; back_until: Date | string | null; back_token: string | null; back_done: boolean;
+      back_day: string | null; back_count: number; scanned: number; imported: number; error: string;
+    }>(who.tenantId,
+      `select enabled, checked_at, back_from, back_until, back_token, back_done, back_day::text as back_day, back_count, scanned, imported, error
+       from library_mail_watch where tenant_id = $1 and owner_id = $2`, [who.tenantId, who.userId]);
+    const r = rows[0];
+    if (!r) return null;
+    const at = (v: Date | string | null) => (v === null ? null : iso(v));
+    return {
+      enabled: r.enabled, checkedAt: at(r.checked_at), backFrom: at(r.back_from), backUntil: at(r.back_until), backToken: r.back_token, backDone: r.back_done,
+      backDay: r.back_day, backCount: r.back_count, scanned: r.scanned, imported: r.imported, error: r.error,
+    };
+  }
+
+  async saveMailWatch(who: LibraryViewer, w: LibraryMailWatchRow): Promise<void> {
+    await this.q(who.tenantId,
+      `insert into library_mail_watch (tenant_id, owner_id, enabled, checked_at, back_from, back_until, back_token, back_done, back_day, back_count, scanned, imported, error, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13, now())
+       on conflict (tenant_id, owner_id) do update set enabled = excluded.enabled, checked_at = excluded.checked_at, back_from = excluded.back_from, back_until = excluded.back_until,
+         back_token = excluded.back_token, back_done = excluded.back_done, back_day = excluded.back_day, back_count = excluded.back_count, scanned = excluded.scanned,
+         imported = excluded.imported, error = excluded.error, updated_at = now()`,
+      [who.tenantId, who.userId, w.enabled, w.checkedAt, w.backFrom, w.backUntil, w.backToken, w.backDone, w.backDay, w.backCount, w.scanned, w.imported, w.error.slice(0, 300)]);
+  }
+
+  async mailWatchers(tenantId: string): Promise<string[]> {
+    const rows = await this.q<{ owner_id: string }>(tenantId, `select owner_id from library_mail_watch where tenant_id = $1 and enabled order by updated_at`, [tenantId]);
+    return rows.map((r) => r.owner_id);
+  }
+
+  async seenMessage(who: LibraryViewer, messageId: string): Promise<boolean> {
+    const rows = await this.q(who.tenantId,
+      `select 1 from library_item_origins o join library_items i on i.tenant_id = o.tenant_id and i.id = o.item_id
+       where o.tenant_id = $1 and o.message_id = $2 and i.owner_id = $3 limit 1`, [who.tenantId, messageId, who.userId]);
+    return rows.length > 0;
   }
 
   async claim(tenantId: string, limit: number, leaseMs: number, placeOnly: boolean): Promise<LibraryWork[]> {
@@ -369,7 +439,8 @@ export class PostgresLibraryStore implements LibraryStore {
  * 目録の置き場（メモリ。テスト用）。
  */
 export class MemoryLibraryStore implements LibraryStore {
-  readonly rows = new Map<string, LibraryWork & { tenantId: string; nextTryAt: number; searchText: string; origins: (LibraryOrigin & { artifactId?: string })[] }>();
+  readonly rows = new Map<string, LibraryWork & { tenantId: string; nextTryAt: number; searchText: string; origins: (LibraryOrigin & { artifactId?: string; messageId?: string })[] }>();
+  readonly mailWatches = new Map<string, LibraryMailWatchRow>();
   readonly tombstones = new Set<string>();
   readonly folders = new Map<string, string>();
   private mine = (who: LibraryViewer) => [...this.rows.values()].filter((r) => r.tenantId === who.tenantId && r.ownerId === who.userId);
@@ -384,7 +455,7 @@ export class MemoryLibraryStore implements LibraryStore {
     const now = new Date().toISOString();
     const row = {
       id: `lib-${randomUUID()}`, tenantId: who.tenantId, ownerId: who.userId, driveFileId: i.driveFileId, driveUrl: i.driveUrl, placed: i.placed, fileId: i.fileId, originalName: i.originalName,
-      format: i.format, mime: i.mime, sizeBytes: i.sizeBytes, sha256: i.sha256, entry: i.entry, title: i.title ?? '', docType: '', counterparty: '', contactId: null, docDate: null, receivedAt: now,
+      format: i.format, mime: i.mime, sizeBytes: i.sizeBytes, sha256: i.sha256, entry: i.entry, title: i.title ?? '', docType: '', counterparty: '', contactId: null, docDate: null, receivedAt: i.receivedAt ?? now,
       summary: '', keywords: [], readState: i.readState ?? 'pending' as LibraryReadState, readNote: i.readNote ?? '', readScope: '', edited: [], attempts: 0, createdAt: now, updatedAt: now,
       nextTryAt: 0, searchText: '', origins: [],
     };
@@ -397,14 +468,18 @@ export class MemoryLibraryStore implements LibraryStore {
     const r = this.rows.get(itemId);
     if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return;
     if (o.artifactId && r.origins.some((x) => x.artifactId === o.artifactId)) return;
-    r.origins.push({ entry: o.entry, folder: o.folder ?? '', sender: '', subject: '', at: new Date().toISOString(), ...(o.artifactId ? { artifactId: o.artifactId } : {}) });
-    if (o.folder) r.searchText += `\n${libraryNormal(o.folder)}`;
+    if (o.messageId && r.origins.some((x) => x.messageId === o.messageId)) return;
+    r.origins.push({
+      entry: o.entry, folder: o.folder ?? '', sender: o.sender ?? '', subject: o.subject ?? '', at: new Date().toISOString(),
+      ...(o.artifactId ? { artifactId: o.artifactId } : {}), ...(o.messageId ? { messageId: o.messageId } : {}),
+    });
+    for (const hint of [o.folder, o.sender, o.subject].filter((x): x is string => !!x)) r.searchText += `\n${libraryNormal(hint)}`;
   }
 
   async get(who: LibraryViewer, id: string): Promise<LibraryItemDetail | null> {
     const r = this.rows.get(id);
     if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return null;
-    return { ...this.view(r), origins: r.origins.map(({ artifactId: _a, ...o }) => o) };
+    return { ...this.view(r), origins: r.origins.map(({ artifactId: _a, messageId: _m, ...o }) => o) };
   }
 
   async list(who: LibraryViewer, f: LibraryFilter, terms: string[], limit: number, offset: number): Promise<{ items: LibraryItem[]; total: number }> {
@@ -482,7 +557,25 @@ export class MemoryLibraryStore implements LibraryStore {
   async purgeOwner(tenantId: string, userId: string): Promise<number> {
     const rows = this.mine({ tenantId, userId });
     for (const r of rows) this.rows.delete(r.id);
+    this.mailWatches.delete(`${tenantId}:${userId}`);
     return rows.length;
+  }
+
+  async mailWatch(who: LibraryViewer): Promise<LibraryMailWatchRow | null> {
+    const w = this.mailWatches.get(`${who.tenantId}:${who.userId}`);
+    return w ? { ...w } : null;
+  }
+
+  async saveMailWatch(who: LibraryViewer, row: LibraryMailWatchRow): Promise<void> {
+    this.mailWatches.set(`${who.tenantId}:${who.userId}`, { ...row });
+  }
+
+  async mailWatchers(tenantId: string): Promise<string[]> {
+    return [...this.mailWatches.entries()].filter(([k, w]) => k.startsWith(`${tenantId}:`) && w.enabled).map(([k]) => k.slice(tenantId.length + 1));
+  }
+
+  async seenMessage(who: LibraryViewer, messageId: string): Promise<boolean> {
+    return this.mine(who).some((r) => r.origins.some((o) => o.messageId === messageId));
   }
 
   async claim(tenantId: string, limit: number, leaseMs: number, placeOnly: boolean): Promise<LibraryWork[]> {

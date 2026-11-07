@@ -9,11 +9,11 @@
 import type { Repository } from '../../repository/types.js';
 import type { SecretBox } from '../../secrets/box.js';
 import {
-  ConnectorUnavailableError, type BusySlot, type CalendarEvent, type ConnectorPrincipal, type MailAttachment, type MailMessage,
+  ConnectorUnavailableError, type BusySlot, type CalendarEvent, type ConnectorPrincipal, type MailAttachment, type MailAttachmentList, type MailAttachmentQuery, type MailMessage,
   type MailSummary, type TaskItem, type WorkspaceConnector,
 } from '../types.js';
 import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndpoints } from './http.js';
-import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, fromBase64Url, header, senderAuthenticated, type GmailPart } from './mime.js';
+import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, fromBase64Url, header, mailAttachmentListOf, senderAuthenticated, type GmailPart } from './mime.js';
 import { externalOf, pickSpace, spaceIdOf, toChatText } from './chat.js';
 import { googleDocs, googleDrive } from './drive.js';
 import { googleSheets } from './sheets.js';
@@ -38,6 +38,16 @@ const INBOX_MAIN = 'in:inbox category:primary';
 
 /** 未読を数えるときに読む頁の上限（1 頁 500 通）。 */
 const UNREAD_COUNT_PAGES = 2;
+
+/** 資料に集める添付のあるメール（受け取ったものだけ。ごみ箱と迷惑メールは一覧の API が初めから含めない。仕様書 第44.4節）。 */
+const ATTACHMENT_MAIL = 'has:attachment -in:sent -in:drafts -in:chats';
+
+/** 添付のあるメールを探す条件。 */
+const attachmentQuery = (q: Pick<MailAttachmentQuery, 'after' | 'before'>) => [
+  ATTACHMENT_MAIL,
+  ...(q.after !== undefined && Number.isFinite(q.after) ? [`after:${Math.floor(q.after)}`] : []),
+  ...(q.before !== undefined && Number.isFinite(q.before) ? [`before:${Math.floor(q.before)}`] : []),
+].join(' ');
 
 /** メールの見出しを同時に取りに行く数。多すぎると Google に断られる。 */
 const MAIL_FETCH_CONCURRENCY = 8;
@@ -209,6 +219,24 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
         files.push({ name: decodeHeaderWords(part.filename!), mime: part.mimeType ?? 'application/octet-stream', bytes });
       }
       return { messageId: header(m.payload, 'Message-ID'), files };
+    },
+    attachmentPage: async (p: ConnectorPrincipal, q: MailAttachmentQuery) => {
+      const params = new URLSearchParams({ q: attachmentQuery(q), maxResults: String(Math.min(Math.max(q.limit ?? 25, 1), 100)), ...(q.pageToken ? { pageToken: q.pageToken } : {}) });
+      const res = await this.gmail(p, `/messages?${params}`);
+      return { ids: ((res?.['messages'] ?? []) as { id: string }[]).map((m) => m.id), next: res?.['nextPageToken'] ? String(res['nextPageToken']) : null };
+    },
+    attachmentCount: async (p: ConnectorPrincipal, q: Pick<MailAttachmentQuery, 'after' | 'before'>) => {
+      const res = await this.gmail(p, `/messages?${new URLSearchParams({ q: attachmentQuery(q), maxResults: '1' })}`);
+      const n = Number(res?.['resultSizeEstimate']);
+      return Number.isFinite(n) ? n : null;
+    },
+    attachmentParts: async (p: ConnectorPrincipal, id: string): Promise<MailAttachmentList | null> => {
+      const m = await this.gmail(p, `/messages/${encodeURIComponent(id)}?format=full`) as GmailMessage | null;
+      return m ? mailAttachmentListOf(m) : null;
+    },
+    attachmentBytes: async (p: ConnectorPrincipal, id: string, attachmentId: string) => {
+      const a = await this.gmail(p, `/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}`) as { data?: string } | null;
+      return a?.data ? fromBase64Url(a.data) : null;
     },
     send: async (p: ConnectorPrincipal, mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string; attachments?: MailAttachment[] }) => {
       const thread = mail.replyTo ? await this.threadOf(p, mail.replyTo) : null;

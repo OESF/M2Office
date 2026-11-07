@@ -263,6 +263,9 @@ const ACTION_LABELS: Record<string, string> = {
   'library.reread': '資料を読み直した',
   'library.delete': '資料を削除した',
   'library.purge': '資料の目録を消した',
+  'library.mail.on': 'メールの添付を資料に集め始めた',
+  'library.mail.off': 'メールの添付を資料に集めるのをやめた',
+  'library.mail.extend': '資料に集めるメールを 1 年さかのぼった',
   'contract.create': '契約を台帳に入れた',
   'contract.update': '契約の台帳を直した',
   'contract.status': '契約の状態を変えた',
@@ -587,6 +590,9 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'subsidy': return id === 'search' ? '補助金・助成金の調べもの' : id === 'settings' ? '補助金・助成金の設定' : `補助金・助成金の候補 ${id.slice(4, 12)}`;
     case 'reservation': return id.startsWith('rsi-') ? `予約できるもの ${id.slice(4, 12)}` : `予約 ${id.slice(4, 12)}`;
     case 'web_review': return 'Webの分析';
+    // 資料の題名・送り主・件名は監査に出さない（第44.10節）
+    case 'library_item': return `資料 ${id.slice(4, 12)}`;
+    case 'library_mail': return 'メールの添付の取り込み';
     case 'competitor': return id === 'settings' ? '競合の分析の設定' : id === 'map-key' ? '競合の分析の地図の鍵' : id === 'discover' ? '競合の分析（探す）' : id === 'all' ? '競合の分析（見回り）' : `競合の分析 ${id.slice(4, 12)}`;
     case 'inquiry': return id === 'mailbox' ? '問い合わせの窓口のアカウント' : id === 'line' ? '問い合わせの LINE 公式アカウント' : `問い合わせ ${id.slice(4, 12)}`;
     case 'tool': {

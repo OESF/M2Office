@@ -1,5 +1,5 @@
 /**
- * @file 資料（内蔵の拡張）の API。一覧と絞り込み・ファイルを入れる・ドライブで選ぶ・1 件・直す・読み直す・削除・費用の目安（第44章）。
+ * @file 資料（内蔵の拡張）の API。一覧と絞り込み・ファイルを入れる・ドライブで選ぶ・1 件・直す・読み直す・削除・費用の目安・メールの添付の取り込み（第44章）。
  *
  * 会社が切っているときと、利用範囲の外の人には、どの口も使わせない。見えるのは本人の資料だけで、管理者にも見せない（第44.8節）。
  * 運営の代理アクセスからは見せない（第23.6節）。監査ログは処理（LibraryService）が残す。
@@ -26,7 +26,7 @@ const BODY_MAX = LIBRARY_LIMITS.placeBytes + 1024 * 1024;
  */
 export function libraryRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
-  const { service } = deps.library;
+  const { service, mail } = deps.library;
   const drive = driveFilesFor(deps);
   const who = (c: Context<AppEnv>): LibraryViewer => {
     const { tenant, user } = c.get('ctx');
@@ -107,6 +107,40 @@ export function libraryRoute(deps: AppDeps) {
     const r = await service.addFromDrive(who(c), typeof b.fileId === 'string' ? b.fileId : '');
     if ('error' in r) return c.json({ error: r.error }, r.status);
     return c.json(r, r.duplicate ? 200 : 201);
+  });
+
+  /** 本人が Gmail を読む許可を出しているか（見本の会社は出しているものとする）。 */
+  const gmailReady = async (me: LibraryViewer): Promise<boolean> => {
+    if (deps.connector.sourceFor(me.tenantId) === 'mock') return true;
+    const conn = await deps.repo.getGoogleConnection(me.tenantId, me.userId);
+    return !!conn && conn.scopes.includes('gmail.readonly') && conn.scopes.includes('drive.file');
+  };
+
+  /** メールの添付の取り込みの様子（第44.4節）。`gmail` は、本人の Google の接続で読めるか。 */
+  app.get('/mail', async (c) => {
+    const me = who(c);
+    const [state, gmail] = await Promise.all([mail.state(me), gmailReady(me)]);
+    return c.json({ ...state, gmail });
+  });
+
+  /** 入れる・切る（本文: `enabled`）。本人だけが入れられる。 */
+  app.put('/mail', async (c) => {
+    const b = await c.req.json<{ enabled?: unknown }>().catch(() => ({} as { enabled?: unknown }));
+    if (typeof b.enabled !== 'boolean') return c.json({ error: 'enabled を指定してください' }, 400);
+    const me = who(c);
+    if (b.enabled && !(await gmailReady(me))) return c.json({ error: 'Gmail とドライブを読む許可がありません。Google との接続をやり直してください' }, 409);
+    return c.json({ ...(await mail.setEnabled(me, b.enabled)), gmail: true });
+  });
+
+  /** 入れる前・広げる前の、添付のあるメールのおおよその数と費用の目安（`which`: `start`・`extend`）。 */
+  app.get('/mail/estimate', async (c) => {
+    return c.json(await mail.estimate(who(c), c.req.query('which') === 'extend' ? 'extend' : 'start'));
+  });
+
+  /** 過去のメールを見る範囲を、さらに 1 年さかのぼる。 */
+  app.post('/mail/extend', async (c) => {
+    const r = await mail.extend(who(c));
+    return 'refused' in r ? c.json({ error: r.refused }, 409) : c.json({ ...r, gmail: true });
   });
 
   app.use('/:id/*', async (c, next) => (ID.test(c.req.param('id')) ? next() : notFound(c)));

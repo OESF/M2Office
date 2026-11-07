@@ -113,6 +113,36 @@ export interface DriveFile {
   url: string | null;
 }
 
+/** メールの添付 1 つの様子（中身は持たない。資料の取り込み。仕様書 第44.4節）。 */
+export interface MailAttachmentPart {
+  /** 中身を読むときに渡す ID。 */
+  attachmentId: string;
+  name: string;
+  mime: string;
+  size: number;
+  /** 本文の HTML から `cid:` で指されている（署名やロゴなど、本文に埋め込まれた画像）。 */
+  embedded: boolean;
+}
+
+/** 1 通の添付の一覧（第44.4節）。 */
+export interface MailAttachmentList {
+  id: string;
+  from: string;
+  subject: string;
+  receivedAt: string;
+  /** 配信のメール（`List-Unsubscribe`・`List-Id`・`Precedence: bulk` を持つか、プロモーションに振り分けられたもの）。 */
+  bulk: boolean;
+  parts: MailAttachmentPart[];
+}
+
+/** 添付のあるメールを探す範囲（秒の UNIX 時刻。受け取ったメールだけ。ごみ箱・迷惑メール・送信済み・下書きは含めない）。 */
+export interface MailAttachmentQuery {
+  after?: number;
+  before?: number;
+  pageToken?: string;
+  limit?: number;
+}
+
 export interface MailConnector {
   /**
    * 受信トレイの「メイン」のメールを新しい順に返す（仕様書 第14.3.4節「Gmail」）。
@@ -136,6 +166,19 @@ export interface MailConnector {
    * @remarks 持たない接続口では未定義
    */
   attachments?(p: ConnectorPrincipal, id: string, opts?: { maxBytes?: number }): Promise<{ messageId: string; files: { name: string; mime: string; bytes: Uint8Array }[] }>;
+  /**
+   * 添付のあるメールの ID を新しい順に 1 ページ返す（資料の取り込み。仕様書 第44.4節）。読むだけ。
+   *
+   * @returns ID と次のページの印（無ければ `null`）
+   * @remarks 持たない接続口では未定義
+   */
+  attachmentPage?(p: ConnectorPrincipal, q: MailAttachmentQuery): Promise<{ ids: string[]; next: string | null }>;
+  /** 範囲の中の添付のあるメールのおおよその数（費用の目安のため。第44.11節）。分からなければ `null`。 */
+  attachmentCount?(p: ConnectorPrincipal, q: Pick<MailAttachmentQuery, 'after' | 'before'>): Promise<number | null>;
+  /** 1 通の添付の一覧。中身は読まない。見つからなければ `null`。 */
+  attachmentParts?(p: ConnectorPrincipal, id: string): Promise<MailAttachmentList | null>;
+  /** 添付 1 つの中身。見つからなければ `null`。 */
+  attachmentBytes?(p: ConnectorPrincipal, id: string, attachmentId: string): Promise<Uint8Array | null>;
   /** 検索の条件（Gmail の検索の書き方）で探す。本文は返さない。 */
   search(p: ConnectorPrincipal, q: { query: string; limit?: number }): Promise<MailSummary[]>;
   /**

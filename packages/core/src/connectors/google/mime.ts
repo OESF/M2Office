@@ -263,3 +263,53 @@ export function buildRawMessage(m: {
   }
   return Buffer.from(lines.join('\r\n'), 'utf-8').toString('base64url');
 }
+
+/** 配信のメールの印になる見出し（第44.4節）。 */
+const BULK_PRECEDENCE = /^(bulk|list|junk)$/i;
+
+/**
+ * 1 通のメールから、添付の一覧を作る（資料の取り込み。仕様書 第44.4節）。中身は読まない。
+ *
+ * @param m Gmail のメール（`format=full`）
+ * @returns 送り主・件名・受け取った時刻・配信のメールか・添付（本文の HTML から `cid:` で指される画像には `embedded` を付ける）
+ *
+ * @remarks 何を取り込まないかは資料の側の決まりで決める。ここでは見えた事実だけを返す
+ */
+export function mailAttachmentListOf(m: { id: string; labelIds?: string[]; internalDate?: string; payload?: GmailPart }): {
+  id: string; from: string; subject: string; receivedAt: string; bulk: boolean;
+  parts: { attachmentId: string; name: string; mime: string; size: number; embedded: boolean }[];
+} {
+  const payload = m.payload ?? {};
+  const cids = new Set<string>();
+  const files: GmailPart[] = [];
+  const walk = (part: GmailPart) => {
+    const type = (part.mimeType ?? '').toLowerCase();
+    if (part.filename && part.body?.attachmentId) files.push(part);
+    else if (type === 'text/html' && part.body?.data) {
+      const html = decodeText(fromBase64Url(part.body.data), charsetOf(part));
+      for (const hit of html.matchAll(/cid:([^"'\s>)]+)/gi)) cids.add(hit[1]!.toLowerCase());
+    }
+    for (const child of part.parts ?? []) walk(child);
+  };
+  walk(payload);
+  const received = m.internalDate ? new Date(Number(m.internalDate)) : new Date(header(payload, 'Date'));
+  const bulk = !!header(payload, 'List-Unsubscribe') || !!header(payload, 'List-Id') || BULK_PRECEDENCE.test(header(payload, 'Precedence').trim())
+    || (m.labelIds ?? []).includes('CATEGORY_PROMOTIONS');
+  return {
+    id: m.id,
+    from: decodeHeaderWords(header(payload, 'From')),
+    subject: decodeHeaderWords(header(payload, 'Subject')),
+    receivedAt: Number.isFinite(received.getTime()) ? received.toISOString() : '',
+    bulk,
+    parts: files.map((part) => {
+      const cid = header(part, 'Content-ID').trim().replace(/^<|>$/g, '').toLowerCase();
+      return {
+        attachmentId: part.body!.attachmentId!,
+        name: decodeHeaderWords(part.filename!),
+        mime: (part.mimeType ?? 'application/octet-stream').toLowerCase(),
+        size: part.body?.size ?? 0,
+        embedded: !!cid && cids.has(cid),
+      };
+    }),
+  };
+}
