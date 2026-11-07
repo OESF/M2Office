@@ -18,12 +18,12 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, withAiUsage, LibraryService, PostgresLibraryStore, libraryAccess, libraryReaderFor, libraryContactOf, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   PostgresDemoStore, demoSubdomain, isDemoTenantId, seedDemoCompany, BUILTIN_EXTENSIONS, type DemoStore,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
-import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, fileInputKey } from '@m2office/shared';
+import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -259,6 +259,10 @@ export interface AppDeps {
     access(tenantId: string, userId: string): Promise<MemberSettings | null>;
   };
   /** 販促物の作成（内蔵の拡張。仕様書 第41章）。字は M2Office が組み、画像は生成 AI（文字の無い画像）か渡した写真。 */
+  library: {
+    service: LibraryService;
+    access(tenantId: string, userId: string): Promise<LibrarySettings | null>;
+  };
   printDesigns: {
     service: PrintDesignService;
     access(tenantId: string, userId: string): Promise<PrintDesignSettings | null>;
@@ -762,6 +766,31 @@ export function buildDeps(): AppDeps {
     }),
     access: printDesignsAccess(repo),
   };
+  // 資料（内蔵の拡張。仕様書 第44章）。本体は本人の Google ドライブ（drive.file）。読むのはワーカー。会社の鍵の AI だけで読む（第44.11節）
+  const library = {
+    service: new LibraryService({
+      store: new PostgresLibraryStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      repo, files, drive: connector.drive, logger: log,
+      ...libraryReaderFor(ai),
+      contactOf: libraryContactOf(contactStore, cardsAccess(repo)),
+      deckFile: async (tenantId, deckId) => (await slideDecks.store.get(tenantId, deckId))?.presentationId ?? null,
+      compartmentOf: async (tenantId, agentId, version) => (await tenantView(tenantId)).resolve(agentId, version)?.compartment ?? null,
+    }),
+    access: libraryAccess(repo),
+  };
+  // 見本の接続口はプロセスごとのメモリーにあるので、見本の会社の資料はこのプロセスで置いて読む（本物の会社はワーカーが読む。第44.11節）
+  let libraryMockBusy = false;
+  setInterval(() => {
+    if (libraryMockBusy) return;
+    libraryMockBusy = true;
+    void withAiUsage({ purpose: 'worker:library' }, async () => {
+      const tenants: string[] = [];
+      for (const id of await repo.listTenantIds()) {
+        if (connector.sourceFor(id) === 'mock' && (await repo.getTenantSettings(id)).library.enabled) tenants.push(id);
+      }
+      return library.service.tick(tenants);
+    }).catch((err: unknown) => log.warn('見本の会社の資料の整理に失敗しました', { err })).finally(() => { libraryMockBusy = false; });
+  }, Number(process.env['LIBRARY_POLL_MS'] ?? 5_000)).unref();
   // Webの分析（内蔵の拡張。仕様書 第34章）。担当の許可（アナリティクスと Search Console の読み取りだけ）で読む
   const webReview = {
     service: new WebReviewService({
@@ -806,7 +835,7 @@ export function buildDeps(): AppDeps {
     materials: columnMaterialsFrom({ repo, webReview: webReview.service, competitorStore: competitors.service.store, inquiries: inquiries.service }),
   });
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts, salesDocs, subsidies, decisions, members, printDesigns, reservations,
+    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts, salesDocs, subsidies, decisions, members, printDesigns, library, reservations,
     deliveries: { service: deliveries }, slideDecks, slideThemes,
     taxTable: () => taxSide.taxRates(),
     closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
@@ -1042,6 +1071,7 @@ export function buildDeps(): AppDeps {
     decisions,
     members,
     printDesigns,
+    library,
     webReview,
     effect,
     // サイネージ（第31章）

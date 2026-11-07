@@ -19,7 +19,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Job, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type ReservationSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, type ReservationSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -56,6 +56,7 @@ import type { DecisionService } from '../decisions/service.js';
 import type { MemberService } from '../members/service.js';
 import type { DeliveryService } from '../deliveries/service.js';
 import type { PrintDesignService } from '../print-designs/service.js';
+import type { LibraryService } from '../library/service.js';
 import type { ReservationService } from '../reservations/service.js';
 import type { ColumnPlanner } from '../columns/planner.js';
 import type { ColumnSignageService } from '../columns/signage.js';
@@ -245,6 +246,11 @@ export interface RunEngineDeps {
   printDesigns?: {
     service: PrintDesignService;
     access(tenantId: string, userId: string): Promise<PrintDesignSettings | null>;
+  };
+  /** 資料（内蔵の拡張。仕様書 第44章）。ツールに渡し、終わった実行の成果物を依頼した本人の資料に載せる（第44.3節）。 */
+  library?: {
+    service: LibraryService;
+    access(tenantId: string, userId: string): Promise<LibrarySettings | null>;
   };
   /** 予約（内蔵の拡張。仕様書 第37章）。日程調整で会議と一緒に会議室を取る（第37.18節）。 */
   reservations?: {
@@ -1190,6 +1196,9 @@ export class RunEngine {
         members: { service: this.deps.members.service, access: () => this.deps.members!.access(run.tenantId, requestedBy) },
       } : {}),
       // 販促物の作成（第41.10節）
+      ...(this.deps.library ? {
+        library: { service: this.deps.library.service, access: () => this.deps.library!.access(run.tenantId, requestedBy) },
+      } : {}),
       ...(this.deps.printDesigns ? {
         printDesigns: { service: this.deps.printDesigns.service, access: () => this.deps.printDesigns!.access(run.tenantId, requestedBy) },
       } : {}),
@@ -1386,7 +1395,20 @@ export class RunEngine {
       action: 'run.complete', targetType: 'run', targetId: run.id,
       detail: { tokensUsed: run.tokensUsed, costJpy: run.costJpy, savedMinutes }, occurredAt: now,
     });
+    await this.registerInLibrary(run);
     return { outcome: 'completed' };
+  }
+
+  /** 成果物を依頼した本人の資料に載せる（第44.3節）。載せられなくても、業務は終わったままにする。 */
+  private async registerInLibrary(run: Run): Promise<void> {
+    const library = this.deps.library;
+    if (!library) return;
+    try {
+      const job = await this.deps.repo.getJob(run.tenantId, run.jobId);
+      if (job) await library.service.registerRun(run, job, library.access);
+    } catch (err) {
+      this.log.warn('成果物を資料に載せられませんでした', { runId: run.id, tenantId: run.tenantId, err: err instanceof Error ? err.name : 'unknown' });
+    }
   }
 
   private async fail(run: Run, reason: string): Promise<AdvanceResult> {

@@ -7,7 +7,7 @@
 
 import type { ConnectorPrincipal, DocsConnector, DriveConnector, DriveFile } from '../types.js';
 import { extractPdfText } from '../../files/pdf.js';
-import { callGoogle, downloadGoogle, type GoogleApiEndpoints, type GoogleTokenSource } from './http.js';
+import { callGoogle, callGoogleLocation, downloadGoogle, type GoogleApiEndpoints, type GoogleTokenSource } from './http.js';
 import { markdownToDocHtml } from './doc-html.js';
 import { clearBodyRequests, docBodyRequests, fillTableRequests, findMark, type DocContent } from './doc-requests.js';
 import { SlideThemeUnavailableError } from '../../slides/theme.js';
@@ -17,6 +17,12 @@ export const DRIVE_READ_MAX_BYTES = 5 * 1024 * 1024;
 
 /** そのままの形で読むときの上限（契約書の PDF など。第38.7節）。 */
 export const DRIVE_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
+
+/** 1 回にまとめて送る大きさの上限（Google の決まり）。超えるものは分けて送る口を使う。 */
+export const DRIVE_MULTIPART_MAX_BYTES = 5 * 1024 * 1024;
+
+/** 大きいファイルを送るときに待つ時間（ミリ秒）。 */
+const DRIVE_LARGE_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** 探すときに返す件数の上限。 */
 const SEARCH_LIMIT_MAX = 50;
@@ -133,9 +139,21 @@ export function googleDrive(ctx: Ctx): DriveConnector {
     },
 
     upload: async (p, input) => {
+      const metadata = { name: input.name, mimeType: input.mimeType, ...(input.parentId ? { parents: [input.parentId] } : {}) };
+      // 大きいものは分けて送る口を使う（multipart は 5 MB までが Google の決まり。資料は 100 MB まで置く。第44.5節）
+      if (input.bytes.length > DRIVE_MULTIPART_MAX_BYTES) {
+        const session = await callGoogleLocation(ctx().tokens, p, 'ドライブ', `${ctx().endpoints.driveUpload}/files?uploadType=resumable&fields=${FIELDS}`, {
+          method: 'POST', body: metadata, headers: { 'x-upload-content-type': input.mimeType, 'x-upload-content-length': String(input.bytes.length) },
+        });
+        if (!session) throw new Error('入れるフォルダが見つかりません');
+        const placed = (await callGoogle(ctx().tokens, p, 'ドライブ', session, {
+          method: 'PUT', raw: { contentType: input.mimeType, data: input.bytes }, timeoutMs: DRIVE_LARGE_UPLOAD_TIMEOUT_MS,
+        })) as DriveMeta | null;
+        if (!placed) throw new Error('ファイルを置けませんでした');
+        return toFile(placed);
+      }
       // 本文は JSON の情報とファイルの中身を 1 つの multipart にまとめて送る（そのままの形で置く）
       const boundary = `m2office-${Math.random().toString(36).slice(2)}`;
-      const metadata = { name: input.name, mimeType: input.mimeType, ...(input.parentId ? { parents: [input.parentId] } : {}) };
       const head = new TextEncoder().encode([
         `--${boundary}`, 'Content-Type: application/json; charset=UTF-8', '', JSON.stringify(metadata),
         `--${boundary}`, `Content-Type: ${input.mimeType}`, '', '',
@@ -171,6 +189,13 @@ export function googleDrive(ctx: Ctx): DriveConnector {
     get: async (p, fileId) => {
       const f = await meta(p, fileId);
       return f ? toFile(f) : null;
+    },
+
+    trash: async (p, fileId) => {
+      const f = await meta(p, fileId);
+      if (!f) return false;
+      await api(p, `/files/${encodeURIComponent(f.id)}?fields=id`, { method: 'PATCH', body: { trashed: true } });
+      return true;
     },
 
     shareWithDomain: async (p, s) => {

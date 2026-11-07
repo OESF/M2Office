@@ -370,6 +370,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `POST /v1/members/messages` | 会員への LINE の知らせ（第40.18節）: 一覧と宛先ごとの LINE の会員の数 ／ 用意して承認へ進める（管理者。`audience`: line・away・expiring、`text`。送るのは承認の後） |
 | `GET /v1/member-card/:key` ／ `GET` ／ `POST /v1/member-card/line` | ログインなし: 会員証のページ（鍵つき）／ LINE の入口（LIFF。ID トークンを LINE で確かめ、初めてなら呼び名を受け取って会員にする） |
 | `PUT /v1/admin/extensions/members/settings` | 管理者: 来店のポイント・購入の率・有効期限・LIFF ID・LINE ログインのチャネル ID |
+| `GET /v1/library` ／ `POST /v1/library/items` ／ `POST /v1/library/check` ／ `GET /v1/library/estimate` | 資料（仕様書 第44章）: 本人の一覧（`q`・`docType`・`counterparty`・`year`・`entry`・`offset`。絞り込みの選択肢と読み取りの進み具合つき）／ ファイルを 1 つ入れる（`file`・`folder`。100 MB まで。同じ中身は `duplicate: true`）／ もう入っているハッシュ ／ 件数からの費用の目安 |
+| `GET /v1/library/drive-picker` ／ `POST /v1/library/from-drive` ／ `GET` ／ `PATCH` ／ `DELETE /v1/library/:id` ／ `POST /v1/library/:id/reread` | Google のファイル選びの材料 ／ 選んだファイルを載せる（`fileId`。動かさない）／ 1 件（入口の記録つき）／ 題名・種類・取引先・日付を直す ／ 削除（M2Office が置いたファイルはごみ箱へ）／ もう一度読む。**どの口も本人の資料だけ**（管理者にも見せない） |
 | `GET` ／ `POST /v1/print-designs` ／ `GET` ／ `PATCH` ／ `DELETE /v1/print-designs/:id` | 販促物の作成（仕様書 第41章）: 一覧（掲示の状態つき）／ 作る（`request`・`kind`・`size`・`photoFileId`。3 案）／ 1 つと版 ／ 題名・掲示の期間・置き場所 ／ 削除（作った人と管理者） |
 | `POST /v1/print-designs/:id/choose` ／ `revise` ／ `remake` ／ `removed`、`PATCH /v1/print-designs/:id/copy` | 案を選ぶ・前の版に戻す（`versionId`）／ 会話で直す（`instruction`・`photoFileId`）／ 作り直す（新しい物）／ 外した ／ 文面を直す（新しい版） |
 | `GET /v1/print-designs/drive-picker` | 「ドライブから」の選ぶ画面の材料（`drive.file` だけに絞ったトークン・API キー・プロジェクトの番号。見本の会社は見本の写真の一覧。第41.19.2節）。作る・直すは `driveFileId` で選んだ写真を渡す |

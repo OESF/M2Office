@@ -26,6 +26,7 @@ import type { SubsidyToolContext } from '../subsidies/tools.js';
 import type { DecisionToolContext } from '../decisions/tools.js';
 import type { MemberToolContext } from '../members/tools.js';
 import type { PrintDesignToolContext } from '../print-designs/tools.js';
+import type { LibraryToolContext } from '../library/tools.js';
 import type { ReservationService } from '../reservations/service.js';
 import type { ReservationSettings } from '@m2office/shared';
 import type { DeliveryToolContext } from '../deliveries/tools.js';
@@ -146,6 +147,8 @@ export interface ToolContext {
   deliveries?: DeliveryToolContext;
   /** 販促物の作成（内蔵の拡張。仕様書 第41章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   printDesigns?: PrintDesignToolContext;
+  /** 資料（内蔵の拡張。仕様書 第44章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
+  library?: LibraryToolContext;
   /** 予約（内蔵の拡張。仕様書 第37章）。会議の予定と一緒に会議室を取る（第37.18節）。使えるかどうかは呼ぶたびに確かめる。 */
   reservations?: { service: ReservationService; access(): Promise<ReservationSettings | null> };
 }

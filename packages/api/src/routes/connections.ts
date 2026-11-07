@@ -195,7 +195,7 @@ export function connectionsRoute(deps: AppDeps) {
       ai: { policy, geminiSource: resolved.source, localConfigured: deps.ai.localLlm().name === 'local' },
       credentials: new Set(creds.filter((k): k is NonNullable<typeof k> => !!k)),
       extensions: {
-        webReview: settings.webReview.enabled, printDesigns: settings.printDesigns.enabled, competitors: settings.competitors.enabled,
+        webReview: settings.webReview.enabled, printDesigns: settings.printDesigns.enabled, library: settings.library.enabled, competitors: settings.competitors.enabled,
         columns: settings.webColumns.enabled, inquiries: settings.inquiries.enabled,
       },
       canvaAvailable: !!deps.canva,
@@ -497,6 +497,8 @@ async function disconnectEveryone(deps: AppDeps, tenantId: string, cause: 'clien
     await deps.repo.deleteGoogleConnection(tenantId, conn.userId);
     stoppedRuns += (await deps.revocation.stopUserRuns(tenantId, conn.userId, cause, now)).length;
     await deps.retention.purgeUser(tenantId, conn.userId, now);
+    // 資料の目録も消す（第44.9節）。ドライブのファイルは本人のものなので消さない
+    await deps.library.service.purgeOwner(tenantId, conn.userId);
   }
   return { users: conns.length, stoppedRuns };
 }
@@ -596,6 +598,8 @@ export function myGoogleRoute(deps: AppDeps) {
     const now = new Date();
     const stoppedRuns = (await deps.revocation.stopUserRuns(tenant.id, user.id, 'disconnect', now)).length;
     const purgedRuns = await deps.retention.purgeUser(tenant.id, user.id, now);
+    // 資料の目録も消す（第44.9節）。ドライブのファイルは本人のものなので消さない
+    await deps.library.service.purgeOwner(tenant.id, user.id);
     await audit(deps, tenant.id, user.id, 'connection.google.disconnect', user.id, { revokedAtGoogle: revoked, stoppedRuns, purgedRuns });
     return c.json({ ok: true, revokedAtGoogle: revoked, stoppedRuns, purgedRuns });
   });

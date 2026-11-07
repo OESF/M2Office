@@ -3117,3 +3117,31 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   .invoice-sheet { background: #fff; color: #000; }
   .invoice-actions { display: none; }
 }
+
+/* 資料（第44章） */
+.library { position: relative; min-height: 320px; display: flex; flex-direction: column; gap: 12px; }
+.library-filter select { max-width: 180px; }
+.library-search { flex: 1 1 240px; min-width: 200px; }
+.library-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.library-upload progress { width: 160px; }
+.library-failed { flex-basis: 100%; margin: 0; padding-left: 1.2em; color: var(--danger); overflow-wrap: anywhere; }
+.library-confirm { display: flex; flex-direction: column; gap: 8px; }
+.library-confirm p { margin: 0; }
+.library-empty { display: flex; align-items: center; justify-content: center; min-height: 200px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); }
+.library-empty p { margin: 0; padding: 16px; text-align: center; }
+.library-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.library-list li { border-bottom: 1px solid var(--line); }
+.library-row { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 10px 8px; cursor: pointer; }
+.library-row:hover { background: var(--accent-soft); }
+.library-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.library-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.library-title { font-weight: 600; overflow-wrap: anywhere; }
+.library-meta, .library-why { overflow-wrap: anywhere; }
+.library-summary { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.library-drop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, transparent); font-weight: 600; pointer-events: none; }
+.library-detail { display: flex; flex-direction: column; gap: 12px; }
+.library-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.library-form label { display: flex; flex-direction: column; gap: 4px; }
+.library-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+.library-facts dt { color: var(--muted); }
+.library-facts dd { margin: 0; overflow-wrap: anywhere; }

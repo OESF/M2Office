@@ -224,6 +224,12 @@ export interface DriveConnector {
   /** 1 つのファイルの情報。見えない・ごみ箱なら `null`（承認の画面に名前を出すのに使う）。 */
   get(p: ConnectorPrincipal, fileId: string): Promise<DriveFile | null>;
   /**
+   * ファイルをごみ箱へ移す（元に戻せる。完全には消さない。仕様書 第44.5節）。
+   *
+   * @returns 見えないファイルなら `false`
+   */
+  trash(p: ConnectorPrincipal, fileId: string): Promise<boolean>;
+  /**
    * M2Office が作ったファイルを、会社のドメインの全員が**閲覧だけ**できるようにする（仕様書 第14.3.4節、ADR-0025）。
    * 検索には出さず、リンクを知っている社内の人だけが開ける。見えないファイルなら `null`。
    *

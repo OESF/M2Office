@@ -33,6 +33,7 @@ import { SALES_DOC_TOOLS } from '../sales-docs/tools.js';
 import { SUBSIDY_TOOLS } from '../subsidies/tools.js';
 import { DECISION_TOOLS } from '../decisions/tools.js';
 import { PRINT_DESIGN_TOOLS } from '../print-designs/tools.js';
+import { LIBRARY_TOOLS } from '../library/tools.js';
 import { MEMBER_TOOLS } from '../members/tools.js';
 import { WEB_REVIEW_TOOLS } from '../web-review/tools.js';
 import { HR_TOOLS } from '../hr/tools.js';
@@ -223,7 +224,7 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...COMPETITOR_TOOLS,
   // お知らせの作成（内蔵の拡張。第35.17節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
   ...ANNOUNCEMENT_TOOLS,
-  ...CONTRACT_TOOLS, ...SALES_DOC_TOOLS, ...SUBSIDY_TOOLS, ...DECISION_TOOLS, ...MEMBER_TOOLS, ...PRINT_DESIGN_TOOLS,
+  ...CONTRACT_TOOLS, ...SALES_DOC_TOOLS, ...SUBSIDY_TOOLS, ...DECISION_TOOLS, ...MEMBER_TOOLS, ...PRINT_DESIGN_TOOLS, ...LIBRARY_TOOLS,
   // 見積書（AG-07。第9.5.8節）
   ...QUOTE_TOOLS,
   // 社外の参加者を含む日程調整（AG-03。第9.5.3.1節）

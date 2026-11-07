@@ -21,6 +21,7 @@ import { RESERVATIONS_EXTENSION_ID } from './reservations.js';
 import { SIGNAGE_EXTENSION_ID } from './signage.js';
 import { SUBSIDIES_EXTENSION_ID } from './subsidies.js';
 import { DECISIONS_EXTENSION_ID } from './decisions.js';
+import { LIBRARY_EXTENSION_ID } from './library.js';
 import { WEB_COLUMNS_EXTENSION_ID } from './web-columns.js';
 import { WEB_REVIEW_EXTENSION_ID } from './web-review.js';
 
@@ -334,7 +335,7 @@ export const AGENT_AREAS: readonly AgentArea[] = [
   { id: 'schedule', name: '予定と会議', categories: ['calendar', 'meeting'], extensions: [] },
   { id: 'briefing', name: 'ブリーフ', categories: ['briefing'], extensions: [] },
   { id: 'documents', name: '資料の作成', categories: ['document'], extensions: [] },
-  { id: 'research', name: '調べもの', categories: ['knowledge'], extensions: [] },
+  { id: 'research', name: '調べもの', categories: ['knowledge'], extensions: [LIBRARY_EXTENSION_ID] },
   { id: 'cards', name: '名刺管理', categories: [], extensions: [CARDS_EXTENSION_ID] },
   { id: 'customers', name: '問い合わせと会員', categories: [], extensions: [INQUIRIES_EXTENSION_ID, MEMBERS_EXTENSION_ID] },
   { id: 'columns', name: 'コラムの作成', categories: [], extensions: [WEB_COLUMNS_EXTENSION_ID] },

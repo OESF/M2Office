@@ -258,6 +258,11 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       return { file: f.file, mimeType: f.mimeType ?? 'text/plain', bytes: f.bytes ?? new TextEncoder().encode(f.text ?? '') };
     },
     get: async (p: ConnectorPrincipal, fileId: string) => this.visibleFiles(p).find((x) => x.file.id === fileId)?.file ?? null,
+    trash: async (p: ConnectorPrincipal, fileId: string) => {
+      if (!this.visibleFiles(p).some((x) => x.file.id === fileId)) return false;
+      this.driveFiles.delete(fileId);
+      return true;
+    },
     shareWithDomain: async (p: ConnectorPrincipal, s: { fileId: string; domain: string }) => {
       const f = this.driveFiles.get(s.fileId);
       // 共有できるのは本人が M2Office で作ったファイルだけ（drive.file の範囲を模す）

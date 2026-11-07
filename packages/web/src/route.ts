@@ -46,6 +46,7 @@ export type Route =
   | { kind: 'members'; memberId: string | null }
   /** 販促物の作成（仕様書 第41章）。`designId` があれば 1 つ。 */
   | { kind: 'printDesigns'; designId: string | null }
+  | { kind: 'library'; itemId: string | null }
   /** Webの分析（仕様書 第34.18節）。`month`（YYYY-MM）があればその月の便り。 */
   | { kind: 'webReview'; month: string | null }
   | { kind: 'settings'; section: string | null }
@@ -92,6 +93,7 @@ export function parseRoute(pathname: string): Route {
     case 'subsidies': return second === undefined ? { kind: 'subsidies' } : { kind: 'unknown' };
     case 'decisions': return second === undefined ? { kind: 'decisions', decisionId: null } : id(second) ? { kind: 'decisions', decisionId: id(second) } : { kind: 'unknown' };
     case 'members': return second === undefined ? { kind: 'members', memberId: null } : id(second) ? { kind: 'members', memberId: id(second) } : { kind: 'unknown' };
+    case 'library': return second === undefined ? { kind: 'library', itemId: null } : id(second) ? { kind: 'library', itemId: id(second) } : { kind: 'unknown' };
     case 'print-designs': return second === undefined ? { kind: 'printDesigns', designId: null } : id(second) ? { kind: 'printDesigns', designId: id(second) } : { kind: 'unknown' };
     case 'web-review': return second === undefined ? { kind: 'webReview', month: null } : /^\d{4}-(0[1-9]|1[0-2])$/.test(second) ? { kind: 'webReview', month: second } : { kind: 'unknown' };
     case 'columns': return second === undefined ? { kind: 'columns', columnId: null } : id(second) ? { kind: 'columns', columnId: id(second) } : { kind: 'unknown' };
@@ -123,6 +125,7 @@ export function routePath(route: Route): string {
     case 'subsidies': return '/subsidies';
     case 'decisions': return route.decisionId ? `/decisions/${enc(route.decisionId)}` : '/decisions';
     case 'members': return route.memberId ? `/members/${enc(route.memberId)}` : '/members';
+    case 'library': return route.itemId ? `/library/${enc(route.itemId)}` : '/library';
     case 'printDesigns': return route.designId ? `/print-designs/${enc(route.designId)}` : '/print-designs';
     case 'webReview': return route.month ? `/web-review/${enc(route.month)}` : '/web-review';
     case 'settings': return route.section ? `/settings/${enc(route.section)}` : '/settings';

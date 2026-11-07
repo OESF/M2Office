@@ -75,8 +75,9 @@ agent01.png ～ agent60.png
 | 51 | 注文請書の作成（`sales-docs:acknowledgement`） | 販売の書類と受注 |
 | 52 | 意思決定支援（`decisions:consult`） | 意思決定支援 |
 | 53 | 意思決定支援の材料集め（`decisions:gather`） | 意思決定支援 |
+| 54 | 資料（`library:desk`） | 資料 |
 
-**未使用: 54〜60**
+**未使用: 55〜60**
 
 ### 業務を足すとき
 

@@ -51,6 +51,7 @@ import { decisionsRoute } from './routes/decisions.js';
 import { membersRoute } from './routes/members.js';
 import { memberCardRoute } from './routes/member-card.js';
 import { printDesignsRoute } from './routes/print-designs.js';
+import { libraryRoute } from './routes/library.js';
 import { webReviewRoute } from './routes/web-review.js';
 import { inventoryHooksRoute } from './routes/inventory-hooks.js';
 import { signageRoute } from './routes/signage.js';
@@ -273,6 +274,7 @@ app.get('/v1/me', async (c) => {
     members: !!(await deps.members.access(ctx.tenant.id, ctx.user.id)),
     // 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）
     printDesigns: !!(await deps.printDesigns.access(ctx.tenant.id, ctx.user.id)),
+    library: !!(await deps.library.access(ctx.tenant.id, ctx.user.id)),
     // 秘書に Google ドライブのファイルを渡せるか（会社のファイル選びの API キーと本人の Google の接続。第10.10.8節）
     driveFiles: await driveFilesFor(deps).available({ tenantId: ctx.tenant.id, userId: ctx.user.id }).catch(() => false),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
@@ -325,6 +327,7 @@ app.route('/v1/subsidies', subsidiesRoute(deps));
 app.route('/v1/decisions', decisionsRoute(deps));
 app.route('/v1/members', membersRoute(deps));
 app.route('/v1/print-designs', printDesignsRoute(deps));
+app.route('/v1/library', libraryRoute(deps));
 app.route('/v1/web-review', webReviewRoute(deps));
 app.route('/v1/signage', signageRoute(deps));
 app.route('/v1/hr', hrRoute(deps));

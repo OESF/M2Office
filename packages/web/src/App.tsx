@@ -11,7 +11,7 @@ import { KnowledgeQa } from './knowledge-qa.js';
 import { SalesDocs } from './SalesDocs.js';
 import { QUOTE_AGENT_ID, QuoteList } from './quotes.js';
 import { DOCUMENT_AGENT_ID, SHEET_AGENT_ID, SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
-import { CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { LIBRARY_EXTENSION_ID, CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, swapCategories, togglePinned, type MenuSection,
 } from './menu.js';
@@ -45,6 +45,7 @@ import { Reservations } from './Reservations.js';
 import { Subsidies } from './Subsidies.js';
 import { Decisions } from './Decisions.js';
 import { PrintDesigns } from './PrintDesigns.js';
+import { Library } from './Library.js';
 import { Members } from './Members.js';
 import { WebReview } from './WebReview.js';
 import { Signage } from './Signage.js';
@@ -136,6 +137,7 @@ type View =
   | { kind: 'decisions'; decisionId: string | null }
   | { kind: 'members'; memberId: string | null }
   | { kind: 'printDesigns'; designId: string | null }
+  | { kind: 'library'; itemId: string | null }
   | { kind: 'webReview'; month: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
@@ -155,6 +157,7 @@ function viewPath(v: View): string {
     case 'contracts': return routePath({ kind: 'contracts', contractId: v.contractId });
     case 'sales': return routePath({ kind: 'sales', itemId: v.itemId });
     case 'members': return routePath({ kind: 'members', memberId: v.memberId });
+    case 'library': return routePath({ kind: 'library', itemId: v.itemId });
     case 'printDesigns': return routePath({ kind: 'printDesigns', designId: v.designId });
     case 'webReview': return routePath({ kind: 'webReview', month: v.month });
     case 'decisions': return routePath({ kind: 'decisions', decisionId: v.decisionId });
@@ -184,6 +187,7 @@ function viewOf(r: Route): View | null {
     case 'contracts': return { kind: 'contracts', contractId: r.contractId };
     case 'sales': return { kind: 'sales', itemId: r.itemId };
     case 'members': return { kind: 'members', memberId: r.memberId };
+    case 'library': return { kind: 'library', itemId: r.itemId };
     case 'printDesigns': return { kind: 'printDesigns', designId: r.designId };
     case 'webReview': return { kind: 'webReview', month: r.month };
     case 'decisions': return { kind: 'decisions', decisionId: r.decisionId };
@@ -364,6 +368,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const decisionChangeKey = history.filter((h) => h.job?.agentId === 'decisions:consult' && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   const subsidyChangeKey = history.filter((h) => h.job?.agentId?.startsWith('subsidies:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   // 秘書が会員のポイントや特典を直したら、会員の画面を読み直す
+  const libraryChangeKey = history.filter((h) => h.job?.agentId?.startsWith('library:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   const printChangeKey = history.filter((h) => h.job?.agentId?.startsWith('print-designs:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   const memberChangeKey = history.filter((h) => h.job?.agentId?.startsWith('members:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   const announcementChangeKey = history.filter((h) => h.job?.agentId?.startsWith('announcements:') && ['completed', 'failed', 'rejected', 'cancelled'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
@@ -458,6 +463,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 補助金・助成金の案内（仕様書 第39章）。会社で入れていて利用範囲の人にだけ出す
     // 会員とポイント（仕様書 第40章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.members ? [{ id: MEMBERS_EXTENSION_ID, name: '会員', description: 'お客様を会員にし、来店と購入でポイントを貯めて特典と交換する', icon: 'users' as IconName, agent: null }] : []),
+    // 資料（仕様書 第44章）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.library ? [{ id: LIBRARY_EXTENSION_ID, name: '資料', description: 'メールの添付や PC のファイルを集め、AI が整理して探せるようにする', icon: 'folder' as IconName, agent: null }] : []),
     // 販促物の作成（仕様書 第41章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.printDesigns ? [{ id: PRINT_DESIGNS_EXTENSION_ID, name: '販促物の作成', description: 'ポップ・チラシ・パンフレット・案内・ポスターを、頼むだけで作る', icon: 'slides' as IconName, agent: null }] : []),
     ...(me.decisions ? [{ id: DECISIONS_EXTENSION_ID, name: '意思決定支援', description: '経営の判断について、慎重と推進の AI が社内の材料で討論し、見立てと論点を報告する', icon: 'report' as IconName, agent: null }] : []),
@@ -498,11 +505,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   : m.id === DECISIONS_EXTENSION_ID ? setView({ kind: 'decisions', decisionId: null })
                   : m.id === MEMBERS_EXTENSION_ID ? setView({ kind: 'members', memberId: null })
                   : m.id === PRINT_DESIGNS_EXTENSION_ID ? setView({ kind: 'printDesigns', designId: null })
+                  : m.id === LIBRARY_EXTENSION_ID ? setView({ kind: 'library', itemId: null })
                   : m.id === WEB_REVIEW_EXTENSION_ID ? setView({ kind: 'webReview', month: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
-        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === SALES_DOCS_EXTENSION_ID ? view.kind === 'sales' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === DECISIONS_EXTENSION_ID ? view.kind === 'decisions' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === SALES_DOCS_EXTENSION_ID ? view.kind === 'sales' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === DECISIONS_EXTENSION_ID ? view.kind === 'decisions' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === LIBRARY_EXTENSION_ID ? view.kind === 'library' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -847,6 +855,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <Members memberId={view.memberId} onOpen={(memberId) => setView({ kind: 'members', memberId })} changeKey={memberChangeKey} />
             </>
           )}
+          {view.kind === 'library' && (
+            <>
+              <ViewTitle>資料 <HelpTip article="start-library">メールの添付や PC のファイルを 1 か所に集め、AI が中身を読んで整理します。秘書に聞いて探せます。</HelpTip></ViewTitle>
+              <Library itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'library', itemId })} changeKey={libraryChangeKey} />
+            </>
+          )}
           {view.kind === 'printDesigns' && (
             <>
               <ViewTitle>販促物の作成 <HelpTip article="start-print-designs">ポップ・チラシ・パンフレット・案内・ポスター・ショップカードの案を 3 つ作り、頼みのとおりに直します。印刷用の PDF と画像を書き出します。</HelpTip></ViewTitle>
@@ -1096,6 +1110,7 @@ const VIEW_LABELS: Record<string, string> = {
   decisions: '意思決定支援',
   members: '会員',
   printDesigns: '販促物の作成',
+  library: '資料',
   webReview: 'Webの分析',
   settings: '個人設定',
 };

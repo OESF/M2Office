@@ -258,6 +258,11 @@ const ACTION_LABELS: Record<string, string> = {
   'announcement.closure': '休業の期間を覚えた',
   'inquiry.closure_reply': '休業中の問い合わせに返事の下書きを用意した',
   // 契約の管理（仕様書 第38章。相手の名前と契約の中身は記録に残さない）
+  'library.import': '資料を入れた',
+  'library.update': '資料の題名などを直した',
+  'library.reread': '資料を読み直した',
+  'library.delete': '資料を削除した',
+  'library.purge': '資料の目録を消した',
   'contract.create': '契約を台帳に入れた',
   'contract.update': '契約の台帳を直した',
   'contract.status': '契約の状態を変えた',

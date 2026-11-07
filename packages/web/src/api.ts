@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
+import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, LibraryFacets, LibraryItem, LibraryItemDetail, LibraryProgress, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
   InventoryItem, InventoryItemKind, InventoryItemView, InventoryLocation, InventoryMove, InventoryMoveKind, InventoryOutPurpose, InventorySettings, InventoryStockRow,
@@ -431,6 +431,7 @@ export interface Me {
   members?: boolean;
   /** 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）。 */
   printDesigns?: boolean;
+  library?: boolean;
   /** 秘書に Google ドライブのファイルを渡せるか（第10.10.8節）。 */
   driveFiles?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
@@ -1931,6 +1932,29 @@ export const api = {
     },
   },
   /** 販促物の作成（内蔵の拡張。仕様書 第41章）。 */
+  /** 資料（仕様書 第44章）。 */
+  library: {
+    list: (q: Record<string, string> = {}) => {
+      const p = new URLSearchParams(q);
+      return call<{ items: (LibraryItem & { why: string[] })[]; total: number; facets: LibraryFacets; progress: LibraryProgress; google: boolean; picker: boolean }>(`/library${p.size ? `?${p}` : ''}`);
+    },
+    get: (id: string) => call<LibraryItemDetail>(`/library/${encodeURIComponent(id)}`),
+    /** ファイルを 1 つ入れる。`folder` は元のフォルダの名前。 */
+    upload: (file: File, folder: string) => {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('folder', folder);
+      return postForm<{ item: LibraryItem; duplicate: boolean }>('/library/items', form);
+    },
+    /** 渡したハッシュのうち、もう資料にあるもの。 */
+    check: (hashes: string[]) => call<{ existing: string[] }>('/library/check', { method: 'POST', body: JSON.stringify({ hashes }) }).then((r) => r.existing),
+    estimate: (count: number) => call<{ count: number; jpy: number | null; confirmOver: number }>(`/library/estimate?count=${count}`),
+    drivePicker: () => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>('/library/drive-picker'),
+    fromDrive: (fileId: string) => call<{ item: LibraryItem; duplicate: boolean }>('/library/from-drive', { method: 'POST', body: JSON.stringify({ fileId }) }),
+    update: (id: string, patch: Record<string, unknown>) => call<LibraryItem>(`/library/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    reread: (id: string) => call<LibraryItem>(`/library/${encodeURIComponent(id)}/reread`, { method: 'POST', body: '{}' }),
+    remove: (id: string) => call<{ ok: true; trashed: boolean }>(`/library/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
   printDesigns: {
     /** 一覧（新しく直した順。掲示の状態つき）と、今日と、本人が管理者か。 */
     list: () => call<{ items: (PrintDesign & { state: PrintState })[]; today: string; admin: boolean; drive: boolean }>('/print-designs'),

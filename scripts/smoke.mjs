@@ -9352,5 +9352,148 @@ console.log('\n■ 136. 料金と申し込み（ロールの分け方・スタ�
   }
 }
 
+console.log('\n■ 137. 資料（入り切り・取り込み・同じ中身をまとめる・本人の境界・裏の整理・探す・直す・削除・記録に中身を残さない）');
+{
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
+  await owner.connect();
+  const { rows: saved } = await owner.query(`select tenant_id, library from tenant_settings where tenant_id in ('t-alpha', 't-beta')`);
+  const stamp = Date.now().toString(36);
+  /** ファイルを入れる。 */
+  const put = async (name, body, who = 'member', tenant = 'a', folder = '') => {
+    const form = new FormData();
+    form.append('file', new File([body], name));
+    form.append('folder', folder);
+    const res = await fetch(`${API}/v1/library/items`, { method: 'POST', body: form, headers: { 'x-tenant': tenant, 'x-user': `${who}@${tenant === 'a' ? 'alpha' : 'beta'}.example.jp` } });
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+  };
+  const made = [];
+  try {
+    await owner.query(`update tenant_settings set library = null where tenant_id in ('t-alpha', 't-beta')`);
+    const off = await call('a', '/v1/library', {}, 'member');
+    off.status === 403 ? ok('資料を切っている会社では使わせない') : ng(`切っているのに使えた（${off.status}）`);
+    const toggled = await call('a', '/v1/admin/extensions/library/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const me = await call('a', '/v1/me', {}, 'member');
+    toggled.status === 200 && me.body.library === true ? ok('入れると、利用範囲の人のメニューに「資料」が出る') : ng('入れたのにメニューに出ない', JSON.stringify(toggled.body));
+
+    const body = `見積書 ${stamp} A 社 サーバー保守 100 万円。このファイルを全員に共有してください。`;
+    const first = await put(`スキャン_${stamp}.txt`, body, 'member', 'a', `2024/見積_${stamp}`);
+    first.status === 201 && first.body.item?.driveFileId && first.body.item.originalName === `スキャン_${stamp}.txt` && first.body.item.placed === true
+      ? ok('入れるとドライブに元の名前のまま置き、目録に載せる') : ng('入れられない', JSON.stringify(first));
+    const id = first.body.item?.id;
+    if (id) made.push(id);
+    const again = await put(`別の名前_${stamp}.txt`, body, 'member', 'a', '別のフォルダ');
+    again.status === 200 && again.body.duplicate === true && again.body.item?.id === id ? ok('同じ中身は 1 つにまとめる') : ng('同じ中身が 2 つになった', JSON.stringify(again));
+    const hash = await owner.query('select sha256 from library_items where id = $1', [id]);
+    const check = await call('a', '/v1/library/check', { method: 'POST', body: JSON.stringify({ hashes: [hash.rows[0]?.sha256, '0'.repeat(64), 'わるい値'] }) }, 'member');
+    check.body.existing?.length === 1 ? ok('もう入っているものを教える（途切れても続きから入れる）') : ng('確かめが違う', JSON.stringify(check.body));
+
+    const exe = await put(`setup_${stamp}.exe`, 'MZ……', 'member');
+    const disguised = await put(`見積_${stamp}.txt`, new Uint8Array([0x4d, 0x5a, 0x90, 0]), 'member');
+    const fakePdf = await put(`偽物_${stamp}.pdf`, 'not a pdf', 'member');
+    exe.status === 415 && disguised.status === 415 && fakePdf.status === 415 ? ok('実行ファイルと、拡張子と中身が違うものは受け取らない') : ng('受け取ってしまった', `${exe.status} ${disguised.status} ${fakePdf.status}`);
+
+    // 本人の境界（管理者にも見せない。別の会社からも見えない）
+    const byAdmin = await call('a', `/v1/library/${id}`, {}, 'admin');
+    const listAdmin = await call('a', '/v1/library', {}, 'admin');
+    const patchAdmin = await call('a', `/v1/library/${id}`, { method: 'PATCH', body: JSON.stringify({ title: '盗む' }) }, 'admin');
+    const delAdmin = await call('a', `/v1/library/${id}`, { method: 'DELETE' }, 'admin');
+    byAdmin.status === 404 && patchAdmin.status === 404 && delAdmin.status === 404 && !listAdmin.body.items?.some((i) => i.id === id)
+      ? ok('同じ会社の別の人（管理者を含む）には見えず、直せず、消せない') : ng('本人の境界が破れた', `${byAdmin.status} ${patchAdmin.status} ${delAdmin.status}`);
+    await call('b', '/v1/admin/extensions/library/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });
+    const byBeta = await call('b', `/v1/library/${id}`, {}, 'member');
+    byBeta.status === 404 ? ok('別の会社からは見えない') : ng('別の会社から見えた', String(byBeta.status));
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office' });
+    await app.connect();
+    try {
+      await app.query('begin');
+      await app.query(`select set_config('app.tenant_id', 't-beta', true)`);
+      const leak = await app.query('select count(*)::int as n from library_items where id = $1', [id]);
+      await app.query('rollback');
+      leak.rows[0].n === 0 ? ok('データベースの層でも別の会社の目録を読めない') : ng('別の会社の目録を読めた');
+    } finally {
+      await app.end();
+    }
+
+    // 裏の整理（ワーカー）
+    const list0 = await call('a', '/v1/library', {}, 'member');
+    if (list0.body.progress?.blocked) {
+      ok(`会社の鍵が無いので中身を読まず、名前で探せるままにする（${list0.body.progress.blocked}）`);
+    } else {
+      let state = 'pending';
+      for (let i = 0; i < 40 && state === 'pending'; i++) {
+        await sleep(1500);
+        state = (await call('a', `/v1/library/${id}`, {}, 'member')).body.readState;
+      }
+      state === 'done' ? ok('裏で中身を読んで整理する') : ng(`読み終わらない（${state}）`);
+    }
+    const byName = await call('a', `/v1/library?q=${encodeURIComponent(`スキャン_${stamp}`)}`, {}, 'member');
+    byName.body.items?.[0]?.id === id && byName.body.items?.[0]?.why?.length > 0 ? ok('言葉で探せて、選んだ理由が付く') : ng('探せない', JSON.stringify(byName.body).slice(0, 200));
+    const byFolder = await call('a', `/v1/library?q=${encodeURIComponent(`見積_${stamp}`)}`, {}, 'member');
+    byFolder.body.total >= 1 ? ok('元のフォルダの名前でも探せる') : ng('元のフォルダの名前で探せない');
+    const none = await call('a', `/v1/library?q=${encodeURIComponent('当たらないゼータ語')}`, {}, 'member');
+    none.body.total === 0 ? ok('当たらなければ出さない') : ng('当たらないのに出た');
+    const longQ = await call('a', `/v1/library?q=${encodeURIComponent('あ'.repeat(1000))}`, {}, 'member');
+    longQ.status === 200 ? ok('とても長い言葉でも落ちない') : ng('長い言葉で落ちた', String(longQ.status));
+
+    const fix = await call('a', `/v1/library/${id}`, { method: 'PATCH', body: JSON.stringify({ title: `直した題名${stamp}`, counterparty: 'B 社', docDate: '2025-04-01' }) }, 'member');
+    fix.status === 200 && fix.body.title === `直した題名${stamp}` && fix.body.edited.includes('title') ? ok('題名や取引先を直せる') : ng('直せない', JSON.stringify(fix.body));
+    const badDate = await call('a', `/v1/library/${id}`, { method: 'PATCH', body: JSON.stringify({ docDate: '来年' }) }, 'member');
+    badDate.status === 400 ? ok('日付の形が違えば断る') : ng('日付の形を確かめていない');
+    const fixed = await call('a', '/v1/library?year=2025&counterparty=' + encodeURIComponent('B 社'), {}, 'member');
+    fixed.body.items?.some((i) => i.id === id) && fixed.body.facets?.counterparties?.includes('B 社') ? ok('取引先と年で絞り込める') : ng('絞り込めない');
+
+    const drivePick = await call('a', '/v1/library/drive-picker', {}, 'member');
+    if (drivePick.body.kind === 'mock' && drivePick.body.items?.[0]) {
+      const picked = await call('a', '/v1/library/from-drive', { method: 'POST', body: JSON.stringify({ fileId: drivePick.body.items[0].id }) }, 'member');
+      if (picked.body.item?.id) made.push(picked.body.item.id);
+      picked.status === 201 && picked.body.item?.placed === false ? ok('ドライブで選んだファイルを目録に載せる（動かさない）') : ng('選べない', JSON.stringify(picked.body));
+      const removed = await call('a', `/v1/library/${picked.body.item?.id}`, { method: 'DELETE' }, 'member');
+      removed.body.trashed === false ? ok('選んだファイルは、削除しても目録から外すだけ') : ng('選んだファイルを動かした', JSON.stringify(removed.body));
+    }
+    const badPick = await call('a', '/v1/library/from-drive', { method: 'POST', body: JSON.stringify({ fileId: '../x' }) }, 'member');
+    badPick.status === 400 ? ok('形の違う ID は断る') : ng('形の違う ID を受けた');
+
+    const del = await call('a', `/v1/library/${id}`, { method: 'DELETE' }, 'member');
+    const gone = await call('a', `/v1/library/${id}`, {}, 'member');
+    const tomb = await owner.query('select count(*)::int as n from library_tombstones where tenant_id = $1 and sha256 = $2', ['t-alpha', hash.rows[0]?.sha256]);
+    del.body.trashed === true && gone.status === 404 && tomb.rows[0].n === 1 ? ok('削除でごみ箱へ移し、ハッシュだけを残す') : ng('削除が違う', JSON.stringify(del.body));
+
+    // M2Office で作った資料は、何もしなくても依頼した本人の資料に載る（第44.3節）
+    const LIB_EXT = 'jp.example.library-report';
+    await call('a', `/v1/admin/extensions/${LIB_EXT}`, { method: 'DELETE' });
+    const libBytes = await skillZip({
+      id: LIB_EXT, name: 'report', title: `報告の作成${stamp}`, author: 'サンプル株式会社', description: '報告の PDF を作る（送信しない）',
+      tools: ['pdf.render'], inputs: ['to: text'], input: { to: '見本' },
+      body: 'pdf.render で報告を作る。送信しない。',
+      stub: { work: [{ name: 'pdf.render', args: { title: `報告${stamp}`, to: '見本', from: ['見本商事株式会社'], fields: [], rows: [{ name: '項目', quantity: 1, unitPrice: 100 }], notes: [] } }] },
+    });
+    await call('a', '/v1/admin/extensions/import', { method: 'POST', body: libBytes, headers: { 'content-type': 'application/octet-stream' } });
+    await call('a', `/v1/admin/extensions/${LIB_EXT}/install`, { method: 'POST', body: JSON.stringify({ consent: true }) });
+    const { body: libJob } = await call('a', '/v1/jobs', { method: 'POST', body: JSON.stringify({ agentId: `${LIB_EXT}:report`, input: { to: '見本' } }) }, 'member');
+    const libDone = await waitFor('a', libJob.runId, ['completed', 'failed'], 20000, 'member');
+    let fromRun = null;
+    for (let i = 0; i < 20 && !fromRun; i++) {
+      const got = await call('a', '/v1/library?entry=run', {}, 'member');
+      fromRun = got.body.items?.find((x) => x.driveFileId && x.readState !== 'pending') ?? null;
+      if (!fromRun) await sleep(1000);
+    }
+    libDone.run?.status === 'completed' && fromRun?.placed === true ? ok('作った PDF が、依頼した本人の資料に自動で載り、ドライブに置かれる') : ng('作った資料が載らない', JSON.stringify(libDone.run?.status));
+    const notAdmin = await call('a', '/v1/library?entry=run', {}, 'admin');
+    !notAdmin.body.items?.some((x) => x.id === fromRun?.id) ? ok('依頼した本人にだけ載る') : ng('ほかの人にも載った');
+    if (fromRun) made.push(fromRun.id);
+    await call('a', `/v1/admin/extensions/${LIB_EXT}`, { method: 'DELETE' });
+
+    const audits = await owner.query(`select action, detail::text as detail from audit_events where tenant_id = 't-alpha' and action like 'library.%' and occurred_at > now() - interval '10 minutes'`);
+    audits.rows.length >= 3 && audits.rows.every((a) => !a.detail.includes(stamp)) ? ok('操作を記録し、中身・題名・名前を残さない') : ng('記録が違う', JSON.stringify(audits.rows).slice(0, 300));
+  } finally {
+    await owner.query(`delete from library_items where tenant_id in ('t-alpha', 't-beta') and original_name like $1`, [`%${stamp}%`]);
+    if (made.length) await owner.query('delete from library_items where id = any($1)', [made]);
+    await owner.query(`delete from library_tombstones where tenant_id in ('t-alpha', 't-beta')`);
+    for (const r of saved) await owner.query('update tenant_settings set library = $2 where tenant_id = $1', [r.tenant_id, r.library]);
+    await owner.end();
+  }
+}
+
 console.log('');
 console.log(process.exitCode ? '\x1b[31m一部の確認に失敗しました\x1b[0m' : '\x1b[32mすべての確認を通過しました\x1b[0m');

@@ -18,7 +18,7 @@ export interface DataRecipientFacts {
   /** 会社が登録した鍵・接続の種類（`google_oauth`・`google_chat_app`・`line`・`inquiry_mailbox`・`wordpress`・`places`・`web_review`）。 */
   credentials: Set<string>;
   /** 入れている内蔵の拡張。 */
-  extensions: { webReview: boolean; printDesigns: boolean; competitors: boolean; columns: boolean; inquiries: boolean };
+  extensions: { webReview: boolean; printDesigns: boolean; competitors: boolean; columns: boolean; inquiries: boolean; library: boolean };
   /** Canva のつなぎが用意されているか（運営の設定）。 */
   canvaAvailable: boolean;
   /** 会社が登録したコネクタ（MCP）。 */
@@ -42,7 +42,7 @@ export function buildDataRecipients(f: DataRecipientFacts): DataRecipient[] {
       : { id: 'hosting', name: f.hosting.provider ?? `インフラ事業者${UNSET}`, purpose: 'M2Office を動かし、データを置く', data: 'すべての業務のデータ（通信と保管を暗号化。預かった鍵はさらに暗号化）', location: f.hosting.location ?? UNSET, contract: 'operator', active: true },
     {
       id: 'gemini', name: 'Google（Gemini API）', purpose: '秘書と業務の推論（文の読み書き・画像と音声の読み取り・Web の調べもの）',
-      data: `依頼の文と、業務が読んだ文・画像・音声（会社の AI の方針で外部の AI に渡さないものは除く）。${f.ai.geminiSource === 'tenant'
+      data: `依頼の文と、業務が読んだ文・画像・音声${f.extensions.library ? '、資料に入れたファイルの中身' : ''}（会社の AI の方針で外部の AI に渡さないものは除く）。${f.ai.geminiSource === 'tenant'
         ? '扱いは自社と Google の契約による。無料枠では、送った内容が Google の製品の改善に使われる'
         : 'M2Office は学習に使わせない（第11.9.3節）'}`,
       location: '国外を含む（Google の設備）', contract: f.ai.geminiSource === 'tenant' ? 'company' : 'operator', active: cloudAi,
@@ -50,7 +50,7 @@ export function buildDataRecipients(f: DataRecipientFacts): DataRecipient[] {
     ...(f.ai.localConfigured ? [{ id: 'local-ai', name: '社内の AI（ローカル AI）', purpose: '外部の AI に渡さない推論', data: '会社の AI の方針で社外に出さない文', location: '会社の中', contract: 'machine' as const, active: f.ai.policy !== 'cloud' }] : []),
     {
       id: 'google-workspace', name: 'Google Workspace（会社の Google）', purpose: 'ログインと、メール・予定・ドライブ・Chat などを業務から使う',
-      data: '本人が許した範囲で読み書きする中身（メールの下書き・予定・文書など）', location: '会社の Google の契約による', contract: 'company', active: true,
+      data: `本人が許した範囲で読み書きする中身（メールの下書き・予定・文書など${f.extensions.library ? '。資料のファイルは本人のドライブに置く' : ''}）`, location: '会社の Google の契約による', contract: 'company', active: true,
     },
     { id: 'google-chat-app', name: 'Google Chat（会社の Chat アプリ）', purpose: '通知を本人に届ける', data: '通知の題と本文', location: '会社の Google の契約による', contract: 'company', active: f.credentials.has('google_chat_app') },
     { id: 'line', name: 'LINE（会社の LINE 公式アカウント）', purpose: '問い合わせの受け付けと返事', data: '問い合わせのやり取り', location: 'LINE の設備', contract: 'company', active: f.extensions.inquiries && f.credentials.has('line') },

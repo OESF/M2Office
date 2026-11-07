@@ -15,6 +15,7 @@ interface PickerBuilder {
   addView(v: DocsView): PickerBuilder; setOAuthToken(t: string): PickerBuilder; setDeveloperKey(k: string): PickerBuilder;
   setAppId(a: string): PickerBuilder; setLocale(l: string): PickerBuilder; setCallback(cb: (d: PickerData) => void): PickerBuilder;
   setTitle?(t: string): PickerBuilder;
+  enableFeature?(f: string): PickerBuilder;
   build(): { setVisible(v: boolean): void };
 }
 interface PickerNamespace {
@@ -23,6 +24,7 @@ interface PickerNamespace {
   ViewId: { DOCS_IMAGES: string; DOCS: string; PRESENTATIONS?: string; DOCUMENTS?: string; SPREADSHEETS?: string };
   DocsViewMode?: { LIST: string; GRID: string };
   Action: { PICKED: string; CANCEL: string };
+  Feature?: { MULTISELECT_ENABLED: string };
 }
 
 const SCRIPT = 'https://apis.google.com/js/api.js';
@@ -158,3 +160,29 @@ export function driveFileIdOf(text: string): string | null {
   return m ? m[1]! : null;
 }
 
+/**
+ * 資料に載せるファイルを選ぶ（仕様書 第44.3節）。種類を絞らず、いくつも選べる。
+ *
+ * @returns 選んだファイルの ID と名前。やめたら空
+ */
+export async function pickDriveFiles(p: { apiKey: string; appId: string; accessToken: string }): Promise<{ id: string; name: string }[]> {
+  await loadPicker();
+  const picker = (window as unknown as { google: { picker: PickerNamespace } }).google.picker;
+  return new Promise((resolve) => {
+    const view = new picker.DocsView(picker.ViewId.DOCS).setIncludeFolders(true);
+    let builder = new picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(p.accessToken)
+      .setDeveloperKey(p.apiKey)
+      .setAppId(p.appId)
+      .setLocale('ja');
+    if (picker.Feature && builder.enableFeature) builder = builder.enableFeature(picker.Feature.MULTISELECT_ENABLED);
+    builder
+      .setCallback((data) => {
+        if (data.action === picker.Action.PICKED) resolve((data.docs ?? []).map((d) => ({ id: d.id, name: d.name })));
+        else if (data.action === picker.Action.CANCEL) resolve([]);
+      })
+      .build()
+      .setVisible(true);
+  });
+}

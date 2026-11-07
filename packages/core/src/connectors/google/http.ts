@@ -198,7 +198,26 @@ export interface GoogleRequestInit {
   body?: unknown;
   /** JSON でない中身（ファイルの取り込みの multipart など）。`body` と一緒には使わない。 */
   raw?: { contentType: string; data: string | Uint8Array };
+  /** 足して送るヘッダー（分けて送る口の始まりなど）。 */
+  headers?: Record<string, string>;
+  /** 待つ時間（ミリ秒）。大きいファイルを送るときだけ長くする。 */
+  timeoutMs?: number;
   missingOn400?: boolean;
+}
+
+/**
+ * 分けて送る口の始まりを呼び、送り先（`Location` ヘッダー）を返す（ドライブの大きいファイル。第44.5節）。
+ *
+ * @returns 送り先の URL。`404`・`410` なら `null`
+ * @throws {ConnectorUnavailableError} 許可が無い・API が無効・届かない（{@link callGoogle} と同じ）
+ */
+export async function callGoogleLocation(
+  tokens: GoogleTokenSource, p: ConnectorPrincipal, api: GoogleApiName, url: string, init: GoogleRequestInit,
+): Promise<string | null> {
+  const res = await requestGoogle(tokens, p, api, url, init);
+  if (!res) return null;
+  await res.body?.cancel().catch(() => undefined);
+  return res.headers.get('location');
 }
 
 /**
@@ -263,10 +282,11 @@ async function requestGoogleOnce(
           authorization: `Bearer ${token}`,
           ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}),
           ...(init.raw ? { 'content-type': init.raw.contentType } : {}),
+          ...(init.headers ?? {}),
         },
         ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
         ...(init.raw ? { body: typeof init.raw.data === 'string' ? init.raw.data : Buffer.from(init.raw.data) } : {}),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(init.timeoutMs ?? TIMEOUT_MS),
       });
     } catch {
       if (attempt === 1) continue;

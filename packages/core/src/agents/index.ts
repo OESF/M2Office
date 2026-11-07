@@ -169,6 +169,7 @@ export const DEFAULT_STANDARD_MINUTES: Record<string, number> = {
   'members:desk': 5,
   'members:line-send': 20,
   'print-designs:desk': 60,
+  'library:desk': 5,
   // 同梱の拡張機能の業務
   'jp.m2office.legal.contract-review:contract-review': 45,
   'jp.m2office.samples.research-slides:research-slides': 60,

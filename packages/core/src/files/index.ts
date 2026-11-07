@@ -10,6 +10,7 @@ export { saveFile, loadFile } from './service.js';
 export { readSheet, renderSheet, parseCsv, decodeText, csvSafeText, csvText, type SheetData } from './sheet.js';
 export { extractPdfText, normalizeRadicals, type PdfText } from './pdf.js';
 export { renderDocx, extractDocxText, type DocBlock } from './docx.js';
+export { extractPptxText, zipExpandedBytes } from './pptx.js';
 export { fileToText, TEXT_LIMIT, TRANSCRIPT_NOTE, type FileText, type OcrFn, type TranscribeFn } from './to-text.js';
 export { transcribeRecording, TranscribeError, TRANSCRIBE_SEGMENT_SEC, clockOf, shiftTimes, speakersOf, type Transcript, type TranscribeDeps } from './transcribe.js';
 export { discardStaleRecordings, RECORDING_UNUSED_MS } from './recordings.js';
