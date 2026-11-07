@@ -42,7 +42,7 @@ Caddy は、インターネットからの通信を受けて、名前で行き�
 | 名前 | 行き先 |
 |---|---|
 | `会社名.m2office.net` | 会社の画面と API |
-| `m2office.net`・`www.m2office.net` | 紹介のページ（`/var/www/m2office-site/`） |
+| `m2office.net`・`www.m2office.net` | 紹介のページ（`/var/www/m2office-site/`）。問い合わせのフォーム（`/api/contact`）だけは、紹介のサイトの受け口（`127.0.0.1:4330`）へ渡す |
 | `ops.m2office.net` | マスター管理画面と運営の API。VPN の網から来た通信だけを通し、網の外には「見つかりません」を返す |
 
 - 証明書は Let's Encrypt から自動で取ります。会社の名前の証明書は、初めて開かれたときに、M2Office に「払い出した会社か」を尋ねてから取ります。

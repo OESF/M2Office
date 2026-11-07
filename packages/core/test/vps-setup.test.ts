@@ -111,7 +111,7 @@ test('Cloudflare を前に置くときだけ、Cloudflare 以外を断り、利�
   assert.match(on, /client_ip_headers CF-Connecting-IP/);
 });
 
-test('紹介のページ: 公開前の確認の答えがあるときだけ BASIC 認証を掛け、Google からの戻りには掛けない。無いページは 404.html', () => {
+test('紹介のページ: 公開前の確認の答えがあるときだけ BASIC 認証を掛け、Google からの戻りと問い合わせの受け口には掛けない。無いページは 404.html', () => {
   const site = (file: string) => file.slice(file.indexOf('m2office.net, www.m2office.net {'));
   const off = readFileSync(join(render('no'), 'Caddyfile'), 'utf8');
   assert.ok(!site(off).includes('import site_preview_auth'), '答えが無ければ公開');
@@ -123,6 +123,10 @@ test('紹介のページ: 公開前の確認の答えがあるときだけ BASIC
   assert.ok(files.startsWith('\thandle {\n\t\timport site_preview_auth\n'), '紹介のページのファイルの段だけに掛ける');
   const oauth = body.slice(body.indexOf('handle /v1/oauth/*'), body.indexOf('\thandle {'));
   assert.ok(!oauth.includes('site_preview_auth'), 'Google からの戻りには掛けない');
+  const contact = body.slice(body.indexOf('handle /api/contact {'), body.indexOf('\thandle {'));
+  assert.ok(contact.length > 0 && !contact.includes('site_preview_auth'), '問い合わせの受け口には掛けない');
+  assert.match(contact, /^handle \/api\/contact \{\n\t\timport waf\n\t\trequest_body \{\n\t\t\tmax_size 32KB\n\t\t\}\n\t\treverse_proxy 127\.0\.0\.1:4330 \{\n\t\t\theader_up X-Client-Ip \{client_ip\}\n\t\t\}\n\t\}/);
+  assert.ok(body.indexOf('handle /v1/oauth/*') < body.indexOf('handle /api/contact {'), 'Google からの戻りの次に置く');
   // 他の名前の段には掛けない
   assert.equal(on.split('import site_preview_auth').length, 2);
   assert.match(body, /handle_errors 404 \{\n\t\trewrite \* \/404\.html\n\t\tfile_server \{\n\t\t\tstatus 404/);

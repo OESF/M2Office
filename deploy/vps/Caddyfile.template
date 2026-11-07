@@ -206,9 +206,9 @@ ops.{{BASE_DOMAIN}} {
 	}
 }
 
-# 紹介のページ（第23.3.1節。いまは静的なページの置き場。申し込みの口は作ってから足す）と、Google からの戻り
+# 紹介のページ（第23.3.1節。静的なページの置き場と、問い合わせのフォームの受け口）と、Google からの戻り
 # （Google は戻り先に HTTPS の決まった名前を求めるため、会社ごとの名前ではなく親のドメインで受ける。第16.1.2節）
-# 公開前の確認の BASIC 認証は、紹介のページのファイルだけに掛ける。Google からの戻り（/v1/oauth/）は別の handle なので掛からない
+# 公開前の確認の BASIC 認証は、紹介のページのファイルだけに掛ける。Google からの戻り（/v1/oauth/）と問い合わせ（/api/contact）は別の handle なので掛からない
 {{BASE_DOMAIN}}, www.{{BASE_DOMAIN}} {
 	import on_demand_cert
 	import cloudflare_only
@@ -221,6 +221,17 @@ ops.{{BASE_DOMAIN}} {
 	handle /v1/oauth/* {
 		import waf
 		reverse_proxy 127.0.0.1:{{API_PORT}}
+	}
+	# 問い合わせのフォームの受け口（紹介のサイトが動かす。受けた内容は蓄積せずメールで送る。第23.3.1節、ADR-0126）。
+	# 公開前の確認の BASIC 認証は掛けない。道は 1 つずつ足し、紹介のページの下をまとめて渡さない
+	handle /api/contact {
+		import waf
+		request_body {
+			max_size 32KB
+		}
+		reverse_proxy 127.0.0.1:4330 {
+			header_up X-Client-Ip {client_ip}
+		}
 	}
 	handle {
 {{SITE_PREVIEW_IMPORT}}
