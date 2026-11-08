@@ -80,10 +80,20 @@ export function libraryOkfFileName(item: Pick<LibraryItem, 'id' | 'title' | 'ori
  *
  * @remarks
  * 取引先・案件・種類などを区別せず、頭の印を付けない。ノートの道具（Obsidian）はタグで探す・グラフに点を出すことができる。
- * 日本語の横の空白は詰め（「A 社」→「A社」）、英字どうしの間の空白とタグに使えない記号は `_` に置き換える。名前が空なら `null`
+ * 日本語の横の空白は詰め（「A 社」→「A社」）、英字どうしの間の空白とタグに使えない記号は `_` に置き換える。名前が空なら `null`。
+ * 空白の扱いは、空白の並びごとに前後の 1 文字を見て決める（先読み・後読みの正規表現は、空白が長く続くと時間が長さの 2 乗で伸びるため。
+ * CodeQL の js/polynomial-redos）。読む長さも先に区切る
  */
 export function libraryOkfTag(name: string): string | null {
-  const body = name.normalize('NFKC').replace(/(?<=[^\x00-\x7f])\s+|\s+(?=[^\x00-\x7f])/g, '').replace(/[^\p{L}\p{M}\p{N}_-]+/gu, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 60);
+  const parts = name.normalize('NFKC').slice(0, 200).split(/(\s+)/);
+  const ascii = (c: string | undefined) => !!c && c.charCodeAt(0) < 0x80;
+  let joined = '';
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!;
+    // 偶数番目は空白でない部分、奇数番目は空白の並び。両側が英字などなら `_` にし、日本語の横なら詰める
+    joined += i % 2 === 0 ? p : ascii(parts[i - 1]?.at(-1)) && ascii(parts[i + 1]?.[0]) ? '_' : '';
+  }
+  const body = joined.replace(/[^\p{L}\p{M}\p{N}_-]+/gu, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 60);
   return body && !/^\d+$/.test(body) ? body : body ? `_${body}` : null;
 }
 

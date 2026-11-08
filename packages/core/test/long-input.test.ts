@@ -24,6 +24,7 @@ import { readHtml, stripHidden } from '../src/competitors/html.js';
 import { externalRefs } from '../src/signage/service.js';
 import { guessInquiry } from '../src/inquiries/extract.js';
 import { afterLabel, parseHeader, parseSpeech, splitReport } from '../src/decisions/format.js';
+import { libraryOkfTag } from '../src/library/okf.js';
 
 /** かかった時間（ミリ秒）。 */
 const ms = (fn: () => unknown) => { const t = performance.now(); fn(); return performance.now() - t; };
@@ -133,4 +134,16 @@ test('意思決定支援の発言と報告の読み取りは、空白が長く�
   assert.equal(parsed.claims[0]?.gist, '競合が近くにある');
   assert.equal(afterLabel('論点', ['論点']), null);
   assert.equal(afterLabel('対象 B1-1', ['対象'], false), 'B1-1');
+});
+
+test('ナレッジの整理の目録のタグの形は、空白が長く続く名前でもすぐ終わり、ふつうの名前は前と同じに整える（第44.16節）', () => {
+  for (const name of [' '.repeat(100_000), `a${' '.repeat(100_000)}b`, `${' '.repeat(100_000)}あ`, `あ${' \t'.repeat(50_000)}`]) {
+    assert.ok(ms(() => libraryOkfTag(name)) < 300, '10 万字の空白でもすぐ終わる');
+  }
+  assert.equal(libraryOkfTag('A 社'), 'A社');
+  assert.equal(libraryOkfTag('Sales Report 2026'), 'Sales_Report_2026');
+  assert.equal(libraryOkfTag(' A/B: 見積? '), 'A_B_見積');
+  assert.equal(libraryOkfTag('本社ビル の改修'), '本社ビルの改修');
+  assert.equal(libraryOkfTag(' ・ '), null);
+  assert.equal(libraryOkfTag('2026'), '_2026');
 });
