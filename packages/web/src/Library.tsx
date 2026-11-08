@@ -330,6 +330,8 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       </div>
 
       {error && <p className="error" role="alert">{error}</p>}
+      {/* ドラッグしている間は、一覧の上に小さな帯で示す（落とすのは画面のどこでもよい） */}
+      {dragging && <div className="library-drop" aria-hidden="true">ここに入れる</div>}
       {view === 'graph' && graph && (graph.shown === 0
         ? <p className="muted">{filtered ? '当たる資料はありません。' : 'まだ資料がありません。'}</p>
         : <>
@@ -339,7 +341,7 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       {view === 'list' && items && items.length === 0 && (
         filtered
           ? <p className="muted">当たる資料はありません。</p>
-          : <div className="library-empty"><p>ここにファイルかフォルダをドラッグしてください</p></div>
+          : !dragging && <div className="library-empty"><p>ここにファイルかフォルダをドラッグしてください</p></div>
       )}
       {view === 'list' && items && items.length > 0 && (
         <ul className="library-list">
@@ -366,7 +368,6 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
         </ul>
       )}
       {view === 'list' && items && items.length < total && <button className="btn ghost small" onClick={more}>続きを見る（残り {(total - items.length).toLocaleString('ja-JP')} 件）</button>}
-      {dragging && <div className="library-drop" aria-hidden="true">ここに入れる</div>}
     </div>
   );
 }
