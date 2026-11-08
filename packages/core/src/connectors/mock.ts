@@ -67,7 +67,15 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
   /** 変更して、作った予定の側に置き換えた見本の予定。 */
   private readonly replacedEvents = new Set<string>();
   /** M2Office が作ったドライブのファイル（文書は本文、表は値を持つ）。 */
-  private readonly driveFiles = new Map<string, { file: DriveFile; owner: string; text?: string; values?: string[][]; bytes?: Uint8Array; mimeType?: string }>();
+  private readonly driveFiles = new Map<string, { file: DriveFile; owner: string; text?: string; values?: string[][]; bytes?: Uint8Array; mimeType?: string; viewedAt?: string }>();
+
+  /** 本人がドライブでファイルを開いたことにする（見本と試験。ドライブの `viewedByMeTime` を模す）。 */
+  markViewed(fileId: string, at: string): boolean {
+    const f = this.driveFiles.get(fileId);
+    if (!f) return false;
+    f.viewedAt = at;
+    return true;
+  }
 
   constructor(private readonly now: () => Date = () => new Date()) {}
 
@@ -271,6 +279,9 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       return { file: f.file, mimeType: f.mimeType ?? 'text/plain', bytes: f.bytes ?? new TextEncoder().encode(f.text ?? '') };
     },
     get: async (p: ConnectorPrincipal, fileId: string) => this.visibleFiles(p).find((x) => x.file.id === fileId)?.file ?? null,
+    viewedSince: async (p: ConnectorPrincipal, since: string | null, limit: number) => [...this.driveFiles.values()]
+      .filter((f) => f.owner === key(p) && f.viewedAt && (!since || f.viewedAt > since))
+      .slice(0, limit).map((f) => ({ id: f.file.id, viewedAt: f.viewedAt! })),
     trash: async (p: ConnectorPrincipal, fileId: string) => {
       if (!this.visibleFiles(p).some((x) => x.file.id === fileId)) return false;
       this.driveFiles.delete(fileId);

@@ -7,6 +7,7 @@
  * - 目録が変わった人だけ、10 分ほどで変わったものだけを書き直す。消した資料のファイルはごみ箱へ移す。自動で共有しない。
  *   本人が「目録」フォルダを消したら、次の回に作り直す
  * - 文書に「関連する資料」を置き、つながる資料の文書へ相対のリンクを張る（第44.17.1節と同じつながり）
+ * - タグ（取引先・案件・種類などを区別しない）は、頭の印を付けない平らなタグにする。資料でない文書は置かない。一覧（`index.md`）はタグごとに並べる（第44.17.3節）
  * - 項目の形は OKF v0.2 の SPEC.md に合わせる（`generated` は `{ by, at }`、`verified` は人が確かめたときだけ、`sources` は `resource` を持つ並び）
  * - メールから来た資料も送り主を書かない。人の名前を書かない（`verified` の `by` は `human:owner`）
  * - 古い版の知らせ: 題名・取引先・種類が同じで中身が違う資料を同じ資料の版とみなし、新しく見つかった組の数を週 1 回本人に知らせる（自動では消さない）
@@ -21,7 +22,7 @@ import type { Logger } from '../log/logger.js';
 import type { Repository } from '../repository/types.js';
 import { LIBRARY_OKF_FOLDER, type LibraryService } from './service.js';
 import { libraryLinkReason, type LibraryLink } from './links.js';
-import { libraryVersionKey, type LibraryOwnerStateRow, type LibraryStore, type LibraryViewer } from './store.js';
+import { libraryTagKey, libraryVersionKey, type LibraryOwnerStateRow, type LibraryStore, type LibraryViewer } from './store.js';
 
 /** OKF の版（最上位の `index.md` に書く）。 */
 export const LIBRARY_OKF_VERSION = '0.2';
@@ -36,6 +37,32 @@ const VERSIONS_INTERVAL_MS = 7 * 86_400_000;
 /** 1 社を見直す間隔（目録を読む回数を抑える）。 */
 const TENANT_INTERVAL_MS = 10 * 60_000;
 const MIME = 'text/markdown';
+/**
+ * 書き出す文書の形の版。形を変えたら上げる（目録が変わっていなくても、全員の文書を書き直させる）。
+ * 2: 頭書きをドライブの表示でも 1 行ずつ読めるようにした（第 0.534.1 版）。
+ * 3: 案件とテーマの項目と文書を足した（第 0.535.0 版。書き出す前に 4 の形に改めた）。
+ * 4: 取引先・案件・テーマを入れ子のタグにし、語を `keywords` に分け、一覧を角度ごとに並べた。案件とテーマの文書はやめた（第 0.535.0 版の途中）。
+ * 5: 取引先・案件・種類などを区別しない平らなタグにし、一覧をタグごとに並べた（第 0.535.0 版）。
+ * 6: 本人が実際の資料を開いたら `verified` を書き、古い版に `status: deprecated` と新しい版へのリンクを置いた（第 0.535.0 版。第44.16.1節）。
+ */
+const OKF_FORMAT = 6;
+/** 本人が開いた時刻を読み直す間隔と、時刻のずれに備えてさかのぼる幅（第44.16.1節）。 */
+const VIEWS_INTERVAL_MS = 10 * 60_000;
+const VIEWS_OVERLAP_MS = 86_400_000;
+/** 1 回に読む開いた時刻の数の上限。 */
+const VIEWS_LIMIT = 5000;
+
+/**
+ * 頭書き（YAML）を `---` で囲む。
+ *
+ * @remarks
+ * Google ドライブの表示などは頭書きを Markdown の段落として描き、行を 1 つにつなげて読みにくくする。
+ * そこで各行の終わりに空白 2 つ（Markdown の改行。YAML では意味を持たない）を置き、閉じの `---` の前に空行を入れる
+ * （空行が無いと、すぐ上の行が `---` で大きな見出しになる）。
+ */
+function frontMatter(lines: string[]): string[] {
+  return ['---', ...lines.map((l) => `${l}  `), '', '---'];
+}
 
 /** YAML の文字（JSON の文字は YAML の二重引用符の文字として読める）。 */
 const q = (s: string) => JSON.stringify(s);
@@ -46,6 +73,23 @@ const q = (s: string) => JSON.stringify(s);
 export function libraryOkfFileName(item: Pick<LibraryItem, 'id' | 'title' | 'originalName'>): string {
   const base = libraryTitleOf(item).replace(/[\u0000-\u001f\\/:*?"<>|#[\]^]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || '資料';
   return `${base} (${item.id.replace(/^lib-/, '').slice(0, 8)}).md`;
+}
+
+/**
+ * タグをノートの道具で使える形にする（第44.16節・第44.17.3節）。
+ *
+ * @remarks
+ * 取引先・案件・種類などを区別せず、頭の印を付けない。ノートの道具（Obsidian）はタグで探す・グラフに点を出すことができる。
+ * 日本語の横の空白は詰め（「A 社」→「A社」）、英字どうしの間の空白とタグに使えない記号は `_` に置き換える。名前が空なら `null`
+ */
+export function libraryOkfTag(name: string): string | null {
+  const body = name.normalize('NFKC').replace(/(?<=[^\x00-\x7f])\s+|\s+(?=[^\x00-\x7f])/g, '').replace(/[^\p{L}\p{M}\p{N}_-]+/gu, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 60);
+  return body && !/^\d+$/.test(body) ? body : body ? `_${body}` : null;
+}
+
+/** 資料のタグ（ノートの道具で使える形。重ねない）。 */
+export function libraryOkfTags(item: Pick<LibraryItem, 'tags'>): string[] {
+  return [...new Set((item.tags ?? []).map(libraryOkfTag).filter((t): t is string => !!t))];
 }
 
 /** 相対のリンクの行き先（Markdown のリンクが「(」「)」で切れないよう、それも符号にする）。 */
@@ -61,21 +105,27 @@ export interface LibraryOkfRelated {
  * 資料 1 つを OKF の文書にする（第44.16節）。
  *
  * @param related 関連する資料（第44.17.1節。強い順）。本文に相対のリンクで並べる
- * @remarks 本体と全文は入れない。メールの送り主と人の名前は書かない。`status`・`stale_after` は確かでないので入れない
+ * @param newer 新しい版（同じ資料の版のうち、いちばん新しいもの。第44.8節）。あれば `status: deprecated` を付け、本文にリンクを置く
+ * @remarks
+ * 本体と全文は入れない。メールの送り主と人の名前は書かない。`stale_after` は確かでないので入れない。
+ * `verified` は、本人が実際の資料を開いた・直した・会社の知識にしたときだけ、いちばん新しい時刻で書く（第44.16.1節）
  */
-export function libraryOkfDocument(item: LibraryItem, related: LibraryOkfRelated[] = []): string {
+export function libraryOkfDocument(item: LibraryItem, related: LibraryOkfRelated[] = [], newer: LibraryOkfRelated['item'] | null = null): string {
   const title = libraryTitleOf(item);
-  const tags = [...new Set([item.counterparty, ...item.keywords].map((t) => t.trim()).filter(Boolean))].slice(0, 20);
-  const verifiedAt = item.verifiedAt ?? (item.edited.length > 0 ? item.updatedAt : null);
-  const head = [
-    '---',
+  // タグと検索の語を分ける（語はばらばらのタグを増やすだけなので、タグにしない）
+  const tags = libraryOkfTags(item);
+  const keywords = [...new Set(item.keywords.map((k) => k.trim()).filter(Boolean))].slice(0, 20);
+  const verifiedAt = [item.verifiedAt, item.viewedAt ?? null, item.edited.length > 0 ? item.updatedAt : null].filter((x): x is string => !!x).sort().at(-1) ?? null;
+  const head = frontMatter([
     `type: ${q(item.docType || '資料')}`,
     `title: ${q(title)}`,
     ...(item.summary ? [`description: ${q(item.summary)}`] : []),
     ...(item.driveUrl ? [`resource: ${q(item.driveUrl)}`] : []),
     ...(tags.length ? [`tags: [${tags.map(q).join(', ')}]`] : []),
+    ...(keywords.length ? [`keywords: [${keywords.map(q).join(', ')}]`] : []),
     `generated: { by: ${q(OKF_GENERATED_BY)}, at: ${q(item.updatedAt)} }`,
     ...(verifiedAt ? [`verified: { by: ${q('human:owner')}, at: ${q(verifiedAt)} }`] : []),
+    ...(newer ? [`status: ${q('deprecated')}`] : []),
     ...(item.driveUrl ? [
       'sources:',
       `  - id: ${q('original')}`,
@@ -83,8 +133,7 @@ export function libraryOkfDocument(item: LibraryItem, related: LibraryOkfRelated
       `    title: ${q(item.originalName)}`,
       `    last_modified: ${q(item.receivedAt)}`,
     ] : []),
-    '---',
-  ];
+  ]);
   const line = (label: string, value: string | null) => (value ? [`- ${label}: ${value}`] : []);
   const body = [
     `# ${title}`,
@@ -93,7 +142,9 @@ export function libraryOkfDocument(item: LibraryItem, related: LibraryOkfRelated
     ...(item.driveUrl ? [`- 元の資料: [${item.originalName.replace(/[[\]]/g, '')}](${item.driveUrl})`] : [`- 元の資料: ${item.originalName}`]),
     ...line('種類', item.docType),
     ...line('取引先', item.counterparty),
+    ...line('タグ', (item.tags ?? []).join('・')),
     ...line('書類の日付', item.docDate),
+    ...(newer ? [`- 新しい版: [${libraryTitleOf(newer).replace(/[[\]]/g, '')}](${libraryOkfLink(libraryOkfFileName(newer))})`] : []),
     `- 受け取った日: ${item.receivedAt.slice(0, 10)}`,
     '',
     ...(related.length ? [
@@ -106,19 +157,34 @@ export function libraryOkfDocument(item: LibraryItem, related: LibraryOkfRelated
   return [...head, ...body].join('\n');
 }
 
-/** 最上位の一覧（`index.md`。OKF の版と、種類ごとの一覧）。 */
+/** 一覧の 1 行（資料の文書へのリンク。`summary` なら要約を添える）。 */
+const indexLine = (i: LibraryItem, summary: boolean) =>
+  `* [${libraryTitleOf(i).replace(/[[\]]/g, '')}](${libraryOkfLink(libraryOkfFileName(i))})${summary && i.summary ? ` - ${i.summary.replace(/\s+/g, ' ').slice(0, 120)}` : ''}`;
+
+/**
+ * 最上位の一覧（`index.md`）。OKF の版と、タグごとの資料へのリンクと、すべての資料（要約つき。新しい順）を並べる（第44.16節）。
+ *
+ * @remarks AI やノートの道具が、どのタグからでも資料をたどれるようにする。タグは正規化して同じものを 1 つにまとめ、最初に出た書き方で示す
+ */
 export function libraryOkfIndex(items: LibraryItem[]): string {
-  const byType = new Map<string, LibraryItem[]>();
+  const out = [...frontMatter([`okf_version: ${q(LIBRARY_OKF_VERSION)}`]), '# M2Office 資料', ''];
+  const groups = new Map<string, { name: string; items: LibraryItem[] }>();
   for (const i of items) {
-    const t = i.docType || '資料';
-    byType.set(t, [...(byType.get(t) ?? []), i]);
+    for (const name of i.tags ?? []) {
+      const key = libraryTagKey(name);
+      if (!key) continue;
+      const g = groups.get(key) ?? { name: name.trim(), items: [] };
+      if (g.items.at(-1) !== i) g.items.push(i);
+      groups.set(key, g);
+    }
   }
-  const out = ['---', `okf_version: ${q(LIBRARY_OKF_VERSION)}`, '---', '# M2Office 資料', ''];
-  for (const [t, list] of [...byType.entries()].sort((a, b) => b[1].length - a[1].length)) {
-    out.push(`## ${t}`, '');
-    for (const i of list) out.push(`* [${libraryTitleOf(i).replace(/[[\]]/g, '')}](${libraryOkfLink(libraryOkfFileName(i))})${i.summary ? ` - ${i.summary.replace(/\s+/g, ' ').slice(0, 120)}` : ''}`);
-    out.push('');
+  if (groups.size > 0) {
+    out.push('## タグ', '');
+    for (const g of [...groups.values()].sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name))) {
+      out.push(`### ${g.name}`, '', ...g.items.map((i) => indexLine(i, false)), '');
+    }
   }
+  out.push('## すべての資料', '', ...items.map((i) => indexLine(i, true)), '');
   return out.join('\n');
 }
 
@@ -137,7 +203,7 @@ export interface LibraryKeeperDeps {
 }
 
 /** 何もしていない人の様子。 */
-const EMPTY: LibraryOwnerStateRow = { okfEnabled: false, okfWrittenAt: null, okfStamp: '', okfError: '', versionsNotified: [], versionsNoticedAt: null };
+const EMPTY: LibraryOwnerStateRow = { okfEnabled: false, okfWrittenAt: null, okfStamp: '', okfError: '', versionsNotified: [], versionsNoticedAt: null, viewsCheckedAt: null };
 
 /**
  * 目録の書き出しと、古い版の知らせ（第44.16節・第44.8節）。ワーカー（見本の会社は API）が {@link LibraryKeeper.tick} を呼ぶ。
@@ -153,7 +219,7 @@ export class LibraryKeeper {
   /** 本人の目録の書き出しの様子（画面には出さない。確かめと運用の調べに使う）。 */
   async catalogState(who: LibraryViewer): Promise<{ writtenAt: string | null; files: number; error: string }> {
     const w = await this.deps.store.ownerState(who.tenantId, who.userId);
-    const files = (await this.deps.store.okfFiles(who.tenantId, who.userId)).filter((f) => f.key !== 'index').length;
+    const files = (await this.deps.store.okfFiles(who.tenantId, who.userId)).filter((f) => f.key !== 'index' && !f.key.includes(':')).length;
     return { writtenAt: w?.okfWrittenAt ?? null, files, error: w?.okfError ?? '' };
   }
 
@@ -180,10 +246,16 @@ export class LibraryKeeper {
           if (!(await this.deps.access(tenantId, ownerId))) continue;
           const state = (await this.deps.store.ownerState(tenantId, ownerId)) ?? EMPTY;
           const next = { ...state };
-          const stamp = await this.deps.store.ownerStamp(tenantId, ownerId);
+          // 本人が実際の資料を開いた時刻を読む（確かめた記録。第44.16.1節）。目録の変わり目より先に読む
+          const viewsDue = !next.viewsCheckedAt || now - Date.parse(next.viewsCheckedAt) >= VIEWS_INTERVAL_MS;
+          if (viewsDue) await this.readViews({ tenantId, userId: ownerId }, next);
+          const stamp = `f${OKF_FORMAT}:${await this.deps.store.ownerStamp(tenantId, ownerId)}`;
           const catalogDue = stamp !== next.okfStamp || !next.okfWrittenAt;
           const versionsDue = !next.versionsNoticedAt || now - Date.parse(next.versionsNoticedAt) >= VERSIONS_INTERVAL_MS;
-          if (!catalogDue && !versionsDue) continue;
+          if (!catalogDue && !versionsDue) {
+            if (viewsDue) await this.deps.store.saveOwnerState(tenantId, ownerId, next);
+            continue;
+          }
           const items = await this.deps.store.allOf(tenantId, ownerId);
           const who = { tenantId, userId: ownerId };
           if (versionsDue) await this.noticeVersions(who, items, next);
@@ -201,6 +273,22 @@ export class LibraryKeeper {
       }
     }
     return written;
+  }
+
+  /**
+   * 本人が実際の資料を開いた時刻をドライブから読み、目録に記録する（第44.16.1節）。前に読んだ時刻（1 日さかのぼる）より後に開いたものだけを読む。
+   *
+   * @remarks ドライブに問い合わせられなければ、読んだ時刻を進めずに次の回に試し直す（確かめた印を推測で付けない）
+   */
+  private async readViews(who: LibraryViewer, state: LibraryOwnerStateRow): Promise<void> {
+    const since = state.viewsCheckedAt ? new Date(Date.parse(state.viewsCheckedAt) - VIEWS_OVERLAP_MS).toISOString() : null;
+    try {
+      const views = await this.deps.drive.viewedSince(who, since, VIEWS_LIMIT);
+      await this.deps.store.setViewed(who.tenantId, who.userId, views.map((v) => ({ driveFileId: v.id, at: v.viewedAt })));
+      state.viewsCheckedAt = this.now().toISOString();
+    } catch (err) {
+      this.deps.logger.info('資料を開いた時刻を読めませんでした。次の回に試し直します', { tenantId: who.tenantId, err: err instanceof Error ? err.name : 'unknown' });
+    }
   }
 
   /** 古い版の知らせ（第44.8節）。新しく見つかった組だけを数える。 */
@@ -262,13 +350,25 @@ export class LibraryKeeper {
         writes += 1;
         return true;
       };
+      // 同じ資料の版のうち、いちばん新しいもの（古い版の文書に status: deprecated と、新しい版へのリンクを置く。第44.16.1節）
+      const newest = new Map<string, LibraryItem>();
+      const at = (i: LibraryItem) => `${i.docDate ?? i.receivedAt.slice(0, 10)}|${i.receivedAt}`;
+      for (const i of items) {
+        const key = libraryVersionKey(i);
+        if (!key) continue;
+        const cur = newest.get(key);
+        if (!cur || at(i) > at(cur)) newest.set(key, i);
+      }
       for (const item of items) {
+        const key = libraryVersionKey(item);
+        const top = key ? newest.get(key) : undefined;
+        const newer = top && top.id !== item.id ? top : null;
         const related = (links.get(item.id) ?? []).slice(0, OKF_RELATED)
           .map((l) => ({ link: l, item: byId.get(l.id) })).filter((x): x is { link: LibraryLink; item: LibraryItem } => !!x.item)
           .map((x) => ({ item: x.item, reason: libraryLinkReason(x.link) }));
-        if (!(await put(item.id, libraryOkfFileName(item), libraryOkfDocument(item, related)))) complete = false;
+        if (!(await put(item.id, libraryOkfFileName(item), libraryOkfDocument(item, related, newer)))) complete = false;
       }
-      // 消した資料の文書はごみ箱へ（元に戻せる）
+      // 消した資料の文書と、前の形で置いた案件・テーマの文書はごみ箱へ（元に戻せる）
       for (const [key, f] of files) {
         if (key === 'index' || byId.has(key)) continue;
         await drive.trash(who, f.driveId).catch(() => false);

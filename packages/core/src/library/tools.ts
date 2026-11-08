@@ -40,9 +40,12 @@ async function relatedOf(service: LibraryService, ctx: ToolContext, id: string) 
 /** 秘書に返す 1 件の形。共有された他人の資料には `sharedBy`（持ち主の名前）を付ける。 */
 function brief(i: LibraryItem & { mine?: boolean; ownerName?: string | null }, why: string[] = []) {
   return {
-    id: i.id, title: libraryTitleOf(i), originalName: i.originalName, docType: i.docType, counterparty: i.counterparty, docDate: i.docDate,
+    id: i.id, title: libraryTitleOf(i), originalName: i.originalName, docType: i.docType, counterparty: i.counterparty,
+    ...(i.tags.length ? { tags: i.tags } : {}), docDate: i.docDate,
     receivedAt: i.receivedAt.slice(0, 10), summary: i.summary, from: LIBRARY_ENTRY_LABELS[i.entry], url: i.driveUrl, path: libraryPath(i.id),
     share: LIBRARY_SHARE_LABELS[i.shareScope],
+    // 本人が実際の資料を開いて確かめた資料か（第44.16.1節）
+    ...(i.mine !== false && i.viewedAt ? { checked: true } : {}),
     ...(i.mine === false ? { sharedBy: i.ownerName ?? '同じ会社の人' } : {}),
     ...(i.readState === 'done' ? {} : { readState: i.readState, readNote: i.readNote }), ...(why.length ? { why } : {}),
   };
@@ -58,13 +61,14 @@ export const librarySearch: Tool = {
   risk: 'read',
   activityLabel: '資料を探しています',
   helpText: '本人の資料（メールの添付・PC のファイル・M2Office で作った資料など）と、本人に共有された資料を探します',
-  description: '本人の資料と、本人に共有された資料を探す（共有されたものには sharedBy が付く。その中身は読めないので、要約とリンクで答える。上位の資料には関連する資料 related が付く）。query は探す言葉（取引先・品名・書類の種類など）。words は言い換え（「見積」なら「見積書」「お見積り」など。思いつくものを入れる）。docType は種類、counterparty は取引先（正確な名前が分かるときだけ）、year は書類の年（西暦。「去年」は今年から計算する）、entry は入口（mail・pc・run・picker・chat。言われたときだけ）',
+  description: '本人の資料と、本人に共有された資料を探す（共有されたものには sharedBy が付く。その中身は読めないので、要約とリンクで答える。上位の資料には関連する資料 related が付く。checked は本人が実際の資料を開いて確かめた資料）。query は探す言葉（取引先・品名・書類の種類など）。words は言い換え（「見積」なら「見積書」「お見積り」など。思いつくものを入れる）。docType は種類、counterparty は取引先（正確な名前が分かるときだけ）、tags はタグ（取引先・案件・製品・技術・分野・書類の種類などを区別しないキー。資料に付いたタグの正確な名前が分かるときだけ。並べると全部を持つ資料に絞る。分からなければ query に入れる）、year は書類の年（西暦。「去年」は今年から計算する）、entry は入口（mail・pc・run・picker・chat。言われたときだけ）',
   args: {
     properties: {
       query: { type: 'string', description: '探す言葉' },
       words: { type: 'array', items: { type: 'string', description: '言い換えの語' }, description: '言い換え' },
       docType: { type: 'string', description: '種類' },
       counterparty: { type: 'string', description: '取引先' },
+      tags: { type: 'array', items: { type: 'string', description: 'タグ' }, description: 'タグ（全部を持つ資料に絞る）' },
       year: { type: 'number', description: '書類の年（西暦）' },
       entry: { type: 'string', description: '入口' },
       limit: { type: 'number', description: '件数（既定 10）' },
@@ -80,6 +84,7 @@ export const librarySearch: Tool = {
       words: Array.isArray(args['words']) ? args['words'].filter((w): w is string => typeof w === 'string') : [],
       ...(str(args['docType']) ? { docType: str(args['docType']) } : {}),
       ...(str(args['counterparty']) ? { counterparty: str(args['counterparty']) } : {}),
+      ...(Array.isArray(args['tags']) ? { tags: args['tags'].filter((t): t is string => typeof t === 'string').slice(0, 10) } : {}),
       ...(typeof args['year'] === 'number' ? { year: args['year'] } : {}),
       ...(entry in LIBRARY_ENTRY_LABELS ? { entry: entry as LibraryEntry } : {}),
       limit: typeof args['limit'] === 'number' ? args['limit'] : 10,
@@ -139,7 +144,7 @@ export const libraryAdd: Tool = {
 };
 
 /**
- * 題名・種類・取引先を直す（「この資料の取引先は B 社」）。人が直した項目は、AI が読み直しても書き換えない。
+ * 題名・種類・取引先・タグを直す（「この資料の取引先は B 社」「この資料に Aster のタグを付けて」）。人が直した項目は、AI が読み直しても書き換えない。
  *
  * @remarks 危険度 `write-internal`。本人の目録だけを直す
  */
@@ -147,21 +152,22 @@ export const libraryUpdate: Tool = {
   name: 'library.update',
   risk: 'write-internal',
   activityLabel: '資料を直しています',
-  helpText: '本人の資料の題名・種類・取引先を直します',
-  description: '本人の資料の題名・種類・取引先を直す。id は library.search の id。直す項目だけを入れる',
+  helpText: '本人の資料の題名・種類・取引先・タグを直します',
+  description: '本人の資料の題名・種類・取引先・タグを直す。id は library.search の id。直す項目だけを入れる。tags は 10 個までで、渡した並びに置き換わる（足すときは今のタグに加えて渡す）',
   args: {
     properties: {
       id: { type: 'string', description: '資料の ID' },
       title: { type: 'string', description: '題名' },
       docType: { type: 'string', description: '種類' },
       counterparty: { type: 'string', description: '取引先' },
+      tags: { type: 'array', items: { type: 'string', description: 'タグ' }, description: 'タグ' },
     },
     required: ['id'],
   },
   async invoke(args, ctx) {
     const service = await serviceOf(ctx);
     if (!service) return UNAVAILABLE;
-    const r = await service.update(who(ctx), str(args['id']), { title: args['title'], docType: args['docType'], counterparty: args['counterparty'] });
+    const r = await service.update(who(ctx), str(args['id']), { title: args['title'], docType: args['docType'], counterparty: args['counterparty'], tags: args['tags'] });
     if ('error' in r) return { available: false, reason: r.error };
     return { available: true, item: brief(r) };
   },

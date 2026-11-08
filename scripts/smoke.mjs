@@ -9441,7 +9441,28 @@ console.log('\n■ 137. 資料（入り切り・取り込み・同じ中身を�
     const badDate = await call('a', `/v1/library/${id}`, { method: 'PATCH', body: JSON.stringify({ docDate: '来年' }) }, 'member');
     badDate.status === 400 ? ok('日付の形が違えば断る') : ng('日付の形を確かめていない');
     const fixed = await call('a', '/v1/library?year=2025&counterparty=' + encodeURIComponent('B 社'), {}, 'member');
-    fixed.body.items?.some((i) => i.id === id) && fixed.body.facets?.counterparties?.includes('B 社') ? ok('取引先と年で絞り込める') : ng('絞り込めない');
+    fixed.body.items?.some((i) => i.id === id) ? ok('取引先と年で絞り込める') : ng('絞り込めない');
+    // タグ（第44.17.3節）。取引先・案件・種類などを区別しない
+    const tagName = `案件${stamp}`;
+    const tagFix = await call('a', `/v1/library/${id}`, { method: 'PATCH', body: JSON.stringify({ tags: `${tagName}、設計、#認証` }) }, 'member');
+    tagFix.status === 200 && tagFix.body.tags?.join() === `${tagName},設計,認証` && tagFix.body.edited.includes('tags')
+      ? ok('タグを直せる（「、」で区切ってよく、頭の「#」は外す）') : ng('タグを直せない', JSON.stringify(tagFix.body).slice(0, 200));
+    const byTag = await call('a', `/v1/library?tags=${encodeURIComponent(`${tagName}\n設計`)}`, {}, 'member');
+    byTag.body.total === 1 && byTag.body.items?.[0]?.id === id && byTag.body.facets?.tags?.includes(tagName) ? ok('タグで絞り込めて（全部を持つもの）、選択肢に出る') : ng('タグで絞り込めない', JSON.stringify(byTag.body).slice(0, 200));
+    const byTagNone = await call('a', `/v1/library?tags=${encodeURIComponent(`${tagName}\n無いタグ`)}`, {}, 'member');
+    byTagNone.body.total === 0 ? ok('選んだタグを全部持たなければ出さない') : ng('タグの絞り込みが広すぎる');
+    const byWord = await call('a', `/v1/library?q=${encodeURIComponent('認証')}`, {}, 'member');
+    byWord.body.items?.some((i) => i.id === id && i.why?.some((w) => w.startsWith('タグ'))) ? ok('タグは言葉でも探せる') : ng('タグで探せない');
+    const tagGraph = await call('a', `/v1/library/graph?tags=${encodeURIComponent(tagName)}`, {}, 'member');
+    tagGraph.status === 200 && tagGraph.body.shown === 1 && tagGraph.body.links?.every((l) => typeof l.hub === 'boolean') ? ok('つながりの画面もタグで絞り込める') : ng('つながりの画面をタグで絞り込めない', JSON.stringify(tagGraph.body).slice(0, 200));
+
+    // 確かめた記録（第44.16.1節）。本人が「開く」で開いたら記録し、ほかの人が開いても記録しない
+    const openedByOther = await call('a', `/v1/library/${id}/opened`, { method: 'POST', body: '{}' }, 'admin');
+    const afterOther = await call('a', `/v1/library/${id}`, {}, 'member');
+    const opened = await call('a', `/v1/library/${id}/opened`, { method: 'POST', body: '{}' }, 'member');
+    const afterOpen = await call('a', `/v1/library/${id}`, {}, 'member');
+    openedByOther.body?.recorded === false && afterOther.body.viewedAt === null && opened.body?.recorded === true && typeof afterOpen.body.viewedAt === 'string'
+      ? ok('本人が「開く」で開いたら確かめた記録を付け、ほかの人が開いても付けない') : ng('確かめた記録が違う', JSON.stringify({ other: openedByOther.body, mine: opened.body, viewedAt: afterOpen.body.viewedAt }));
 
     const drivePick = await call('a', '/v1/library/drive-picker', {}, 'member');
     if (drivePick.body.kind === 'mock' && drivePick.body.items?.[0]) {
@@ -9646,14 +9667,16 @@ console.log('\n■ 139. 資料の共有とつながり（グループ・会社�
     const noToggle = await call('a', '/v1/library/okf', {}, 'member');
     noToggle.status === 404 ? ok('目録の書き出しの入り切りの口は無い') : ng(`入り切りの口が残っている（${noToggle.status}）`);
     const memberId = users.items.find((u) => u.email.startsWith('member@')).id;
+    // 書き出しは裏の見回りで行うので、書いた日時と文書の数がそろうまで待つ（前の回に書いた日時だけを見て数えない）
     let written = null;
-    for (let i = 0; i < 20 && !written; i++) {
+    let docs = 0;
+    for (let i = 0; i < 30 && !(written && docs >= 2); i++) {
       const st = await owner.query('select okf_written_at from library_owner_state where tenant_id = $1 and owner_id = $2', ['t-alpha', memberId]);
       written = st.rows[0]?.okf_written_at ?? null;
-      if (!written) await sleep(1000);
+      docs = (await owner.query(`select count(*)::int as n from library_okf_files where tenant_id = $1 and owner_id = $2 and key <> 'index' and key not like '%:%'`, ['t-alpha', memberId])).rows[0].n;
+      if (!(written && docs >= 2)) await sleep(1000);
     }
-    const docs = await owner.query('select count(*)::int as n from library_okf_files where tenant_id = $1 and owner_id = $2 and key <> $3', ['t-alpha', memberId, 'index']);
-    written && docs.rows[0].n >= 2 ? ok('資料を入れると、何もしなくても目録を書き出す') : ng('目録を書き出さない', JSON.stringify({ written, n: docs.rows[0].n }));
+    written && docs >= 2 ? ok('資料を入れると、何もしなくても目録を書き出す') : ng('目録を書き出さない', JSON.stringify({ written, n: docs }));
 
     const audits = await owner.query(`select action, detail::text as detail from audit_events where tenant_id = 't-alpha' and action in ('library.share', 'library.knowledge') and occurred_at > now() - interval '5 minutes'`);
     audits.rows.length >= 4 && audits.rows.every((a) => !a.detail.includes(stamp)) ? ok('共有と会社の知識を記録し、題名を残さない') : ng('記録が違う', JSON.stringify(audits.rows).slice(0, 300));

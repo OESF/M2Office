@@ -14,6 +14,9 @@ import { api, ApiError, describeError } from './api.js';
 import { BackButton } from './back-button.js';
 import { pickDriveFiles } from './google-picker.js';
 
+/** フォルダを選べるか（スマホのブラウザはフォルダを選べないので、選択肢に出さない）。 */
+const canPickFolder = typeof window === 'undefined' || !window.matchMedia?.('(pointer: coarse)').matches;
+
 /** つながりの画面（グラフ）。開いたときだけ読み込む（第44.17.2節）。 */
 const LibraryGraphView = lazy(() => import('./LibraryGraph.js'));
 
@@ -81,13 +84,14 @@ interface Upload { total: number; done: number; same: number; failed: { name: st
 function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: string }) {
   const [items, setItems] = useState<(LibraryItemView & { why: string[] })[] | null>(null);
   const [total, setTotal] = useState(0);
-  const [facets, setFacets] = useState<LibraryFacets>({ docTypes: [], counterparties: [], years: [] });
+  const [facets, setFacets] = useState<LibraryFacets>({ tags: [], years: [] });
   const [progress, setProgress] = useState<LibraryProgress | null>(null);
   const [google, setGoogle] = useState(true);
   const [picker, setPicker] = useState(false);
   const [q, setQ] = useState('');
-  const [docType, setDocType] = useState('');
-  const [counterparty, setCounterparty] = useState('');
+  /** 絞り込むタグ（全部を持つ資料に絞る。第44.17.3節）と、入力の途中の文字。 */
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
   const [year, setYear] = useState('');
   const [entry, setEntry] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -99,10 +103,21 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
   const cancelled = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+  const addMenu = useRef<HTMLDetailsElement>(null);
+  // 「入れる」の選択肢は、外を押すか Esc で閉じる
+  useEffect(() => {
+    const close = (e: MouseEvent) => { if (addMenu.current?.open && !addMenu.current.contains(e.target as Node)) addMenu.current.removeAttribute('open'); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape' && addMenu.current?.open) { addMenu.current.removeAttribute('open'); addMenu.current.querySelector('summary')?.focus(); } };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key); };
+  }, []);
 
   const filter = useCallback(() => ({
-    ...(q.trim() ? { q: q.trim() } : {}), ...(docType ? { docType } : {}), ...(counterparty ? { counterparty } : {}), ...(year ? { year } : {}), ...(entry ? { entry } : {}),
-  }), [q, docType, counterparty, year, entry]);
+    ...(q.trim() ? { q: q.trim() } : {}), ...(tags.length ? { tags: tags.join('\n') } : {}), ...(year ? { year } : {}),
+    ...(entry ? { entry } : {}),
+  }), [q, tags, year, entry]);
+  const addTag = (t: string) => { const v = t.trim(); if (v && !tags.includes(v)) setTags([...tags, v]); setTagInput(''); };
 
   const load = useCallback(() => {
     api.library.list(filter())
@@ -242,7 +257,7 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
     }
   };
 
-  const filtered = !!(q.trim() || docType || counterparty || year || entry);
+  const filtered = !!(q.trim() || tags.length || year || entry);
   const left = upload ? upload.total - upload.done - upload.same - upload.failed.length : 0;
   return (
     <div className={`library${dragging ? ' is-dragging' : ''}`}
@@ -251,9 +266,15 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       onDrop={onDrop}>
       {!google && <p className="error">資料のファイルは本人の Google ドライブに置きます。個人設定の「Google 連携」で接続してください。</p>}
       <div className="row wrap library-entry">
-        <button className="btn" disabled={!google || !!upload?.running} onClick={() => fileInput.current?.click()}>ファイルを入れる</button>
-        <button className="btn ghost" disabled={!google || !!upload?.running} onClick={() => folderInput.current?.click()}>フォルダを入れる</button>
-        {picker && <button className="btn ghost" disabled={!google} onClick={() => void fromDrive()}>ドライブから選ぶ</button>}
+        {/* 入れ方は 1 つのボタンにまとめる（ブラウザはファイルとフォルダを同じ選ぶ画面で選べないため、押してから選ぶ）。ドラッグでも入れられる */}
+        <details className={`library-add${!google ? ' is-disabled' : ''}`} ref={addMenu}>
+          <summary className="btn" aria-disabled={!google} onClick={(e) => { if (!google) e.preventDefault(); }}>入れる</summary>
+          <div className="library-add-menu" role="menu" onClick={() => addMenu.current?.removeAttribute('open')}>
+            <button role="menuitem" disabled={!!upload?.running} onClick={() => fileInput.current?.click()}>ファイル</button>
+            {canPickFolder && <button role="menuitem" disabled={!!upload?.running} onClick={() => folderInput.current?.click()}>フォルダ</button>}
+            {picker && <button role="menuitem" onClick={() => void fromDrive()}>ドライブから選ぶ</button>}
+          </div>
+        </details>
         <input ref={fileInput} type="file" hidden multiple
           onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) void begin(fs.map((file) => ({ file, folder: '' }))); }} />
         <input ref={folderInput} type="file" hidden multiple {...({ webkitdirectory: '' } as object)}
@@ -310,15 +331,14 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
           <button className={view === 'list' ? 'btn small' : 'btn ghost small'} aria-pressed={view === 'list'} onClick={() => setView('list')}>一覧</button>
           <button className={view === 'graph' ? 'btn small' : 'btn ghost small'} aria-pressed={view === 'graph'} onClick={() => setView('graph')}>つながり</button>
         </div>
-        <input className="library-search" type="search" value={q} placeholder="探す（取引先・品名・書類の種類など）" aria-label="探す" maxLength={LIBRARY_LIMITS.queryChars} onChange={(e) => setQ(e.target.value)} />
-        <select value={counterparty} aria-label="取引先" onChange={(e) => setCounterparty(e.target.value)}>
-          <option value="">取引先: すべて</option>
-          {facets.counterparties.map((v) => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <select value={docType} aria-label="種類" onChange={(e) => setDocType(e.target.value)}>
-          <option value="">種類: すべて</option>
-          {facets.docTypes.map((v) => <option key={v} value={v}>{v}</option>)}
-        </select>
+        <input className="library-search" type="search" value={q} placeholder="探す（取引先・案件・品名など）" aria-label="探す" maxLength={LIBRARY_LIMITS.queryChars} onChange={(e) => setQ(e.target.value)} />
+        <div className="library-tag-filter">
+          {tags.map((t) => <button key={t} className="library-tag on" aria-label={`タグ「${t}」を外す`} onClick={() => setTags(tags.filter((x) => x !== t))}>{t} ×</button>)}
+          <input list="library-tag-options" value={tagInput} placeholder="タグ" aria-label="タグで絞り込む" maxLength={LIBRARY_LIMITS.tagChars}
+            onChange={(e) => { const v = e.target.value; if (facets.tags.includes(v)) addTag(v); else setTagInput(v); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && tagInput.trim()) { e.preventDefault(); addTag(facets.tags.find((t) => t.toLowerCase() === tagInput.trim().toLowerCase()) ?? tagInput); } }} />
+          <datalist id="library-tag-options">{facets.tags.filter((t) => !tags.includes(t)).map((t) => <option key={t} value={t} />)}</datalist>
+        </div>
         <select value={year} aria-label="年" onChange={(e) => setYear(e.target.value)}>
           <option value="">年: すべて</option>
           {facets.years.map((v) => <option key={v} value={v}>{v} 年</option>)}
@@ -336,7 +356,7 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
         ? <p className="muted">{filtered ? '当たる資料はありません。' : 'まだ資料がありません。'}</p>
         : <>
           {graph.total > graph.shown && <p className="small muted" role="status">新しい {graph.shown.toLocaleString('ja-JP')} 件を描いています（全 {graph.total.toLocaleString('ja-JP')} 件）。絞り込むと、その範囲を描きます</p>}
-          <Suspense fallback={<p className="muted">読み込んでいます…</p>}><LibraryGraphView graph={graph} onOpen={onOpen} /></Suspense>
+          <Suspense fallback={<p className="muted">読み込んでいます…</p>}><LibraryGraphView graph={graph} onOpen={onOpen} onOpenFile={(id) => void api.library.opened(id)} /></Suspense>
         </>)}
       {view === 'list' && items && items.length === 0 && (
         filtered
@@ -356,13 +376,19 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
                   {(i.readState === 'pending' || i.readState === 'paused') && <span className="badge">読む前</span>}
                   {!i.mine && <span className="badge">共有: {i.ownerName ?? '同じ会社の人'}</span>}
                   {i.mine && i.shareScope !== 'self' && <span className="badge">{LIBRARY_SHARE_LABELS[i.shareScope]}</span>}
+                  {i.mine && i.viewedAt && <span className="badge">確認済み</span>}
                 </span>
                 <span className="library-meta small muted">
-                  {[i.counterparty, i.docType, dayLabel(i.docDate ?? i.receivedAt), LIBRARY_ENTRY_LABELS[i.entry]].filter(Boolean).join(' ・ ')}
+                  {[dayLabel(i.docDate ?? i.receivedAt), LIBRARY_ENTRY_LABELS[i.entry]].filter(Boolean).join(' ・ ')}
                 </span>
                 {i.summary && <span className="library-summary small">{i.summary}</span>}
                 {i.why.length > 0 && <span className="library-why small muted">{i.why.join('・')}</span>}
               </button>
+              {i.tags.length > 0 && (
+                <div className="library-row-tags">
+                  {i.tags.map((t) => <button key={t} className={tags.includes(t) ? 'library-tag on' : 'library-tag'} onClick={() => addTag(t)}>{t}</button>)}
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -456,7 +482,7 @@ function MailIntake({ google, onImported }: { google: boolean; onImported: () =>
 /** 1 件。題名などを直す・開く・もう一度読む・削除・共有・会社の知識（持ち主だけ）。共有された資料は見るだけ。 */
 function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void; onOpen: (id: string) => void }) {
   const [item, setItem] = useState<LibraryItemPage | null>(null);
-  const [form, setForm] = useState({ title: '', docType: '', counterparty: '', docDate: '' });
+  const [form, setForm] = useState({ title: '', tags: '', docDate: '' });
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -464,7 +490,7 @@ function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void;
   const load = useCallback(() => {
     api.library.get(id).then((i) => {
       setItem(i);
-      setForm({ title: libraryTitleOf(i), docType: i.docType, counterparty: i.counterparty, docDate: i.docDate ?? '' });
+      setForm({ title: libraryTitleOf(i), tags: i.tags.join('、'), docDate: i.docDate ?? '' });
       setError(null);
     }).catch((e) => setError(describeError(e, '読めませんでした')));
   }, [id]);
@@ -486,9 +512,9 @@ function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void;
   const save = () => {
     if (!item?.mine) return;
     const patch: Record<string, string | null> = {};
+    // タグは「、」で区切って直す（API が整える）
+    if (form.tags !== item.tags.join('、')) patch['tags'] = form.tags;
     if (form.title.trim() !== libraryTitleOf(item)) patch['title'] = form.title;
-    if (form.docType !== item.docType) patch['docType'] = form.docType;
-    if (form.counterparty !== item.counterparty) patch['counterparty'] = form.counterparty;
     if (form.docDate !== (item.docDate ?? '')) patch['docDate'] = form.docDate || null;
     if (Object.keys(patch).length === 0) return;
     void act(async () => { await api.library.update(id, patch); load(); }, '直しました');
@@ -501,7 +527,8 @@ function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void;
     <div className="library-detail">
       <BackButton label="資料の一覧へ" onClick={onBack} />
       <div className="row wrap library-actions">
-        {item.driveUrl && <a className="btn" href={item.driveUrl} target="_blank" rel="noreferrer">開く</a>}
+        {/* 本人が実際の資料を開いたら、確かめた記録にする（第44.16.1節） */}
+        {item.driveUrl && <a className="btn" href={item.driveUrl} target="_blank" rel="noreferrer" onClick={() => { if (item.mine) void api.library.opened(item.id).then(load); }}>開く</a>}
         {mine && <button className="btn ghost" disabled={busy} onClick={() => void act(async () => { await api.library.reread(id); load(); }, 'もう一度読みます')}>もう一度読む</button>}
         {mine && (item.knowledgeId
           ? <span className="badge">会社の知識</span>
@@ -521,8 +548,7 @@ function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void;
       {mine && <ShareBox item={item} onChanged={load} />}
       <div className="card library-form">
         <label>題名<input value={form.title} readOnly={!mine} maxLength={LIBRARY_LIMITS.titleChars} onChange={(e) => setForm({ ...form, title: e.target.value })} onBlur={save} /></label>
-        <label>種類<input value={form.docType} readOnly={!mine} maxLength={LIBRARY_LIMITS.typeChars} onChange={(e) => setForm({ ...form, docType: e.target.value })} onBlur={save} /></label>
-        <label>取引先<input value={form.counterparty} readOnly={!mine} maxLength={LIBRARY_LIMITS.counterpartyChars} onChange={(e) => setForm({ ...form, counterparty: e.target.value })} onBlur={save} /></label>
+        <label>タグ<input value={form.tags} readOnly={!mine} maxLength={(LIBRARY_LIMITS.tagChars + 1) * LIBRARY_LIMITS.tagCount} onChange={(e) => setForm({ ...form, tags: e.target.value })} onBlur={save} /></label>
         <label>書類の日付<input type="date" value={form.docDate} readOnly={!mine} onChange={(e) => setForm({ ...form, docDate: e.target.value })} onBlur={save} /></label>
       </div>
       {item.summary && <p>{item.summary}</p>}

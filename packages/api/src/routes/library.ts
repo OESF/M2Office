@@ -47,6 +47,12 @@ export function libraryRoute(deps: AppDeps) {
     if (c.req.method !== 'GET') keeper.touch(tenant.id);
   });
 
+  /** 絞り込むタグ（改行で区切る。全部を持つ資料に絞る。第44.17.3節）。無ければ `null`。 */
+  const tagsOf = (v: string | undefined): string[] | null => {
+    const list = (v ?? '').split('\n').map((t) => t.trim().slice(0, LIBRARY_LIMITS.tagChars)).filter(Boolean).slice(0, 10);
+    return list.length ? list : null;
+  };
+
   /** 一覧（絞り込み）と、絞り込みの選択肢・読み取りの進み具合・ドライブに置けるか。 */
   app.get('/', async (c) => {
     const q = c.req.query();
@@ -56,6 +62,7 @@ export function libraryRoute(deps: AppDeps) {
       q: (q['q'] ?? '').slice(0, LIBRARY_LIMITS.queryChars),
       ...(q['docType'] ? { docType: q['docType'] } : {}),
       ...(q['counterparty'] ? { counterparty: q['counterparty'] } : {}),
+      ...(tagsOf(q['tags']) ? { tags: tagsOf(q['tags'])! } : {}),
       ...(Number.isInteger(year) && year >= 1900 && year <= 2200 ? { year } : {}),
       ...(entry in LIBRARY_ENTRY_LABELS ? { entry: entry as LibraryEntry } : {}),
       offset: Math.max(Number(q['offset']) || 0, 0),
@@ -162,6 +169,7 @@ export function libraryRoute(deps: AppDeps) {
       q: (q['q'] ?? '').slice(0, LIBRARY_LIMITS.queryChars),
       ...(q['docType'] ? { docType: q['docType'] } : {}),
       ...(q['counterparty'] ? { counterparty: q['counterparty'] } : {}),
+      ...(tagsOf(q['tags']) ? { tags: tagsOf(q['tags'])! } : {}),
       ...(Number.isInteger(year) && year >= 1900 && year <= 2200 ? { year } : {}),
       ...(entry in LIBRARY_ENTRY_LABELS ? { entry: entry as LibraryEntry } : {}),
     }));
@@ -175,6 +183,9 @@ export function libraryRoute(deps: AppDeps) {
     const item = await service.page(who(c), c.req.param('id'));
     return item ? c.json(item) : notFound(c);
   });
+
+  /** 本人が「開く」で実際の資料を開いた（確かめた記録。第44.16.1節）。本人の資料でなければ何もしない。 */
+  app.post('/:id/opened', async (c) => c.json({ recorded: await service.markOpened(who(c), c.req.param('id')) }));
 
   /** ローカルグラフ（その資料のまわり 2 歩先まで。本人の資料だけ）。 */
   app.get('/:id/graph', async (c) => {

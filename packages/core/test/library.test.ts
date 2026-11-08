@@ -159,12 +159,12 @@ test('AI の整理で題名・種類・取引先・日付・要約・語を入�
   assert.equal((await service.list(A, { q: 'カタログ' })).total, 0);
   assert.equal((await service.list(A, { year: 2026, docType: '見積' })).total, 1);
   assert.equal((await service.list(A, { year: 2025 })).total, 0);
-  assert.deepEqual(await service.facets(A), { docTypes: ['見積'], counterparties: ['A 社'], years: [2026] });
+  assert.deepEqual(await service.facets(A), { tags: ['A 社', '見積'], years: [2026] });
 });
 
 test('AI の答えは決めた項目の値としてだけ受け取り、形の違う日付は入れない', () => {
   const r = parseReadingFields('前置き {"title":"題\\n名","docType":"見積","counterparty":"","docDate":"去年","summary":"s","keywords":["a","a","b",1],"share":"全員"} 後ろ', '2026-11-07');
-  assert.deepEqual(r, { title: '題 名', docType: '見積', counterparty: '', docDate: null, summary: 's', keywords: ['a', 'b'] });
+  assert.deepEqual(r, { title: '題 名', docType: '見積', counterparty: '', docDate: null, summary: 's', keywords: ['a', 'b'], tags: [] });
   assert.equal(parseReadingFields('読めません', '2026-11-07'), null);
   assert.equal(parseReadingFields('{"docDate":"1200-01-01"}', '2026-11-07')?.docDate, null);
 });
@@ -195,8 +195,12 @@ test('読めないものは推測で埋めず、読めなかったと示す。�
   const big = await service.importFile(A, { name: '大きい.pdf', bytes: Object.assign(new Uint8Array(26 * 1024 * 1024), { 0: 0x25, 1: 0x50, 2: 0x44, 3: 0x46 }) });
   assert.ok('item' in big);
   assert.equal(big.item.readState, 'too_large');
-  assert.equal(await service.tick(['t1']), 0, '読めないものは AI を呼ばない');
-  assert.equal(llm.prompts.length, 0);
+  // 中身を読む整理の頼み（付け直しの頼みは除く。第44.17.3節）
+  const reads = () => llm.prompts.filter((p) => !p.includes('目録に、タグを付けます')).length;
+  assert.equal(await service.tick(['t1']), 3, '読めないものは中身を読まず、名前からタグだけを付ける');
+  assert.equal(reads(), 0, '読めないものは中身を読む AI を呼ばない');
+  assert.equal(llm.prompts.length, 1, '名前だけをまとめて 1 回で頼む');
+  assert.ok(llm.prompts[0]!.includes('古い.ppt'));
 
   // 文字の無いファイルは読めなかったにする
   const empty = await service.importFile(A, { name: '空.txt', bytes: text('   ') });
@@ -204,7 +208,7 @@ test('読めないものは推測で埋めず、読めなかったと示す。�
   await service.tick(['t1']);
   const e = await service.get(A, empty.item.id);
   assert.equal(e?.readState, 'unreadable');
-  assert.equal(llm.prompts.length, 0, '読めないものを AI に渡して埋めない');
+  assert.equal(reads(), 0, '読めないものを AI に渡して埋めない');
 
   // 人が直した項目
   const doc = await service.importFile(A, { name: '見積.txt', bytes: text('見積') });

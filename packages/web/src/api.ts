@@ -1965,6 +1965,8 @@ export const api = {
     fromDrive: (fileId: string) => call<{ item: LibraryItem; duplicate: boolean }>('/library/from-drive', { method: 'POST', body: JSON.stringify({ fileId }) }),
     update: (id: string, patch: Record<string, unknown>) => call<LibraryItem>(`/library/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     reread: (id: string) => call<LibraryItem>(`/library/${encodeURIComponent(id)}/reread`, { method: 'POST', body: '{}' }),
+    /** 「開く」で実際の資料を開いた（確かめた記録。第44.16.1節）。失敗しても画面は止めない。 */
+    opened: (id: string) => call<{ recorded: boolean }>(`/library/${encodeURIComponent(id)}/opened`, { method: 'POST', body: '{}' }).catch(() => null),
     remove: (id: string) => call<{ ok: true; trashed: boolean }>(`/library/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** メールの添付の取り込み（第44.4節）。 */
     mail: {

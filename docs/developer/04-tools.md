@@ -156,7 +156,7 @@
 | `library.add` | write-internal | `drive.file`（機密でない） | 渡されたファイルを本人の資料に入れます |
 | `library.knowledge` | write-internal | `drive.file`（機密でない） | 本人の資料を、会社の全員の秘書が参照できる知識にします。個人の情報に関わる資料はしません |
 | `library.share` | write-internal | `drive.file`（機密でない） | 本人の資料を、グループや会社の人と共有します。自分だけに戻すこともできます。社外の人とは共有しません |
-| `library.update` | write-internal | — | 本人の資料の題名・種類・取引先を直します |
+| `library.update` | write-internal | — | 本人の資料の題名・種類・取引先・タグを直します |
 | `members.points` | write-internal | — | 会員のポイントを足す・引く（理由を残す） |
 | `members.rank` | write-internal | — | 会員のランクの境（直近 1 年の来店の回数）を見る・決める・自動に戻す（決めるのは管理者） |
 | `members.rewards` | write-internal | — | ポイントと交換できる特典を作る・直す・止める（管理者） |
@@ -248,7 +248,7 @@
 | `inventory.search` | `query`: 探す言葉（空なら全品目）、`lowOnly`: 残りわずかの品目だけにするか |
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
 | `library.read` | `id`（必須）: 資料の ID |
-| `library.search` | `query`: 探す言葉、`words`: 言い換え、`docType`: 種類、`counterparty`: 取引先、`year`: 書類の年（西暦）、`entry`: 入口、`limit`: 件数（既定 10） |
+| `library.search` | `query`: 探す言葉、`words`: 言い換え、`docType`: 種類、`counterparty`: 取引先、`tags`: タグ（全部を持つ資料に絞る）、`year`: 書類の年（西暦）、`entry`: 入口、`limit`: 件数（既定 10） |
 | `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議）、`meetingId`: 会議の記録の ID（自動の議事録が入力に入れたもの。無ければ空） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
 | `members.find` | `query`: 会員番号か呼び名、`order`: points・visits・recent・away、`awayDays`: 何日来ていない会員か、`rank`: gold・silver（そのランクの会員だけ） |
@@ -333,7 +333,7 @@
 | `library.add` | `fileId`（必須）: ファイルの ID |
 | `library.knowledge` | `id`（必須）: 資料の ID |
 | `library.share` | `ids`（必須）: 共有する資料の ID、`scope`（必須）: 共有の範囲（self・group・company）、`group`: グループの名前（scope が group のとき）、`again`: 止めた後に本人がもう一度頼んだときだけ true |
-| `library.update` | `id`（必須）: 資料の ID、`title`: 題名、`docType`: 種類、`counterparty`: 取引先 |
+| `library.update` | `id`（必須）: 資料の ID、`title`: 題名、`docType`: 種類、`counterparty`: 取引先、`tags`: タグ |
 | `members.points` | `query`（必須）: 会員番号か呼び名、`points`（必須）: 足す数（引くなら負）、`note`（必須）: 理由 |
 | `members.rank` | `action`（必須）: show・set・auto、`silver`: シルバーになる直近 1 年の来店の回数、`gold`: ゴールドになる直近 1 年の来店の回数 |
 | `members.rewards` | `action`（必須）: list・create・update・stop、`name`: 特典の名前、`points`: 必要なポイント、`newName`: 新しい名前、`birthdayOnly`: 誕生月の会員だけが使える特典か、`minRank`: regular（全員）・silver（シルバー以上）・gold（ゴールドだけ） |

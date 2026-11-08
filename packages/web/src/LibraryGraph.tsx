@@ -1,7 +1,7 @@
 /**
  * @file 資料のつながりの画面（グラフ。仕様書 第44.17.2節、ADR-0127）。force-graph（canvas 2D）で、点どうしが引き合い・離れ合って並ぶ形に描く。
  *
- * 資料を点に、取引先を名前の付いた大きめの点にする。点を押すと、その点とつながる点だけを明るくし、横に題名・要約・「開く」「詳しく」を出す。
+ * 資料を色の付いた丸に、タグを「# 名前」の淡い札にする（取引先・案件・種類などを区別せず、同じ形と色。資料より目立たせない。第44.17.3節）。点を押すと、その点とつながる点だけを明るくし、横に題名・要約・「開く」「詳しく」を出す。
  * 引っ張る・拡大・縮小ができる（指でもつまんで拡大できる）。言葉に当たった資料は輪で光らせる。
  * 色は画面の色の決まり（CSS の変数 `--graph-*`）から取り、暗い表示に切り替えたら描き直す。
  * このファイルは、グラフの画面を開いたときだけ読み込む（ほかの画面を重くしない）。
@@ -17,19 +17,51 @@ type GNode = LibraryGraphNode & { x?: number; y?: number };
 type GLink = Omit<LibraryGraphLink, 'source' | 'target'> & { source: string | GNode; target: string | GNode };
 
 /** 画面の色（CSS の変数から読む）。 */
-interface Colors { types: string[]; party: string; link: string; dim: string; accent: string; ink: string; panel: string }
+interface Colors { types: string[]; tag: string; tagBg: string; link: string; hubLink: string; dim: string; accent: string; ink: string; panel: string }
 
 function readColors(): Colors {
   const css = getComputedStyle(document.documentElement);
   const v = (name: string) => css.getPropertyValue(name).trim();
   return {
     types: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--graph-${i}`)),
-    party: v('--graph-party'), link: v('--graph-link'), dim: v('--graph-dim'), accent: v('--accent'), ink: v('--ink'), panel: v('--panel'),
+    tag: v('--graph-tag'), tagBg: v('--graph-tag-bg'), link: v('--graph-link'), hubLink: v('--graph-hub-link'), dim: v('--graph-dim'), accent: v('--accent'), ink: v('--ink'), panel: v('--panel'),
   };
 }
 
 const idOf = (end: string | GNode) => (typeof end === 'string' ? end : end.id);
-const radiusOf = (n: GNode) => (n.kind === 'party' ? Math.min(20, 8 + Math.sqrt(n.degree) * 2) : Math.min(14, 4 + Math.sqrt(n.degree) * 1.5));
+const isHub = (n: Pick<GNode, 'kind'>) => n.kind !== 'item';
+const radiusOf = (n: GNode) => Math.min(14, 4 + Math.sqrt(n.degree) * 1.5);
+
+/** 資料の点の形を描く（丸）。 */
+function shapeOf(ctx: CanvasRenderingContext2D, n: GNode, r: number) {
+  ctx.beginPath();
+  ctx.arc(n.x ?? 0, n.y ?? 0, r, 0, 2 * Math.PI);
+}
+
+/** タグの札の文字（長い名前は縮める）。 */
+const chipText = (n: GNode) => `# ${n.label.length > 16 ? `${n.label.slice(0, 16)}…` : n.label}`;
+
+/**
+ * タグの札の大きさを決め、角の丸い四角の道を作る。画面の上で同じ大きさに見えるよう、拡大の倍率で割る。
+ * 多くの資料に付いたタグほど、文字を少し大きくする。
+ *
+ * @returns 札の幅と高さ（グラフの座標）
+ */
+function chipPath(ctx: CanvasRenderingContext2D, n: GNode, scale: number): { w: number; h: number; font: number } {
+  const font = (10 + Math.min(3, Math.sqrt(n.degree) * 0.6)) / scale;
+  ctx.font = `600 ${font}px sans-serif`;
+  const w = ctx.measureText(chipText(n)).width + (10 / scale);
+  const h = font * 1.7;
+  const x = (n.x ?? 0) - w / 2, y = (n.y ?? 0) - h / 2, r = h / 2;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  return { w, h, font };
+}
 
 /**
  * 資料のつながりを描く。
@@ -38,10 +70,12 @@ const radiusOf = (n: GNode) => (n.kind === 'party' ? Math.min(20, 8 + Math.sqrt(
  * @param props.onOpen 資料の 1 件の画面を開く
  * @param props.compact 1 件の画面の小さなグラフ（ローカルグラフ）。点を押すと、その資料を開く
  * @param props.focusId はじめから選んでおく資料
+ * @param props.onOpenFile 「開く」で実際の資料を開いたとき（確かめた記録。第44.16.1節）。無ければ何もしない
  */
-export default function LibraryGraphView({ graph, onOpen, compact = false, focusId }: {
+export default function LibraryGraphView({ graph, onOpen, compact = false, focusId, onOpenFile }: {
   graph: LibraryGraph;
   onOpen: (id: string) => void;
+  onOpenFile?: (id: string) => void;
   compact?: boolean;
   focusId?: string;
 }) {
@@ -98,12 +132,27 @@ export default function LibraryGraphView({ graph, onOpen, compact = false, focus
       const s = state.current.selected ?? state.current.hovered;
       return !s || s === id || !!view.neighbors.get(s)?.has(id);
     };
-    const colorOf = (n: GNode) => (n.kind === 'party' ? colors.party : colors.types[view.typeIndex.get(n.docType) ?? 7] ?? colors.types[0]!);
+    const colorOf = (n: GNode) => (n.kind === 'item' ? colors.types[view.typeIndex.get(n.docType) ?? 7] ?? colors.types[0]! : colors.tag);
     g.nodeCanvasObject((n, ctx, scale) => {
-      const r = radiusOf(n);
       const lit = near(n.id);
-      ctx.beginPath();
-      ctx.arc(n.x ?? 0, n.y ?? 0, r, 0, 2 * Math.PI);
+      if (isHub(n)) {
+        // タグは淡い札（資料の丸より目立たせない）。選んだ・言葉に当たったタグは強調の色の縁
+        const { font } = chipPath(ctx, n, scale);
+        ctx.fillStyle = lit ? colors.tagBg : colors.panel;
+        ctx.fill();
+        const strong = view.matched.has(n.id) || state.current.selected === n.id;
+        ctx.lineWidth = (strong ? 2 : 1) / scale;
+        ctx.strokeStyle = strong ? colors.accent : lit ? colors.tag : colors.dim;
+        ctx.stroke();
+        ctx.font = `600 ${font}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = lit ? colors.tag : colors.dim;
+        ctx.fillText(chipText(n), n.x ?? 0, (n.y ?? 0) + font * 0.05);
+        return;
+      }
+      const r = radiusOf(n);
+      shapeOf(ctx, n, r);
       ctx.fillStyle = lit ? colorOf(n) : colors.dim;
       ctx.fill();
       if (view.matched.has(n.id) || state.current.selected === n.id) {
@@ -111,11 +160,11 @@ export default function LibraryGraphView({ graph, onOpen, compact = false, focus
         ctx.strokeStyle = colors.accent;
         ctx.stroke();
       }
-      // 取引先の名前は常に、資料の題名は拡大したときか、選んだ・指した点とそのとなりだけ
-      const showLabel = n.kind === 'party' || scale >= 2.2 || ((state.current.selected || state.current.hovered) && lit);
+      // 資料の題名は、拡大したときか、選んだ・指した点とそのとなりだけ
+      const showLabel = scale >= 2.2 || ((state.current.selected || state.current.hovered) && lit);
       if (!showLabel) return;
-      const font = (n.kind === 'party' ? 13 : 11) / scale;
-      ctx.font = `${n.kind === 'party' ? '600 ' : ''}${font}px sans-serif`;
+      const font = 11 / scale;
+      ctx.font = `${font}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       const label = n.label.length > 24 ? `${n.label.slice(0, 24)}…` : n.label;
@@ -125,20 +174,20 @@ export default function LibraryGraphView({ graph, onOpen, compact = false, focus
       ctx.fillStyle = lit ? colors.ink : colors.dim;
       ctx.fillText(label, n.x ?? 0, (n.y ?? 0) + r + 2 / scale);
     });
-    g.nodePointerAreaPaint((n, color, ctx) => {
+    g.nodePointerAreaPaint((n, color, ctx, scale) => {
       ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(n.x ?? 0, n.y ?? 0, radiusOf(n) + 2, 0, 2 * Math.PI);
+      if (isHub(n)) chipPath(ctx, n, scale);
+      else shapeOf(ctx, n, radiusOf(n) + 2);
       ctx.fill();
     });
-    g.nodeLabel((n) => (n.kind === 'party' ? n.label : `${n.label}${n.date ? `（${n.date}）` : ''}`));
+    g.nodeLabel((n) => (n.kind === 'item' ? `${n.label}${n.date ? `（${n.date}）` : ''}` : `タグ: ${n.label}`));
     g.linkColor((l) => {
       const s = state.current.selected ?? state.current.hovered;
-      if (!s) return colors.link;
+      if (!s) return l.hub ? colors.hubLink : colors.link;
       return idOf(l.source) === s || idOf(l.target) === s ? colors.accent : colors.dim;
     });
-    g.linkWidth((l) => (l.kind === 'party' ? 0.6 : 0.8 + l.strength * 0.6));
-    g.linkLineDash((l) => (l.kind === 'party' ? [2, 2] : null));
+    // 線は背景に対して見えるよう濃くする。タグとの線は点線にせず、資料どうしの線より細く淡い実線で分ける
+    g.linkWidth((l) => (l.hub ? 1 : 1.2 + l.strength * 0.6));
     g.linkLabel((l) => l.reason);
     g.onNodeHover((n) => { state.current.hovered = n?.id ?? null; if (box.current) box.current.style.cursor = n ? 'pointer' : 'grab'; });
     g.onNodeClick((n) => {
@@ -156,8 +205,8 @@ export default function LibraryGraphView({ graph, onOpen, compact = false, focus
   }, [graph]);
 
   const node = selected ? view.byId.get(selected) ?? null : null;
-  const items = node?.kind === 'party'
-    ? graph.links.filter((l) => l.kind === 'party' && l.source === node.id).map((l) => view.byId.get(l.target)).filter((x): x is LibraryGraphNode => !!x)
+  const items = node && isHub(node)
+    ? graph.links.filter((l) => l.hub && l.source === node.id).map((l) => view.byId.get(l.target)).filter((x): x is LibraryGraphNode => !!x)
     : [];
   return (
     <div className={['library-graph', compact ? 'compact' : '', !compact && node ? 'has-card' : ''].filter(Boolean).join(' ')}>
@@ -170,14 +219,14 @@ export default function LibraryGraphView({ graph, onOpen, compact = false, focus
               {node.date && <span className="small muted">{[node.docType, node.date].filter(Boolean).join(' ・ ')}</span>}
               {node.summary && <p className="small library-summary">{node.summary}</p>}
               <div className="row wrap">
-                {node.url && <a className="btn small" href={node.url} target="_blank" rel="noreferrer">開く</a>}
+                {node.url && <a className="btn small" href={node.url} target="_blank" rel="noreferrer" onClick={() => onOpenFile?.(node.id)}>開く</a>}
                 <button className="btn ghost small" onClick={() => onOpen(node.id)}>詳しく</button>
               </div>
             </>
           ) : (
             <>
               <strong>{node.label}</strong>
-              <span className="small muted">{items.length.toLocaleString('ja-JP')} 件の資料</span>
+              <span className="small muted">タグ ・ {items.length.toLocaleString('ja-JP')} 件の資料</span>
               <ul className="library-mails">
                 {items.slice(0, 12).map((i) => <li key={i.id}><button className="link-btn library-version-link" onClick={() => onOpen(i.id)}>{i.label}</button></li>)}
               </ul>

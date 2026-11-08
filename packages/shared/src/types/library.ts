@@ -33,6 +33,10 @@ export const LIBRARY_LIMITS = {
   titleChars: 120,
   typeChars: 40,
   counterpartyChars: 100,
+  /** タグの数と長さ（第44.17.3節）。AI が付けるのは `aiTagCount` まで（取引先と種類を足して `tagCount` まで） */
+  tagCount: 10,
+  aiTagCount: 8,
+  tagChars: 60,
   summaryChars: 400,
   keywordCount: 20,
   keywordChars: 40,
@@ -134,6 +138,11 @@ export interface LibraryItem {
   docType: string;
   counterparty: string;
   contactId: string | null;
+  /**
+   * タグ（第44.17.3節）。取引先・案件・製品・技術・分野・書類の種類など、探す手がかりになるキーを区別せず同列に並べる。10 個まで。
+   * 取引先と種類の項目は、名刺へのつなぎと同じ資料の版の見分けのために別にも持つ。
+   */
+  tags: string[];
   /** 書類の日付。読めなければ `null`（推測で埋めない）。 */
   docDate: string | null;
   receivedAt: string;
@@ -151,6 +160,8 @@ export interface LibraryItem {
   /** 会社の知識にしたなら、その知識の ID と日時（第44.8節）。 */
   knowledgeId: string | null;
   verifiedAt: string | null;
+  /** 本人が実際の資料（ドライブのファイル）を最後に開いた時刻。開いていなければ `null`（確かめた記録。第44.16.1節）。 */
+  viewedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -183,12 +194,12 @@ export interface LibraryItemPage extends LibraryItemDetail {
   related: LibraryRelated[];
 }
 
-/** つながりの種類（第44.17.1節）。 */
-export type LibraryLinkKind = 'mail' | 'version' | 'project' | 'words' | 'folder';
+/** つながりの種類（第44.17.1節）。`tag` は同じタグ（第44.17.3節）。 */
+export type LibraryLinkKind = 'mail' | 'version' | 'tag' | 'words' | 'folder';
 
 /** つながりの理由の言葉（画面と秘書に出す）。 */
 export const LIBRARY_LINK_LABELS: Record<LibraryLinkKind, string> = {
-  mail: '同じメールで届いた', version: '同じ資料の版', project: '同じ取引先の同じ案件', words: '同じ語が出てくる', folder: '同じフォルダにあった',
+  mail: '同じメールで届いた', version: '同じ資料の版', tag: '同じタグ', words: '同じ語が出てくる', folder: '同じフォルダにあった',
 };
 
 /** 関連する資料 1 件。 */
@@ -200,7 +211,7 @@ export interface LibraryRelated {
   receivedAt: string;
   kind: LibraryLinkKind;
   strength: number;
-  /** 理由の文（「同じ取引先の同じ案件（サーバー保守）」など）。 */
+  /** 理由の文（「同じタグ（Aster・認証）」など）。 */
   reason: string;
 }
 
@@ -216,12 +227,12 @@ export const LIBRARY_GRAPH_LIMITS = {
   localMax: 80,
 } as const;
 
-/** グラフの点。資料か取引先。 */
+/** グラフの点。資料か、資料を集めるタグの点（第44.17.3節）。 */
 export interface LibraryGraphNode {
   id: string;
-  kind: 'item' | 'party';
+  kind: 'item' | 'tag';
   label: string;
-  /** 資料の種類（色に使う）。取引先なら空。 */
+  /** 資料の種類（色に使う）。タグの点なら空。 */
   docType: string;
   /** つながりの数（大きさに使う）。 */
   degree: number;
@@ -231,11 +242,15 @@ export interface LibraryGraphNode {
   url?: string | null;
 }
 
-/** グラフの線。`kind` が `party` なら取引先の点と資料を結ぶ線。 */
+/**
+ * グラフの線。`hub` が真なら、タグの点（`source`）と資料（`target`）を結ぶ線（`kind` は `tag`）。
+ * 偽なら資料どうしのつながり（同じタグはタグの点に集めるので、資料どうしの線にはしない）。
+ */
 export interface LibraryGraphLink {
   source: string;
   target: string;
-  kind: LibraryLinkKind | 'party';
+  kind: LibraryLinkKind;
+  hub: boolean;
   strength: number;
   reason: string;
 }
@@ -263,8 +278,8 @@ const SENSITIVE = /(給与|給料|賃金|賞与|源泉徴収|年末調整|人事
  *
  * @returns 理由（当たった言葉を含む）。当たらなければ `null`
  */
-export function librarySensitiveReason(i: Pick<LibraryItem, 'title' | 'docType' | 'keywords' | 'originalName' | 'summary'>): string | null {
-  const hit = SENSITIVE.exec([i.title, i.docType, ...i.keywords, i.originalName, i.summary].join('\n'));
+export function librarySensitiveReason(i: Pick<LibraryItem, 'title' | 'docType' | 'keywords' | 'originalName' | 'summary'> & Partial<Pick<LibraryItem, 'tags'>>): string | null {
+  const hit = SENSITIVE.exec([i.title, i.docType, ...i.keywords, ...(i.tags ?? []), i.originalName, i.summary].join('\n'));
   return hit ? `「${hit[1]}」に関わる資料のようです` : null;
 }
 
@@ -275,6 +290,8 @@ export interface LibraryFilter {
   words?: string[];
   docType?: string;
   counterparty?: string;
+  /** タグ（第44.17.3節）。選んだタグを全部持つ資料に絞る。 */
+  tags?: string[];
   year?: number;
   entry?: LibraryEntry;
   offset?: number;
@@ -283,8 +300,8 @@ export interface LibraryFilter {
 
 /** 絞り込みの選択肢。 */
 export interface LibraryFacets {
-  docTypes: string[];
-  counterparties: string[];
+  /** タグ（多い順。第44.17.3節）。取引先や種類もタグの 1 つとして入る。 */
+  tags: string[];
   years: number[];
 }
 

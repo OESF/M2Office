@@ -290,6 +290,14 @@ export interface DriveConnector {
    * @param s.domain 会社のドメイン（例: `oesf.jp`）。個人向けのドメインを渡さないことは呼ぶ側が守る
    */
   shareWithDomain(p: ConnectorPrincipal, s: { fileId: string; domain: string }): Promise<{ fileId: string; domain: string } | null>;
+  /**
+   * 本人が `since` より後に開いたファイルと、最後に開いた時刻（ドライブの `viewedByMeTime`。仕様書 第44.16.1節）。
+   * 見えるのは M2Office が置いたファイルと本人が選んだファイルだけ（`drive.file` の範囲）。
+   *
+   * @param since これより後に開いたものだけ。`null` なら開いたことのあるものすべて
+   * @param limit 返す数の上限
+   */
+  viewedSince(p: ConnectorPrincipal, since: string | null, limit: number): Promise<{ id: string; viewedAt: string }[]>;
 }
 
 /** 会社の中の人（Google Workspace のディレクトリ）。 */

@@ -191,6 +191,27 @@ export function googleDrive(ctx: Ctx): DriveConnector {
       return f ? toFile(f) : null;
     },
 
+    viewedSince: async (p, since, limit) => {
+      // 本人が開いたファイルだけを、開いた時刻の新しい順にまとめて読む（drive.file の範囲。仕様書 第44.16.1節）
+      const out: { id: string; viewedAt: string }[] = [];
+      let pageToken: string | undefined;
+      do {
+        const params = new URLSearchParams({
+          q: `trashed = false and viewedByMeTime > '${(since ?? '1970-01-01T00:00:00Z').replace(/'/g, '')}'`,
+          orderBy: 'viewedByMeTime desc',
+          pageSize: String(Math.min(1000, Math.max(1, limit - out.length))),
+          fields: 'nextPageToken,files(id,viewedByMeTime)',
+          ...(pageToken ? { pageToken } : {}),
+        });
+        const res = await api(p, `/files?${params}`);
+        for (const f of (res?.['files'] ?? []) as { id?: string; viewedByMeTime?: string }[]) {
+          if (f.id && f.viewedByMeTime) out.push({ id: f.id, viewedAt: new Date(f.viewedByMeTime).toISOString() });
+        }
+        pageToken = typeof res?.['nextPageToken'] === 'string' ? res['nextPageToken'] : undefined;
+      } while (pageToken && out.length < limit);
+      return out.slice(0, limit);
+    },
+
     trash: async (p, fileId) => {
       const f = await meta(p, fileId);
       if (!f) return false;

@@ -3,19 +3,22 @@
  *
  * つながりの決まりと強さ（Q-314。使いながら直す）:
  * - 同じメールで届いた（4）・同じ資料の版（4）
- * - 同じ取引先で、案件の語が 1 つ以上重なる（2。重なる語 1 つごとに 1 足す。5 まで）
- * - 取引先が違うか無く、語が 2 つ以上重なる（1。重なる語 1 つごとに 1 足す。3 まで）
+ * - 同じタグ（第44.17.3節）。重なるタグを、少ない資料にしか付かないタグ（10 件まで）は 2、ほかは 1 と数えて足し、2 以上でつなぐ（4 まで）。
+ *   取引先・案件・種類などを区別しない。資料の半分（少なくとも 10 件）を超えて付くタグは数えない
+ * - 語が 2 つ以上重なる（1。重なる語 1 つごとに 1 足す。3 まで）
  * - PC から入れたときの元のフォルダが同じ（1。30 件を超えるフォルダは除く）
  *
- * 本人の資料どうしだけをつなぐ（呼ぶ側が本人の資料だけを渡す）。取引先が同じだけの資料どうしは線にせず、グラフでは取引先の点に集める。
+ * 本人の資料どうしだけをつなぐ（呼ぶ側が本人の資料だけを渡す）。
+ * 同じタグは、関連する資料・秘書・書き出す文書に使い、グラフではタグの点に集める（線にしない）。
  * すべての組を比べず、語・メール・フォルダごとの索引で比べる。一般的すぎる語と、大きすぎる組は除く。
  *
  * @see 仕様書 第44.17節
  * @see ADR-0127
+ * @see ADR-0128
  */
 
 import { LIBRARY_LINK_LABELS, type LibraryItem, type LibraryLinkKind } from '@m2office/shared';
-import { libraryNormal, libraryVersionKey } from './store.js';
+import { libraryNormal, libraryTagKey, libraryVersionKey } from './store.js';
 
 /** つながりを見つけるのに使う 1 件（目録の項目と、入口の記録のメールの ID・元のフォルダ）。 */
 export interface LibraryLinkInput extends LibraryItem {
@@ -23,7 +26,7 @@ export interface LibraryLinkInput extends LibraryItem {
   folders: string[];
 }
 
-/** つながり 1 つ。`shared` は重なった語（語のつながりのとき）。 */
+/** つながり 1 つ。`shared` は重なった語・タグ（理由に添える）。 */
 export interface LibraryLink {
   id: string;
   kind: LibraryLinkKind;
@@ -35,8 +38,15 @@ export interface LibraryLink {
 export const LIBRARY_LINK_RULES = {
   mail: 4,
   version: 4,
-  projectBase: 2,
-  projectMax: 5,
+  /** 同じタグ: 少ない資料にしか付かないタグ（`tagRare` 件まで）の重み・ほかの重み・つなぐ下限・上限 */
+  tagRare: 10,
+  tagRareWeight: 2,
+  tagWeight: 1,
+  tagMin: 2,
+  tagMax: 4,
+  /** 資料のこの割合（少なくとも `tagCommonFloor` 件）を超えて付くタグは数えない */
+  tagCommonShare: 0.5,
+  tagCommonFloor: 10,
   wordsMin: 2,
   wordsBase: 1,
   wordsMax: 3,
@@ -87,6 +97,36 @@ export function libraryLinks(items: LibraryLinkInput[]): Map<string, LibraryLink
   for (const ids of index((i) => [libraryVersionKey(i) ?? '']).values()) if (ids.length <= R.groupMax) within(ids, 'version', R.version);
   for (const ids of index((i) => i.folders.map((f) => f.trim()).filter(Boolean)).values()) if (ids.length <= R.folderMax) within(ids, 'folder', R.folder);
 
+  // 同じタグ（第44.17.3節）。取引先・案件・種類などを区別しない。理由には元の書き方で出す
+  const tagCommon = Math.max(R.tagCommonFloor, Math.floor(items.length * R.tagCommonShare));
+  const tagShown = new Map<string, string>();
+  const tagGroups = new Map<string, string[]>();
+  for (const i of items) {
+    for (const t of i.tags ?? []) {
+      const k = libraryTagKey(t);
+      if (!k || tagGroups.get(k)?.at(-1) === i.id) continue;
+      if (!tagShown.has(k)) tagShown.set(k, t.trim());
+      tagGroups.set(k, [...(tagGroups.get(k) ?? []), i.id]);
+    }
+  }
+  const tagPairs = new Map<string, { score: number; tags: string[] }>();
+  for (const [k, ids] of tagGroups) {
+    if (ids.length < 2 || ids.length > tagCommon || ids.length > R.groupMax) continue;
+    const weight = ids.length <= R.tagRare ? R.tagRareWeight : R.tagWeight;
+    for (let x = 0; x < ids.length; x++) for (let y = x + 1; y < ids.length; y++) {
+      const key = pairKey(ids[x]!, ids[y]!);
+      const cur = tagPairs.get(key) ?? { score: 0, tags: [] };
+      cur.score += weight;
+      cur.tags.push(tagShown.get(k)!);
+      tagPairs.set(key, cur);
+    }
+  }
+  for (const [key, p] of tagPairs) {
+    if (p.score < R.tagMin) continue;
+    const [a, b] = key.split('\n') as [string, string];
+    offer(a, b, 'tag', Math.min(R.tagMax, p.score), p.tags);
+  }
+
   // 語（一般的すぎる語は数えない）。理由には元の書き方で出す
   const words = new Map(items.map((i) => [i.id, wordsOf(i)]));
   const shown = new Map<string, string>();
@@ -102,13 +142,9 @@ export function libraryLinks(items: LibraryLinkInput[]): Map<string, LibraryLink
       shared.set(k, [...(shared.get(k) ?? []), w]);
     }
   }
-  const party = new Map(items.map((i) => [i.id, libraryNormal(i.counterparty)]));
   for (const [k, ws] of shared) {
     const [a, b] = k.split('\n') as [string, string];
-    const same = !!party.get(a) && party.get(a) === party.get(b);
-    const label = ws.map((w) => shown.get(w) ?? w);
-    if (same) offer(a, b, 'project', Math.min(R.projectMax, R.projectBase + ws.length - 1), label);
-    else if (ws.length >= R.wordsMin) offer(a, b, 'words', Math.min(R.wordsMax, R.wordsBase + ws.length - R.wordsMin), label);
+    if (ws.length >= R.wordsMin) offer(a, b, 'words', Math.min(R.wordsMax, R.wordsBase + ws.length - R.wordsMin), ws.map((w) => shown.get(w) ?? w));
   }
 
   const out = new Map<string, LibraryLink[]>(items.map((i) => [i.id, []]));
@@ -125,5 +161,5 @@ export function libraryLinks(items: LibraryLinkInput[]): Map<string, LibraryLink
 /** つながりの理由の文（重なった語があれば添える）。 */
 export function libraryLinkReason(l: Pick<LibraryLink, 'kind' | 'shared'>): string {
   const label = LIBRARY_LINK_LABELS[l.kind];
-  return (l.kind === 'project' || l.kind === 'words') && l.shared.length ? `${label}（${l.shared.slice(0, 3).join('・')}）` : label;
+  return (['words', 'tag'] as LibraryLinkKind[]).includes(l.kind) && l.shared.length ? `${label}（${l.shared.slice(0, 3).join('・')}）` : label;
 }

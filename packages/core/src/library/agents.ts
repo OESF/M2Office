@@ -9,7 +9,7 @@ import { LIBRARY_EXTENSION_ID, type AgentDefinition } from '@m2office/shared';
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const LIBRARY_EXTENSION_VERSION = '1.3.0';
+export const LIBRARY_EXTENSION_VERSION = '1.4.0';
 
 const TOOLS = ['library.search', 'library.read', 'library.add', 'library.update', 'library.share', 'library.knowledge'];
 
@@ -17,10 +17,10 @@ const TOOLS = ['library.search', 'library.read', 'library.add', 'library.update'
 export const LIBRARY_DESK: AgentDefinition = {
   schemaVersion: 1,
   id: `${LIBRARY_EXTENSION_ID}:desk`,
-  version: 4,
+  version: 5,
   name: 'ナレッジの整理',
   category: 'sample',
-  description: 'メールの添付・PC のファイル・紙から起こしたデータ・M2Office で作った資料など、本人の資料を探し（「去年 A 社からもらった見積を出して」「B 社のカタログ、PDF であったよね？」）、中身を答え（「この見積の合計はいくら？」）、渡されたファイルを入れ（「この PDF を資料に入れて」）、題名や取引先を直し、社内で共有し（「A 社の資料を営業のグループに共有して」）、会社の知識にします（「これを会社の知識にして」）。会社の規程や就業規則は社内ナレッジで答えるので、ここでは扱いません',
+  description: 'メールの添付・PC のファイル・紙から起こしたデータ・M2Office で作った資料など、本人の資料を探し（「去年 A 社からもらった見積を出して」「B 社のカタログ、PDF であったよね？」）、中身を答え（「この見積の合計はいくら？」）、渡されたファイルを入れ（「この PDF を資料に入れて」）、題名・取引先・タグを直し（「この資料に Aster のタグを付けて」）、社内で共有し（「A 社の資料を営業のグループに共有して」）、会社の知識にします（「これを会社の知識にして」）。会社の規程や就業規則は社内ナレッジで答えるので、ここでは扱いません',
   locale: 'ja-JP',
   compartment: null,
   menu: false,
@@ -43,9 +43,9 @@ export const LIBRARY_DESK: AgentDefinition = {
       label: '資料を探す',
       instruction: [
         '依頼（request）に合わせてツールを呼ぶ。',
-        '探す頼みは library.search。query に取引先・品名・種類の言葉を入れ、words に言い換えを入れる（「見積」なら「見積書」「お見積り」など）。「去年」「今年」は今日の日付から西暦の year にする。見つからなければ、語を減らすか言い換えて、もう 1 回だけ探す。',
+        '探す頼みは library.search。query に取引先・案件・品名・種類などの言葉を入れ（資料に付いたタグの正確な名前が分かれば tags にも入れる）、words に言い換えを入れる（「見積」なら「見積書」「お見積り」など）。「去年」「今年」は今日の日付から西暦の year にする。見つからなければ、語を減らすか言い換えて、もう 1 回だけ探す。',
         '中身を聞かれたら、library.search で選んでから library.read で読む。「この資料」が前の会話で分かるなら context を手がかりにする。',
-        'ファイル（fileId）を渡されて入れる頼みは library.add。題名・種類・取引先を直す頼みは library.update。',
+        'ファイル（fileId）を渡されて入れる頼みは library.add。題名・種類・取引先・タグを直す頼みは library.update（tags は置き換わるので、足すときは今のタグに加えて渡す）。',
         '共有する頼みは、library.search で選んでから library.share。範囲は依頼の言葉で決める（グループの名前なら group、「会社の全員」「社内に」なら company、「自分だけに戻して」なら self）。本人が頼んでいないのに共有しない。共有できるのは本人の資料だけ（sharedBy の付いたものは共有しない）。',
         'held が返ったら共有していないので、理由を伝える。本人が「それでも共有して」ともう一度頼んだときだけ、その 1 件を again: true で呼ぶ。',
         '「会社の知識にして」は library.search で選んでから library.knowledge。',

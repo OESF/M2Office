@@ -43,6 +43,8 @@ export interface LibraryOwnerStateRow {
   /** もう知らせた版の組（題名・取引先・種類の鍵）。 */
   versionsNotified: string[];
   versionsNoticedAt: string | null;
+  /** 本人が開いた時刻を最後にドライブから読んだ時刻（第44.16.1節）。 */
+  viewsCheckedAt: string | null;
 }
 
 /** OKF で書き出したファイル（第44.14節 `library_okf_files`）。 */
@@ -117,6 +119,8 @@ export interface LibraryReadResult {
   docDate?: string | null;
   summary?: string;
   keywords?: string[];
+  /** タグ（第44.17.3節）。渡したら、付け終えた印も付ける。 */
+  tags?: string[];
   /** ドライブに置けた・読んで分かったこと。 */
   driveFileId?: string;
   driveUrl?: string | null;
@@ -132,7 +136,7 @@ export interface LibraryWork extends LibraryItem {
 }
 
 /** 人が直す項目。 */
-export type LibraryPatch = Partial<Pick<LibraryItem, 'title' | 'docType' | 'counterparty' | 'docDate'>>;
+export type LibraryPatch = Partial<Pick<LibraryItem, 'title' | 'docType' | 'counterparty' | 'docDate' | 'tags'>>;
 
 /** 目録の置き場。 */
 export interface LibraryStore {
@@ -200,6 +204,21 @@ export interface LibraryStore {
   retryLater(tenantId: string, id: string, delayMs: number): Promise<void>;
   /** ドライブに置いた分だけを記録する（読み取りは続きで行う）。 */
   setPlaced(tenantId: string, id: string, driveFileId: string, driveUrl: string | null): Promise<void>;
+  /**
+   * まだタグを付けていない資料（読み取りを待っているものを除く。第44.17.3節）。1 人の分だけを新しい順に返す（その人の名前に合わせて付けるため）。
+   */
+  untagged(tenantId: string, limit: number): Promise<LibraryItem[]>;
+  /** タグを付け、付け終えた印を付ける。`null` なら印だけを付ける（付けられなかった）。人が直したタグは書き換えない。 */
+  setTags(tenantId: string, id: string, tags: string[] | null): Promise<void>;
+  /** 本人がもう使っているタグ（多い順に 100。名前のゆれをそろえる。第44.17.3節）。 */
+  tagNames(tenantId: string, ownerId: string): Promise<string[]>;
+  /**
+   * 本人が実際の資料を開いた時刻を記録する（確かめた記録。第44.16.1節）。前より新しい時刻だけを入れる。
+   *
+   * @param views ドライブのファイルの ID と開いた時刻（本人の資料のドライブのファイルだけに当てる）
+   * @returns 記録した資料の数
+   */
+  setViewed(tenantId: string, ownerId: string, views: { driveFileId: string; at: string }[]): Promise<number>;
   /** 待っているものを上限で止める（第44.11節）。 */
   pauseTenant(tenantId: string): Promise<number>;
   /** 止めていたものを待ちに戻す。 */
@@ -211,22 +230,45 @@ export interface LibraryStore {
  */
 export const libraryNormal = (s: string): string => normalizeForSearch(s).replace(/\s+/g, '');
 
-/** 検索の語を入れる文（題名・要約・語・送り主・元の名前。第44.7節）。 */
-export function librarySearchText(i: { originalName: string; title: string; docType: string; counterparty: string; summary: string; keywords: string[] }, origins: { folder: string; sender: string; subject: string }[]): string {
+/** 会社の形を表す語（タグの見分けでは無視する。「サンプル商事株式会社」と「サンプル商事」を同じタグにする）。 */
+const CORPORATE_FORM = /株式会社|有限会社|合同会社|合資会社|合名会社|一般社団法人|一般財団法人|\(株\)|\(有\)|㈱|㈲/g;
+
+/**
+ * タグの見分けの鍵（第44.17.3節）。正規化（{@link libraryNormal}）に加えて、会社の形を表す語を除く。
+ *
+ * @remarks 鍵が同じタグは同じタグとして扱う（書き方をそろえる・つながり・グラフの点・一覧）。会社の形の語だけのタグは、そのまま鍵にする
+ */
+export const libraryTagKey = (s: string): string => {
+  const n = libraryNormal(s);
+  return n.replace(CORPORATE_FORM, '') || n;
+};
+
+/** 多く付いたタグから並べる（同じ数なら名前の順）。 */
+export function libraryTopTags(list: string[], limit: number): string[] {
+  const n = new Map<string, number>();
+  for (const v of list) if (v) n.set(v, (n.get(v) ?? 0) + 1);
+  return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit).map(([v]) => v);
+}
+
+/** 検索の語を入れる文（題名・要約・語・タグ・送り主・元の名前。第44.7節）。 */
+export function librarySearchText(
+  i: { originalName: string; title: string; docType: string; counterparty: string; summary: string; keywords: string[]; tags?: string[] },
+  origins: { folder: string; sender: string; subject: string }[],
+): string {
   return [
-    i.title, i.originalName, i.docType, i.counterparty, i.summary, ...i.keywords,
+    i.title, i.originalName, i.docType, i.counterparty, i.summary, ...i.keywords, ...(i.tags ?? []),
     ...origins.flatMap((o) => [o.folder, o.sender, o.subject]),
   ].filter(Boolean).map(libraryNormal).join('\n');
 }
 
-const COLS = `id, owner_id, drive_file_id, drive_url, placed, file_id, original_name, format, mime, size_bytes, sha256, entry, title, doc_type, counterparty, contact_id,
-  doc_date::text as doc_date, received_at, summary, keywords, read_state, read_note, read_scope, edited, attempts, share_scope, knowledge_id, verified_at, created_at, updated_at`;
+const COLS = `id, owner_id, drive_file_id, drive_url, placed, file_id, original_name, format, mime, size_bytes, sha256, entry, title, doc_type, counterparty, contact_id, tags,
+  doc_date::text as doc_date, received_at, summary, keywords, read_state, read_note, read_scope, edited, attempts, share_scope, knowledge_id, verified_at, viewed_at, created_at, updated_at`;
 
 interface Row extends pg.QueryResultRow {
   id: string; owner_id: string; drive_file_id: string | null; drive_url: string | null; placed: boolean; file_id: string | null; original_name: string; format: LibraryFormat; mime: string;
-  size_bytes: string | number; sha256: string | null; entry: LibraryEntry; title: string; doc_type: string; counterparty: string; contact_id: string | null; doc_date: string | null;
+  size_bytes: string | number; sha256: string | null; entry: LibraryEntry; title: string; doc_type: string; counterparty: string; contact_id: string | null; tags: string[]; doc_date: string | null;
   received_at: Date | string; summary: string; keywords: string[]; read_state: LibraryReadState; read_note: string; read_scope: string; edited: string[]; attempts: number;
-  share_scope: LibraryShareScope; knowledge_id: string | null; verified_at: Date | string | null; created_at: Date | string; updated_at: Date | string;
+  share_scope: LibraryShareScope; knowledge_id: string | null; verified_at: Date | string | null; viewed_at: Date | string | null; created_at: Date | string; updated_at: Date | string;
 }
 
 /** 日時を ISO の形にする（接続の設定により、文字か Date で返る）。 */
@@ -234,9 +276,10 @@ const iso = (v: Date | string) => new Date(v).toISOString();
 
 const toItem = (r: Row): LibraryItem => ({
   id: r.id, ownerId: r.owner_id, driveFileId: r.drive_file_id, driveUrl: r.drive_url, placed: r.placed, originalName: r.original_name, format: r.format, mime: r.mime,
-  sizeBytes: Number(r.size_bytes), entry: r.entry, title: r.title, docType: r.doc_type, counterparty: r.counterparty, contactId: r.contact_id, docDate: r.doc_date,
+  sizeBytes: Number(r.size_bytes), entry: r.entry, title: r.title, docType: r.doc_type, counterparty: r.counterparty, contactId: r.contact_id,
+  tags: r.tags ?? [], docDate: r.doc_date,
   receivedAt: iso(r.received_at), summary: r.summary, keywords: r.keywords, readState: r.read_state, readNote: r.read_note, readScope: r.read_scope, edited: r.edited,
-  shareScope: r.share_scope, knowledgeId: r.knowledge_id, verifiedAt: r.verified_at === null ? null : iso(r.verified_at),
+  shareScope: r.share_scope, knowledgeId: r.knowledge_id, verifiedAt: r.verified_at === null ? null : iso(r.verified_at), viewedAt: r.viewed_at === null ? null : iso(r.viewed_at),
   createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
 });
 
@@ -335,6 +378,7 @@ export class PostgresLibraryStore implements LibraryStore {
     if (who.groups) { params.push(who.groups); where.push(visibleSql(who, params.length)); } else where.push('owner_id = $2');
     if (f.docType) add((n) => `doc_type = ${n}`, f.docType);
     if (f.counterparty) add((n) => `counterparty = ${n}`, f.counterparty);
+    if (f.tags?.length) add((n) => `tags @> ${n}::text[]`, f.tags);
     if (f.entry) add((n) => `entry = ${n}`, f.entry);
     if (f.year) add((n) => `extract(year from coalesce(doc_date, (received_at at time zone 'Asia/Tokyo')::date)) = ${n}`, f.year);
     if (terms.length > 0) add((n) => `search_text ilike any(${n})`, terms.map(likeOf));
@@ -348,12 +392,11 @@ export class PostgresLibraryStore implements LibraryStore {
   async facets(who: LibraryViewer): Promise<LibraryFacets> {
     const p = [who.tenantId, who.userId, who.groups ?? []];
     const mine = visibleSql(who, 3);
-    const [types, parties, years] = await Promise.all([
-      this.q<{ v: string }>(who.tenantId, `select doc_type as v from library_items where tenant_id = $1 and ${mine} and doc_type <> '' and $3::text[] is not null group by doc_type order by count(*) desc limit 40`, p),
-      this.q<{ v: string }>(who.tenantId, `select counterparty as v from library_items where tenant_id = $1 and ${mine} and counterparty <> '' and $3::text[] is not null group by counterparty order by count(*) desc limit 100`, p),
+    const [tags, years] = await Promise.all([
+      this.q<{ v: string }>(who.tenantId, `select v from library_items, unnest(tags) as v where tenant_id = $1 and ${mine} and v <> '' and $3::text[] is not null group by v order by count(*) desc, v limit 300`, p),
       this.q<{ v: number }>(who.tenantId, `select distinct extract(year from coalesce(doc_date, (received_at at time zone 'Asia/Tokyo')::date))::int as v from library_items where tenant_id = $1 and ${mine} and $3::text[] is not null order by v desc limit 40`, p),
     ]);
-    return { docTypes: types.map((r) => r.v), counterparties: parties.map((r) => r.v), years: years.map((r) => r.v) };
+    return { tags: tags.map((r) => r.v), years: years.map((r) => r.v) };
   }
 
   async progress(who: LibraryViewer): Promise<{ pending: number; paused: number }> {
@@ -385,15 +428,15 @@ export class PostgresLibraryStore implements LibraryStore {
     const next = { ...cur, ...patch };
     const edited = [...new Set([...cur.edited, ...Object.keys(patch)])];
     const rows = await this.q<Row>(who.tenantId,
-      `update library_items set title = $4, doc_type = $5, counterparty = $6, doc_date = $7::date, edited = $8, search_text = $9, updated_at = now()
+      `update library_items set title = $4, doc_type = $5, counterparty = $6, doc_date = $7::date, edited = $8, search_text = $9, tags = $10, updated_at = now()
        where tenant_id = $1 and owner_id = $2 and id = $3 returning ${COLS}`,
-      [who.tenantId, who.userId, id, next.title, next.docType, next.counterparty, next.docDate, edited, librarySearchText(next, cur.origins)]);
+      [who.tenantId, who.userId, id, next.title, next.docType, next.counterparty, next.docDate, edited, librarySearchText(next, cur.origins), next.tags]);
     return rows[0] ? toItem(rows[0]) : null;
   }
 
   async requeue(who: LibraryViewer, id: string): Promise<LibraryItem | null> {
     const rows = await this.q<Row>(who.tenantId,
-      `update library_items set read_state = 'pending', read_note = '', read_scope = '', attempts = 0, next_try_at = now(), updated_at = now()
+      `update library_items set read_state = 'pending', read_note = '', read_scope = '', attempts = 0, tagged = false, next_try_at = now(), updated_at = now()
        where tenant_id = $1 and owner_id = $2 and id = $3 returning ${COLS}`, [who.tenantId, who.userId, id]);
     return rows[0] ? toItem(rows[0]) : null;
   }
@@ -508,23 +551,26 @@ export class PostgresLibraryStore implements LibraryStore {
   }
 
   async ownerState(tenantId: string, ownerId: string): Promise<LibraryOwnerStateRow | null> {
-    const rows = await this.q<{ okf_enabled: boolean; okf_written_at: Date | string | null; okf_stamp: string; okf_error: string; versions_notified: string[]; versions_noticed_at: Date | string | null }>(tenantId,
-      `select okf_enabled, okf_written_at, okf_stamp, okf_error, versions_notified, versions_noticed_at from library_owner_state where tenant_id = $1 and owner_id = $2`, [tenantId, ownerId]);
+    const rows = await this.q<{
+      okf_enabled: boolean; okf_written_at: Date | string | null; okf_stamp: string; okf_error: string; versions_notified: string[]; versions_noticed_at: Date | string | null; views_checked_at: Date | string | null;
+    }>(tenantId,
+      `select okf_enabled, okf_written_at, okf_stamp, okf_error, versions_notified, versions_noticed_at, views_checked_at from library_owner_state where tenant_id = $1 and owner_id = $2`, [tenantId, ownerId]);
     const r = rows[0];
     if (!r) return null;
     return {
       okfEnabled: r.okf_enabled, okfWrittenAt: r.okf_written_at === null ? null : iso(r.okf_written_at), okfStamp: r.okf_stamp, okfError: r.okf_error,
       versionsNotified: r.versions_notified, versionsNoticedAt: r.versions_noticed_at === null ? null : iso(r.versions_noticed_at),
+      viewsCheckedAt: r.views_checked_at === null ? null : iso(r.views_checked_at),
     };
   }
 
   async saveOwnerState(tenantId: string, ownerId: string, w: LibraryOwnerStateRow): Promise<void> {
     await this.q(tenantId,
-      `insert into library_owner_state (tenant_id, owner_id, okf_enabled, okf_written_at, okf_stamp, okf_error, versions_notified, versions_noticed_at, updated_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, now())
+      `insert into library_owner_state (tenant_id, owner_id, okf_enabled, okf_written_at, okf_stamp, okf_error, versions_notified, versions_noticed_at, views_checked_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
        on conflict (tenant_id, owner_id) do update set okf_enabled = excluded.okf_enabled, okf_written_at = excluded.okf_written_at, okf_stamp = excluded.okf_stamp, okf_error = excluded.okf_error,
-         versions_notified = excluded.versions_notified, versions_noticed_at = excluded.versions_noticed_at, updated_at = now()`,
-      [tenantId, ownerId, w.okfEnabled, w.okfWrittenAt, w.okfStamp, w.okfError.slice(0, 300), w.versionsNotified.slice(-2000), w.versionsNoticedAt]);
+         versions_notified = excluded.versions_notified, versions_noticed_at = excluded.versions_noticed_at, views_checked_at = excluded.views_checked_at, updated_at = now()`,
+      [tenantId, ownerId, w.okfEnabled, w.okfWrittenAt, w.okfStamp, w.okfError.slice(0, 300), w.versionsNotified.slice(-2000), w.versionsNoticedAt, w.viewsCheckedAt]);
   }
 
   async okfFiles(tenantId: string, ownerId: string): Promise<LibraryOkfFileRow[]> {
@@ -597,19 +643,22 @@ export class PostgresLibraryStore implements LibraryStore {
     if (!row) return;
     const item = toItem(row);
     // 人が直した項目は、AI が読み直しても書き換えない
-    const keep = (k: string, ai: string | undefined, old: string) => (item.edited.includes(k) || ai === undefined ? old : ai);
+    const keep = <T>(k: string, ai: T | undefined, old: T) => (item.edited.includes(k) || ai === undefined ? old : ai);
     const next = {
       title: keep('title', r.title, item.title), docType: keep('docType', r.docType, item.docType), counterparty: keep('counterparty', r.counterparty, item.counterparty),
       summary: r.summary ?? item.summary, keywords: r.keywords ?? item.keywords, originalName: item.originalName,
+      tags: keep('tags', r.tags, item.tags),
     };
     const docDate = item.edited.includes('docDate') || r.docDate === undefined ? item.docDate : r.docDate;
     const origins = await this.q<{ folder: string; sender: string; subject: string }>(tenantId, `select folder, sender, subject from library_item_origins where tenant_id = $1 and item_id = $2`, [tenantId, id]);
     await this.q(tenantId,
       `update library_items set read_state = $3, read_note = $4, read_scope = $5, title = $6, doc_type = $7, counterparty = $8, contact_id = $9, doc_date = $10::date,
-         summary = $11, keywords = $12, search_text = $13, drive_file_id = coalesce($14, drive_file_id), drive_url = coalesce($15, drive_url), sha256 = coalesce(sha256, $16), size_bytes = coalesce($17, size_bytes), attempts = 0, updated_at = now()
+         summary = $11, keywords = $12, search_text = $13, drive_file_id = coalesce($14, drive_file_id), drive_url = coalesce($15, drive_url), sha256 = coalesce(sha256, $16), size_bytes = coalesce($17, size_bytes),
+         tags = $18, tagged = tagged or $19, attempts = 0, updated_at = now()
        where tenant_id = $1 and id = $2`,
       [tenantId, id, r.readState, r.readNote, r.readScope, next.title, next.docType, next.counterparty, r.contactId === undefined ? item.contactId : r.contactId, docDate,
-        next.summary, next.keywords, librarySearchText(next, origins), r.driveFileId ?? null, r.driveUrl ?? null, r.sha256 ?? null, r.sizeBytes ?? null]);
+        next.summary, next.keywords, librarySearchText(next, origins), r.driveFileId ?? null, r.driveUrl ?? null, r.sha256 ?? null, r.sizeBytes ?? null,
+        next.tags, r.tags !== undefined]);
   }
 
   async retryLater(tenantId: string, id: string, delayMs: number): Promise<void> {
@@ -618,6 +667,46 @@ export class PostgresLibraryStore implements LibraryStore {
 
   async setPlaced(tenantId: string, id: string, driveFileId: string, driveUrl: string | null): Promise<void> {
     await this.q(tenantId, `update library_items set drive_file_id = $3, drive_url = $4, placed = true, file_id = null, updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, id, driveFileId, driveUrl]);
+  }
+
+  async setViewed(tenantId: string, ownerId: string, views: { driveFileId: string; at: string }[]): Promise<number> {
+    if (views.length === 0) return 0;
+    const rows = await this.q<{ id: string }>(tenantId,
+      `update library_items i set viewed_at = v.at, updated_at = now()
+         from (select unnest($3::text[]) as drive_file_id, unnest($4::timestamptz[]) as at) v
+       where i.tenant_id = $1 and i.owner_id = $2 and i.drive_file_id = v.drive_file_id and (i.viewed_at is null or i.viewed_at < v.at)
+       returning i.id`,
+      [tenantId, ownerId, views.map((v) => v.driveFileId), views.map((v) => v.at)]);
+    return rows.length;
+  }
+
+  async untagged(tenantId: string, limit: number): Promise<LibraryItem[]> {
+    const rows = await this.q<Row>(tenantId,
+      `select ${COLS} from library_items where tenant_id = $1 and not tagged and read_state not in ('pending', 'paused')
+         and owner_id = (select owner_id from library_items where tenant_id = $1 and not tagged and read_state not in ('pending', 'paused') limit 1)
+       order by received_at desc limit $2`, [tenantId, limit]);
+    return rows.map(toItem);
+  }
+
+  async setTags(tenantId: string, id: string, tags: string[] | null): Promise<void> {
+    if (!tags) {
+      await this.q(tenantId, `update library_items set tagged = true where tenant_id = $1 and id = $2`, [tenantId, id]);
+      return;
+    }
+    const cur = await this.q<Row>(tenantId, `select ${COLS} from library_items where tenant_id = $1 and id = $2`, [tenantId, id]);
+    const row = cur[0];
+    if (!row) return;
+    const item = toItem(row);
+    const next = { ...item, tags: item.edited.includes('tags') ? item.tags : tags };
+    const origins = await this.q<{ folder: string; sender: string; subject: string }>(tenantId, `select folder, sender, subject from library_item_origins where tenant_id = $1 and item_id = $2`, [tenantId, id]);
+    await this.q(tenantId,
+      `update library_items set tags = $3, search_text = $4, tagged = true, updated_at = now() where tenant_id = $1 and id = $2`,
+      [tenantId, id, next.tags, librarySearchText(next, origins)]);
+  }
+
+  async tagNames(tenantId: string, ownerId: string): Promise<string[]> {
+    return (await this.q<{ v: string }>(tenantId,
+      `select v from library_items, unnest(tags) as v where tenant_id = $1 and owner_id = $2 and v <> '' group by v order by count(*) desc, v limit 100`, [tenantId, ownerId])).map((r) => r.v);
   }
 
   async pauseTenant(tenantId: string): Promise<number> {
@@ -633,7 +722,7 @@ export class PostgresLibraryStore implements LibraryStore {
  * 目録の置き場（メモリ。テスト用）。
  */
 export class MemoryLibraryStore implements LibraryStore {
-  readonly rows = new Map<string, LibraryWork & { tenantId: string; nextTryAt: number; searchText: string; origins: (LibraryOrigin & { artifactId?: string; messageId?: string })[] }>();
+  readonly rows = new Map<string, LibraryWork & { tenantId: string; nextTryAt: number; searchText: string; tagged: boolean; origins: (LibraryOrigin & { artifactId?: string; messageId?: string })[] }>();
   readonly mailWatches = new Map<string, LibraryMailWatchRow>();
   readonly tombstones = new Set<string>();
   readonly folders = new Map<string, string>();
@@ -646,7 +735,7 @@ export class MemoryLibraryStore implements LibraryStore {
     || (!!who.groups && (r.shareScope === 'company' || (r.shareScope === 'group' && (this.shareRows.get(r.id) ?? []).some((x) => !!x.groupId && who.groups!.includes(x.groupId))))));
   private seen = (who: LibraryViewer) => [...this.rows.values()].filter((r) => this.visible(who, r));
   private toView = (r: LibraryWork): LibraryItem => {
-    const { fileId: _f, sha256: _s, attempts: _a, tenantId: _t, nextTryAt: _n, searchText: _x, origins: _o, ...item } = r as LibraryWork & { tenantId: string; nextTryAt: number; searchText: string; origins: unknown };
+    const { fileId: _f, sha256: _s, attempts: _a, tenantId: _t, nextTryAt: _n, searchText: _x, origins: _o, tagged: _g, ...item } = r as LibraryWork & { tenantId: string; nextTryAt: number; searchText: string; origins: unknown; tagged: boolean };
     return item;
   };
 
@@ -656,10 +745,10 @@ export class MemoryLibraryStore implements LibraryStore {
     const now = new Date().toISOString();
     const row = {
       id: `lib-${randomUUID()}`, tenantId: who.tenantId, ownerId: who.userId, driveFileId: i.driveFileId, driveUrl: i.driveUrl, placed: i.placed, fileId: i.fileId, originalName: i.originalName,
-      format: i.format, mime: i.mime, sizeBytes: i.sizeBytes, sha256: i.sha256, entry: i.entry, title: i.title ?? '', docType: '', counterparty: '', contactId: null, docDate: null, receivedAt: i.receivedAt ?? now,
+      format: i.format, mime: i.mime, sizeBytes: i.sizeBytes, sha256: i.sha256, entry: i.entry, title: i.title ?? '', docType: '', counterparty: '', contactId: null, tags: [] as string[], docDate: null, receivedAt: i.receivedAt ?? now,
       summary: '', keywords: [], readState: i.readState ?? 'pending' as LibraryReadState, readNote: i.readNote ?? '', readScope: '', edited: [], attempts: 0,
-      shareScope: 'self' as LibraryShareScope, knowledgeId: null as string | null, verifiedAt: null as string | null, createdAt: now, updatedAt: now,
-      nextTryAt: 0, searchText: '', origins: [],
+      shareScope: 'self' as LibraryShareScope, knowledgeId: null as string | null, verifiedAt: null as string | null, viewedAt: null as string | null, createdAt: now, updatedAt: now,
+      nextTryAt: 0, searchText: '', tagged: false, origins: [],
     };
     row.searchText = librarySearchText(row, []);
     this.rows.set(row.id, row);
@@ -692,7 +781,7 @@ export class MemoryLibraryStore implements LibraryStore {
 
   async list(who: LibraryViewer, f: LibraryFilter, terms: string[], limit: number, offset: number): Promise<{ items: LibraryItem[]; total: number }> {
     const hits = this.seen(who).filter((r) =>
-      (!f.docType || r.docType === f.docType) && (!f.counterparty || r.counterparty === f.counterparty) && (!f.entry || r.entry === f.entry)
+      (!f.docType || r.docType === f.docType) && (!f.counterparty || r.counterparty === f.counterparty) && (!f.tags?.length || f.tags.every((t) => r.tags.includes(t))) && (!f.entry || r.entry === f.entry)
       && (!f.year || Number((r.docDate ?? r.receivedAt).slice(0, 4)) === f.year)
       && (terms.length === 0 || terms.some((t) => r.searchText.includes(t))));
     hits.sort((a, b) => (b.docDate ?? b.receivedAt.slice(0, 10)).localeCompare(a.docDate ?? a.receivedAt.slice(0, 10)) || b.receivedAt.localeCompare(a.receivedAt));
@@ -702,8 +791,7 @@ export class MemoryLibraryStore implements LibraryStore {
   async facets(who: LibraryViewer): Promise<LibraryFacets> {
     const rows = this.seen(who);
     return {
-      docTypes: [...new Set(rows.map((r) => r.docType).filter(Boolean))],
-      counterparties: [...new Set(rows.map((r) => r.counterparty).filter(Boolean))],
+      tags: libraryTopTags(rows.flatMap((r) => r.tags), 300),
       years: [...new Set(rows.map((r) => Number((r.docDate ?? r.receivedAt).slice(0, 4))))].sort((a, b) => b - a),
     };
   }
@@ -739,7 +827,7 @@ export class MemoryLibraryStore implements LibraryStore {
   async requeue(who: LibraryViewer, id: string): Promise<LibraryItem | null> {
     const r = this.rows.get(id);
     if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return null;
-    Object.assign(r, { readState: 'pending', readNote: '', readScope: '', attempts: 0, nextTryAt: 0 });
+    Object.assign(r, { readState: 'pending', readNote: '', readScope: '', attempts: 0, nextTryAt: 0, tagged: false });
     return this.toView(r);
   }
 
@@ -876,6 +964,8 @@ export class MemoryLibraryStore implements LibraryStore {
     if (x.contactId !== undefined) r.contactId = x.contactId;
     r.summary = x.summary ?? r.summary;
     r.keywords = x.keywords ?? r.keywords;
+    if (x.tags !== undefined && !r.edited.includes('tags')) r.tags = x.tags;
+    if (x.tags !== undefined) r.tagged = true;
     r.readState = x.readState; r.readNote = x.readNote; r.readScope = x.readScope; r.attempts = 0;
     r.updatedAt = new Date(Math.max(Date.now(), Date.parse(r.updatedAt) + 1)).toISOString();
     if (x.driveUrl) r.driveUrl = x.driveUrl;
@@ -892,6 +982,38 @@ export class MemoryLibraryStore implements LibraryStore {
   async setPlaced(tenantId: string, id: string, driveFileId: string, driveUrl: string | null): Promise<void> {
     const r = this.rows.get(id);
     if (r && r.tenantId === tenantId) Object.assign(r, { driveFileId, driveUrl, placed: true, fileId: null });
+  }
+
+  async setViewed(tenantId: string, ownerId: string, views: { driveFileId: string; at: string }[]): Promise<number> {
+    let n = 0;
+    for (const r of this.mine({ tenantId, userId: ownerId })) {
+      const at = views.filter((v) => v.driveFileId === r.driveFileId).map((v) => v.at).sort().at(-1);
+      if (!at || (r.viewedAt && r.viewedAt >= at)) continue;
+      r.viewedAt = at;
+      r.updatedAt = new Date(Math.max(Date.now(), Date.parse(r.updatedAt) + 1)).toISOString();
+      n += 1;
+    }
+    return n;
+  }
+
+  async untagged(tenantId: string, limit: number): Promise<LibraryItem[]> {
+    const waiting = [...this.rows.values()].filter((r) => r.tenantId === tenantId && !r.tagged && r.readState !== 'pending' && r.readState !== 'paused');
+    const owner = waiting[0]?.ownerId;
+    return waiting.filter((r) => r.ownerId === owner).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(0, limit).map(this.toView);
+  }
+
+  async setTags(tenantId: string, id: string, tags: string[] | null): Promise<void> {
+    const r = this.rows.get(id);
+    if (!r || r.tenantId !== tenantId) return;
+    r.tagged = true;
+    if (!tags) return;
+    if (!r.edited.includes('tags')) r.tags = tags;
+    r.updatedAt = new Date(Math.max(Date.now(), Date.parse(r.updatedAt) + 1)).toISOString();
+    r.searchText = librarySearchText(r, r.origins);
+  }
+
+  async tagNames(tenantId: string, ownerId: string): Promise<string[]> {
+    return libraryTopTags(this.mine({ tenantId, userId: ownerId }).flatMap((r) => r.tags), 100);
   }
 
   async pauseTenant(tenantId: string): Promise<number> {
