@@ -1,7 +1,7 @@
 /**
- * @file 資料（内蔵の拡張）の付属の業務と、拡張機能の一覧に並べるための形（仕様書 第44.2節・第44.13節）。
+ * @file ナレッジの整理（内蔵の拡張）の付属の業務と、拡張機能の一覧に並べるための形（仕様書 第44.2節・第44.13節）。
  *
- * 付属の業務「資料」は、秘書から頼まれて本人の資料を探す・読む・入れる・直す・社内で共有する・会社の知識にする。
+ * 付属の業務「ナレッジの整理」は、秘書から頼まれて本人の資料を探す・読む・入れる・直す・社内で共有する・会社の知識にする。
  * 社外には何も出さない（最上位の危険度は write-internal）。削除はここでは行わない。共有と会社の知識は本人が頼んだときだけ行う。
  */
 
@@ -9,16 +9,16 @@ import { LIBRARY_EXTENSION_ID, type AgentDefinition } from '@m2office/shared';
 import type { ExtensionPackage } from '../extensions/loader.js';
 
 /** 内蔵の拡張の版。付属の業務やツールが変わったら上げる。 */
-export const LIBRARY_EXTENSION_VERSION = '1.2.0';
+export const LIBRARY_EXTENSION_VERSION = '1.3.0';
 
 const TOOLS = ['library.search', 'library.read', 'library.add', 'library.update', 'library.share', 'library.knowledge'];
 
-/** 付属の業務「資料」（秘書から）。 */
+/** 付属の業務「ナレッジの整理」（秘書から）。 */
 export const LIBRARY_DESK: AgentDefinition = {
   schemaVersion: 1,
   id: `${LIBRARY_EXTENSION_ID}:desk`,
-  version: 3,
-  name: '資料',
+  version: 4,
+  name: 'ナレッジの整理',
   category: 'sample',
   description: 'メールの添付・PC のファイル・紙から起こしたデータ・M2Office で作った資料など、本人の資料を探し（「去年 A 社からもらった見積を出して」「B 社のカタログ、PDF であったよね？」）、中身を答え（「この見積の合計はいくら？」）、渡されたファイルを入れ（「この PDF を資料に入れて」）、題名や取引先を直し、社内で共有し（「A 社の資料を営業のグループに共有して」）、会社の知識にします（「これを会社の知識にして」）。会社の規程や就業規則は社内ナレッジで答えるので、ここでは扱いません',
   locale: 'ja-JP',
@@ -87,16 +87,16 @@ export const LIBRARY_DESK: AgentDefinition = {
   face: 54,
 };
 
-/** 資料の付属の業務。 */
+/** ナレッジの整理の付属の業務。 */
 export const LIBRARY_AGENTS: AgentDefinition[] = [LIBRARY_DESK];
 
-/** 資料を、拡張機能の一覧に並べるための形（第12.13節「公式・内蔵」）。 */
+/** ナレッジの整理を、拡張機能の一覧に並べるための形（第12.13節「公式・内蔵」）。 */
 export const LIBRARY_PACKAGE: ExtensionPackage = {
   manifest: {
     id: LIBRARY_EXTENSION_ID,
-    name: '資料',
+    name: 'ナレッジの整理',
     version: LIBRARY_EXTENSION_VERSION,
-    description: 'メールの添付・PC のファイル・紙から起こしたデータ・M2Office で作った資料を 1 か所に集め、AI が中身を読んで整理します。秘書に聞いて探せ、社内で共有できます。ファイルは本人の Google ドライブに置き、M2Office は探すための目録だけを持ちます',
+    description: 'メールの添付・PC のファイル・紙から起こしたデータ・M2Office で作った資料を 1 か所に集め、AI が中身を読んで整理し、関連する資料をつないで知識にします。秘書に聞いて探せ、社内で共有できます。ファイルは本人の Google ドライブに置き、M2Office は探すための目録だけを持ちます',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
     permissions: { tools: TOOLS, max_risk_level: 'write-internal' },

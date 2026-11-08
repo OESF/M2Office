@@ -463,8 +463,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 補助金・助成金の案内（仕様書 第39章）。会社で入れていて利用範囲の人にだけ出す
     // 会員とポイント（仕様書 第40章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.members ? [{ id: MEMBERS_EXTENSION_ID, name: '会員', description: 'お客様を会員にし、来店と購入でポイントを貯めて特典と交換する', icon: 'users' as IconName, agent: null }] : []),
-    // 資料（仕様書 第44章）。会社で入れていて利用範囲の人にだけ出す
-    ...(me.library ? [{ id: LIBRARY_EXTENSION_ID, name: '資料', description: 'メールの添付や PC のファイルを集め、AI が整理して探せるようにする', icon: 'folder' as IconName, agent: null }] : []),
+    // ナレッジの整理（仕様書 第44章）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.library ? [{ id: LIBRARY_EXTENSION_ID, name: 'ナレッジの整理', description: 'メールの添付や PC のファイルを集め、AI が整理してつながる知識にする', icon: 'folder' as IconName, agent: null }] : []),
     // 販促物の作成（仕様書 第41章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.printDesigns ? [{ id: PRINT_DESIGNS_EXTENSION_ID, name: '販促物の作成', description: 'ポップ・チラシ・パンフレット・案内・ポスターを、頼むだけで作る', icon: 'slides' as IconName, agent: null }] : []),
     ...(me.decisions ? [{ id: DECISIONS_EXTENSION_ID, name: '意思決定支援', description: '経営の判断について、慎重と推進の AI が社内の材料で討論し、見立てと論点を報告する', icon: 'report' as IconName, agent: null }] : []),
@@ -857,7 +857,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           )}
           {view.kind === 'library' && (
             <>
-              <ViewTitle>資料 <HelpTip article="start-library">メールの添付や PC のファイルを 1 か所に集め、AI が中身を読んで整理します。秘書に聞いて探せます。</HelpTip></ViewTitle>
+              <ViewTitle>ナレッジの整理 <HelpTip article="start-library">メールの添付や PC のファイルを 1 か所に集め、AI が中身を読んで整理し、関連する資料どうしをつなぎます。秘書に聞いて探せます。</HelpTip></ViewTitle>
               <Library itemId={view.itemId} onOpen={(itemId) => setView({ kind: 'library', itemId })} changeKey={libraryChangeKey} />
             </>
           )}
@@ -1110,7 +1110,7 @@ const VIEW_LABELS: Record<string, string> = {
   decisions: '意思決定支援',
   members: '会員',
   printDesigns: '販促物の作成',
-  library: '資料',
+  library: 'ナレッジの整理',
   webReview: 'Webの分析',
   settings: '個人設定',
 };

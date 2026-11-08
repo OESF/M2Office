@@ -257,7 +257,7 @@ export function Settings({ me, agents, onChanged, section, photo, onPhoto }: {
             ['decision', '意思決定支援', '討論が終わった', !!(me.decisions)],
             ['member', '会員', '週の見立て・LINE の知らせの結果', !!(me.members)],
             ['print', '販促物の作成', '掲示の期間が終わった', !!(me.printDesigns)],
-            ['library', '資料', '古い版が見つかった', !!(me.library)],
+            ['library', 'ナレッジの整理', '古い版が見つかった', !!(me.library)],
             ['contract', '契約', '解約の申し出の期限・契約の終わり・自動更新', !!(me.contracts)],
             ['column', 'コラムの作成', 'テーマ案・予定表・予約', !!(me.webColumns)],
           ]],
