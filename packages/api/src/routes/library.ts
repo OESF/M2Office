@@ -1,6 +1,6 @@
 /**
  * @file 資料（内蔵の拡張）の API。一覧と絞り込み・ファイルを入れる・ドライブで選ぶ・1 件・直す・読み直す・削除・費用の目安・メールの添付の取り込み・
- * 社内の共有・会社の知識・OKF の書き出し（第44章）。
+ * 社内の共有・会社の知識・つながりの画面（第44章）。
  *
  * 会社が切っているときと、利用範囲の外の人には、どの口も使わせない。見えるのは本人の資料と本人に共有された資料だけで、管理者にも見せない（第44.8節）。
  * 直す・削除・共有・会社の知識・読み直しは持ち主だけ。
@@ -43,6 +43,8 @@ export function libraryRoute(deps: AppDeps) {
       return c.json({ error: '資料は使えません（会社で切っているか、利用範囲の外です）' }, 403);
     }
     await next();
+    // 資料が変わったら、目録の書き出しを次の回に見直す（このプロセスで見回る会社だけに効く。ほかはワーカーが 10 分ほどで見直す）
+    if (c.req.method !== 'GET') keeper.touch(tenant.id);
   });
 
   /** 一覧（絞り込み）と、絞り込みの選択肢・読み取りの進み具合・ドライブに置けるか。 */
@@ -151,14 +153,18 @@ export function libraryRoute(deps: AppDeps) {
     return c.json({ groups: groups.map((g) => ({ id: g.id, name: g.name, members: g.memberIds.length })) });
   });
 
-  /** OKF の書き出しの様子（第44.16節）。 */
-  app.get('/okf', async (c) => c.json(await keeper.okfState(who(c))));
-
-  /** OKF の書き出しを入れる・切る（本文: `enabled`）。本人だけが入れられる。 */
-  app.put('/okf', async (c) => {
-    const b = await c.req.json<{ enabled?: unknown }>().catch(() => ({} as { enabled?: unknown }));
-    if (typeof b.enabled !== 'boolean') return c.json({ error: 'enabled を指定してください' }, 400);
-    return c.json(await keeper.setOkf(who(c), b.enabled));
+  /** つながりの画面（第44.17.2節）。本人の資料の、絞り込んだ範囲の新しい順に 2,000 件まで。言葉は絞り込まず、当たる資料を `matched` で返す。 */
+  app.get('/graph', async (c) => {
+    const q = c.req.query();
+    const entry = q['entry'] ?? '';
+    const year = Number(q['year']);
+    return c.json(await service.graph(who(c), {
+      q: (q['q'] ?? '').slice(0, LIBRARY_LIMITS.queryChars),
+      ...(q['docType'] ? { docType: q['docType'] } : {}),
+      ...(q['counterparty'] ? { counterparty: q['counterparty'] } : {}),
+      ...(Number.isInteger(year) && year >= 1900 && year <= 2200 ? { year } : {}),
+      ...(entry in LIBRARY_ENTRY_LABELS ? { entry: entry as LibraryEntry } : {}),
+    }));
   });
 
   app.use('/:id/*', async (c, next) => (ID.test(c.req.param('id')) ? next() : notFound(c)));
@@ -168,6 +174,12 @@ export function libraryRoute(deps: AppDeps) {
     if (!ID.test(c.req.param('id'))) return notFound(c);
     const item = await service.page(who(c), c.req.param('id'));
     return item ? c.json(item) : notFound(c);
+  });
+
+  /** ローカルグラフ（その資料のまわり 2 歩先まで。本人の資料だけ）。 */
+  app.get('/:id/graph', async (c) => {
+    const g = await service.localGraph(who(c), c.req.param('id'));
+    return g ? c.json(g) : notFound(c);
   });
 
   /** 社内で共有する・自分だけに戻す（本文: `scope`・`groupIds`・`again`）。機微なものは 409 で `held`（理由）を返す。 */

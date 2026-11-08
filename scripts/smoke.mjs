@@ -9567,7 +9567,7 @@ console.log('\n■ 138. 資料のメールの添付（本人が入れる・直�
   }
 }
 
-console.log('\n■ 139. 資料の共有と OKF（グループ・会社で共有・機微なものを止める・見るだけ・自分だけに戻す・会社の知識・OKF の書き出し）');
+console.log('\n■ 139. 資料の共有とつながり（グループ・会社で共有・機微なものを止める・見るだけ・自分だけに戻す・会社の知識・つながりの画面・目録の書き出し）');
 {
   const { default: pg } = await import('pg');
   const owner = new pg.Client({ connectionString: process.env.MIGRATION_DATABASE_URL ?? 'postgres://m2office:m2office@localhost:3105/m2office' });
@@ -9631,21 +9631,32 @@ console.log('\n■ 139. 資料の共有と OKF（グループ・会社で共有�
     know2.status === 201 && (k.rows.length === 0 || (k.rows[0].kind === 'library' && k.rows[0].category === 'learned')) ? ok('資料を会社の知識にできる（種類 library）') : ng('会社の知識にできない', JSON.stringify(know2.body));
     if (kid) await owner.query('delete from knowledge_items where id = $1', [kid]).catch(() => undefined);
 
-    const okfOff = await call('a', '/v1/library/okf', {}, 'member');
-    const okfOn = await call('a', '/v1/library/okf', { method: 'PUT', body: JSON.stringify({ enabled: true }) }, 'member');
-    okfOff.body.enabled === false && okfOn.body.enabled === true ? ok('OKF の書き出しは本人が入れる') : ng('OKF を入れられない', JSON.stringify(okfOn.body));
-    let okf = okfOn.body;
-    for (let i = 0; i < 20 && !okf.writtenAt; i++) {
-      await sleep(1000);
-      okf = (await call('a', '/v1/library/okf', {}, 'member')).body;
-    }
-    okf.writtenAt && okf.files >= 2 ? ok('入れるとすぐに、本人の資料を OKF で書き出す') : ng('書き出さない', JSON.stringify(okf));
-    const okfAdmin = await call('a', '/v1/library/okf', {}, 'admin');
-    okfAdmin.body.enabled === false ? ok('OKF の書き出しは本人ごと') : ng('ほかの人の入り切りが変わった');
-    await call('a', '/v1/library/okf', { method: 'PUT', body: JSON.stringify({ enabled: false }) }, 'member');
+    // つながりの画面（第44.17節）。本人の資料だけを描き、取引先を点にする
+    const graph = await call('a', '/v1/library/graph', {}, 'member');
+    graph.status === 200 && graph.body.nodes?.some((n) => n.id === item.id) && Array.isArray(graph.body.links) ? ok('つながりの画面に本人の資料を描く') : ng('つながりを描けない', JSON.stringify(graph.body).slice(0, 200));
+    const graphAdmin = await call('a', '/v1/library/graph', {}, 'admin');
+    !graphAdmin.body.nodes?.some((n) => n.id === item.id || n.id === pay.id) ? ok('つながりの画面には、共有された他人の資料を描かない') : ng('他人の資料を描いた');
+    const local = await call('a', `/v1/library/${item.id}/graph`, {}, 'member');
+    const localAdmin = await call('a', `/v1/library/${item.id}/graph`, {}, 'admin');
+    local.status === 200 && localAdmin.status === 404 ? ok('ローカルグラフは本人の資料だけ') : ng('ローカルグラフが違う', `${local.status} ${localAdmin.status}`);
+    const detail = await call('a', `/v1/library/${item.id}`, {}, 'member');
+    Array.isArray(detail.body.related) ? ok('1 件の画面に関連する資料を返す') : ng('関連する資料が無い');
 
-    const audits = await owner.query(`select action, detail::text as detail from audit_events where tenant_id = 't-alpha' and action in ('library.share', 'library.knowledge', 'library.okf.on', 'library.okf.off') and occurred_at > now() - interval '5 minutes'`);
-    audits.rows.length >= 5 && audits.rows.every((a) => !a.detail.includes(stamp)) ? ok('共有・会社の知識・OKF の入り切りを記録し、題名を残さない') : ng('記録が違う', JSON.stringify(audits.rows).slice(0, 300));
+    // 目録は何もしなくても書き出す（第44.16節。入り切りは無い）
+    const noToggle = await call('a', '/v1/library/okf', {}, 'member');
+    noToggle.status === 404 ? ok('目録の書き出しの入り切りの口は無い') : ng(`入り切りの口が残っている（${noToggle.status}）`);
+    const memberId = users.items.find((u) => u.email.startsWith('member@')).id;
+    let written = null;
+    for (let i = 0; i < 20 && !written; i++) {
+      const st = await owner.query('select okf_written_at from library_owner_state where tenant_id = $1 and owner_id = $2', ['t-alpha', memberId]);
+      written = st.rows[0]?.okf_written_at ?? null;
+      if (!written) await sleep(1000);
+    }
+    const docs = await owner.query('select count(*)::int as n from library_okf_files where tenant_id = $1 and owner_id = $2 and key <> $3', ['t-alpha', memberId, 'index']);
+    written && docs.rows[0].n >= 2 ? ok('資料を入れると、何もしなくても目録を書き出す') : ng('目録を書き出さない', JSON.stringify({ written, n: docs.rows[0].n }));
+
+    const audits = await owner.query(`select action, detail::text as detail from audit_events where tenant_id = 't-alpha' and action in ('library.share', 'library.knowledge') and occurred_at > now() - interval '5 minutes'`);
+    audits.rows.length >= 4 && audits.rows.every((a) => !a.detail.includes(stamp)) ? ok('共有と会社の知識を記録し、題名を残さない') : ng('記録が違う', JSON.stringify(audits.rows).slice(0, 300));
   } finally {
     if (made.length) await owner.query('delete from library_items where id = any($1)', [made]);
     await owner.query(`delete from library_tombstones where tenant_id in ('t-alpha', 't-beta')`);

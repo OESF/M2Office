@@ -7,7 +7,7 @@
  * 削除と社外への共有のツールは持たない（第44.5節・第44.8節）。
  */
 
-import { LIBRARY_ENTRY_LABELS, LIBRARY_SHARE_LABELS, libraryPath, libraryTitleOf, type LibraryEntry, type LibraryItem, type LibrarySettings, type LibraryShareScope } from '@m2office/shared';
+import { LIBRARY_ENTRY_LABELS, LIBRARY_GRAPH_LIMITS, LIBRARY_SHARE_LABELS, libraryPath, libraryTitleOf, type LibraryEntry, type LibraryItem, type LibrarySettings, type LibraryShareScope } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { LibraryService } from './service.js';
 
@@ -31,6 +31,12 @@ async function serviceOf(ctx: ToolContext): Promise<LibraryService | null> {
   return (await ctx.library.access()) ? ctx.library.service : null;
 }
 
+/** 関連する資料（第44.17.1節）を、秘書に返す形で 3 件まで。本人の資料でなければ空。 */
+async function relatedOf(service: LibraryService, ctx: ToolContext, id: string) {
+  const list = await service.related(who(ctx), id, LIBRARY_GRAPH_LIMITS.toolRelated).catch(() => []);
+  return list.map((r) => ({ id: r.id, title: r.title, reason: r.reason, path: libraryPath(r.id) }));
+}
+
 /** 秘書に返す 1 件の形。共有された他人の資料には `sharedBy`（持ち主の名前）を付ける。 */
 function brief(i: LibraryItem & { mine?: boolean; ownerName?: string | null }, why: string[] = []) {
   return {
@@ -52,7 +58,7 @@ export const librarySearch: Tool = {
   risk: 'read',
   activityLabel: '資料を探しています',
   helpText: '本人の資料（メールの添付・PC のファイル・M2Office で作った資料など）と、本人に共有された資料を探します',
-  description: '本人の資料と、本人に共有された資料を探す（共有されたものには sharedBy が付く。その中身は読めないので、要約とリンクで答える）。query は探す言葉（取引先・品名・書類の種類など）。words は言い換え（「見積」なら「見積書」「お見積り」など。思いつくものを入れる）。docType は種類、counterparty は取引先（正確な名前が分かるときだけ）、year は書類の年（西暦。「去年」は今年から計算する）、entry は入口（mail・pc・run・picker・chat。言われたときだけ）',
+  description: '本人の資料と、本人に共有された資料を探す（共有されたものには sharedBy が付く。その中身は読めないので、要約とリンクで答える。上位の資料には関連する資料 related が付く）。query は探す言葉（取引先・品名・書類の種類など）。words は言い換え（「見積」なら「見積書」「お見積り」など。思いつくものを入れる）。docType は種類、counterparty は取引先（正確な名前が分かるときだけ）、year は書類の年（西暦。「去年」は今年から計算する）、entry は入口（mail・pc・run・picker・chat。言われたときだけ）',
   args: {
     properties: {
       query: { type: 'string', description: '探す言葉' },
@@ -78,7 +84,12 @@ export const librarySearch: Tool = {
       ...(entry in LIBRARY_ENTRY_LABELS ? { entry: entry as LibraryEntry } : {}),
       limit: typeof args['limit'] === 'number' ? args['limit'] : 10,
     });
-    return { available: true, untrusted: true, total: r.total, items: r.items.map((i) => brief(i, i.why)) };
+    // 上位 3 件には、関連する資料を添える（「この見積に関連して、契約書もあります」。第44.17.1節）
+    const items = await Promise.all(r.items.map(async (i, n) => {
+      const related = n < 3 && i.mine ? await relatedOf(service, ctx, i.id) : [];
+      return { ...brief(i, i.why), ...(related.length ? { related } : {}) };
+    }));
+    return { available: true, untrusted: true, total: r.total, items };
   },
 };
 
@@ -100,7 +111,8 @@ export const libraryRead: Tool = {
     if (!service) return UNAVAILABLE;
     const r = await service.readContent(who(ctx), str(args['id']));
     if ('error' in r) return { available: false, reason: r.error };
-    return { available: true, untrusted: true, item: brief(r.item), text: r.text, ...(r.scope ? { scope: `読んだ範囲: ${r.scope}` } : {}) };
+    const related = await relatedOf(service, ctx, r.item.id);
+    return { available: true, untrusted: true, item: brief(r.item), text: r.text, ...(r.scope ? { scope: `読んだ範囲: ${r.scope}` } : {}), ...(related.length ? { related } : {}) };
   },
 };
 

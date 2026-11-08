@@ -87,10 +87,11 @@ src/members/     会員とポイント（内蔵の拡張。第40章の段 1・�
                  ランク（service.ts の rankCutOf・rankOf。第40.19節）、サイネージの特典の 1 枚（screen.ts）、
                  ツール（tools.ts。members.find・points・rewards・rank・send_line）、付属の業務「会員とポイント」「会員に LINE で知らせる」（agents.ts）。
                  段 2 で週の見立て・会員への LINE の知らせ（承認の後）・誕生日と誕生月の特典
-src/library/     資料（内蔵の拡張。第44章の段 1〜段 4）。形式の確かめ（format.ts。拡張子と中身の先頭）、読み取り（read.ts。PDF は先頭 50 ページ・pptx・読めないものの扱い）、
+src/library/     資料（内蔵の拡張。第44章の段 1〜段 5）。形式の確かめ（format.ts。拡張子と中身の先頭）、読み取り（read.ts。PDF は先頭 50 ページ・pptx・読めないものの扱い）、
                  目録の置き場（store.ts。持ち主で絞る）、処理（service.ts。ドライブに置く・同じ中身をまとめる・AI の整理・上限で止める・探す・成果物の自動の登録）、
                  メールの添付の取り込み（mail.ts。本人が入れる・直近 1 年と新しいメール・決まりで除く・1 日 500 通）、
-                 OKF の書き出しと古い版の知らせ（okf.ts。OKF v0.2 の形・週 1 回・変わったものだけ）、
+                 目録（OKF）の書き出しと古い版の知らせ（okf.ts。OKF v0.2 の形・常に書き出す・変わったものだけ・関連する資料へのリンク）、
+                 つながり（links.ts。同じメール・同じ資料の版・同じ取引先の同じ案件・同じ語・同じフォルダを決まりで見つける）、
                  ツール（tools.ts。library.search・read・add・update・share・knowledge）、付属の業務「資料」（agents.ts）。本体は本人のドライブで、全文は持たない
 src/print-designs/ 販促物の作成（内蔵の拡張。第41章の段 1）。型 12 種と組み版（templates.ts。mm の SVG・塗り足し・配色 3 通り・字の大きさを枠に合わせる）、
                  書き出し（render.ts。案の小さな画像・印刷の解像度の PNG・実寸と入稿用の PDF）、点検（checks.ts。曜日・連絡先・入りきらない文・推論の誤字と表示の決まり）、

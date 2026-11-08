@@ -39,6 +39,10 @@
   --shadow-lg: rgba(0, 0, 0, .2);
   --shadow-knob: 0 1px 2px rgba(0, 0, 0, .25);
   --backdrop: rgba(15, 30, 30, .35);
+  /* 資料のつながりの画面（第44.17.2節）。資料の種類を描き分ける 8 色・取引先の点・線 */
+  --graph-1: #0f766e; --graph-2: #2563eb; --graph-3: #b45309; --graph-4: #7c3aed;
+  --graph-5: #be185d; --graph-6: #15803d; --graph-7: #0369a1; --graph-8: #a16207;
+  --graph-party: #334155; --graph-link: rgba(100, 116, 139, .45); --graph-dim: rgba(148, 163, 184, .25);
   font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", system-ui, sans-serif;
   font-size: calc(14px * var(--font-scale));
   color: var(--ink);
@@ -87,6 +91,9 @@
   --shadow-lg: rgba(0, 0, 0, .6);
   --shadow-knob: 0 1px 2px rgba(0, 0, 0, .6);
   --backdrop: rgba(0, 0, 0, .55);
+  --graph-1: #2dd4bf; --graph-2: #60a5fa; --graph-3: #fbbf24; --graph-4: #a78bfa;
+  --graph-5: #f472b6; --graph-6: #4ade80; --graph-7: #38bdf8; --graph-8: #facc15;
+  --graph-party: #e2e8f0; --graph-link: rgba(148, 163, 184, .45); --graph-dim: rgba(71, 85, 105, .35);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -122,6 +129,9 @@
     --shadow-lg: rgba(0, 0, 0, .6);
     --shadow-knob: 0 1px 2px rgba(0, 0, 0, .6);
     --backdrop: rgba(0, 0, 0, .55);
+    --graph-1: #2dd4bf; --graph-2: #60a5fa; --graph-3: #fbbf24; --graph-4: #a78bfa;
+    --graph-5: #f472b6; --graph-6: #4ade80; --graph-7: #38bdf8; --graph-8: #facc15;
+    --graph-party: #e2e8f0; --graph-link: rgba(148, 163, 184, .45); --graph-dim: rgba(71, 85, 105, .35);
   }
 }
 
@@ -3128,6 +3138,16 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .library-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .library-mail { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .library-mail-note { flex-basis: 100%; margin: 0; }
+/* 資料のつながりの画面（第44.17.2節）。canvas と、選んだ点の札。狭い画面では縦に並べる */
+.library-view { display: inline-flex; gap: 4px; flex: none; }
+.library-graph { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.library-graph.has-card { grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); }
+.library-graph.compact { display: block; margin-top: 8px; }
+.library-graph-canvas { position: relative; height: min(70vh, 620px); min-height: 320px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); touch-action: none; }
+.library-graph.compact .library-graph-canvas { height: 260px; min-height: 0; }
+.library-graph-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.library-graph-card p { margin: 0; }
+@media (max-width: 760px) { .library-graph.has-card { grid-template-columns: 1fr; } }
 .library-share { display: flex; flex-direction: column; gap: 8px; }
 .library-share p { margin: 0; }
 .library-versions h3 { margin: 0 0 4px; }

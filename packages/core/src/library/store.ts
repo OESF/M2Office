@@ -10,6 +10,7 @@ import type pg from 'pg';
 import { LIBRARY_LIMITS, type LibraryEntry, type LibraryFacets, type LibraryFilter, type LibraryFormat, type LibraryItem, type LibraryItemDetail, type LibraryOrigin, type LibraryReadState, type LibraryShareScope } from '@m2office/shared';
 import { createPool } from '../repository/pool.js';
 import { normalizeForSearch } from '../knowledge/search.js';
+import type { LibraryLinkInput } from './links.js';
 
 /** 目録を見る人。 */
 export interface LibraryViewer {
@@ -33,8 +34,11 @@ export interface LibraryShareRow {
 
 /** 持ち主ごとの様子（第44.14節 `library_owner_state`）。 */
 export interface LibraryOwnerStateRow {
+  /** 第 0.532.0 版から読まない（目録は常に書き出す。第44.16節）。 */
   okfEnabled: boolean;
   okfWrittenAt: string | null;
+  /** 最後に書き出したときの目録の変わり目（{@link LibraryStore.ownerStamp}）。 */
+  okfStamp: string;
   okfError: string;
   /** もう知らせた版の組（題名・取引先・種類の鍵）。 */
   versionsNotified: string[];
@@ -166,6 +170,10 @@ export interface LibraryStore {
   versionsOf(who: LibraryViewer, item: LibraryItem): Promise<LibraryItem[]>;
   /** 本人の資料のすべて（OKF の書き出しと版の知らせ。新しい順）。 */
   allOf(tenantId: string, ownerId: string): Promise<LibraryItem[]>;
+  /** 本人の資料と、入口の記録のメールの ID・元のフォルダ（つながりの材料。第44.17.1節）。新しい順。 */
+  linkInputs(tenantId: string, ownerId: string): Promise<LibraryLinkInput[]>;
+  /** 本人の目録の変わり目（件数・最後に変わった時刻・入口の記録の数）。変わっていなければ同じ文字を返す（目録の書き出し。第44.16節）。 */
+  ownerStamp(tenantId: string, ownerId: string): Promise<string>;
   /** 資料を持っている人。 */
   owners(tenantId: string): Promise<string[]>;
   ownerState(tenantId: string, ownerId: string): Promise<LibraryOwnerStateRow | null>;
@@ -475,29 +483,48 @@ export class PostgresLibraryStore implements LibraryStore {
     return rows.map(toItem);
   }
 
+  async linkInputs(tenantId: string, ownerId: string): Promise<LibraryLinkInput[]> {
+    const items = await this.allOf(tenantId, ownerId);
+    const rows = await this.q<{ item_id: string; messages: string[] | null; folders: string[] | null }>(tenantId,
+      `select o.item_id, array_agg(distinct o.message_id) filter (where o.message_id is not null) as messages, array_agg(distinct o.folder) filter (where o.folder <> '') as folders
+       from library_item_origins o join library_items i on i.tenant_id = o.tenant_id and i.id = o.item_id
+       where o.tenant_id = $1 and i.owner_id = $2 group by o.item_id`, [tenantId, ownerId]);
+    const by = new Map(rows.map((r) => [r.item_id, r]));
+    return items.map((i) => ({ ...i, messageIds: by.get(i.id)?.messages ?? [], folders: by.get(i.id)?.folders ?? [] }));
+  }
+
+  async ownerStamp(tenantId: string, ownerId: string): Promise<string> {
+    const rows = await this.q<{ n: string; at: Date | string | null; o: string }>(tenantId,
+      `select count(*) as n, max(updated_at) as at,
+         (select count(*) from library_item_origins o join library_items i on i.tenant_id = o.tenant_id and i.id = o.item_id where o.tenant_id = $1 and i.owner_id = $2) as o
+       from library_items where tenant_id = $1 and owner_id = $2`, [tenantId, ownerId]);
+    const r = rows[0];
+    return r ? `${r.n}:${r.at === null ? '' : iso(r.at)}:${r.o}` : '0::0';
+  }
+
   async owners(tenantId: string): Promise<string[]> {
     const rows = await this.q<{ owner_id: string }>(tenantId, `select distinct owner_id from library_items where tenant_id = $1`, [tenantId]);
     return rows.map((r) => r.owner_id);
   }
 
   async ownerState(tenantId: string, ownerId: string): Promise<LibraryOwnerStateRow | null> {
-    const rows = await this.q<{ okf_enabled: boolean; okf_written_at: Date | string | null; okf_error: string; versions_notified: string[]; versions_noticed_at: Date | string | null }>(tenantId,
-      `select okf_enabled, okf_written_at, okf_error, versions_notified, versions_noticed_at from library_owner_state where tenant_id = $1 and owner_id = $2`, [tenantId, ownerId]);
+    const rows = await this.q<{ okf_enabled: boolean; okf_written_at: Date | string | null; okf_stamp: string; okf_error: string; versions_notified: string[]; versions_noticed_at: Date | string | null }>(tenantId,
+      `select okf_enabled, okf_written_at, okf_stamp, okf_error, versions_notified, versions_noticed_at from library_owner_state where tenant_id = $1 and owner_id = $2`, [tenantId, ownerId]);
     const r = rows[0];
     if (!r) return null;
     return {
-      okfEnabled: r.okf_enabled, okfWrittenAt: r.okf_written_at === null ? null : iso(r.okf_written_at), okfError: r.okf_error,
+      okfEnabled: r.okf_enabled, okfWrittenAt: r.okf_written_at === null ? null : iso(r.okf_written_at), okfStamp: r.okf_stamp, okfError: r.okf_error,
       versionsNotified: r.versions_notified, versionsNoticedAt: r.versions_noticed_at === null ? null : iso(r.versions_noticed_at),
     };
   }
 
   async saveOwnerState(tenantId: string, ownerId: string, w: LibraryOwnerStateRow): Promise<void> {
     await this.q(tenantId,
-      `insert into library_owner_state (tenant_id, owner_id, okf_enabled, okf_written_at, okf_error, versions_notified, versions_noticed_at, updated_at)
-       values ($1, $2, $3, $4, $5, $6, $7, now())
-       on conflict (tenant_id, owner_id) do update set okf_enabled = excluded.okf_enabled, okf_written_at = excluded.okf_written_at, okf_error = excluded.okf_error,
+      `insert into library_owner_state (tenant_id, owner_id, okf_enabled, okf_written_at, okf_stamp, okf_error, versions_notified, versions_noticed_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, now())
+       on conflict (tenant_id, owner_id) do update set okf_enabled = excluded.okf_enabled, okf_written_at = excluded.okf_written_at, okf_stamp = excluded.okf_stamp, okf_error = excluded.okf_error,
          versions_notified = excluded.versions_notified, versions_noticed_at = excluded.versions_noticed_at, updated_at = now()`,
-      [tenantId, ownerId, w.okfEnabled, w.okfWrittenAt, w.okfError.slice(0, 300), w.versionsNotified.slice(-2000), w.versionsNoticedAt]);
+      [tenantId, ownerId, w.okfEnabled, w.okfWrittenAt, w.okfStamp, w.okfError.slice(0, 300), w.versionsNotified.slice(-2000), w.versionsNoticedAt]);
   }
 
   async okfFiles(tenantId: string, ownerId: string): Promise<LibraryOkfFileRow[]> {
@@ -704,6 +731,7 @@ export class MemoryLibraryStore implements LibraryStore {
     const r = this.rows.get(id);
     if (!r || r.tenantId !== who.tenantId || r.ownerId !== who.userId) return null;
     Object.assign(r, patch, { edited: [...new Set([...r.edited, ...Object.keys(patch)])] });
+    r.updatedAt = new Date(Math.max(Date.now(), Date.parse(r.updatedAt) + 1)).toISOString();
     r.searchText = librarySearchText(r, r.origins);
     return this.toView(r);
   }
@@ -775,6 +803,18 @@ export class MemoryLibraryStore implements LibraryStore {
     return this.mine({ tenantId, userId: ownerId }).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).map(this.toView);
   }
 
+  async linkInputs(tenantId: string, ownerId: string): Promise<LibraryLinkInput[]> {
+    return this.mine({ tenantId, userId: ownerId }).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).map((r) => ({
+      ...this.toView(r), messageIds: [...new Set(r.origins.map((o) => o.messageId).filter((x): x is string => !!x))], folders: [...new Set(r.origins.map((o) => o.folder).filter(Boolean))],
+    }));
+  }
+
+  async ownerStamp(tenantId: string, ownerId: string): Promise<string> {
+    const rows = this.mine({ tenantId, userId: ownerId });
+    const at = rows.map((r) => r.updatedAt).sort().at(-1) ?? '';
+    return `${rows.length}:${at}:${rows.reduce((n, r) => n + r.origins.length, 0)}`;
+  }
+
   async owners(tenantId: string): Promise<string[]> {
     return [...new Set([...this.rows.values()].filter((r) => r.tenantId === tenantId).map((r) => r.ownerId))];
   }
@@ -837,6 +877,7 @@ export class MemoryLibraryStore implements LibraryStore {
     r.summary = x.summary ?? r.summary;
     r.keywords = x.keywords ?? r.keywords;
     r.readState = x.readState; r.readNote = x.readNote; r.readScope = x.readScope; r.attempts = 0;
+    r.updatedAt = new Date(Math.max(Date.now(), Date.parse(r.updatedAt) + 1)).toISOString();
     if (x.driveUrl) r.driveUrl = x.driveUrl;
     if (x.sha256 && !r.sha256) r.sha256 = x.sha256;
     if (x.sizeBytes !== undefined) r.sizeBytes = x.sizeBytes;

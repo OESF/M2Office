@@ -179,8 +179,74 @@ export interface LibraryItemPage extends LibraryItemDetail {
   ownerName: string | null;
   /** 共有したグループの名前（持ち主にだけ返す）。 */
   sharedGroups: string[];
-  /** 題名・取引先・種類が同じで中身が違う資料（新しい順）。 */
-  versions: { id: string; title: string; docDate: string | null; receivedAt: string }[];
+  /** 関連する資料（強い順。持ち主にだけ返す。第44.17.1節）。同じ資料の版もここに入る。 */
+  related: LibraryRelated[];
+}
+
+/** つながりの種類（第44.17.1節）。 */
+export type LibraryLinkKind = 'mail' | 'version' | 'project' | 'words' | 'folder';
+
+/** つながりの理由の言葉（画面と秘書に出す）。 */
+export const LIBRARY_LINK_LABELS: Record<LibraryLinkKind, string> = {
+  mail: '同じメールで届いた', version: '同じ資料の版', project: '同じ取引先の同じ案件', words: '同じ語が出てくる', folder: '同じフォルダにあった',
+};
+
+/** 関連する資料 1 件。 */
+export interface LibraryRelated {
+  id: string;
+  title: string;
+  docType: string;
+  docDate: string | null;
+  receivedAt: string;
+  kind: LibraryLinkKind;
+  strength: number;
+  /** 理由の文（「同じ取引先の同じ案件（サーバー保守）」など）。 */
+  reason: string;
+}
+
+/** つながりの画面の決まり（第44.17節・Q-315）。 */
+export const LIBRARY_GRAPH_LIMITS = {
+  /** 一度に描く資料の数 */
+  nodes: 2000,
+  /** 1 件の画面に並べる関連する資料の数 */
+  related: 8,
+  /** 秘書の答えに添える関連する資料の数 */
+  toolRelated: 3,
+  /** ローカルグラフで描く資料の数 */
+  localMax: 80,
+} as const;
+
+/** グラフの点。資料か取引先。 */
+export interface LibraryGraphNode {
+  id: string;
+  kind: 'item' | 'party';
+  label: string;
+  /** 資料の種類（色に使う）。取引先なら空。 */
+  docType: string;
+  /** つながりの数（大きさに使う）。 */
+  degree: number;
+  /** 資料の要約・書類の日付・開くリンク（資料のときだけ）。 */
+  summary?: string;
+  date?: string;
+  url?: string | null;
+}
+
+/** グラフの線。`kind` が `party` なら取引先の点と資料を結ぶ線。 */
+export interface LibraryGraphLink {
+  source: string;
+  target: string;
+  kind: LibraryLinkKind | 'party';
+  strength: number;
+  reason: string;
+}
+
+/** グラフの形。`total` は絞り込んだ範囲の資料の数、`shown` は描いた数。`matched` は言葉に当たった資料（光らせる）。 */
+export interface LibraryGraph {
+  nodes: LibraryGraphNode[];
+  links: LibraryGraphLink[];
+  total: number;
+  shown: number;
+  matched: string[];
 }
 
 /** 共有の結果（第44.8節）。`held` は機微なものとして止めた理由（もう一度頼まれたら共有する）。 */
@@ -188,17 +254,6 @@ export type LibraryShareResult =
   | { item: LibraryItem; scope: LibraryShareScope; people: number }
   | { held: string }
   | { error: string };
-
-/** OKF の書き出しの様子（本人ごと。第44.16節）。 */
-export interface LibraryOkfState {
-  enabled: boolean;
-  writtenAt: string | null;
-  files: number;
-  error: string;
-}
-
-/** OKF で書き出し直す間隔（第44.16節「週に 1 回」）。 */
-export const LIBRARY_OKF_INTERVAL_MS = 7 * 86_400_000;
 
 /** 機微な資料らしい言葉（第44.8節。会社で共有の前に止める・会社の知識にしない）。 */
 const SENSITIVE = /(給与|給料|賃金|賞与|源泉徴収|年末調整|人事評価|人事考課|人事|評価|査定|個人番号|マイナンバー|健康診断|診断書|履歴書|職務経歴|雇用契約|身分証|住民票|扶養)/;

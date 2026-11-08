@@ -15,7 +15,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   canUseAgent, isRefusedLibraryName, librarySensitiveReason, LIBRARY_EXTENSION_ID, LIBRARY_LIMITS, libraryPath, libraryTitleOf, type Artifact, type LibraryFilter, type LibraryFormat, type LibraryItem,
   type LibraryItemDetail, type LibraryItemPage, type LibraryProgress, type LibrarySettings, type LibraryShareResult, type LibraryShareScope, type Run,
+  LIBRARY_GRAPH_LIMITS, type LibraryGraph, type LibraryGraphLink, type LibraryGraphNode, type LibraryRelated,
 } from '@m2office/shared';
+import { libraryLinkReason, libraryLinks, type LibraryLink, type LibraryLinkInput } from './links.js';
 import { ConnectorUnavailableError, type DriveConnector } from '../connectors/types.js';
 import type { FileStore } from '../files/store.js';
 import type { OcrFn } from '../files/to-text.js';
@@ -34,8 +36,8 @@ import { detectLibraryFormat, libraryFormatFromDrive, libraryMimeOf } from './fo
 import { isImageFormat, readLibraryFile, unreadableReason } from './read.js';
 import { libraryNormal, type LibraryPatch, type LibraryReadResult, type LibraryShareRow, type LibraryStore, type LibraryViewer, type LibraryWork, type NewLibraryOrigin } from './store.js';
 
-/** OKF の書き出しのフォルダの名前（第44.16節）。 */
-export const LIBRARY_OKF_FOLDER = 'OKF';
+/** 目録（OKF）の書き出しのフォルダの名前（第44.16節。利用者に OKF を意識させないため「OKF」の名前を使わない）。 */
+export const LIBRARY_OKF_FOLDER = '目録';
 /** 本人のドライブに作るフォルダの名前（第44.5節）。 */
 export const LIBRARY_FOLDER_NAME = 'M2Office 資料';
 /** 1 回の見回りで 1 社から受け持つ件数。 */
@@ -156,6 +158,46 @@ const KNOWLEDGE_CHARS = 20_000;
 /** 共有された資料の中身を読まない理由（第44.8節）。 */
 const SHARED_NOT_READ = '共有された資料の中身は読みません。題名と要約を参考にし、中身はリンクから開いて確かめてください';
 
+/** つながりを覚えておく人の数（同じ人の画面を開き直しても計算し直さない）。 */
+const LINK_CACHE_OWNERS = 50;
+
+/**
+ * 資料とつながりから、グラフの点と線を作る（第44.17.2節）。取引先は点にして、その取引先の資料と細い線で結ぶ。
+ *
+ * @param items 描く資料（本人の資料だけ）
+ * @param links 本人の資料のつながり（描く資料の間の線だけを使う）
+ */
+export function graphOf(items: LibraryItem[], links: Map<string, LibraryLink[]>): Pick<LibraryGraph, 'nodes' | 'links'> {
+  const shown = new Set(items.map((i) => i.id));
+  const out: LibraryGraphLink[] = [];
+  for (const i of items) {
+    for (const l of links.get(i.id) ?? []) {
+      if (shown.has(l.id) && i.id < l.id) out.push({ source: i.id, target: l.id, kind: l.kind, strength: l.strength, reason: libraryLinkReason(l) });
+    }
+  }
+  const parties = new Map<string, string>();
+  for (const i of items) {
+    const name = i.counterparty.trim();
+    if (!name) continue;
+    const pid = `party:${libraryNormal(name)}`;
+    if (!parties.has(pid)) parties.set(pid, name);
+    out.push({ source: pid, target: i.id, kind: 'party', strength: 1, reason: name });
+  }
+  const degree = new Map<string, number>();
+  for (const l of out) {
+    degree.set(l.source, (degree.get(l.source) ?? 0) + 1);
+    degree.set(l.target, (degree.get(l.target) ?? 0) + 1);
+  }
+  const nodes: LibraryGraphNode[] = [
+    ...items.map((i): LibraryGraphNode => ({
+      id: i.id, kind: 'item', label: libraryTitleOf(i), docType: i.docType, degree: degree.get(i.id) ?? 0,
+      summary: i.summary, date: i.docDate ?? i.receivedAt.slice(0, 10), url: i.driveUrl,
+    })),
+    ...[...parties].map(([id, label]): LibraryGraphNode => ({ id, kind: 'party', label, docType: '', degree: degree.get(id) ?? 0 })),
+  ];
+  return { nodes, links: out };
+}
+
 /** 個人向けの Google アカウントのドメイン（会社の全員への共有はできない）。 */
 const CONSUMER_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
 
@@ -254,6 +296,8 @@ function fieldsByRule(name: string, text: string): LibraryReadingFields {
 export class LibraryService {
   /** 上限に当たった会社と、次に試す時刻（第44.11節）。 */
   private readonly pausedUntil = new Map<string, number>();
+  /** 人ごとのつながり（目録の変わり目が同じなら計算し直さない）。 */
+  private readonly linkCache = new Map<string, { stamp: string; inputs: Map<string, LibraryLinkInput>; links: Map<string, LibraryLink[]> }>();
   /** フォルダを作っている途中の約束（同時に入れても、同じ人のフォルダを 2 つ作らない）。 */
   private readonly folderJobs = new Map<string, Promise<string>>();
 
@@ -271,7 +315,7 @@ export class LibraryService {
   }
 
   /** 本人の資料の一覧。言葉があれば点を付けて並べる（第44.7節）。 */
-  async list(who: LibraryViewer, filter: LibraryFilter): Promise<{ items: LibraryHit[]; total: number }> {
+  async list(who: LibraryViewer, filter: LibraryFilter): Promise<{ items: LibraryListed[]; total: number }> {
     const limit = Math.min(Math.max(filter.limit ?? LIBRARY_LIMITS.pageSize, 1), LIBRARY_LIMITS.pageSize);
     const offset = Math.max(filter.offset ?? 0, 0);
     const terms = this.termsOf(filter);
@@ -318,21 +362,74 @@ export class LibraryService {
   }
 
   /**
-   * 1 件の画面に出す形（第44.8節）。本人の資料と、本人に共有された資料が見える。持ち主には共有したグループとほかの版も返す。
+   * 1 件の画面に出す形（第44.8節・第44.17.1節）。本人の資料と、本人に共有された資料が見える。持ち主には共有したグループと関連する資料も返す。
    */
   async page(who: LibraryViewer, id: string): Promise<LibraryItemPage | null> {
     const item = await this.store.view(await this.viewer(who), id);
     if (!item) return null;
     const [decorated] = await this.decorate(who, [item]);
-    if (!decorated!.mine) return { ...decorated!, sharedGroups: [], versions: [] };
+    if (!decorated!.mine) return { ...decorated!, sharedGroups: [], related: [] };
     const groups = await this.deps.repo.listGroups(who.tenantId);
     const shares = await this.store.shares(who, id);
-    const versions = await this.store.versionsOf(who, item);
     return {
       ...decorated!,
       sharedGroups: shares.filter((x) => x.groupId).map((x) => groups.find((g) => g.id === x.groupId)?.name ?? '（消したグループ）'),
-      versions: versions.map((v) => ({ id: v.id, title: libraryTitleOf(v), docDate: v.docDate, receivedAt: v.receivedAt })),
+      related: await this.related(who, id, LIBRARY_GRAPH_LIMITS.related),
     };
+  }
+
+  /**
+   * 本人の資料のつながり（第44.17.1節）。目録が変わったときだけ計算し直す。
+   *
+   * @remarks 本人の資料どうしだけをつなぐ（共有された他人の資料とはつながない）
+   */
+  async linksOf(tenantId: string, ownerId: string): Promise<{ inputs: Map<string, LibraryLinkInput>; links: Map<string, LibraryLink[]> }> {
+    const key = `${tenantId}:${ownerId}`;
+    const stamp = await this.store.ownerStamp(tenantId, ownerId);
+    const cached = this.linkCache.get(key);
+    if (cached && cached.stamp === stamp) return cached;
+    const list = await this.store.linkInputs(tenantId, ownerId);
+    const fresh = { stamp, inputs: new Map(list.map((i) => [i.id, i])), links: libraryLinks(list) };
+    this.linkCache.delete(key);
+    this.linkCache.set(key, fresh);
+    // 覚えておく人の数を抑える（古いものから捨てる）
+    while (this.linkCache.size > LINK_CACHE_OWNERS) this.linkCache.delete(this.linkCache.keys().next().value!);
+    return fresh;
+  }
+
+  /** 本人の資料に関連する資料（強い順。本人の資料でなければ空）。 */
+  async related(who: LibraryViewer, id: string, limit: number): Promise<LibraryRelated[]> {
+    const { inputs, links } = await this.linksOf(who.tenantId, who.userId);
+    return (links.get(id) ?? []).slice(0, limit).map((l) => {
+      const i = inputs.get(l.id)!;
+      return { id: i.id, title: libraryTitleOf(i), docType: i.docType, docDate: i.docDate, receivedAt: i.receivedAt, kind: l.kind, strength: l.strength, reason: libraryLinkReason(l) };
+    });
+  }
+
+  /**
+   * つながりの画面（第44.17.2節）。本人の資料の、絞り込んだ範囲の新しい順に 2,000 件まで。取引先の点に、その取引先の資料を集める。
+   * 言葉（`q`）は絞り込まず、当たる資料を `matched` で返して光らせる。
+   */
+  async graph(who: LibraryViewer, filter: LibraryFilter): Promise<LibraryGraph> {
+    const own: LibraryViewer = { tenantId: who.tenantId, userId: who.userId };
+    const { q, words, ...rest } = filter;
+    const r = await this.store.list(own, rest, [], LIBRARY_GRAPH_LIMITS.nodes, 0);
+    const terms = this.termsOf({ q, words });
+    const matched = terms.length ? (await this.store.list(own, rest, terms, LIBRARY_GRAPH_LIMITS.nodes, 0)).items.map((i) => i.id) : [];
+    const { links } = await this.linksOf(who.tenantId, who.userId);
+    return { ...graphOf(r.items, links), total: r.total, shown: r.items.length, matched };
+  }
+
+  /** ローカルグラフ（第44.17.2節）。その資料のまわり 2 歩先まで、強いつながりから多くて 80 件。本人の資料でなければ `null`。 */
+  async localGraph(who: LibraryViewer, id: string): Promise<LibraryGraph | null> {
+    const { inputs, links } = await this.linksOf(who.tenantId, who.userId);
+    if (!inputs.has(id)) return null;
+    const picked = new Set([id]);
+    const first = (links.get(id) ?? []).map((l) => l.id);
+    for (const x of first) if (picked.size < LIBRARY_GRAPH_LIMITS.localMax) picked.add(x);
+    for (const x of first) for (const l of links.get(x) ?? []) if (picked.size < LIBRARY_GRAPH_LIMITS.localMax) picked.add(l.id);
+    const items = [...picked].map((x) => inputs.get(x)!).filter(Boolean);
+    return { ...graphOf(items, links), total: items.length, shown: items.length, matched: [id] };
   }
 
   /** 読み取りの進み具合と、読めない理由（第44.11節）。 */

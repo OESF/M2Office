@@ -5,14 +5,17 @@
  * 人に整理をさせない（ADR-0028）。読めなかった資料は「読めなかった」と示す。途切れても、同じファイルを入れ直せば続きから入る（同じ中身は入れ直さない）。
  */
 
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import {
   isRefusedLibraryName, LIBRARY_ENTRY_LABELS, LIBRARY_FORMAT_LABELS, LIBRARY_LIMITS, LIBRARY_SHARE_LABELS, libraryTitleOf,
-  type LibraryEntry, type LibraryFacets, type LibraryItemPage, type LibraryItemView, type LibraryMailState, type LibraryOkfState, type LibraryProgress, type LibraryShareScope,
+  type LibraryEntry, type LibraryFacets, type LibraryItemPage, type LibraryItemView, type LibraryGraph, type LibraryMailState, type LibraryProgress, type LibraryShareScope,
 } from '@m2office/shared';
 import { api, ApiError, describeError } from './api.js';
 import { BackButton } from './back-button.js';
 import { pickDriveFiles } from './google-picker.js';
+
+/** つながりの画面（グラフ）。開いたときだけ読み込む（第44.17.2節）。 */
+const LibraryGraphView = lazy(() => import('./LibraryGraph.js'));
 
 /** 入れるファイル 1 つ。 */
 interface QueuedFile { file: File; folder: string }
@@ -91,6 +94,8 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
   const [dragging, setDragging] = useState(false);
   const [upload, setUpload] = useState<Upload | null>(null);
   const [confirm, setConfirm] = useState<{ queue: QueuedFile[]; jpy: number | null } | null>(null);
+  const [view, setView] = useState<'list' | 'graph'>(() => { try { return localStorage.getItem('m2office.libraryView') === 'graph' ? 'graph' : 'list'; } catch { return 'list'; } });
+  const [graph, setGraph] = useState<LibraryGraph | null>(null);
   const cancelled = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -105,6 +110,15 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       .catch((e) => setError(describeError(e, '読めませんでした')));
   }, [filter]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
+  // つながりの画面は、絞り込みが変わるたびに読み直す
+  useEffect(() => {
+    try { localStorage.setItem('m2office.libraryView', view); } catch { /* 覚えられなくても動く */ }
+    if (view !== 'graph') return undefined;
+    const t = setTimeout(() => {
+      api.library.graph(filter() as Record<string, string>).then(setGraph).catch((e) => setError(describeError(e, 'つながりを読めませんでした')));
+    }, q ? 250 : 0);
+    return () => clearTimeout(t);
+  }, [view, filter, q, changeKey]);
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // 裏で読んでいる間は、ときどき読み直す
   const reading = (progress?.pending ?? 0) > 0 && !progress?.blocked;
@@ -251,7 +265,6 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       </div>
 
       <MailIntake google={google} onImported={load} />
-      <OkfExport google={google} />
 
       {confirm && (
         <div className="card library-confirm" role="alertdialog" aria-label="取り込みの確かめ">
@@ -293,6 +306,10 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       {reading && <p className="small muted" role="status">中身を読んでいます（残り {progress!.pending.toLocaleString('ja-JP')} 件）</p>}
 
       <div className="row wrap library-filter">
+        <div className="library-view" role="group" aria-label="見せ方">
+          <button className={view === 'list' ? 'btn small' : 'btn ghost small'} aria-pressed={view === 'list'} onClick={() => setView('list')}>一覧</button>
+          <button className={view === 'graph' ? 'btn small' : 'btn ghost small'} aria-pressed={view === 'graph'} onClick={() => setView('graph')}>つながり</button>
+        </div>
         <input className="library-search" type="search" value={q} placeholder="探す（取引先・品名・書類の種類など）" aria-label="探す" maxLength={LIBRARY_LIMITS.queryChars} onChange={(e) => setQ(e.target.value)} />
         <select value={counterparty} aria-label="取引先" onChange={(e) => setCounterparty(e.target.value)}>
           <option value="">取引先: すべて</option>
@@ -313,12 +330,18 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
       </div>
 
       {error && <p className="error" role="alert">{error}</p>}
-      {items && items.length === 0 && (
+      {view === 'graph' && graph && (graph.shown === 0
+        ? <p className="muted">{filtered ? '当たる資料はありません。' : 'まだ資料がありません。'}</p>
+        : <>
+          {graph.total > graph.shown && <p className="small muted" role="status">新しい {graph.shown.toLocaleString('ja-JP')} 件を描いています（全 {graph.total.toLocaleString('ja-JP')} 件）。絞り込むと、その範囲を描きます</p>}
+          <Suspense fallback={<p className="muted">読み込んでいます…</p>}><LibraryGraphView graph={graph} onOpen={onOpen} /></Suspense>
+        </>)}
+      {view === 'list' && items && items.length === 0 && (
         filtered
           ? <p className="muted">当たる資料はありません。</p>
           : <div className="library-empty"><p>ここにファイルかフォルダをドラッグしてください</p></div>
       )}
-      {items && items.length > 0 && (
+      {view === 'list' && items && items.length > 0 && (
         <ul className="library-list">
           {items.map((i) => (
             <li key={i.id}>
@@ -342,40 +365,8 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
           ))}
         </ul>
       )}
-      {items && items.length < total && <button className="btn ghost small" onClick={more}>続きを見る（残り {(total - items.length).toLocaleString('ja-JP')} 件）</button>}
+      {view === 'list' && items && items.length < total && <button className="btn ghost small" onClick={more}>続きを見る（残り {(total - items.length).toLocaleString('ja-JP')} 件）</button>}
       {dragging && <div className="library-drop" aria-hidden="true">ここに入れる</div>}
-    </div>
-  );
-}
-
-/**
- * OKF での書き出し（第44.16節）。本人が入れたときだけ、本人のドライブの「M2Office 資料/OKF」に書き出し、週に 1 回書き直す。自動で共有しない。
- */
-function OkfExport({ google }: { google: boolean }) {
-  const [state, setState] = useState<LibraryOkfState | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => { api.library.okf.get().then(setState).catch((e) => setError(describeError(e, '書き出しの様子を読めませんでした'))); }, []);
-  if (!state) return error ? <p className="small error" role="alert">{error}</p> : null;
-  const toggle = async () => {
-    setBusy(true);
-    setError(null);
-    try { setState(await api.library.okf.set(!state.enabled)); } catch (e) { setError(describeError(e, '変えられませんでした')); } finally { setBusy(false); }
-  };
-  return (
-    <div className="library-mail">
-      <label className="switch-label">
-        <span>OKF で書き出す</span>
-        <button type="button" role="switch" aria-checked={state.enabled} aria-label={state.enabled ? 'OKF での書き出しをやめる' : 'OKF で書き出す'}
-          className={state.enabled ? 'switch on' : 'switch'} disabled={busy || (!google && !state.enabled)} onClick={() => void toggle()}><span /></button>
-      </label>
-      {state.enabled && (
-        <span className="small muted" role="status">
-          {state.writtenAt ? `${dayLabel(new Date(state.writtenAt).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }))} に ${state.files.toLocaleString('ja-JP')} 件を書き出しました` : '書き出しています'}
-        </span>
-      )}
-      {state.enabled && state.error && <p className="small error library-mail-note" role="alert">書き出せませんでした（{state.error}）</p>}
-      {error && <p className="small error library-mail-note" role="alert">{error}</p>}
     </div>
   );
 }
@@ -535,12 +526,13 @@ function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void;
       </div>
       {item.summary && <p>{item.summary}</p>}
       {item.keywords.length > 0 && <p className="small muted">{item.keywords.join('・')}</p>}
-      {item.versions.length > 0 && (
+      {mine && item.related.length > 0 && (
         <div className="library-versions">
-          <h3 className="small">ほかの版</h3>
+          <h3 className="small">関連する資料</h3>
           <ul className="library-mails">
-            {item.versions.map((v) => <li key={v.id}><button className="link-btn library-version-link" onClick={() => onOpen(v.id)}>{v.title}</button> <span className="small muted">{dayLabel(v.docDate ?? v.receivedAt)}</span></li>)}
+            {item.related.map((r) => <li key={r.id}><button className="link-btn library-version-link" onClick={() => onOpen(r.id)}>{r.title}</button> <span className="small muted">{r.reason}</span></li>)}
           </ul>
+          <LocalGraph id={item.id} onOpen={onOpen} />
         </div>
       )}
       <dl className="library-facts small">
@@ -557,6 +549,14 @@ function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void;
       </dl>
     </div>
   );
+}
+
+/** 1 件の画面の小さなグラフ（ローカルグラフ。その資料のまわり 2 歩先まで。第44.17.2節）。点を押すと、その資料を開く。 */
+function LocalGraph({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
+  const [graph, setGraph] = useState<LibraryGraph | null>(null);
+  useEffect(() => { api.library.localGraph(id).then(setGraph).catch(() => setGraph(null)); }, [id]);
+  if (!graph || graph.shown < 2) return null;
+  return <Suspense fallback={null}><LibraryGraphView graph={graph} onOpen={onOpen} compact focusId={id} /></Suspense>;
 }
 
 /**

@@ -178,13 +178,13 @@ test('会社の知識にすると、そのときドライブから読んだ文�
 
 // ───────── 古い版の知らせ ─────────
 
-test('題名・取引先・種類が同じで中身が違う資料を版とみなし、1 件の画面に出す。週 1 回、新しい組だけを 1 度知らせる', async () => {
+test('題名・取引先・種類が同じで中身が違う資料を版とみなし、1 件の画面の関連する資料に出す。週 1 回、新しい組だけを 1 度知らせる', async () => {
   const env = setup();
   const a = await put(env, '見積_v1.txt', { title: 'A 社 見積書' });
   const b = await put(env, '見積_v2.txt', { title: 'A 社 見積書' });
   await put(env, '別の見積.txt', { title: 'B 社 見積書' });
   const page = await env.service.page(OWNER, a);
-  assert.deepEqual(page?.versions.map((v) => v.id), [b]);
+  assert.deepEqual(page?.related.filter((r) => r.kind === 'version').map((r) => [r.id, r.reason]), [[b, '同じ資料の版']]);
   await env.keeper.tick(['t1']);
   assert.equal(env.notices.length, 1);
   assert.equal(env.notices[0]!.kind, 'library');
@@ -223,44 +223,44 @@ test('OKF の文書は SPEC.md v0.2 の形で、本体・全文・送り主を�
   assert.notEqual(libraryOkfFileName({ id: 'lib-index', title: 'index', originalName: 'x' }), 'index.md', '予約の名前にしない');
   const index = libraryOkfIndex([base, { ...base, id: 'lib-2', title: '契約書', docType: '契約書', summary: '' }]);
   assert.match(index, /^---\nokf_version: "0\.2"\n---\n# M2Office 資料\n/);
-  assert.match(index, /## 見積\n\n\* \[A 社 見積書\]\(A%20%E7%A4%BE/);
+  assert.match(index, /## 見積\n\n\* \[A 社 見積書\]\(A%20%E7%A4%BE[^)]*%2812345678%29\.md\) - サーバー保守の見積/, 'ファイル名の「(」「)」でリンクが切れない');
 });
 
-test('OKF の書き出し: 入れるとすぐに書き出し、週に 1 回、変わったものだけを書き直す。消した資料のファイルはごみ箱へ。他人の資料は入れない', async () => {
+test('目録の書き出し: 入り切りなしで全員の分を書き出し、変わったものだけを書き直す。消した資料の文書はごみ箱へ。フォルダを消されたら作り直す', async () => {
   const env = setup();
-  const a = await put(env, '見積.txt');
-  await put(env, '契約.txt', { docType: '契約書' });
+  const a = await put(env, '見積.txt', { keywords: ['サーバー保守'] });
+  await put(env, '契約.txt', { docType: '契約書', keywords: ['サーバー保守'] });
   await put(env, '他人の資料.txt', {}, SALES);
-  assert.equal((await env.keeper.okfState(OWNER)).enabled, false);
-  await env.keeper.tick(['t1']);
-  assert.equal((await env.store.okfFiles('t1', 'u1')).length, 0, '入れるまでは書き出さない');
-
-  const on = await env.keeper.setOkf(OWNER, true);
-  assert.equal(on.enabled, true);
-  assert.equal(env.audit.at(-1)!.action, 'library.okf.on');
   const written = await env.keeper.tick(['t1']);
-  assert.equal(written, 3, '資料 2 つと index.md');
-  const s = await env.keeper.okfState(OWNER);
+  assert.equal(written, 5, '持ち主の資料 2 つと一覧・ほかの人の資料 1 つと一覧');
+  const s = await env.keeper.catalogState(OWNER);
   assert.equal(s.files, 2);
   assert.equal(s.writtenAt, NOW.toISOString());
   const files = await env.store.okfFiles('t1', 'u1');
-  const folder = (await env.connector.drive.get(OWNER, files[0]!.driveId))!;
-  assert.match(folder.name, /\.md$/);
-  assert.ok(!(await env.store.okfFiles('t1', 'u2')).length, '他人の資料は書き出さない（その人が入れていない）');
+  const doc = files.find((f) => f.key === a)!;
+  const file = (await env.connector.drive.download(OWNER, doc.driveId)) as { file: { name: string }; bytes: Uint8Array };
+  const text = new TextDecoder().decode(file.bytes);
+  assert.match(text, /## 関連する資料\n\n- \[契約\.txt\]\(%E5%A5%91%E7%B4%84\.txt%20%28[0-9a-f]{8}%29\.md\) - 同じ取引先の同じ案件（サーバー保守）/, '関連する資料へ相対のリンクを張る');
+  assert.ok(!text.includes('OKF'), '文書にも OKF の言葉を出さない');
+  const folderId = await env.store.folder(OWNER, '目録');
+  assert.ok(folderId, '「目録」フォルダに書く（「OKF」の名前を使わない）');
 
-  // 週が明けるまでは書き直さない
-  env.setNow(new Date(NOW.getTime() + 3 * 86_400_000));
-  await env.service.update(OWNER, a, { title: '直した題名' });
+  // 目録が変わらなければ書かない
+  env.setNow(new Date(NOW.getTime() + 20 * 60_000));
   assert.equal(await env.keeper.tick(['t1']), 0);
-  // 週が明けたら、変わった資料と一覧だけを書き直す
-  env.setNow(new Date(NOW.getTime() + 8 * 86_400_000));
-  assert.equal(await env.keeper.tick(['t1']), 2);
-  // 消した資料のファイルはごみ箱へ
+  // 変わったら、次の回（10 分ほど）で変わったものだけを書き直す（直した資料・つながる資料・一覧）
+  await env.service.update(OWNER, a, { title: '直した題名' });
+  env.setNow(new Date(NOW.getTime() + 40 * 60_000));
+  assert.equal(await env.keeper.tick(['t1']), 3);
+  // 消した資料の文書はごみ箱へ
   await env.service.remove(OWNER, a);
-  env.setNow(new Date(NOW.getTime() + 16 * 86_400_000));
+  env.setNow(new Date(NOW.getTime() + 60 * 60_000));
   await env.keeper.tick(['t1']);
-  assert.equal((await env.keeper.okfState(OWNER)).files, 1);
-  const off = await env.keeper.setOkf(OWNER, false);
-  assert.equal(off.enabled, false);
-  assert.equal(off.files, 1, '切っても書き出したファイルは残る');
+  assert.equal((await env.keeper.catalogState(OWNER)).files, 1);
+  // 本人がフォルダを消したら、次の回に作り直す
+  await env.connector.drive.trash(OWNER, (await env.store.folder(OWNER, '目録'))!);
+  await env.service.update(OWNER, [...env.store.rows.values()].find((r) => r.ownerId === 'u1')!.id, { title: '契約書 改' });
+  env.setNow(new Date(NOW.getTime() + 80 * 60_000));
+  assert.equal(await env.keeper.tick(['t1']), 2, '残りの資料と一覧を新しいフォルダに書き直す');
+  assert.notEqual(await env.store.folder(OWNER, '目録'), folderId);
 });
