@@ -130,6 +130,7 @@ export function connectionsRoute(deps: AppDeps) {
       deps.ai.geminiFor(tenant.id), deps.repo.getTenantCredential(tenant.id, 'google_chat_app'),
     ]);
     const gmeta = (gemini?.meta ?? {}) as GeminiSettingsMeta;
+    const platformAllowed = await deps.ai.platformAllowedFor(tenant.id);
     const need = required.map((r) => r.scope);
     const settings = await deps.repo.getTenantSettings(tenant.id);
     return c.json({
@@ -141,7 +142,9 @@ export function connectionsRoute(deps: AppDeps) {
         localConfigured: deps.ai.localLlm().name === 'local',
       },
       gemini: {
-        mode: gmeta.mode ?? 'platform',
+        // 運営の鍵を使えない会社（クラウド版のスターターと有料の会社。第23.4.5節）は、自社の鍵だけ
+        mode: platformAllowed ? gmeta.mode ?? 'platform' : 'byok',
+        platformAllowed,
         keyRegistered: !!gemini?.secretEnc,
         updatedAt: gemini?.updatedAt ?? null,
         models: gmeta.models ?? {},
@@ -242,6 +245,10 @@ export function connectionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<{ mode?: string; apiKey?: string; models?: Record<string, unknown> }>().catch(() => ({} as { mode?: string; apiKey?: string; models?: Record<string, unknown> }));
     const mode = body.mode === 'byok' ? 'byok' : 'platform';
+    // AI の費用は会社の負担。運営の鍵を使えるのは体験版と運営が作った会社（請求しない）だけ（第23.4.5節）
+    if (mode === 'platform' && !(await deps.ai.platformAllowedFor(tenant.id))) {
+      return c.json({ error: 'この会社は自社の Gemini の鍵で動きます。API キーを入れてください' }, 400);
+    }
     const current = await deps.repo.getTenantCredential(tenant.id, 'gemini');
     const apiKey = (body.apiKey ?? '').trim();
     // 鍵の形は**推測しない**。Google は形式を変えることがあり、実際に `AQ.` で始まりドットを
@@ -548,13 +555,13 @@ export function myGoogleRoute(deps: AppDeps) {
    * @remarks
    * `extra` に、使う人だけに使うときに求める権限（{@link ON_DEMAND_GOOGLE_SCOPES}。Google の連絡先の `contacts`。仕様書 第27.15節）を足せる。
    * すでに許可した権限は `include_granted_scopes` で残るため、足した権限だけを求め直すことになる（ほかの人の再同意は要らない）。
-   * `back` は戻る画面（名刺の画面と、個人設定の通知。Chat の控えの許可を足すとき）
+   * `back` は戻る画面（名刺の画面と、個人設定の通知。Chat の控えの許可を足すとき。セットアップウィザードの `/setup`）
    */
   app.post('/connect', async (c) => {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<{ extra?: unknown; back?: unknown }>().catch(() => ({} as { extra?: unknown; back?: unknown }));
     const extra = (Array.isArray(body.extra) ? body.extra : []).filter((x): x is string => typeof x === 'string' && ON_DEMAND_GOOGLE_SCOPES.includes(x));
-    const back = typeof body.back === 'string' && /^\/cards(\/[A-Za-z0-9_-]+)?$|^\/settings\/notifications$/.test(body.back) ? body.back : '';
+    const back = typeof body.back === 'string' && /^\/cards(\/[A-Za-z0-9_-]+)?$|^\/settings\/notifications$|^\/setup$/.test(body.back) ? body.back : '';
     const client = await googleClient(deps, tenant.id);
     if (!client) return c.json({ error: '会社の管理者が、まだ Google との接続を設定していません' }, 409);
     const required = await requiredGoogleScopes(deps, tenant.id);

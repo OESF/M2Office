@@ -382,6 +382,8 @@ export interface ChecklistItem {
 export interface Me {
   /** 請求の区分（第23.4.5節）。`none` の会社には「ご利用料金」を出さない。 */
   billingCategory?: BillingCategory;
+  /** 管理者のセットアップウィザードを出すか（第6.10.3節、ADR-0130）。会社として終えるまで真。 */
+  setupWizard?: boolean;
   /** 会社。`name` は正式な会社名、`shortName` は略称、`logo` は会社のロゴの URL（仕様書 第6.6.1節）。 */
   tenant: Tenant & { shortName?: string; logo?: string | null; suspendAt?: string | null };
   user: User;
@@ -1119,6 +1121,8 @@ export interface ConnectionSettings {
     mode: 'platform' | 'byok'; keyRegistered: boolean; updatedAt: string | null;
     models: Record<string, string>; defaults: Record<string, string>;
     effective: 'tenant' | 'platform' | 'none'; platformKeyAvailable: boolean;
+    /** 運営の鍵を使える会社か（体験版と運営が作った会社だけ。第23.4.5節）。偽なら「契約の形態」を出さず、自社の鍵だけ。 */
+    platformAllowed: boolean;
   };
   google: {
     clientId: string; secretRegistered: boolean; pickerKeyRegistered?: boolean; updatedAt: string | null; redirectUri: string;
@@ -1427,6 +1431,10 @@ export const api = {
     resetTour: () => call('/onboarding/tour', { method: 'POST', body: JSON.stringify({ reset: true }) }),
     checklist: () => call<{ items: ChecklistItem[]; done: boolean }>('/onboarding/checklist'),
     notified: () => call('/onboarding/checklist/notified', { method: 'POST', body: JSON.stringify({}) }),
+    /** セットアップウィザードの様子（仕様書 第6.10.3節、ADR-0130）。段ごとの済みはチェックリストと同じ。 */
+    wizard: () => call<{ items: ChecklistItem[]; wizardDone: boolean; deployment: 'cloud' | 'onsite' }>('/onboarding/wizard'),
+    /** セットアップウィザードを終えた（会社に 1 回だけ記録する）。 */
+    wizardDone: () => call<{ ok: true }>('/onboarding/wizard/done', { method: 'POST', body: JSON.stringify({}) }),
   },
   me: async () => {
     const me = await call<Me>('/me');
@@ -2882,7 +2890,8 @@ export const api = {
     billing: () => call<BillingView>('/admin/billing'),
     billingTerm: (term: ContractTerm) => call<{ ok: boolean }>('/admin/billing/term', { method: 'POST', body: JSON.stringify({ term }) }),
     billingTransfer: (billingName: string, term?: ContractTerm) => call<{ ok: boolean }>('/admin/billing/transfer', { method: 'POST', body: JSON.stringify({ billingName, term }) }),
-    billingCard: (billingName: string, term?: ContractTerm) => call<{ url: string }>('/admin/billing/card', { method: 'POST', body: JSON.stringify({ billingName, term }) }),
+    /** カードの登録へ移る。`back: 'setup'` なら、登録の後にセットアップウィザードへ戻る。 */
+    billingCard: (billingName: string, term?: ContractTerm, back?: 'setup') => call<{ url: string }>('/admin/billing/card', { method: 'POST', body: JSON.stringify({ billingName, term, back }) }),
     billingCancel: (cancel: boolean) => call<{ cancelOn: string | null }>('/admin/billing/cancel', { method: 'POST', body: JSON.stringify({ cancel }) }),
     inviteUser: (email: string, displayName: string, roles: string[]) =>
       call<User>('/admin/users', { method: 'POST', body: JSON.stringify({ email, displayName, roles }) }),
@@ -2892,6 +2901,9 @@ export const api = {
     /** その人のメールの署名から名刺を新しくした値を戻し、記録を削除する（Google のデータの削除の求め。仕様書 第27.6.1節、Q-152）。 */
     forgetMailSignatures: (id: string) =>
       call<{ ok: true; count: number }>(`/admin/users/${id}/forget-mail-signatures`, { method: 'POST' }),
+    /** 規程のファイル（PDF か Word）から社内規程を登録する（セットアップウィザードの段 5）。ファイルは先に `uploadFile` で上げる。 */
+    knowledgeFromFile: (fileId: string) =>
+      call<{ id: string; title: string; sections: number }>('/admin/knowledge/from-file', { method: 'POST', body: JSON.stringify({ fileId }) }),
     knowledge: () => call<{
       items: KnowledgeItemView[]; compartments: { id: string; name: string; description: string | null }[];
       consolidated: ConsolidationView | null;

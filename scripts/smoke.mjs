@@ -849,6 +849,21 @@ console.log('\n■ 19. ヘルプと案内');
   const forbidden = await call('a', '/v1/onboarding/checklist', {}, 'member');
   forbidden.status === 403 ? ok('チェックリストは管理者だけ（403）') : ng(`一般の利用者に見える（${forbidden.status}）`);
 
+  // 管理者のセットアップウィザード（第6.10.3節、ADR-0130）。見本の会社は済みにしてあり、出さない
+  const { body: wizard } = await call('a', '/v1/onboarding/wizard');
+  wizard.wizardDone === true && wizard.items?.length === list.items?.length
+    ? ok('セットアップウィザードの段の済みは、チェックリストと同じ判定') : ng('ウィザードの様子が不正', JSON.stringify(wizard).slice(0, 200));
+  const { body: meAdmin } = await call('a', '/v1/me');
+  const { body: meMember } = await call('a', '/v1/me', {}, 'member');
+  meAdmin.setupWizard === false && meMember.setupWizard === false
+    ? ok('済んだ会社の管理者と一般の利用者には、ウィザードを出さない') : ng(`ウィザードの出し分けが不正（${meAdmin.setupWizard}・${meMember.setupWizard}）`);
+  const wizardMember = await call('a', '/v1/onboarding/wizard', {}, 'member');
+  const wizardDoneMember = await call('a', '/v1/onboarding/wizard/done', { method: 'POST', body: '{}' }, 'member');
+  wizardMember.status === 403 && wizardDoneMember.status === 403
+    ? ok('ウィザードの様子と終わりの記録は管理者だけ（403）') : ng(`一般の利用者が触れる（${wizardMember.status}・${wizardDoneMember.status}）`);
+  const fromMissing = await call('a', '/v1/admin/knowledge/from-file', { method: 'POST', body: JSON.stringify({ fileId: 'f-none' }) });
+  fromMissing.status === 404 ? ok('規程をファイルから入れるとき、無いファイルは断る（404）') : ng(`無いファイルを断らない（${fromMissing.status}）`);
+
   const bad = await fetch(`${API}/v1/secretary`, {
     method: 'POST', body: '{壊れた', headers: { 'content-type': 'application/json', 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' },
   });

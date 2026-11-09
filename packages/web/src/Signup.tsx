@@ -61,6 +61,10 @@ function Apply() {
   const [existing, setExisting] = useState<string | null>(null);
 
   const load = () => call<SignupStatus>('/status').then(setStatus).catch((e: Error) => setError(e.message));
+  // 別のアカウントで入り直す（会社がもうあるドメインで来たときなど。第23.3.1節）
+  const logout = () => call('/auth/logout', post({}))
+    .then(() => { setError(null); setExisting(null); setCheck(null); setName(''); setSubdomain(''); setTerms(false); return load(); })
+    .catch((e: Error) => setError(e.message));
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     const ticket = q.get('ticket');
@@ -117,7 +121,10 @@ function Apply() {
         )}
         {status.open && status.applicant && (
           <>
-            <p>{status.applicant.email} で申し込みます。この方が最初の管理者になります。</p>
+            <div className="row signup-applicant">
+              <p>{status.applicant.email} で申し込みます。この方が最初の管理者になります。</p>
+              <button className="btn ghost small" disabled={busy} onClick={() => void logout()}>ログアウト</button>
+            </div>
             <label className="field">会社名
               <input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
             </label>

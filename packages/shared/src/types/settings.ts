@@ -108,6 +108,11 @@ export interface TenantOnboarding {
   agentsReviewedAt: string | null;
   /** 従業員へダッシュボードの見える範囲を知らせたと、管理者が記録した日時。 */
   employeesNotifiedAt: string | null;
+  /**
+   * 管理者のセットアップウィザードを終えた日時（仕様書 第6.10.3節、ADR-0130）。
+   * `null` か無ければ、管理者がログインするたびにウィザードを出す。第 0.536.0 版より前からある会社は、移行 188 で済みにした。
+   */
+  wizardDoneAt?: string | null;
 }
 
 /**

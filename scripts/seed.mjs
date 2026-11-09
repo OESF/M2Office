@@ -41,6 +41,13 @@ for (const t of tenants) {
      values ($1,$2,$3,$4,'active') on conflict (id) do nothing`,
     [t.id, t.sub, t.name, t.domain],
   );
+  // 開発の見本の会社には、管理者のセットアップウィザードを出さない（仕様書 第6.10.3節。試すときは wizardDoneAt を消す）
+  await c.query(
+    `insert into tenant_settings (tenant_id, onboarding) values ($1, $2::jsonb)
+     on conflict (tenant_id) do update set onboarding = coalesce(tenant_settings.onboarding, '{}'::jsonb) || $2::jsonb
+      where not (coalesce(tenant_settings.onboarding, '{}'::jsonb) ? 'wizardDoneAt')`,
+    [t.id, JSON.stringify({ wizardDoneAt: new Date().toISOString() })],
+  );
   await c.query(
     `insert into users (id, tenant_id, email, display_name, roles)
      values ($1,$2,$3,$4,$5) on conflict (tenant_id, email) do nothing`,

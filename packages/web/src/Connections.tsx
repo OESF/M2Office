@@ -245,11 +245,14 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
       </div>
       <div className="card">
         <h3>設定</h3>
-        <div className="field">
-          <label>契約の形態</label>
-          <label className="check"><input type="radio" checked={mode === 'platform'} onChange={() => setMode('platform')} /> 運営一括（M2Office の鍵を使う）</label>
-          <label className="check"><input type="radio" checked={mode === 'byok'} onChange={() => setMode('byok')} /> 自社の鍵を使う（費用は自社の Google Cloud に直接かかります）</label>
-        </div>
+        {/* 運営の鍵を使える会社（体験版と運営が作った会社）だけ選ばせる。ほかは自社の鍵だけ（第23.4.5節） */}
+        {data.platformAllowed && (
+          <div className="field">
+            <label>契約の形態</label>
+            <label className="check"><input type="radio" checked={mode === 'platform'} onChange={() => setMode('platform')} /> 運営一括（M2Office の鍵を使う）</label>
+            <label className="check"><input type="radio" checked={mode === 'byok'} onChange={() => setMode('byok')} /> 自社の鍵を使う（費用は自社の Google Cloud に直接かかります）</label>
+          </div>
+        )}
         {mode === 'byok' && (
           <div className="field">
             <label>Gemini API キー{data.keyRegistered && <span className="muted small">（登録済み・{fmt(data.updatedAt)}。登録後は表示しません）</span>}</label>
@@ -272,7 +275,7 @@ function GeminiCard({ data, onSaved }: { data: ConnectionSettings['gemini']; onS
           <button className="btn" disabled={busy} onClick={() => void run(() => api.admin.saveGemini({ mode, apiKey: apiKey || undefined, models }), '保存しました')}>保存</button>
           {data.keyRegistered && (
             <button className="btn danger" disabled={busy} onClick={() => {
-              if (confirm('自社の鍵を削除しますか。削除すると運営一括に戻ります。')) void run(() => api.admin.deleteGeminiKey(), '鍵を削除しました');
+              if (confirm(data.platformAllowed ? '自社の鍵を削除しますか。削除すると運営一括に戻ります。' : '自社の鍵を削除しますか。削除すると、AI を使う秘書と業務が動かなくなります。')) void run(() => api.admin.deleteGeminiKey(), '鍵を削除しました');
             }}>鍵を削除</button>
           )}
           {msg && <span className={msg.ok ? 'ok-msg small' : 'error-inline small'}>{msg.text}</span>}

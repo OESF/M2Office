@@ -79,13 +79,15 @@ export function billingRoute(deps: AppDeps) {
   app.post('/card', async (c) => {
     const { tenant, user } = c.get('ctx');
     if (!deps.billing.cardReady) return c.json({ error: 'いまはカードを登録できません（準備中です）', code: 'card_unavailable' }, 409);
-    const b = await c.req.json<{ billingName?: string; term?: unknown }>().catch(() => ({} as { billingName?: string; term?: unknown }));
+    const b = await c.req.json<{ billingName?: string; term?: unknown; back?: unknown }>().catch(() => ({} as { billingName?: string; term?: unknown; back?: unknown }));
     const term = termOf(b.term);
     const origin = tenantOrigin(c.req.header('origin'), c.req.header('host'));
+    // セットアップウィザードの招待の段から来たときは、登録の後にその段へ戻す（仕様書 第6.10.3節、ADR-0130）
+    const back = b.back === 'setup' ? '/setup' : '/admin/billing';
     const ticket = randomBytes(32).toString('base64url');
     try {
       if (term) await deps.billing.store.setTerm(tenant.id, user.id, term);
-      await deps.billing.store.cardTicket(tenant.id, user.id, createHash('sha256').update(ticket).digest('hex'), `${origin}/admin/billing`, b.billingName ?? '');
+      await deps.billing.store.cardTicket(tenant.id, user.id, createHash('sha256').update(ticket).digest('hex'), `${origin}${back}`, b.billingName ?? '');
     } catch (err) {
       const code = billingRefusal(err);
       if (code === 'not_billable') return c.json({ error: 'この会社には請求がありません', code }, 409);

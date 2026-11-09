@@ -141,7 +141,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/slide-themes/:id/thumbnail`・`/access`・`GET /v1/slide-themes/picker` | テーマの見本の縮小の絵、本人がファイルを開けるか（会社のテーマを初めて使うとき）、Google のファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン） |
 | `POST /v1/slide-decks/:id/share`・`DELETE /v1/slide-decks/:id` | 共有の範囲の切り替え（`sharing`: `private`・`company`。会社の Workspace のドメインへの閲覧だけ）と削除（ファイルはドライブのごみ箱へ）。作った人だけ。作り直しは業務「スライドの作成」の実行（`deckId`） |
 | `GET /v1/public/slide-images/:token` | ログイン不要: スライドの画像の使い捨ての道。Google スライドが画像を貼るときに 1 度だけ読む。鍵（32 バイトの乱数）が違う・5 分を過ぎた・貼り終えたものは 404（仕様書 第9.4.2節「段 2」） |
-| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）とその出どころ（`photoSource`: `upload`・`google`・`hr`・`null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節）・本人の文字の大きさ（`display.textSize`。70〜130。第6.1節）。呼ばれたとき、まだなら朝のブリーフの定時実行（平日 7:30）を秘書が用意する（`secretary/morning.ts`。第9.5.5.1節） |
+| `GET /v1/me` | テナント・利用者・CSRF トークン・接続の状態・本人のアバターの URL（`photo`。無ければ `null`）とその出どころ（`photoSource`: `upload`・`google`・`hr`・`null`）・サーバーの版（`serverVersion`。画面の版との食い違いの判定に使う。仕様書 第6.1.1.1節）・本人の文字の大きさ（`display.textSize`。70〜130。第6.1節）・管理者のセットアップウィザードを出すか（`setupWizard`。会社として終えるまで管理者だけ真。体験版は偽。第6.10.3節）。呼ばれたとき、まだなら朝のブリーフの定時実行（平日 7:30）を秘書が用意する（`secretary/morning.ts`。第9.5.5.1節） |
 | `GET /v1/me/photo` | 本人のアバター（本人が入れた画像を先に、無ければ Google のプロフィール写真）。**本人の写真だけ**を返し、利用者の ID は受け取らない。`nosniff` と読み込みを禁じる CSP を付ける（仕様書 第6.5.1.1節・第6.5.1.2節） |
 | `PUT /v1/me/photo` | 本人のアバターを入れる（`file`。中身で PNG・JPEG を確かめる。1 MB まで。上書き）。`{ photo }` に新しい URL を返す（仕様書 第6.5.1.2節） |
 | `DELETE /v1/me/photo` | 本人が入れたアバターを削除する（Google の写真に戻る）。入れていなければ 404 |
@@ -453,7 +453,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/connections/google/impact` | 管理者: OAuth クライアントを消す（クライアント ID を替える）と影響する人数と業務の件数 |
 | `DELETE /v1/admin/connections/google` | 管理者: OAuth クライアントの登録を消す。接続している全員の接続を消し、Google を使う動いている途中の業務を止める（仕様書 第6.5.2.1節）。クライアント ID を替える `PUT` も同じ |
 | `GET /v1/me/google` | 本人: Google 連携の状況（業務の言葉の許可の一覧。トークンは返さない） |
-| `POST /v1/me/google/connect` | 本人: 接続を始める（Google の同意の画面の URL を返す。state と PKCE つき）。`extra` に使う人だけに求める権限（`contacts`）、`back` に戻る画面（`/cards`・`/cards/<ID>`・`/settings/notifications`）を渡せる（仕様書 第27.15節。Chat のバックアップの `chat.spaces.create` は第6.5.5.2.1節） |
+| `POST /v1/me/google/connect` | 本人: 接続を始める（Google の同意の画面の URL を返す。state と PKCE つき）。`extra` に使う人だけに求める権限（`contacts`）、`back` に戻る画面（`/cards`・`/cards/<ID>`・`/settings/notifications`・`/setup`）を渡せる（仕様書 第27.15節。Chat のバックアップの `chat.spaces.create` は第6.5.5.2.1節） |
 | `GET /v1/me/notifications/chat`・`POST /v1/me/notifications/chat/setup` | 本人: Chat のバックアップを届けられるか（会社の鍵・本人の個別メッセージの場所）と、場所の用意（既存を探す → 本人の許可で作る。許可が足りなければ `needsScope`）（仕様書 第6.5.5.2.1節） |
 | `POST /v1/me/google/check` | 本人: 許可の状況を Google に問い合わせ直す。その許可で受け取れれば、プロフィール写真も取り込み直す |
 | `GET /v1/me/google/impact` | 本人: 取り消すと止まる業務と、飛ばす定時実行の数 |
@@ -508,7 +508,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/billing` | 管理者: ご利用料金（クラスと人数・契約の形・支払いの方法・請求書。第23.4.5節） |
 | `POST /v1/admin/billing/term` | 管理者: 契約の形を選ぶ（本文 `term`。`monthly`・`annual`。年間へは翌月 1 日から、月間へは更新のときだけ） |
 | `POST /v1/admin/billing/transfer` | 管理者: 銀行振込を選ぶ（本文 `billingName`。スターターは `term` も） |
-| `POST /v1/admin/billing/card` | 管理者: カードの登録へ移る 1 回限りの URL を返す（本文 `billingName`。スターターは `term` も） |
+| `POST /v1/admin/billing/card` | 管理者: カードの登録へ移る 1 回限りの URL を返す（本文 `billingName`。スターターは `term` も。`back: "setup"` なら登録の後にセットアップウィザード `/setup` へ戻る） |
 | `POST /v1/admin/billing/cancel` | 管理者: 解約を申し出る・取り下げる（本文 `cancel`。月間はその月の末、年間は契約の終わりの日まで。応答 `cancelOn`） |
 | `GET /v1/admin/dashboard/live` | 管理者: ダッシュボードの「いま」（数値・業務の流れ・承認の滞留・出来事・本人と秘書の 1 組・接続先 `connections`）。業務の状態の各行にまとまり（`group`。仕事の分野。どの分野にも入らなければ拡張機能か業務の分野。第6.7.4.2.1節）を付ける。中身は返さない |
 | `GET /v1/admin/dashboard/connections` | 管理者: 接続先（AI・Google の各サービス・会社の接続）の直近 15 分の状態（`ok`・`slow`・`fail`・`off`）・呼び出し中か・回数・平均の時間・失敗の数と種類。中身と誰の呼び出しかは持たない（仕様書 第6.7.6節） |
@@ -530,6 +530,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409）。止めたときは、止めた業務の数（`stoppedRuns`）と、30 日後に削除される自分だけの名刺の数（`personalCards`。仕様書 第27.7節、Q-94）を返す。止めた日時を持ち、戻すと空にする |
 | `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧（種類 `category`: `rule`・`minutes`・`learned`、状態 `status`: `active`・`retired`・`archived`、施行日と施行日が先の版。廃止・しまったものを含む）と、最後に整理した日と数（`consolidated`。仕様書 第11.11節） |
 | `POST /v1/admin/knowledge` | 管理者: 社内規程の新規の登録（`effectiveFrom` を省くと今日）。ID を発行して 201 で返す（ADR-0019） |
+| `POST /v1/admin/knowledge/from-file` | 管理者: 上げた PDF か Word（本文 `fileId`。本人のファイルだけ）から文字を取り出し、社内規程として登録する（題名はファイルの名前、施行日は今日）。文字を取り出せなければ 422、50 万字を超えれば 400、ほかの形式は 400。セットアップウィザードの段 5（仕様書 第6.10.3節） |
 | `PUT /v1/admin/knowledge/:id` | 管理者: 更新（`new` を指すか、無い ID なら新しい社内規程）。社内規程は版を残し、施行日が先なら施行日まで前の版で答える（`applied: false`）。議事録と秘書が学んだことは版を残さずに直す。廃止・しまったものは 409。本文を節に分け、分けた節を返す（50 万字まで） |
 | `GET /v1/admin/knowledge/:id/sections` | 管理者: 1 件の知識の節（見出しの経路と字数） |
 | `GET /v1/admin/knowledge/:id/versions` ／ `/versions/:version` | 管理者: 社内規程の版の一覧（施行中・施行前）／ 1 つの版の本文 |
@@ -568,7 +569,9 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST` ／ `GET /v1/help/feedback` | 記事が役に立ったか（`articleId`・`source`: article か secretary・`helpful`。押し直せば置き換える）／ ヘルプの見直し（管理者だけ。答えられなかった質問と記事ごとの件数。名前は出さない。仕様書 第6.10.10節） |
 | `GET /v1/onboarding/tour` | 本人の初回の案内の状態 |
 | `POST /v1/onboarding/tour` | 案内を見終えた記録。`{ "reset": true }` で見直し |
-| `GET /v1/onboarding/checklist` | 管理者: 初期設定のチェックリスト |
+| `GET /v1/onboarding/checklist` | 管理者: 初期設定のチェックリスト（「Google Workspace を接続する」は、会社の OAuth クライアントがあり、見ている管理者が接続したときに済み。第 0.536.0 版） |
+| `GET /v1/onboarding/wizard` | 管理者: セットアップウィザードの様子（段ごとの済みはチェックリストと同じ `items`、会社として終えたか `wizardDone`。仕様書 第6.10.3節、ADR-0130） |
+| `POST /v1/onboarding/wizard/done` | 管理者: セットアップウィザードを終えた記録（会社に 1 回だけ。ほかの管理者にも出さなくなる） |
 | `POST /v1/onboarding/checklist/notified` | 管理者: 従業員へ知らせたことの記録 |
 | `POST /v1/files` | ファイルの受け取り（multipart の `file`。10 MB まで。録音（MP3・M4A・WAV）は 200 MB・3 時間まで。ローカルの方針の会社・AI の無い会社は録音を 422 で断る。仕様書 第9.4.5節） |
 | `GET /v1/files/recordings/current` | 本人の途中の録音（その場で録る録音。第9.4.5.1節）。無ければ `recording: null` |

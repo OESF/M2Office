@@ -105,7 +105,11 @@ export function Checklist({ onGo }: { onGo?: (tab: string) => void }) {
   const done = items.filter((i) => i.done).length;
   return (
     <section className="card checklist">
-      <h3>はじめに行う設定（{done} / {items.length}）</h3>
+      <div className="row checklist-head">
+        <h3>はじめに行う設定（{done} / {items.length}）</h3>
+        {/* セットアップウィザードで、残りを順に進める（仕様書 第6.10.3節、ADR-0130） */}
+        <a className="btn small" href="/setup">ウィザードで続ける</a>
+      </div>
       <div className="hbar"><span style={{ width: `${(done / items.length) * 100}%` }} /></div>
       <ul>
         {items.map((i) => (

@@ -87,3 +87,20 @@ test('スターターと有料の会社は運営の鍵を使わない。自社�
   assert.equal((await of()).source, 'platform');
 });
 
+
+test('運営の鍵を使えない会社は、前に「運営一括」を選んだままでも、登録した自社の鍵で動く（第23.4.5節）', async () => {
+  const box = new SecretBox('k');
+  const cred = { secretEnc: box.encrypt('tenant-key'), meta: { mode: 'platform' } };
+  const repo = { getTenantCredential: async () => cred, getTenantSettings: async () => ({}) } as unknown as Repository;
+  const base = {
+    repo, box, fallbackLlm: new UnconfiguredLlmProvider(), fallbackResearch: platformAi({}).research, platformKey: 'operator-key',
+    defaults: { fast: 'f', standard: 's', advanced: 'a', research: 'r', live: 'l' }, baseUrl: 'http://x',
+  };
+  const denied = new TenantAiResolver({ ...base, platformAllowed: async () => false });
+  assert.deepEqual([(await denied.geminiFor('t')).source, (await denied.geminiFor('t')).apiKey], ['tenant', 'tenant-key']);
+  assert.equal(await denied.platformAllowedFor('t'), false);
+  // 運営の鍵を使える会社（体験版・運営が作った会社）は、選んだとおり運営の鍵
+  const allowed = new TenantAiResolver({ ...base, platformAllowed: async () => true });
+  assert.deepEqual([(await allowed.geminiFor('t')).source, (await allowed.geminiFor('t')).apiKey], ['platform', 'operator-key']);
+  assert.equal(await allowed.platformAllowedFor('t'), true);
+});

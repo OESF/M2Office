@@ -132,7 +132,14 @@ export class TenantAiResolver {
     return !!this.platformKey();
   }
 
-  /** その会社が運営の鍵を使えるか。確かめられなければ使わせない（運営が AI の費用を負わないため）。 */
+  /**
+   * その会社が運営の鍵を使えるか（第23.4.5節「運営の鍵を使える範囲」）。使えない会社には、管理者ページで「運営一括」を選ばせない。
+   * 確かめられなければ使わせない（運営が AI の費用を負わないため）。
+   */
+  async platformAllowedFor(tenantId: string): Promise<boolean> {
+    return this.platformAllowed(tenantId);
+  }
+
   private async platformAllowed(tenantId: string): Promise<boolean> {
     if (!this.deps.platformAllowed) return true;
     return this.deps.platformAllowed(tenantId).catch(() => false);
@@ -148,10 +155,12 @@ export class TenantAiResolver {
     const cred = await this.deps.repo.getTenantCredential(tenantId, 'gemini');
     const meta = (cred?.meta ?? {}) as GeminiSettingsMeta;
     const models = { ...this.deps.defaults, ...dropEmpty(meta.models ?? {}) };
-    if (meta.mode === 'byok' && cred?.secretEnc) {
+    const allowed = await this.platformAllowed(tenantId);
+    // 運営の鍵を使えない会社は、前に「運営一括」を選んだままでも、登録した自社の鍵で動かす（第23.4.5節）
+    if (cred?.secretEnc && (meta.mode === 'byok' || !allowed)) {
       return { source: 'tenant', apiKey: this.deps.box.decrypt(cred.secretEnc), models };
     }
-    const platformKey = (await this.platformAllowed(tenantId)) ? this.platformKey() : null;
+    const platformKey = allowed ? this.platformKey() : null;
     return { source: platformKey ? 'platform' : 'none', apiKey: platformKey, models };
   }
 

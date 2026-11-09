@@ -12,6 +12,7 @@ import { Admin } from './Admin.js';
 import { Board } from './Dashboard.js';
 import { Login, takeReturnPath } from './Login.js';
 import { DemoTerms } from './demo-terms.js';
+import { SetupWizard, setupLater } from './SetupWizard.js';
 import { MobileInventory } from './MobileInventory.js';
 import { MobileMembers } from './MobileMembers.js';
 import { MobilePunch } from './MobilePunch.js';
@@ -49,6 +50,8 @@ function Root() {
   const [me, setMe] = useState<Me | null>(null);
   const [state, setState] = useState<'loading' | 'login' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  // セットアップウィザードを「あとで続ける」で閉じたか（このタブでは、もう出さない）
+  const [wizardClosed, setWizardClosed] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -120,6 +123,15 @@ function Root() {
   }
   // 代理アクセスは管理者ページだけを見る（仕様書 第23.6.1節）
   if (me.proxy) return <Admin me={me} onLogout={logout} />;
+  /*
+    管理者のセットアップウィザード（仕様書 第6.10.3節、ADR-0130）。会社として終えるまで、ワークスペースと管理者ページの代わりに出す。
+    `/setup` はチェックリストからいつでも開く入口。ヘルプは新しいタブで開くので、ヘルプの URL では出さない
+  */
+  const onHelp = /^\/(admin\/)?help(\/|$)/.test(location.pathname);
+  if (me.user.roles.includes('admin') && !onHelp
+    && (location.pathname === '/setup' || (me.setupWizard && !wizardClosed && !setupLater()))) {
+    return withDebug(<SetupWizard me={me} onLater={() => setWizardClosed(true)} />);
+  }
   return withDebug(location.pathname.startsWith('/admin')
     ? <Admin me={me} onLogout={logout} />
     : <App me={me} onLogout={logout} />);

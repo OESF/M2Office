@@ -17,7 +17,7 @@ import { semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
   describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, purposeLabel,
   detectKind, readQuoteSample, MAX_FILE_BYTES, serviceReport, monthRange,
-  billingRefusal,
+  billingRefusal, fileToText,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -583,6 +583,36 @@ export function adminRoute(deps: AppDeps) {
 
   // 新規は ID を発行する。更新は呼ぶ側が ID を指す（仕様書 第13.3節、ADR-0019）
   app.post('/knowledge', saveKnowledge(true));
+
+  /**
+   * 規程のファイル（PDF か Word）から文字を取り出し、社内規程として登録する（第6.10.3節 セットアップウィザードの段 5、ADR-0130）。
+   * 題名はファイルの名前、施行日は今日。文字を取り出せないもの（画像だけの PDF など）と長すぎるものは登録せず、知識の画面で入れるよう伝える。
+   * 取り出した文字は推測で補わない。ファイルは先に `/v1/files` で上げ、本人のものだけを読む（不変則 I-2）。
+   */
+  app.post('/knowledge/from-file', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const { fileId } = await c.req.json<{ fileId?: string }>().catch(() => ({} as { fileId?: string }));
+    if (!fileId) return c.json({ error: 'ファイルを選んでください' }, 400);
+    const read = await fileToText(deps.repo, deps.files, tenant.id, fileId, user.id, undefined, { limit: KNOWLEDGE_MAX_CHARS + 1 });
+    if (!read.name) return c.json({ error: 'ファイルが見つかりません' }, 404);
+    if (!/\.(pdf|docx)$/i.test(read.name)) return c.json({ error: 'PDF か Word のファイルを渡してください' }, 400);
+    if (!read.ok) return c.json({ error: `${read.name} から文字を取り出せませんでした。「知識」の画面で本文を貼って登録してください` }, 422);
+    if (read.text.length > KNOWLEDGE_MAX_CHARS) {
+      return c.json({ error: `${read.name} は長すぎます（${KNOWLEDGE_MAX_CHARS.toLocaleString('ja-JP')} 字まで）。「知識」の画面で章などに分けて登録してください` }, 400);
+    }
+    const title = read.name.replace(/\.(pdf|docx)$/i, '').trim().slice(0, 200) || read.name;
+    const id = `k-${randomUUID()}`;
+    const effectiveFrom = today();
+    const saved = await deps.repo.saveRuleVersion({
+      id, tenantId: tenant.id, kind: 'rule', title, body: read.text, source: title, compartment: null,
+      updatedAt: new Date().toISOString(), effectiveFrom,
+    }, user.id, effectiveFrom);
+    if (!saved) return c.json({ error: '登録できませんでした' }, 500);
+    await audit(deps, tenant.id, user.id, 'knowledge.rule.create', 'knowledge', id, { compartment: null, version: saved.version, from: 'file' });
+    checkHr(tenant.id, id, saved.version, read.text);
+    const sections = (await deps.repo.listKnowledgeSections(tenant.id, id)) ?? [];
+    return c.json({ id, title, sections: sections.length }, 201);
+  });
   app.put('/knowledge/:id', saveKnowledge(false));
 
   /** 1 件の知識を、どう節に分けたか（第6.6.6節「分け方の確認」）。 */

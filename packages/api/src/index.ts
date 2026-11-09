@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { defaultGeminiModels, seedBriefTopics, warnHotSwapModels, withAiUsage, appPath, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS } from '@m2office/core';
+import { defaultGeminiModels, isDemoTenantId, seedBriefTopics, warnHotSwapModels, withAiUsage, appPath, writeRuntimeBeat, RUNTIME_BEAT_INTERVAL_MS } from '@m2office/core';
 import { buildDeps, companyView, fileStorageDir } from './context.js';
 import { authenticate, demoRestrictions, resolveTenant, type AppEnv } from './middleware/tenant.js';
 import { demoLoginRoute, demoSignupRoute, demoTermsRoute, demoView } from './demo.js';
@@ -285,6 +285,9 @@ app.get('/v1/me', async (c) => {
     debug: !!deps.debug,
     // 体験版の様子（期限・規約への同意・AI の上限。第23.3.2節）。体験用の会社でなければ null
     demo: await demoView(deps, ctx.tenant.id),
+    // 管理者のセットアップウィザードを出すか（第6.10.3節、ADR-0130）。会社として終えるまで、管理者のログインのたびに出す。体験版には出さない
+    setupWizard: ctx.user.roles.includes('admin') && !isDemoTenantId(ctx.tenant.id)
+      && !(await deps.repo.getTenantSettings(ctx.tenant.id)).onboarding.wizardDoneAt,
     // 文字の大きさ（個人設定の「表示」。仕様書 第6.1節、ADR-0122）。画面は読み込んですぐに当てる
     display: (await deps.repo.getUserSettings(ctx.tenant.id, ctx.user.id)).display,
   });
