@@ -106,7 +106,7 @@ function Apply() {
     <div className="login">
       <div className="card signup-card">
         <h1>M2Office のお申し込み</h1>
-        <p className="muted">最初の 1 人はずっと無料です。2 人目からは 1 人あたり月 {status.monthlyPriceJpy.toLocaleString('ja-JP')} 円、年間契約なら月 {status.annualPriceJpy.toLocaleString('ja-JP')} 円（税別）です。AI と Google Workspace の費用は、お客様と Google のご契約になります。</p>
+        {/* 料金は紹介のサイトに書いてあるので、ここには出さない（仕様書 第23.3.1節「料金」） */}
         {!status.open && <p className="error">いまは申し込みを受け付けていません。</p>}
         {status.open && !status.applicant && (
           <div className="row">
