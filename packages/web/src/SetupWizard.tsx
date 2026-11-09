@@ -8,21 +8,21 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { inviteEffect, type BillingView, type ContractTerm, type TenantSettings } from '@m2office/shared';
-import { api, describeError, type ChecklistItem, type ConnectionSettings, type Me, type MyGoogle } from './api.js';
+import { api, describeError, type ChecklistItem, type ConnectionSettings, type ExtensionView, type Me, type MyGoogle } from './api.js';
 import { copyText } from './clipboard.js';
 
-/** 段の名前（チェックリストの項目の ID と同じ。終わりの段だけ別）。 */
-type StepId = 'company' | 'ai' | 'google' | 'agents' | 'knowledge' | 'users' | 'notify' | 'finish';
+/** 段の名前（チェックリストの項目の ID と同じ。拡張機能と終わりの段は、ウィザードだけの段）。 */
+type StepId = 'company' | 'ai' | 'google' | 'agents' | 'extensions' | 'knowledge' | 'users' | 'notify' | 'finish';
 
 const STEP_LABEL: Record<StepId, string> = {
-  company: '会社の名前', ai: 'Gemini の鍵', google: 'Google Workspace', agents: '使う業務',
+  company: '会社情報', ai: 'Gemini の鍵', google: 'Google Workspace', agents: '使う業務', extensions: '拡張機能',
   knowledge: '規程', users: '同僚の招待', notify: '従業員へ知らせる', finish: '使い始める',
 };
 
-/** 「あとで続ける」を押したタブでは出さない（次のログイン＝新しいタブで、また出す）。 */
+/** 「中断」を押したタブでは出さない（次のログイン＝新しいタブで、また出す）。 */
 const LATER_KEY = 'm2office.setup-later';
 
-/** このタブで「あとで続ける」を押したか。 */
+/** このタブで「中断」を押したか。 */
 export function setupLater(): boolean {
   try { return sessionStorage.getItem(LATER_KEY) === '1'; } catch { return false; }
 }
@@ -38,22 +38,26 @@ function HelpLink({ id, children }: { id: string; children: string }) {
 /**
  * セットアップウィザード。
  *
- * @param onLater 「あとで続ける」を押したとき（呼ぶ側が、いつもの画面に戻す）
+ * @param onLater 「中断」を押したとき（呼ぶ側が、いつもの画面に戻す）
+ * @param onLogout 「ログアウト」を押したとき。全画面で出るので、別のアカウントで入り直すための出口をここに置く
  */
-export function SetupWizard({ me, onLater }: { me: Me; onLater: () => void }) {
+export function SetupWizard({ me, onLater, onLogout }: { me: Me; onLater: () => void; onLogout: () => void }) {
   const [items, setItems] = useState<ChecklistItem[] | null>(null);
   const [step, setStep] = useState<StepId | null>(null);
   const [error, setError] = useState<string | null>(null);
   // この画面で招待したか（「従業員へ知らせる」の段を出すかに使う）
   const [invited, setInvited] = useState(false);
+  // 「拡張機能」の段を一度保存したか（チェックリストには無い、ウィザードだけの段）
+  const [extDone, setExtDone] = useState(false);
   // Google から戻ったときの結果（`?google=`）。最初に読んで URL から消す
   const googleResult = useRef<string | null>(null);
 
-  const load = useCallback(async (): Promise<ChecklistItem[] | null> => {
+  const load = useCallback(async (): Promise<{ items: ChecklistItem[]; extensionsReviewed: boolean } | null> => {
     try {
       const r = await api.onboarding.wizard();
       setItems(r.items);
-      return r.items;
+      setExtDone(r.extensionsReviewed);
+      return r;
     } catch (e) {
       setError(describeError(e, '読み込めませんでした'));
       return null;
@@ -67,16 +71,18 @@ export function SetupWizard({ me, onLater }: { me: Me; onLater: () => void }) {
     void load().then((got) => {
       if (!got) return;
       if (googleResult.current) { setStep('google'); return; }
-      // 開いたときは、まだ済んでいない最初の段から（会社の名前は飛ばせないので、空なら必ずそこから）
-      const order = stepsOf(got, false);
-      setStep(order.find((s) => s !== 'finish' && !got.find((i) => i.id === s)?.done) ?? 'finish');
+      // 開いたときは、まだ済んでいない最初の段から（会社情報はスキップできないので、空なら必ずそこから）
+      const order = stepsOf(got.items, false);
+      // 拡張機能の段はチェックリストに無いので、済みは別の値で見る
+      const done = (s: StepId) => (s === 'extensions' ? got.extensionsReviewed : got.items.find((i) => i.id === s)?.done);
+      setStep(order.find((s) => s !== 'finish' && !done(s)) ?? 'finish');
     });
   }, [load]);
 
   if (!items || !step) return <div className="wizard"><p className={error ? 'error' : 'muted'}>{error ?? '読み込み中…'}</p></div>;
   const steps = stepsOf(items, invited);
   const index = Math.max(0, steps.indexOf(step));
-  const doneOf = (s: StepId) => items.find((i) => i.id === s)?.done ?? false;
+  const doneOf = (s: StepId) => (s === 'extensions' ? extDone : items.find((i) => i.id === s)?.done ?? false);
   const go = (to: number) => { setError(null); setStep(steps[Math.min(Math.max(0, to), steps.length - 1)]!); window.scrollTo(0, 0); };
   const next = () => go(index + 1);
   const later = () => {
@@ -90,7 +96,10 @@ export function SetupWizard({ me, onLater }: { me: Me; onLater: () => void }) {
     <div className="wizard">
       <div className="wizard-card card">
         <header className="wizard-head">
-          <h1>はじめに行う設定</h1>
+          <div className="wizard-title">
+            <h1>はじめに行う設定</h1>
+            <button type="button" className="btn ghost small" onClick={onLogout}>ログアウト</button>
+          </div>
           <ol className="wizard-steps" aria-label="段の並び">
             {steps.map((s, i) => (
               <li key={s} className={`${i === index ? 'current' : ''}${s !== 'finish' && doneOf(s) ? ' done' : ''}`}>
@@ -109,6 +118,7 @@ export function SetupWizard({ me, onLater }: { me: Me; onLater: () => void }) {
           {step === 'ai' && <AiStep done={doneOf('ai')} onChanged={refresh} />}
           {step === 'google' && <GoogleStep result={googleResult.current} onChanged={refresh} />}
           {step === 'agents' && <AgentsStep onSaved={async () => { await refresh(); next(); }} />}
+          {step === 'extensions' && <ExtensionsStep reviewed={extDone} onSaved={async () => { await refresh(); next(); }} />}
           {step === 'knowledge' && <KnowledgeStep done={doneOf('knowledge')} onChanged={refresh} />}
           {step === 'users' && <UsersStep me={me} onInvited={async () => { setInvited(true); await refresh(); }} />}
           {step === 'notify' && <NotifyStep done={doneOf('notify')} onChanged={refresh} />}
@@ -118,15 +128,15 @@ export function SetupWizard({ me, onLater }: { me: Me; onLater: () => void }) {
 
         <footer className="wizard-foot">
           <button type="button" className="btn ghost" disabled={index === 0} onClick={() => go(index - 1)}>戻る</button>
-          <button type="button" className="btn ghost" onClick={later}>あとで続ける</button>
+          <button type="button" className="btn ghost" onClick={later}>中断</button>
           <span className="wizard-foot-gap" />
-          {/* 会社の名前と使う業務は、段の中の保存で進む */}
-          {step !== 'company' && step !== 'agents' && step !== 'finish' && (
+          {/* 会社情報・使う業務・拡張機能は、段の中の保存で進む */}
+          {step !== 'company' && step !== 'agents' && step !== 'extensions' && step !== 'finish' && (
             <button type="button" className={doneOf(step) || (step === 'users' && invited) ? 'btn' : 'btn ghost'} onClick={next}>
-              {doneOf(step) || (step === 'users' && invited) ? '次へ' : step === 'users' ? 'しばらく 1 人で使う' : '飛ばす'}
+              {doneOf(step) || (step === 'users' && invited) ? '次へ' : step === 'users' ? 'しばらく 1 人で使う' : 'スキップ'}
             </button>
           )}
-          {step === 'agents' && <button type="button" className="btn ghost" onClick={next}>飛ばす</button>}
+          {(step === 'agents' || step === 'extensions') && <button type="button" className="btn ghost" onClick={next}>スキップ</button>}
           {step === 'finish' && (
             <button type="button" className="btn" onClick={() => void api.onboarding.wizardDone()
               .then(() => { location.href = '/'; })
@@ -145,13 +155,13 @@ function stepsOf(items: ChecklistItem[], invited: boolean): StepId[] {
   return [
     'company',
     ...(has('ai') ? ['ai' as const] : []),
-    'google', 'agents', 'knowledge', 'users',
+    'google', 'agents', 'extensions', 'knowledge', 'users',
     ...(invited || usersDone ? ['notify' as const] : []),
     'finish',
   ];
 }
 
-/** 段 1: 会社の名前。正式な会社名は申し込みのときの名前を先に入れておく（人に一から打たせない）。 */
+/** 段 1: 会社情報。正式な会社名は申し込みのときの名前を先に入れておく（人に一から打たせない）。 */
 function CompanyStep({ me, onSaved }: { me: Me; onSaved: () => Promise<void> }) {
   const [company, setCompany] = useState<TenantSettings['company'] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -337,6 +347,62 @@ function AgentsStep({ onSaved }: { onSaved: () => Promise<void> }) {
         ))}
       </ul>
       <button type="button" className="btn" disabled={busy} onClick={() => void save()}>{busy ? '保存しています…' : '保存して次へ'}</button>
+      {error && <p className="error">{error}</p>}
+    </>
+  );
+}
+
+/**
+ * 段 4.1: 拡張機能。内蔵の拡張を並べ、使うものに印を付ける（仕様書 第6.10.3節。第 0.537.0 版）。
+ * まだ一度も保存していなければ、すべて選ばない状態から始める（三浦さんが決めた）。保存すると、印の無いものは切る（データは消えない）。
+ * 配布元の拡張機能は権限への同意が要るので、ここに出さない（管理者ページの「拡張機能」で入れる）。
+ */
+function ExtensionsStep({ reviewed, onSaved }: { reviewed: boolean; onSaved: () => Promise<void> }) {
+  const [list, setList] = useState<ExtensionView[] | null>(null);
+  const [on, setOn] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.admin.extensions().then((r) => {
+      const builtin = r.items.filter((x) => x.origin === 'builtin' && x.installed);
+      setList(builtin);
+      setOn(new Set(reviewed ? builtin.filter((x) => x.enabled).map((x) => x.id) : []));
+    }).catch((e) => setError(describeError(e, '読み込めませんでした')));
+    // 開いたときの状態だけを使う（保存の後に印を出し直さない）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (!list) return <p className={error ? 'error' : 'muted'}>{error ?? '読み込み中…'}</p>;
+  const toggle = (id: string, v: boolean) => setOn((d) => { const n = new Set(d); if (v) n.add(id); else n.delete(id); return n; });
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      for (const x of list) {
+        const want = on.has(x.id);
+        if (want !== x.enabled) await api.admin.setExtensionEnabled(x.id, want);
+      }
+      await api.onboarding.wizardExtensions();
+      await onSaved();
+    } catch (e) {
+      setError(describeError(e, '保存できませんでした'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <ul className="wizard-agents">
+        {list.map((x) => (
+          <li key={x.id}>
+            <label className="wizard-agent">
+              <input type="checkbox" checked={on.has(x.id)} onChange={(e) => toggle(x.id, e.target.checked)} />
+              <span><strong>{x.name}</strong><span className="muted small">{x.description}</span></span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <button type="button" className="btn" disabled={busy} onClick={() => void save()}>{busy ? '保存しています…' : '保存して次へ'}</button>
+      <HelpLink id="admin-extensions">拡張機能について</HelpLink>
       {error && <p className="error">{error}</p>}
     </>
   );

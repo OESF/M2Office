@@ -27,7 +27,8 @@ export const AG02_MINUTES: AgentDefinition = {
   version: 1,
   name: '議事録の作成・共有',
   category: 'meeting',
-  description: '会議の記録から議事録を作り、タスクを起票して共有し、社内の知識に登録します',
+  description: '会議の記録から議事録を作り、タスクを起票して共有します',
+  routeHint: '会議の記録から議事録を作り、タスクを起票して共有し、社内の知識に登録します',
   locale: 'ja-JP',
   compartment: null,
   inputs: {

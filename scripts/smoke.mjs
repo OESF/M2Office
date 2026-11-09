@@ -859,8 +859,12 @@ console.log('\n■ 19. ヘルプと案内');
     ? ok('済んだ会社の管理者と一般の利用者には、ウィザードを出さない') : ng(`ウィザードの出し分けが不正（${meAdmin.setupWizard}・${meMember.setupWizard}）`);
   const wizardMember = await call('a', '/v1/onboarding/wizard', {}, 'member');
   const wizardDoneMember = await call('a', '/v1/onboarding/wizard/done', { method: 'POST', body: '{}' }, 'member');
-  wizardMember.status === 403 && wizardDoneMember.status === 403
-    ? ok('ウィザードの様子と終わりの記録は管理者だけ（403）') : ng(`一般の利用者が触れる（${wizardMember.status}・${wizardDoneMember.status}）`);
+  const wizardExtMember = await call('a', '/v1/onboarding/wizard/extensions', { method: 'POST', body: '{}' }, 'member');
+  wizardMember.status === 403 && wizardDoneMember.status === 403 && wizardExtMember.status === 403
+    ? ok('ウィザードの様子と終わり・拡張機能の段の記録は管理者だけ（403）')
+    : ng(`一般の利用者が触れる（${wizardMember.status}・${wizardDoneMember.status}・${wizardExtMember.status}）`);
+  typeof wizard.extensionsReviewed === 'boolean'
+    ? ok('ウィザードの様子に、拡張機能の段を保存したかが入る') : ng('extensionsReviewed が無い', JSON.stringify(wizard).slice(0, 200));
   const fromMissing = await call('a', '/v1/admin/knowledge/from-file', { method: 'POST', body: JSON.stringify({ fileId: 'f-none' }) });
   fromMissing.status === 404 ? ok('規程をファイルから入れるとき、無いファイルは断る（404）') : ng(`無いファイルを断らない（${fromMissing.status}）`);
 

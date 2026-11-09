@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AgentDefinition, Job, Run } from '@m2office/shared';
+import { routeText, type AgentDefinition, type Job, type Run } from '@m2office/shared';
 import type { Plan, PlanStep, Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { LOOKUP_AGENT_ID, PLAN_REPORT_AGENT_ID } from '../agents/index.js';
@@ -133,7 +133,7 @@ export function planningPrompt(request: string, context: string, agents: AgentDe
     '{"steps":[{"agent":"業務の ID","purpose":"頼むこと","after":[]}],"cannot":""}',
     '',
     '## 使える業務',
-    ...agents.map((a) => `- ${a.id}: ${a.name} — ${a.description}`),
+    ...agents.map((a) => `- ${a.id}: ${a.name} — ${routeText(a)}`),
     '',
     ...(context ? ['## これまでの会話と本人の返事', context, ''] : []),
     '## 本人の依頼',

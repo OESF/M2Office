@@ -24,7 +24,8 @@ export const MEETING_PREP: AgentDefinition = {
   version: 1,
   name: '会議の準備',
   category: 'meeting',
-  description: '会議の参加者・目的、前回の議事録の決定事項と宿題、関係するメールと資料の要点、確かめておくことをまとめます',
+  description: '会議の参加者・目的・前回の決定事項・資料の要点をまとめます',
+  routeHint: '会議の参加者・目的、前回の議事録の決定事項と宿題、関係するメールと資料の要点、確かめておくことをまとめます',
   locale: 'ja-JP',
   compartment: null,
   inputs: {
@@ -102,7 +103,8 @@ export const REPLY_FOLLOWUP: AgentDefinition = {
   version: 1,
   name: '返信待ちの追跡',
   category: 'mail',
-  description: '送ったメールのうち返事の来ていないものを挙げ、催促の下書きを Gmail の下書きに用意します（送りません）',
+  description: '返事の来ていないメールを挙げ、催促の下書きを用意します',
+  routeHint: '送ったメールのうち返事の来ていないものを挙げ、催促の下書きを Gmail の下書きに用意します（送りません）',
   locale: 'ja-JP',
   compartment: null,
   inputs: {
@@ -162,7 +164,8 @@ export const DOCUMENT_DRAFT: AgentDefinition = {
   version: 1,
   name: '文書の作成',
   category: 'document',
-  description: '報告書・案内文・社内通知などを、依頼と社内の知識から Google ドキュメントで作ります。直してほしいことを書けば作り直し、会社で共有もできます',
+  description: '報告書・案内文・社内通知などを Google ドキュメントで作ります',
+  routeHint: '報告書・案内文・社内通知などを、依頼と社内の知識から Google ドキュメントで作ります。直してほしいことを書けば作り直し、会社で共有もできます',
   locale: 'ja-JP',
   compartment: null,
   inputs: {
@@ -237,7 +240,8 @@ export const SHEET_BUILDER: AgentDefinition = {
   version: 1,
   name: '表の作成',
   category: 'document',
-  description: '依頼や渡された文書・メールから表を作り、集計を添えて Google スプレッドシートにします。直してほしいことを書けば作り直し、会社で共有もできます',
+  description: '依頼や文書から表を作り、集計を添えて Google スプレッドシートにします',
+  routeHint: '依頼や渡された文書・メールから表を作り、集計を添えて Google スプレッドシートにします。直してほしいことを書けば作り直し、会社で共有もできます',
   locale: 'ja-JP',
   compartment: null,
   inputs: {
@@ -323,7 +327,8 @@ export const SLIDES: AgentDefinition = {
   version: 1,
   name: 'スライドの作成',
   category: 'document',
-  description: 'テーマを Web で調べ、出典つきのスライド（Google スライド）にまとめます。デザインを選ぶか、会社のテンプレートの見た目で作ります',
+  description: 'テーマを Web で調べ、出典つきの Google スライドにまとめます',
+  routeHint: 'テーマを Web で調べ、出典つきのスライド（Google スライド）にまとめます。デザインを選ぶか、会社のテンプレートの見た目で作ります',
   locale: 'ja-JP',
   compartment: null,
   inputs: {
@@ -434,7 +439,8 @@ export const RECORDING_NOTES: AgentDefinition = {
   version: 1,
   name: '録音のまとめ',
   category: 'document',
-  description: 'ボイスメモや打ち合わせの録音を文字に起こし、メモや話し合いの記録にまとめて Google ドキュメントにします（共有しません）',
+  description: '録音を文字に起こし、話し合いの記録を Google ドキュメントにします',
+  routeHint: 'ボイスメモや打ち合わせの録音を文字に起こし、メモや話し合いの記録にまとめて Google ドキュメントにします（共有しません）',
   locale: 'ja-JP',
   compartment: null,
   inputs: {

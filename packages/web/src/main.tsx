@@ -50,7 +50,7 @@ function Root() {
   const [me, setMe] = useState<Me | null>(null);
   const [state, setState] = useState<'loading' | 'login' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
-  // セットアップウィザードを「あとで続ける」で閉じたか（このタブでは、もう出さない）
+  // セットアップウィザードを「中断」で閉じたか（このタブでは、もう出さない）
   const [wizardClosed, setWizardClosed] = useState(false);
 
   const load = useCallback(async () => {
@@ -130,7 +130,7 @@ function Root() {
   const onHelp = /^\/(admin\/)?help(\/|$)/.test(location.pathname);
   if (me.user.roles.includes('admin') && !onHelp
     && (location.pathname === '/setup' || (me.setupWizard && !wizardClosed && !setupLater()))) {
-    return withDebug(<SetupWizard me={me} onLater={() => setWizardClosed(true)} />);
+    return withDebug(<SetupWizard me={me} onLater={() => setWizardClosed(true)} onLogout={() => void logout()} />);
   }
   return withDebug(location.pathname.startsWith('/admin')
     ? <Admin me={me} onLogout={logout} />

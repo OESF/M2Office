@@ -21,7 +21,7 @@ export const AG04_KNOWLEDGE_QA: AgentDefinition = {
   version: 1,
   name: '社内ナレッジ Q&A',
   category: 'knowledge',
-  description: '社内規程や議事録から、出典つきで回答します',
+  description: '社内規程や議事録を調べ、出典を添えて質問に答えます',
   locale: 'ja-JP',
   compartment: null,
   // 秘書は層 3 で組織知識を根拠に答える（第10.9.4.1節）。同じことに本人の確認を求めない。

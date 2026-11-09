@@ -16,7 +16,7 @@ export const HR_PACKAGE: ExtensionPackage = {
     id: HR_EXTENSION_ID,
     name: '人事・給与',
     version: HR_EXTENSION_VERSION,
-    description: '従業員の台帳と雇用条件の履歴を持ち、入社・退職の手続きを期限つきで並べます。今の表計算から取り込め、労働者名簿を書き出せます。人事区画の人だけが扱えます',
+    description: '従業員の台帳を持ち、入社・退職の手続きを期限つきで並べます',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
     permissions: { tools: [], max_risk_level: 'read' },

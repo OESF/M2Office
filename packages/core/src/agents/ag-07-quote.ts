@@ -23,7 +23,8 @@ export const AG07_QUOTE: AgentDefinition = {
   version: 1,
   name: '見積書の作成',
   category: 'document',
-  description: '品目と単価から見積書を PDF で作ります。送り先を書けば、あなたの確認の後にメールで送ります',
+  description: '品目と単価から見積書を PDF で作り、確認の後に送ります',
+  routeHint: '品目と単価から見積書を PDF で作ります。送り先を書けば、あなたの確認の後にメールで送ります',
   locale: 'ja-JP',
   compartment: null,
   inputs: {

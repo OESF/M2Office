@@ -113,6 +113,8 @@ export interface TenantOnboarding {
    * `null` か無ければ、管理者がログインするたびにウィザードを出す。第 0.536.0 版より前からある会社は、移行 188 で済みにした。
    */
   wizardDoneAt?: string | null;
+  /** セットアップウィザードの「拡張機能」の段で、使う拡張機能を一度保存した日時（第 0.537.0 版）。ウィザードだけの段で、チェックリストには出さない。 */
+  extensionsReviewedAt?: string | null;
 }
 
 /**

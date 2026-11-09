@@ -26,7 +26,8 @@ export const AG01_INBOX: AgentDefinition = {
   version: 1,
   name: 'メールの整理・下書きの作成',
   category: 'mail',
-  description: '未処理のメールを分類し、返信が必要なものに下書きを作ります（送信はしません）',
+  description: '未処理のメールを分類し、返事の要るものに下書きを作ります',
+  routeHint: '未処理のメールを分類し、返信が必要なものに下書きを作ります（送信はしません）',
   locale: 'ja-JP',
   compartment: null,
   inputs: {

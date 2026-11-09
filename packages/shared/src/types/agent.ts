@@ -189,7 +189,14 @@ export interface AgentDefinition {
   version: number;
   name: string;
   category: string;
+  /** 画面の一覧に出す 1 文（30 字前後にそろえる。仕様書 第9.2節）。秘書が業務を選ぶときも、`routeHint` が無ければこれを読む。 */
   description: string;
+  /**
+   * 秘書が業務を選ぶとき（取り次ぎと段取り）に、`description` の代わりに読む詳しい説明（仕様書 第9.2節。第 0.538.0 版）。
+   *
+   * @remarks 画面には出さない。依頼の言い回しの例や、扱わないことを書く。スキルの `when_to_use` もここに入る
+   */
+  routeHint?: string;
   locale: string;
   /** 権限区画。区画外は `null`（仕様書 第16.3.6節）。 */
   compartment: string | null;
@@ -373,4 +380,12 @@ export function agentAreaOf(category: string, extensionId: string | null, def?: 
   if (DOCUMENT_WORDS.test(def.name)) return view('documents');
   if (RESEARCH_WORDS.test(def.description)) return view('research');
   return null;
+}
+
+/**
+ * 秘書が業務を選ぶとき（取り次ぎ・段取り・入力の読み取り）に読む説明（仕様書 第9.2節）。
+ * 詳しい手がかり（`routeHint`）があればそれを、無ければ画面と同じ `description` を返す。
+ */
+export function routeText(def: Pick<AgentDefinition, 'description' | 'routeHint'>): string {
+  return def.routeHint?.trim() || def.description;
 }

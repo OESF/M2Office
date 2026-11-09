@@ -98,11 +98,29 @@ export function onboardingRoute(deps: AppDeps) {
   /**
    * セットアップウィザードの様子（第6.10.3節、ADR-0130）。段ごとの済みは、チェックリストと同じ判定。
    * `wizardDone` は会社として終えたか（終えていなければ、管理者のログインのたびに出す）。
+   * `extensionsReviewed` は「拡張機能」の段を一度保存したか（ウィザードだけの段。第 0.537.0 版）。
    */
   app.get('/wizard', requireRole('admin'), async (c) => {
     const { tenant, user } = c.get('ctx');
     const [items, settings] = await Promise.all([buildChecklist(deps, tenant.id, user.id), deps.repo.getTenantSettings(tenant.id)]);
-    return c.json({ items, wizardDone: !!settings.onboarding.wizardDoneAt, deployment: deps.ai.deployment() });
+    return c.json({
+      items, wizardDone: !!settings.onboarding.wizardDoneAt, extensionsReviewed: !!settings.onboarding.extensionsReviewedAt,
+      deployment: deps.ai.deployment(),
+    });
+  });
+
+  /**
+   * 「拡張機能」の段を保存したことを記録する（第6.10.3節 段 4.1）。入り切りそのものは、拡張機能のスイッチ（`PUT /v1/admin/extensions/:id/enabled`）で行う。
+   * 記録した後は、段を開いたときに、いまの入り切りを出す（記録する前は、すべて選ばない状態から始める）。
+   */
+  app.post('/wizard/extensions', requireRole('admin'), async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const settings = await deps.repo.getTenantSettings(tenant.id);
+    if (!settings.onboarding.extensionsReviewedAt) {
+      await deps.repo.saveTenantSettings(tenant.id, 'onboarding',
+        { ...settings.onboarding, extensionsReviewedAt: new Date().toISOString() }, user.id);
+    }
+    return c.json({ ok: true });
   });
 
   /** セットアップウィザードを終えた（最後の「使い始める」）。会社に 1 回だけ記録し、ほかの管理者にも出さない。 */

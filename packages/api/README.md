@@ -570,7 +570,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/onboarding/tour` | 本人の初回の案内の状態 |
 | `POST /v1/onboarding/tour` | 案内を見終えた記録。`{ "reset": true }` で見直し |
 | `GET /v1/onboarding/checklist` | 管理者: 初期設定のチェックリスト（「Google Workspace を接続する」は、会社の OAuth クライアントがあり、見ている管理者が接続したときに済み。第 0.536.0 版） |
-| `GET /v1/onboarding/wizard` | 管理者: セットアップウィザードの様子（段ごとの済みはチェックリストと同じ `items`、会社として終えたか `wizardDone`。仕様書 第6.10.3節、ADR-0130） |
+| `GET /v1/onboarding/wizard` | 管理者: セットアップウィザードの様子（段ごとの済みはチェックリストと同じ `items`、会社として終えたか `wizardDone`、「拡張機能」の段を保存したか `extensionsReviewed`。仕様書 第6.10.3節、ADR-0130） |
+| `POST /v1/onboarding/wizard/extensions` | 管理者: ウィザードの「拡張機能」の段を保存した記録（入り切りは拡張機能のスイッチで行う。記録の前は、段をすべて選ばない状態で出す） |
 | `POST /v1/onboarding/wizard/done` | 管理者: セットアップウィザードを終えた記録（会社に 1 回だけ。ほかの管理者にも出さなくなる） |
 | `POST /v1/onboarding/checklist/notified` | 管理者: 従業員へ知らせたことの記録 |
 | `POST /v1/files` | ファイルの受け取り（multipart の `file`。10 MB まで。録音（MP3・M4A・WAV）は 200 MB・3 時間まで。ローカルの方針の会社・AI の無い会社は録音を 422 で断る。仕様書 第9.4.5節） |

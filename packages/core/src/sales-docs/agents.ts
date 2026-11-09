@@ -69,7 +69,7 @@ function mailStep(onEmpty: 'stop' | 'continue'): AgentStep {
 
 /** 発行に承認の要る書類の業務（注文書・請求書・領収書）。 */
 function issuingAgent(kind: 'purchase_order' | 'invoice' | 'receipt', o: {
-  name: string; description: string; example: string; toExample: string; face: number; extra: string[]; present: string;
+  name: string; description: string; routeHint?: string; example: string; toExample: string; face: number; extra: string[]; present: string;
   help: AgentDefinition['help'];
 }): AgentDefinition {
   return {
@@ -79,6 +79,7 @@ function issuingAgent(kind: 'purchase_order' | 'invoice' | 'receipt', o: {
     name: o.name,
     category: 'document',
     description: o.description,
+    ...(o.routeHint ? { routeHint: o.routeHint } : {}),
     locale: 'ja-JP',
     compartment: null,
     inputs: inputs(o.example, o.toExample),
@@ -109,7 +110,8 @@ function issuingAgent(kind: 'purchase_order' | 'invoice' | 'receipt', o: {
 /** 注文書の作成（第42.4.1節）。 */
 export const PURCHASE_ORDER_AGENT = issuingAgent('purchase_order', {
   name: '注文書の作成',
-  description: '仕入先・外注先に出す注文書を PDF で作ります。あなたの確認の後に発行し、送り先を書けばメールで送ります',
+  description: '仕入先・外注先に出す注文書を PDF で作り、確認の後に発行します',
+  routeHint: '仕入先・外注先に出す注文書を PDF で作ります。あなたの確認の後に発行し、送り先を書けばメールで送ります',
   example: '部品の加工を注文。アルミ板の切削 100 個、単価 1,200 円、納期 11 月 20 日、お支払いは月末締め翌月末',
   toExample: '株式会社見本製作所 御中',
   face: 26,
@@ -133,7 +135,8 @@ export const PURCHASE_ORDER_AGENT = issuingAgent('purchase_order', {
 /** 請求書の作成（AG-06。第42.4.2節・第42.4.3節）。 */
 export const INVOICE_AGENT = issuingAgent('invoice', {
   name: '請求書の作成',
-  description: '納品書をまとめて、または品目から請求書を PDF で作ります。あなたの確認の後に発行し、送り先を書けばメールで送ります',
+  description: '納品書や品目から請求書を PDF で作り、確認の後に発行します',
+  routeHint: '納品書をまとめて、または品目から請求書を PDF で作ります。あなたの確認の後に発行し、送り先を書けばメールで送ります',
   example: '見本商事の今月分を請求して',
   toExample: '株式会社見本商事 御中',
   face: 28,
@@ -163,7 +166,8 @@ export const INVOICE_AGENT = issuingAgent('invoice', {
 /** 領収書の作成（第42.4.4節）。 */
 export const RECEIPT_AGENT = issuingAgent('receipt', {
   name: '領収書の作成',
-  description: '入金のあった請求書から領収書を PDF で作ります。あなたの確認の後に発行し、送り先を書けばメールで送ります',
+  description: '入金のあった請求書から領収書を PDF で作り、確認の後に発行します',
+  routeHint: '入金のあった請求書から領収書を PDF で作ります。あなたの確認の後に発行し、送り先を書けばメールで送ります',
   example: '見本商事から I-20261026-001 の入金があったので領収書を',
   toExample: '株式会社見本商事 御中',
   face: 29,
@@ -192,7 +196,8 @@ export const DELIVERY_NOTE_AGENT: AgentDefinition = {
   version: 1,
   name: '納品書の作成',
   category: 'document',
-  description: '受注か品目から納品書を PDF で作ります。「請求書も」と頼めば、同じ品目の請求書の下書きも作ります。送り先を書けば、あなたの確認の後にメールで送ります',
+  description: '受注や品目から納品書を PDF で作り、確認の後に送ります',
+  routeHint: '受注か品目から納品書を PDF で作ります。「請求書も」と頼めば、同じ品目の請求書の下書きも作ります。送り先を書けば、あなたの確認の後にメールで送ります',
   locale: 'ja-JP',
   compartment: null,
   inputs: inputs('見本商事の受注 S-20261020-001 の納品書を作って', '株式会社見本商事 御中'),
@@ -236,7 +241,8 @@ export const ACKNOWLEDGEMENT_AGENT: AgentDefinition = {
   version: 1,
   name: '注文請書の作成',
   category: 'document',
-  description: '受注から注文請書（受けた注文の内容の写し）を PDF で作ります。送り先を書けば、あなたの確認の後にメールで送ります',
+  description: '受注から注文請書を PDF で作り、確認の後に送ります',
+  routeHint: '受注から注文請書（受けた注文の内容の写し）を PDF で作ります。送り先を書けば、あなたの確認の後にメールで送ります',
   locale: 'ja-JP',
   compartment: null,
   inputs: inputs('見本商事の受注 S-20261020-001 の注文請書を送って', '株式会社見本商事 御中'),
@@ -278,7 +284,8 @@ export const ORDER_INTAKE_AGENT: AgentDefinition = {
   version: 1,
   name: '受注の取り込み',
   category: 'document',
-  description: '受け取った注文書（PDF・画像・Excel・Word）や、電話などで受けた注文（「見本商事から、いつものを 10 個」）を受注として整理します。金額の食い違い・見積との違い・二重の取り込みは印を付けてお知らせします。受注を探す・直すこともできます',
+  description: '受け取った注文書や電話の注文を、受注として整理します',
+  routeHint: '受け取った注文書（PDF・画像・Excel・Word）や、電話などで受けた注文（「見本商事から、いつものを 10 個」）を受注として整理します。金額の食い違い・見積との違い・二重の取り込みは印を付けてお知らせします。受注を探す・直すこともできます',
   locale: 'ja-JP',
   compartment: null,
   inputs: {
@@ -346,7 +353,7 @@ export const SALES_DOCS_PACKAGE: ExtensionPackage = {
     id: SALES_DOCS_EXTENSION_ID,
     name: '販売の書類と受注',
     version: SALES_DOCS_EXTENSION_VERSION,
-    description: '注文書・納品書・請求書・領収書を作り、受け取った注文書を読み込んで受注として整理します。納品書をまとめて請求書にでき、請求書と領収書はあなたの確認の後に発行します。入金・支払い・会計は扱いません',
+    description: '注文書・納品書・請求書・領収書を作り、受け取った注文を整理します',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
     permissions: {

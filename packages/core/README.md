@@ -478,7 +478,7 @@ AG-02 議事録の作成・共有は、承認②のあとに `knowledge.register
 
 **拡張機能は SKILL.md だけで書きます**（仕様書 第12.12節、ADR-0029。`extensions/skill.ts`）。
 `buildSkillPackage()` がスキル（Claude Code の Skills・Agent Skills）の項目をスキルと同じ意味で読み、
-マニフェストとエージェント定義を組み立てて同じ検証に回します。`name`（省けばフォルダ名。`SKILL_FOLDER_ENTRY`）・`description`＋`when_to_use`（秘書の取り次ぎ）・
+マニフェストとエージェント定義を組み立てて同じ検証に回します。`name`（省けばフォルダ名。`SKILL_FOLDER_ENTRY`）・`description`（画面の一覧の説明）＋`when_to_use`（秘書の取り次ぎの手がかり `routeHint`。秘書は `routeText()` で読む）・
 `argument-hint`・`arguments`（入力の欄）・`disable-model-invocation`（`secretaryRoute: false`）・`user-invocable: false`（`menu: false`）・`effort`（`tier`）・
 `allowed-tools`（M2Office のツールと、同じフォルダの `connectors/*.json` で宣言したコネクタのツール。無いツールは無視して `notices`）。本文の `$ARGUMENTS`・`$N`・`$名前` は、実行エンジンが実行のときに入力で置き換えます（`substituteArguments()`）。
 段は本文を指示にした 1 つで、送るツールがあれば「作業 → 承認 → 送る」を組みます。`HELP.md` は業務の説明の本文（`help.body`）になります。

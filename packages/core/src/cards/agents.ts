@@ -22,7 +22,8 @@ export const CARD_IMPORT: AgentDefinition = {
   version: 1,
   name: '名刺の取り込み',
   category: 'sample',
-  description: '名刺の画像を読み取り、連絡先として登録します。同じ人の名刺があれば 1 つにまとめます。社内の名刺の置き場に書くだけで、誰にも送りません',
+  description: '名刺の画像を読み取り、同じ人をまとめて連絡先に登録します',
+  routeHint: '名刺の画像を読み取り、連絡先として登録します。同じ人の名刺があれば 1 つにまとめます。社内の名刺の置き場に書くだけで、誰にも送りません',
   locale: 'ja-JP',
   compartment: null,
   // 名刺の画面と秘書から使う（第27.9節）
@@ -81,7 +82,8 @@ export const CARD_UPDATE: AgentDefinition = {
   version: 1,
   name: '名刺の修正',
   category: 'sample',
-  description: '名刺の電話番号・メールアドレスなどの間違いを直したり、「展示会で会った」のようなメモを書いたり、名刺をあなたの Google の連絡先に入れたりします。誰にも送りません',
+  description: '名刺の間違いを直し、メモを書き、Google の連絡先に入れます',
+  routeHint: '名刺の電話番号・メールアドレスなどの間違いを直したり、「展示会で会った」のようなメモを書いたり、名刺をあなたの Google の連絡先に入れたりします。誰にも送りません',
   locale: 'ja-JP',
   compartment: null,
   menu: false,
@@ -153,7 +155,8 @@ export const CARD_BULK_MAIL: AgentDefinition = {
   version: 1,
   name: 'まとめてのメール',
   category: 'sample',
-  description: '名刺の相手に、お礼や案内のメールを 1 人ずつ宛名を変えてまとめて送ります。送る前に、宛先の一覧と文面をあなたが確かめて承認します',
+  description: '名刺の相手に、宛名を変えたお礼や案内のメールをまとめて送ります',
+  routeHint: '名刺の相手に、お礼や案内のメールを 1 人ずつ宛名を変えてまとめて送ります。送る前に、宛先の一覧と文面をあなたが確かめて承認します',
   locale: 'ja-JP',
   compartment: null,
   // 画面からは名刺管理の「まとめてメール」で始める（宛先を一覧で確かめるため）。秘書からも頼める
@@ -232,7 +235,7 @@ export const CARDS_PACKAGE: ExtensionPackage = {
     id: CARDS_EXTENSION_ID,
     name: '名刺管理',
     version: CARDS_EXTENSION_VERSION,
-    description: '名刺を撮るかスキャナーで読み込むと、AI が読み取って連絡先として登録します。秘書に聞けば名刺が出てきます。会社で共有するのを既定にし、1 枚ずつ「自分だけ」にできます',
+    description: '名刺を撮って読み込むと、AI が連絡先に登録し、秘書に聞けば探せます',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
     // まとめてのメール（第27.9.1節）は送るツールを使うため、最上位の危険度は「社外へ送る」（内蔵の拡張なので再同意は無い）

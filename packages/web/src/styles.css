@@ -3210,7 +3210,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .checklist-head h3 { margin: 0; }
 .wizard { min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: calc(32px * var(--space-scale)) calc(16px * var(--space-scale)); background: var(--bg); }
 .wizard-card { width: min(760px, 100%); display: flex; flex-direction: column; gap: calc(16px * var(--space-scale)); padding: calc(24px * var(--space-scale)); margin: 0; }
-.wizard-head h1 { margin: 0 0 calc(12px * var(--space-scale)); font-size: calc(22px * var(--font-scale)); }
+.wizard-title { display: flex; align-items: center; justify-content: space-between; gap: calc(8px * var(--space-scale)); margin: 0 0 calc(12px * var(--space-scale)); }
+.wizard-head h1 { margin: 0; font-size: calc(22px * var(--font-scale)); }
 .wizard-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: calc(6px * var(--space-scale)); }
 .wizard-steps button { display: inline-flex; align-items: center; gap: calc(6px * var(--space-scale)); border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 999px; padding: calc(4px * var(--space-scale)) calc(10px * var(--space-scale)) calc(4px * var(--space-scale)) calc(4px * var(--space-scale)); font: inherit; font-size: calc(12px * var(--font-scale)); cursor: pointer; }
 .wizard-step-no { display: inline-grid; place-items: center; width: 1.6em; height: 1.6em; border-radius: 50%; background: var(--neutral-soft); color: var(--ink); font-weight: 600; }

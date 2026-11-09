@@ -23,7 +23,8 @@ export const SECRETARY_CALENDAR: AgentDefinition = {
   version: 1,
   name: '予定の登録',
   category: 'calendar',
-  description: '本人のカレンダーに予定を入れます（出張の行程・外出・作業の時間など。複数可）。社外の人を招くときだけ確認します',
+  description: '出張の行程・外出・作業の時間などを、カレンダーに入れます',
+  routeHint: '本人のカレンダーに予定を入れます（出張の行程・外出・作業の時間など。複数可）。社外の人を招くときだけ確認します',
   locale: 'ja-JP',
   compartment: null,
   inputs: {

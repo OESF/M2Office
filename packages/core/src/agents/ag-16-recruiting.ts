@@ -19,7 +19,8 @@ export const AG16_RECRUITING: AgentDefinition = {
   version: 1,
   name: '採用支援',
   category: 'document',
-  description: '求人原稿・応募書類の要約と比較・面接の質問の案を作ります（人事の区画の人だけ。合否は付けません）',
+  description: '求人原稿・応募書類の要約・面接の質問の案を作ります',
+  routeHint: '求人原稿・応募書類の要約と比較・面接の質問の案を作ります（人事の区画の人だけ。合否は付けません）',
   locale: 'ja-JP',
   compartment: HR_COMPARTMENT,
   inputs: {

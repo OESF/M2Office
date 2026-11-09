@@ -1432,7 +1432,9 @@ export const api = {
     checklist: () => call<{ items: ChecklistItem[]; done: boolean }>('/onboarding/checklist'),
     notified: () => call('/onboarding/checklist/notified', { method: 'POST', body: JSON.stringify({}) }),
     /** セットアップウィザードの様子（仕様書 第6.10.3節、ADR-0130）。段ごとの済みはチェックリストと同じ。 */
-    wizard: () => call<{ items: ChecklistItem[]; wizardDone: boolean; deployment: 'cloud' | 'onsite' }>('/onboarding/wizard'),
+    wizard: () => call<{ items: ChecklistItem[]; wizardDone: boolean; extensionsReviewed: boolean; deployment: 'cloud' | 'onsite' }>('/onboarding/wizard'),
+    /** ウィザードの「拡張機能」の段を保存した記録（入り切りは `admin.setExtensionEnabled` で行う）。 */
+    wizardExtensions: () => call<{ ok: true }>('/onboarding/wizard/extensions', { method: 'POST', body: JSON.stringify({}) }),
     /** セットアップウィザードを終えた（会社に 1 回だけ記録する）。 */
     wizardDone: () => call<{ ok: true }>('/onboarding/wizard/done', { method: 'POST', body: JSON.stringify({}) }),
   },

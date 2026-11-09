@@ -21,7 +21,8 @@ export const COMPETITOR_FIND: AgentDefinition = {
   version: 1,
   name: '競合を探す',
   category: 'sample',
-  description: '自社の Web サイトと会社情報から、近くの同業か同じような事業の会社を探して競合として覚えます。競合を入れる・外す・商圏を変えて探し直すこともします。相手の公開のページを読むだけで、社外へは何も送りません',
+  description: '自社の情報から近くの同業を探し、競合として覚えます',
+  routeHint: '自社の Web サイトと会社情報から、近くの同業か同じような事業の会社を探して競合として覚えます。競合を入れる・外す・商圏を変えて探し直すこともします。相手の公開のページを読むだけで、社外へは何も送りません',
   locale: 'ja-JP',
   compartment: null,
   // 画面は「競合の分析」。秘書からも頼める
@@ -84,7 +85,8 @@ export const COMPETITOR_ANALYZE: AgentDefinition = {
   version: 1,
   name: '競合の分析',
   category: 'sample',
-  description: '覚えている競合の動きと、自社との違い・相手の強みを、競合の Web サイトから取り出した事実（出典つき）から答えます。「今すぐ見回って」で見回ってレポートを作ります',
+  description: '競合の動き・自社との違い・相手の強みを、出典つきで答えます',
+  routeHint: '覚えている競合の動きと、自社との違い・相手の強みを、競合の Web サイトから取り出した事実（出典つき）から答えます。「今すぐ見回って」で見回ってレポートを作ります',
   locale: 'ja-JP',
   compartment: null,
   menu: false,
@@ -151,7 +153,7 @@ export const COMPETITORS_PACKAGE: ExtensionPackage = {
     id: COMPETITORS_EXTENSION_ID,
     name: '競合の分析',
     version: COMPETITORS_EXTENSION_VERSION,
-    description: '自社の Web サイトと会社情報から、近くの同業か同じような事業の会社を AI が探して覚えます。競合の公開のページだけを読んで事実を取り出し、自社との違い・相手の強み・次の一手をレポートにします',
+    description: '近くの同業を AI が探し、自社との違いや相手の強みをレポートにします',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
     permissions: {

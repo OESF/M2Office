@@ -576,8 +576,9 @@ export function compileSkill(s: {
   const firstField = Object.keys(s.inputs.properties)[0] ?? 'request';
   return {
     schemaVersion: 1, id: s.name, version: 1, name: s.title, category: 'skill',
-    // 秘書が取り次ぐ手がかり（スキルの自動の呼び出しと同じ役割）。when_to_use を添える
-    description: s.whenToUse ? `${s.description}（${s.whenToUse}）` : s.description,
+    // 画面の一覧には description だけを出し、秘書が取り次ぐ手がかり（スキルの自動の呼び出しと同じ役割）に when_to_use を添える（仕様書 第9.2節）
+    description: s.description,
+    ...(s.whenToUse ? { routeHint: `${s.description}（${s.whenToUse}）` } : {}),
     locale: 'ja-JP', compartment: null,
     ...(s.route ? {} : { secretaryRoute: false }),
     ...(s.menu ? {} : { menu: false }),

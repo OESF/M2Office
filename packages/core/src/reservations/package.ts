@@ -16,7 +16,7 @@ export const RESERVATIONS_PACKAGE: ExtensionPackage = {
     id: RESERVATIONS_EXTENSION_ID,
     name: '予約',
     version: RESERVATIONS_EXTENSION_VERSION,
-    description: '会議室・社用車・備品を、画面か秘書に頼むだけで予約し、重なりを防ぎます。予約した人の Google カレンダーにも予定を入れます',
+    description: '会議室・社用車・備品を予約し、重なりを防いでカレンダーにも入れます',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
     permissions: { tools: [], max_risk_level: 'read' },

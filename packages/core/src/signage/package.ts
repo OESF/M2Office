@@ -16,7 +16,7 @@ export const SIGNAGE_PACKAGE: ExtensionPackage = {
     id: SIGNAGE_EXTENSION_ID,
     name: 'サイネージ',
     version: SIGNAGE_EXTENSION_VERSION,
-    description: '店頭や待合に置いた画面（1 社 3 台まで）に、画像と動画を繰り返し流します。画面は QR を読むだけで登録でき、通信が切れても流し続けます',
+    description: '店頭や待合の画面に、画像と動画を繰り返し流します（1 社 3 台まで）',
     publisher: { name: 'M2Office', verified: true },
     platform_schema: '>=1 <2',
     permissions: { tools: [], max_risk_level: 'read' },

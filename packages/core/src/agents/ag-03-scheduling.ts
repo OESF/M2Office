@@ -25,7 +25,8 @@ export const AG03_SCHEDULING: AgentDefinition = {
   version: 1,
   name: '日程調整',
   category: 'calendar',
-  description: '参加者の空きから候補を出して予定を作り、招待します。社外の方がいれば、候補をメールで送って返事を待ちます',
+  description: '参加者の空きから候補を出し、予定を作って招待します',
+  routeHint: '参加者の空きから候補を出して予定を作り、招待します。社外の方がいれば、候補をメールで送って返事を待ちます',
   locale: 'ja-JP',
   compartment: null,
   inputs: {

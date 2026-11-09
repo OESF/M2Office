@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
+import { DEFAULT_TENANT_SETTINGS, routeText } from '@m2office/shared';
 import {
   BUILTIN_TOOLS, SKILL_FOLDER_ENTRY, ToolRegistry, buildAgentHelp, loadExtension, loadExtensionFiles, parseSkill, parseInputs,
   substituteArguments, unpackExtension, type ExtensionFiles,
@@ -58,7 +58,11 @@ test('スキルの項目が同じ意味で効く: 名前・説明・いつ使う
   const def = pkg!.agents[0]!;
   assert.equal(def.id, 'skill.expense-check:expense-check');
   assert.equal(def.name, '経費精算チェック', '本文の最初の見出し');
-  assert.equal(def.description, '経費の申請を社内の規程と照らし合わせる（「経費を確認して」と頼まれたとき）', 'when_to_use を秘書の手がかりに添える');
+  // 画面の一覧には description だけを出し、when_to_use は秘書の手がかり（routeHint）に添える（仕様書 第9.2節）
+  assert.equal(def.description, '経費の申請を社内の規程と照らし合わせる', '画面の説明には when_to_use を混ぜない');
+  assert.equal(def.routeHint, '経費の申請を社内の規程と照らし合わせる（「経費を確認して」と頼まれたとき）', 'when_to_use を秘書の手がかりに添える');
+  assert.equal(routeText(def), def.routeHint, '秘書は手がかりを読む');
+  assert.equal(routeText({ description: '短い説明' }), '短い説明', '手がかりが無ければ画面と同じ説明を読む');
   assert.equal(def.help?.summary, '経費の申請を社内の規程と照らし合わせる');
   assert.deepEqual((def.inputs as { properties: Record<string, { examples?: string[] }> }).properties['request']!.examples, ['申請の内容を貼り付けてください']);
   assert.equal(def.tier, 'fast', 'effort: low は高速のモデル');
