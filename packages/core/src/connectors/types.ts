@@ -61,12 +61,33 @@ export interface ConnectorPrincipal {
 
 export interface MailSummary {
   id: string;
+  /** スレッドの ID（分かる接続口だけ）。 */
+  threadId?: string;
   from: string;
   subject: string;
   snippet: string;
   receivedAt: string;
   unread: boolean;
   labels: string[];
+}
+
+/**
+ * スレッドの 1 通の見出し（メールの片付け。仕様書 第9.5.1.1節）。本文は持たない。
+ *
+ * @remarks 本人が送ったものは `labels` に `SENT` を持つ。受信トレイにあるものは `INBOX`
+ */
+export interface MailHead {
+  id: string;
+  threadId: string;
+  from: string;
+  to: string[];
+  cc: string[];
+  subject: string;
+  snippet: string;
+  receivedAt: string;
+  labels: string[];
+  /** 配信のメールか（`List-Unsubscribe`・`List-Id`・`Precedence: bulk`、またはプロモーション。第44.4節と同じ決まり）。 */
+  bulk: boolean;
 }
 
 export interface MailMessage extends MailSummary {
@@ -196,6 +217,22 @@ export interface MailConnector {
    * @remarks 持たない接続口では未定義
    */
   thread?(p: ConnectorPrincipal, threadId: string): Promise<MailMessage[]>;
+  /**
+   * いまの受信箱の履歴の番号（メールの片付けの見回りの起点。仕様書 第9.5.1.1節）。
+   *
+   * @remarks 持たない接続口では未定義
+   */
+  historyStart?(p: ConnectorPrincipal): Promise<string>;
+  /**
+   * 履歴の番号から後に、メールが届いた・送った・ラベルが変わったスレッドの ID を返す（第9.5.1.1節）。
+   *
+   * @returns 新しい履歴の番号と、変わったスレッドの ID。番号が古すぎて読めなければ `null`（直近を見直す）
+   */
+  historySince?(p: ConnectorPrincipal, startHistoryId: string): Promise<{ historyId: string; threadIds: string[] } | null>;
+  /** 検索の条件に合うメールのスレッドの ID を、新しい順に重ねずに `limit` 個まで返す（最初の見直し。第9.5.1.1節）。 */
+  threadIdsOf?(p: ConnectorPrincipal, query: string, limit: number): Promise<string[]>;
+  /** スレッドのメールの見出しを古い順に返す。本文は読まない。見つからなければ空（第9.5.1.1節）。 */
+  threadHeads?(p: ConnectorPrincipal, threadId: string): Promise<MailHead[]>;
   /** 返信の下書きを作る。**送信はしない**（仕様書 第9.5.1節）。 */
   createDraft(
     p: ConnectorPrincipal,

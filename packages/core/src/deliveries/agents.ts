@@ -25,6 +25,8 @@ export const DELIVERY_SEND: AgentDefinition = {
   locale: 'ja-JP',
   compartment: null,
   menu: false,
+  // 外部のアプリの依頼で始まる中の業務。秘書は取り次がない（「メールの返信を下書きして」がここへ回っていた。第 0.540.0 版）
+  secretaryRoute: false,
   inputs: {
     type: 'object',
     required: ['deliveryId'],

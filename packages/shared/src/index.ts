@@ -27,6 +27,7 @@ export * from './types/competitors.js';
 export * from './types/announcements.js';
 export * from './types/contracts.js';
 export * from './types/sales-docs.js';
+export * from './types/mail.js';
 export * from './types/tax.js';
 export * from './types/reservations.js';
 export * from './types/subsidies.js';

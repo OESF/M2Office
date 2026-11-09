@@ -57,6 +57,7 @@ import type { MemberService } from '../members/service.js';
 import type { DeliveryService } from '../deliveries/service.js';
 import type { PrintDesignService } from '../print-designs/service.js';
 import type { LibraryService } from '../library/service.js';
+import type { MailStore } from '../mail/store.js';
 import type { ReservationService } from '../reservations/service.js';
 import type { ColumnPlanner } from '../columns/planner.js';
 import type { ColumnSignageService } from '../columns/signage.js';
@@ -252,6 +253,8 @@ export interface RunEngineDeps {
     service: LibraryService;
     access(tenantId: string, userId: string): Promise<LibrarySettings | null>;
   };
+  /** メールの片付け（仕様書 第9.5.1.1節）。メールの返事を送る業務と朝のブリーフのツールに渡す。 */
+  mail?: { store: MailStore };
   /** 予約（内蔵の拡張。仕様書 第37章）。日程調整で会議と一緒に会議室を取る（第37.18節）。 */
   reservations?: {
     service: ReservationService;
@@ -1195,6 +1198,8 @@ export class RunEngine {
       ...(this.deps.members ? {
         members: { service: this.deps.members.service, access: () => this.deps.members!.access(run.tenantId, requestedBy) },
       } : {}),
+      // メールの片付け（第9.5.1.1節）
+      ...(this.deps.mail ? { mail: { store: this.deps.mail.store } } : {}),
       // 販促物の作成（第41.10節）
       ...(this.deps.library ? {
         library: { service: this.deps.library.service, access: () => this.deps.library!.access(run.tenantId, requestedBy) },

@@ -23,6 +23,7 @@ import { onUnexpectedError, requestLogger } from './middleware/logging.js';
 import { agentsRoute } from './routes/agents.js';
 import { jobsRoute } from './routes/jobs.js';
 import { briefsRoute } from './routes/briefs.js';
+import { mailRoute } from './routes/mail.js';
 import { runsRoute } from './routes/runs.js';
 import { approvalsRoute } from './routes/approvals.js';
 import { secretaryRoute } from './routes/secretary.js';
@@ -309,6 +310,8 @@ app.route('/v1/slide-decks', slideDecksRoute(deps));
 app.route('/v1/slide-themes', slideThemesRoute(deps));
 app.route('/v1/jobs', jobsRoute(deps));
 app.route('/v1/briefs', briefsRoute(deps));
+// メールの画面（第9.5.1.1節）。本人だけ
+app.route('/v1/mail', mailRoute(deps));
 app.route('/v1/runs', runsRoute(deps));
 app.route('/v1/approvals', approvalsRoute(deps));
 app.route('/v1/secretary', secretaryRoute(deps));

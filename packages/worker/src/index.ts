@@ -15,7 +15,7 @@ import {
   fillApprovalCompartments, discardStaleRecordings, discardStaleLiveRecordings, PostgresSystemLogStore, SystemLogSink, attachLogSink, EvidenceBuilder, SYSTEM_LOG_KEEP_DAYS,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, SalesDocWatch, salesInventoryFrom, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, DecisionService, PostgresDecisionStore, DecisionRunner, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, libraryAccess, libraryReaderFor, libraryContactOf, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, SalesDocWatch, salesInventoryFrom, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, DecisionService, PostgresDecisionStore, DecisionRunner, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, MailWatch, PostgresMailStore, libraryAccess, libraryReaderFor, libraryContactOf, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, PlatformAiSource, PostgresPlatformAiSettingsReader, envTenantCapJpy, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
@@ -132,7 +132,9 @@ const ai = new TenantAiResolver({
   deployment: deploymentFromEnv(process.env), local: localLlmFromEnv(process.env),
 });
 // Google から取得したデータの保持（仕様書 第14.3.2節）。Google のツールは、内蔵のツールのうち権限を宣言しているもの
-const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
+// メールの画面の一覧（第9.5.1.1節）。片付いてから 7 日で消し、連携の解除ではすぐ消す
+const mailStore = new PostgresMailStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+const retention = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log, mailStore });
 // 許可がなくなったときの後始末（仕様書 第6.5.2.1節）。ワーカーで動く業務が取り直しに失敗したときも、API と同じ後始末を行う
 const revocation = new GoogleRevocation({
   repo, logger: log,
@@ -480,6 +482,7 @@ const engine = new RunEngine({
   subsidies: { service: subsidies, access: subsidiesAccess(repo) },
   decisions: { service: decisions, access: decisionsAccess(repo) },
   library: { service: library, access: libraryAccess(repo) },
+  mail: { store: mailStore },
   members: { service: members, access: membersAccess(repo) },
   printDesigns: { service: printDesigns, access: printDesignsAccess(repo) },
   // 日程調整で会議と一緒に会議室を取る（第37.18節）
@@ -685,6 +688,13 @@ const SALES_MAIL_INTERVAL_MS = Number(process.env['SALES_MAIL_INTERVAL_MS'] ?? 1
 const SALES_MORNING_INTERVAL_MS = 5 * 60_000;
 let lastSalesMail = 0;
 let lastSalesMorning = 0;
+// メールの見回り（第9.5.1.1節）。15 分ごとに 1 人ずつ新しいメールを見る（見本の会社は API のプロセスが見る）
+const MAIL_POLL_MS = Number(process.env['MAIL_POLL_MS'] ?? 60_000);
+let lastMailPoll = 0;
+let mailBusy = false;
+const mailWatch = new MailWatch({
+  store: mailStore, repo, mail: connector.mail, llmFor: (tenantId) => ai.llmFor(tenantId), isMock: (tenantId) => connector.sourceFor(tenantId) === 'mock', logger: log,
+});
 const salesWatch = new SalesDocWatch({
   service: salesDocs, store: salesDocs.deps.store, repo, mail: connector.mail, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
 });
@@ -1397,6 +1407,16 @@ async function patrolOnce(): Promise<void> {
     } catch (err) {
       log.warn('お知らせの見回りに失敗しました', { err });
     }
+  }
+
+  // メールの見回り（第9.5.1.1節）。1 人ずつ 15 分たっていれば見る（間隔はこの関数が人ごとに確かめる）。終わるのを待たない
+  if (!mailBusy && Date.now() - lastMailPoll >= MAIL_POLL_MS) {
+    lastMailPoll = Date.now();
+    mailBusy = true;
+    void (async () => {
+      const tenants = (await repo.listTenantIds()).filter((id) => connector.sourceFor(id) !== 'mock');
+      return withAiUsage({ purpose: 'worker:mail' }, () => mailWatch.tick(tenants, new Date()));
+    })().catch((err: unknown) => log.warn('メールの見回りに失敗しました', { err })).finally(() => { mailBusy = false; });
   }
 
   // 販売の書類と受注: メールに届いた注文書の取り込み（第42.13.1節）と、朝の締めの請求書の下書き・納期の見張り（第42.13.2節・第42.13.3節）

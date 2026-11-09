@@ -3232,3 +3232,37 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .wizard-foot-gap { flex: 1; }
 .wizard label.btn { display: inline-block; align-self: flex-start; cursor: pointer; }
 .wizard label.btn.disabled { opacity: .5; cursor: default; }
+
+/* メール（仕様書 第9.5.1.1節） */
+.mail { display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); max-width: 960px; }
+.mail-group { display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); }
+.mail-group h2, .mail-group > summary { font-size: calc(15px * var(--font-scale)); margin: 0; font-weight: 600; cursor: default; }
+.mail-group > summary { cursor: pointer; }
+.mail-count { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.mail-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.mail-list > li + li { border-top: 1px solid var(--line); }
+.mail-row { display: grid; grid-template-columns: minmax(8em, 14em) 1fr auto; grid-template-areas: "from subject when" "from summary when"; gap: 2px calc(12px * var(--space-scale));
+  width: 100%; text-align: left; background: none; border: 0; padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); color: var(--ink); cursor: pointer; font: inherit; }
+.mail-row:hover { background: var(--row-alt); }
+.mail-from { grid-area: from; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-subject { grid-area: subject; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-summary { grid-area: summary; color: var(--muted); font-size: calc(13px * var(--font-scale)); display: flex; gap: 6px; align-items: center; min-width: 0; }
+.mail-when { grid-area: when; white-space: nowrap; align-self: center; }
+.mail-foot { margin: 0; }
+.mail-title { margin: 0; font-size: calc(18px * var(--font-scale)); }
+.mail-messages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); }
+.mail-messages > li { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); }
+.mail-messages > li.mine { background: var(--subtle-bg); }
+.mail-messages summary { cursor: pointer; }
+.mail-body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: calc(6px * var(--space-scale)); line-height: 1.6; }
+.mail-reply { display: flex; flex-direction: column; gap: calc(8px * var(--space-scale)); border-top: 1px solid var(--line); padding-top: calc(12px * var(--space-scale)); }
+.mail-reply h3 { margin: 0; font-size: calc(15px * var(--font-scale)); }
+.mail-field { display: grid; grid-template-columns: 4em 1fr; align-items: center; gap: 8px; }
+.mail-field input { width: 100%; }
+.mail-draft { width: 100%; font: inherit; line-height: 1.6; }
+.mail-ask input { flex: 1; min-width: 0; }
+.mail-confirm { display: flex; flex-direction: column; gap: 6px; }
+.mail-confirm p { margin: 0; }
+@media (max-width: 640px) {
+  .mail-row { grid-template-columns: 1fr auto; grid-template-areas: "from when" "subject subject" "summary summary"; }
+}

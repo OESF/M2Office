@@ -17,7 +17,7 @@ import { semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
   describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, purposeLabel,
   detectKind, readQuoteSample, MAX_FILE_BYTES, serviceReport, monthRange,
-  billingRefusal, fileToText,
+  billingRefusal, fileToText, RETIRED_AGENT_IDS,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
@@ -230,7 +230,8 @@ export function adminRoute(deps: AppDeps) {
       ...settings,
       // Yahoo!ショッピングの Client ID は末尾だけを出す（第29.11.3節）
       inventory: { ...settings.inventory, yahooClientId: maskClientId(settings.inventory.yahooClientId) },
-      catalog: view.agents.map((a) => ({
+      // 置き換えて使わなくなった業務（第9.5.1.1節）は、使う業務を選ぶ一覧に出さない
+      catalog: view.agents.filter((a) => !RETIRED_AGENT_IDS.has(a.id)).map((a) => ({
         id: a.id, name: a.name, description: a.description,
         usesWriteInternal: a.tools.some((t) => view.registry.get(t)?.risk === 'write-internal'),
         defaultMinutes: DEFAULT_STANDARD_MINUTES[a.id] ?? 0,

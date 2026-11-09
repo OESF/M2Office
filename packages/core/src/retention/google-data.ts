@@ -10,9 +10,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { Approval, Run, RunStep } from '@m2office/shared';
+import { MAIL_LIMITS, type Approval, type Run, type RunStep } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { Logger } from '../log/logger.js';
+import type { MailStore } from '../mail/store.js';
 
 /** 実行が終わってから中身を残す日数の上限（既定）。会社は短くできるが、長くはできない。 */
 export const GOOGLE_DATA_RETENTION_DAYS = 7;
@@ -103,6 +104,8 @@ export interface GoogleDataRetentionDeps {
   repo: Repository;
   isGoogleTool: (name: string) => boolean;
   logger: Logger;
+  /** メールの画面の一覧（第9.5.1.1節）。片付いてから 7 日で消し、連携の解除・削除の求めではすぐ消す（第14.3.2節「メールの一覧」）。 */
+  mailStore?: Pick<MailStore, 'deleteDoneBefore' | 'purgeUser'>;
 }
 
 /**
@@ -126,6 +129,8 @@ export class GoogleDataRetention {
     for (const tenantId of await this.deps.repo.listTenantIds()) {
       try {
         expired += await this.expireStaleApprovals(tenantId, now);
+        // メールの一覧は、片付いてから 7 日で消す（会社の保持の日数には合わせず、決まった日数。第14.3.2節）
+        await this.deps.mailStore?.deleteDoneBefore(tenantId, new Date(now.getTime() - MAIL_LIMITS.doneKeepDays * 86_400_000).toISOString());
         const { privacy } = await this.deps.repo.getTenantSettings(tenantId);
         const cutoff = new Date(now.getTime() - retentionDays(privacy.googleDataRetentionDays) * 86_400_000);
         // 1 回の見回りで、たまった分を片付ける。ただし 1 社あたり上限を置き、ほかの会社を待たせすぎない
@@ -155,6 +160,8 @@ export class GoogleDataRetention {
     }
     // 残しておいたブリーフの本文も消す（予定やメールから作った文を含むため。第9.5.5.1.2節）
     await this.deps.repo.deleteUserBriefs(tenantId, userId);
+    // メールの画面の一覧も消す（件名・差出人・下書きを含むため。第9.5.1.1節）
+    await this.deps.mailStore?.purgeUser({ tenantId, userId });
     return n;
   }
 

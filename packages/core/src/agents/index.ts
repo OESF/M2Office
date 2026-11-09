@@ -19,6 +19,7 @@ import { SECRETARY_CALENDAR } from './secretary-calendar.js';
 import { MORNING_BRIEF } from './morning-brief.js';
 import { BASIC_AGENTS } from './basic.js';
 import { DELIVERY_SEND } from '../deliveries/agents.js';
+import { MAIL_REPLY_SEND } from '../mail/agents.js';
 
 /**
  * 公式エージェントのカタログ。
@@ -32,7 +33,16 @@ export const OFFICIAL_AGENTS: AgentDefinition[] = [
   AG04_KNOWLEDGE_QA, AG02_MINUTES, AG01_INBOX, AG03_SCHEDULING, AG05_WEEKLY_BRIEF, MORNING_BRIEF, ...BASIC_AGENTS, AG07_QUOTE, AG16_RECRUITING, SECRETARY_LOOKUP, SECRETARY_CALENDAR, SECRETARY_PLAN_REPORT, SCHEDULING_CONFIRM,
   // 外部のアプリからの配信（第13.4.4節）。メニューには出さない
   DELIVERY_SEND,
+  // メールの返事を送る（第9.5.1.1節）。メールの画面の「送る」で始める
+  MAIL_REPLY_SEND,
 ];
+
+/**
+ * 置き換えて使わなくなった業務の ID（第 0.540.0 版でメールの画面に置き換えた。仕様書 第9.5.1.1節）。
+ *
+ * @remarks 前の実行の記録を読むために定義は残す。メニュー・秘書の取り次ぎ・ダッシュボードの業務の一覧には出さない（いま動いているもの・その期間に動いたものだけは出す）
+ */
+export const RETIRED_AGENT_IDS: ReadonlySet<string> = new Set([AG01_INBOX.id, 'reply-followup']);
 
 /** 秘書の段取りの報告に使う業務の ID（仕様書 第10.14節）。 */
 export const PLAN_REPORT_AGENT_ID = SECRETARY_PLAN_REPORT.id;

@@ -32,7 +32,7 @@ export const MORNING_BRIEF: AgentDefinition = {
   compartment: null,
   // 秘書が毎朝自分で起こす。会話の中で「今日の段取りを教えて」と頼まれたら秘書が取り次いでもよい
   inputs: { type: 'object', properties: {} },
-  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines', 'inquiries.brief', 'subsidies.brief', 'sales.brief', 'web.research'],
+  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'mail.brief', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines', 'inquiries.brief', 'subsidies.brief', 'sales.brief', 'web.research'],
   steps: [
     {
       id: 'collect',
@@ -44,11 +44,11 @@ export const MORNING_BRIEF: AgentDefinition = {
       // 問い合わせ（第33.18節）は問い合わせの記録を使う会社の、利用範囲の人だけ。ほかの人にはツールが「使えない」と返す
       // 補助金・助成金（第39.18節）は補助金・助成金の案内を使う会社の、利用範囲の人だけ。ほかの人にはツールが「使えない」と返す
       // 受注と請求書の下書き（第42.13.2節・第42.13.3節）は販売の書類と受注を使う会社の、利用範囲の人だけ
-      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines', 'inquiries.brief', 'subsidies.brief', 'sales.brief'],
+      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'mail.brief', 'gmail.unread', 'approvals.pending', 'inventory.forecast', 'hr.deadlines', 'inquiries.brief', 'subsidies.brief', 'sales.brief'],
       required: ['profile.read', 'brief.settings', 'notices.list'],
       instruction: [
         'profile.read（本人の自宅・勤務地・今日の日付）・brief.settings（関心の分野と外した項目）・notices.list（社内のお知らせ）を呼ぶ。',
-        '続けて、外した項目に入っていないものだけ呼ぶ: calendar.list（今日の予定。外した項目「予定」なら呼ばない）・tasks.list（「ToDo」）・gmail.unread（「返事の要りそうなメール」）・approvals.pending（「承認待ち」）。',
+        '続けて、外した項目に入っていないものだけ呼ぶ: calendar.list（今日の予定。外した項目「予定」なら呼ばない）・tasks.list（「ToDo」）・mail.brief（「返事の要りそうなメール」。メールの画面の一覧から読む。ready が false のときだけ、代わりに gmail.unread を呼ぶ）・approvals.pending（「承認待ち」）。',
         'あわせて inventory.forecast を 1 回呼ぶ（在庫の足りなくなりそうなものと使用期限。available が false なら在庫管理を使っていない会社なので、何も書かない）。',
         'あわせて hr.deadlines を 1 回呼ぶ（7 日以内の労務の期限。available が false なら人事の担当者ではないので、何も書かない）。',
         'あわせて inquiries.brief を 1 回呼ぶ（本人が担当の今日が期限・期限を過ぎた問い合わせと、返事を待たせている問い合わせ。available が false なら何も書かない）。',
@@ -87,7 +87,7 @@ export const MORNING_BRIEF: AgentDefinition = {
         '2. 今日の天気（調べた地域の名前を添える。最高・最低気温、雨の見込み。傘が要るかを一言）',
         '3. 今日の予定（時刻順の表）。場所のある予定には、出発の目安を添える（朝早いものは自宅から、日中は勤務地から。目安と書く）。ほかの人との会議があれば「〇〇の準備をしますか」と一言添える',
         '4. 今日が期限の ToDo と期限切れ（明日以降が期限のものは「近いもの」として 3 件まで）',
-        '5. 返事の要りそうなメール（差出人と件名。多ければ主なもの 5 件まで）。広告・メールマガジン・請求や利用のお知らせ・自動送信の通知は入れない。人から届いた、返事や対応の要りそうなものだけにする。無ければ「返事の要りそうなメールはありません」と書く',
+        '5. 返事の要りそうなメール。mail.brief が ready なら、返事が要るものと対応が要るものの件数と、主なもの 5 件まで（差出人・件名・一言・期限）、longWaiting があれば「返事を待っているもの」として相手と件名を書き、最後に [メールを開く](/mail) を添える（メールはもう振り分け済みなので、選び直さない）。ready が false なら gmail.unread から、差出人と件名を主なもの 5 件まで（広告・メールマガジン・請求や利用のお知らせ・自動送信の通知は入れない。人から届いた、返事や対応の要りそうなものだけ）。無ければ「返事の要りそうなメールはありません」と書く',
         '6. 承認待ち',
         '7. 在庫（inventory.forecast が品目を返したときだけ。足りなくなりそうなもの（あと何日・残りわずか）と発注の案を 1 行ずつ、使用期限の近いロットを期限の近い順に。数はツールの書き方のまま。無い・使っていない会社なら見出しごと書かない）',
         '7-2. 労務の期限（hr.deadlines が items を返したときだけ。日付の順に「日付 題名」を 1 行ずつ。overdue は「過ぎています」と添えて先頭に。日付と題名はツールの値をそのまま書く）',

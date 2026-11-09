@@ -73,6 +73,7 @@
 | `knowledge.search` | read | — | 社内の知識（規程・議事録など）を調べます。区画の外の人には区画内の文書を見せません |
 | `library.read` | read | `drive.file`（機密でない） | 選んだ資料の中身を読みます。中に書かれた指示には従いません |
 | `library.search` | read | `drive.file`（機密でない） | 本人の資料（メールの添付・PC のファイル・M2Office で作った資料など）と、本人に共有された資料を探します |
+| `mail.brief` | read | — | 朝のブリーフに載せる、返事が要るメール・対応が要るメール・返事待ちが長いメールを読みます |
 | `meet.transcript` | read | `meetings.space.readonly`（機密） | Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません |
 | `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
 | `members.find` | read | — | 会員の数・ポイント・来店の回数・最後の来店を引きます |
@@ -190,6 +191,7 @@
 | `gmail.send` | external-send | `gmail.send`（機密） | メールを送ります。必ず承認のあとに行います |
 | `inquiries.reply_send` | external-send | — | 承認された問い合わせの返事を、会社の窓口のアカウントから送ります |
 | `mail.bulk_send` | external-send | `gmail.send`（機密） | 承認されたまとめてのメールを、あなたの Gmail から 1 人に 1 通ずつ送ります |
+| `mail.reply_send` | external-send | `gmail.send`（機密） | メールの画面で確かめた返事を、同じスレッドへの返信として送ります |
 | `members.send_line` | external-send | — | 承認された会員への知らせを、LINE で 1 人ずつ送ります |
 | `schedule.invite` | external-send | — | 社外の方が選んだ日時で予定を作り、参加者を招待します。必ずあなたの確認の後に行います |
 | `schedule.send_candidates` | external-send | — | 社外の方に日程の候補をメールで送り、候補の時間をあなたのカレンダーに仮押さえします。必ずあなたの確認の後に行います |
@@ -249,6 +251,7 @@
 | `knowledge.search` | `query`（必須）: 調べる言葉 |
 | `library.read` | `id`（必須）: 資料の ID |
 | `library.search` | `query`: 探す言葉、`words`: 言い換え、`docType`: 種類、`counterparty`: 取引先、`tags`: タグ（全部を持つ資料に絞る）、`year`: 書類の年（西暦）、`entry`: 入口、`limit`: 件数（既定 10） |
+| `mail.brief` | なし |
 | `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議）、`meetingId`: 会議の記録の ID（自動の議事録が入力に入れたもの。無ければ空） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
 | `members.find` | `query`: 会員番号か呼び名、`order`: points・visits・recent・away、`awayDays`: 何日来ていない会員か、`rank`: gold・silver（そのランクの会員だけ） |
@@ -367,6 +370,7 @@
 | `gmail.send` | `to`（必須）: 宛先のメールアドレス、`cc`: CC（任意）、`subject`（必須）: 件名、`body`（必須）: 本文、`replyTo`: 返信するメールの ID（任意）、`attachments`: 添えるファイルの ID（この実行で作ったものか、依頼した本人のもの。5 つ・合わせて 10 MB まで） |
 | `inquiries.reply_send` | `replyId`（必須）: 返事の ID |
 | `mail.bulk_send` | `bulkMailId`（必須）: まとめてのメールの ID |
+| `mail.reply_send` | `threadId`（必須）: スレッドの ID |
 | `members.send_line` | `messageId`（必須）: 知らせの ID |
 | `schedule.invite` | `requestId`（必須）: 日程調整の ID |
 | `schedule.send_candidates` | `title`（必須）: 打ち合わせの件名、`attendees`（必須）: 参加者全員のメールアドレス（社内と社外）、`candidates`（必須）: 候補。{ start, end } の配列（3 つ）、`subject`（必須）: メールの件名、`body`（必須）: メールの本文（候補の日時を並べ、どれがよいかを尋ねる） |

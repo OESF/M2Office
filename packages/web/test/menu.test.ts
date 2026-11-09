@@ -16,8 +16,9 @@ test('まだ一度も変えていなければ、標準の組がピン止めさ�
   assert.deepEqual(pinnedIds(null), DEFAULT_PINNED);
   assert.deepEqual(pinnedIds(undefined), DEFAULT_PINNED);
   const { top, others } = splitMenu(agents, null);
-  assert.deepEqual(top.map((a) => a.id), ['knowledge-qa', 'minutes', 'inbox-triage', 'scheduling', 'slides', 'document-draft'], 'メニューの順のまま');
-  assert.deepEqual(others.map((a) => a.id), ['weekly-brief', 'morning-brief']);
+  assert.deepEqual(top.map((a) => a.id), ['knowledge-qa', 'minutes', 'scheduling', 'slides', 'document-draft'], 'メニューの順のまま');
+  // メールの整理は、メールの画面に置き換えたので標準の組に入れない（第9.5.1.1節）
+  assert.deepEqual(others.map((a) => a.id), ['inbox-triage', 'weekly-brief', 'morning-brief']);
 });
 
 test('ピン止めすれば上に出て、外せば「ほかの業務」に入る。空にもできる', () => {

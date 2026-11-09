@@ -514,7 +514,7 @@ export interface UserSettings {
   };
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
-    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'decision' | 'member' | 'print' | 'library', boolean>;
+    kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'decision' | 'member' | 'print' | 'library' | 'mail', boolean>;
     /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
     quietHours: { from: string; to: string } | null;
     /**
@@ -740,13 +740,14 @@ export function checkLauncherUrl(raw: string): { url: string } | { error: string
   return { url: u.toString() };
 }
 
-export const DEFAULT_PINNED = ['minutes', 'inbox-triage', 'knowledge-qa', 'scheduling', 'slides', 'document-draft', 'business-cards', 'inventory'];
+// メールの整理は、第 0.540.0 版でメールの画面「メール」（業務の並びの項目。ID は MAIL_MENU_ID）に置き換えた
+export const DEFAULT_PINNED = ['minutes', 'mail', 'knowledge-qa', 'scheduling', 'slides', 'document-draft', 'business-cards', 'inventory'];
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
-    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true, reservation: true, subsidy: true, decision: true, member: true, print: true, library: true },
+    kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true, reservation: true, subsidy: true, decision: true, member: true, print: true, library: true, mail: true },
     quietHours: null,
     channels: { chat: false },
   },

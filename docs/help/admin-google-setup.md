@@ -41,7 +41,7 @@ M2Office の管理者ページ「接続 › Google Workspace」の **基本の�
 
 | API | 使う機能 |
 |---|---|
-| Gmail API | メールの整理・下書き・送信 |
+| Gmail API | メールの画面（見回り・下書き・送信） |
 | Google Calendar API | 予定・日程調整 |
 | Google Tasks API | ToDo |
 | Google Chat API | チャットへの投稿・通知 |

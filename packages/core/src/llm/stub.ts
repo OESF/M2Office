@@ -84,6 +84,9 @@ export class StubLlmProvider implements LlmProvider {
     // 秘書の段取り（仕様書 第10.14節）を自動テストで通しで確かめるための、決まった応答
     const planned = stubPlanning(system, user);
     if (planned !== null) return { text: planned, tokensUsed: 16 };
+    // メールの画面の振り分け・返事待ちの見分け・下書き（仕様書 第9.5.1.1節）を、開発と自動テストで通しで確かめるための決まった応答
+    const mail = stubMail(system, user);
+    if (mail !== null) return { text: mail, tokensUsed: 24 };
     const tools = extractToolNames(system);
     const calls = chooseTools(tools, user);
 
@@ -210,6 +213,11 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     if (to && attachment) return [{ name: 'gmail.send', args: { to: [to], subject: extractField(previous, 'subjectHint') || '御見積書', body: '見積書をお送りします。ご確認ください。', attachments: [attachment] } }];
   }
 
+  // メールの返事を送る（第9.5.1.1節）。本人が確かめた控えを送る
+  if (has('mail.reply_send') && instruction.includes('mail.reply_send')) {
+    const id = extractField(prompt, 'threadId');
+    if (id) return [{ name: 'mail.reply_send', args: { threadId: id } }];
+  }
   // 問い合わせの返事（仕様書 第33.18節）: 「〇〇さんへの返事を書いて」で下書き、承認の後に送る
   if (has('inquiries.reply_send') && instruction.includes('inquiries.reply_send')) {
     const id = extractField(prompt, 'replyId');
@@ -587,4 +595,41 @@ export function stubEmbedding(text: string): number[] {
   }
   const norm = Math.hypot(...v) || 1;
   return v.map((x) => x / norm);
+}
+
+/**
+ * メールの画面（仕様書 第9.5.1.1節）の推論の見本。言葉で決める。
+ *
+ * - 振り分け: 「ご教示・いかがでしょうか・お知らせください」は返事が要る、「締め切り・期限・申請」は対応が要る、ほかは目を通すだけ
+ * - 返事待ち: 問いかけ・お願いを含めば待っている
+ * - 下書き: 決まった丁寧な返事
+ *
+ * @returns メールの画面の推論でなければ `null`
+ */
+function stubMail(system: string, user: string): string | null {
+  const rows = (): { i: number; subject: string; head: string }[] => {
+    try {
+      const v = JSON.parse(user) as { i: number; subject?: string; head?: string }[];
+      return Array.isArray(v) ? v.map((x) => ({ i: x.i, subject: x.subject ?? '', head: x.head ?? '' })) : [];
+    } catch {
+      return [];
+    }
+  };
+  if (system.includes('reply（返事が要る）')) {
+    const items = rows().map((x) => {
+      const t = `${x.subject} ${x.head}`;
+      if (/ご教示|いかがでしょうか|お知らせください|ご回答/.test(t)) return { i: x.i, group: 'reply', summary: '回答を求められています', due: /今週中/.test(t) ? '今週中' : '', dueDate: '' };
+      if (/締め切り|期限|申請/.test(t)) return { i: x.i, group: 'action', summary: '期限までに申請', due: (/(\d+) ?日まで/.exec(t)?.[0]) ?? '', dueDate: '' };
+      return { i: x.i, group: 'read', summary: '', due: '', dueDate: '' };
+    });
+    return JSON.stringify({ items });
+  }
+  if (system.includes('相手からの返事を待っているものか')) {
+    return JSON.stringify({ items: rows().map((x) => ({ i: x.i, waiting: /？|\?|ください|いかが|お願い/.test(`${x.subject} ${x.head}`) })) });
+  }
+  if (system.includes('の秘書です。') && (system.includes('返事の下書き') || system.includes('催促の下書き'))) {
+    return system.includes('催促') ? 'お世話になっております。\n先日お送りしたメールの件、ご確認いただけましたでしょうか。\nお手すきの際にご返信いただけますと幸いです。'
+      : 'いつもお世話になっております。\nご連絡ありがとうございます。内容を確認して、改めてご連絡いたします。\nよろしくお願いいたします。';
+  }
+  return null;
 }

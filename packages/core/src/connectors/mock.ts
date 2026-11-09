@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import type { SlidePlan } from '../slides/plan.js';
 import { renderSvgPng } from '../columns/cover.js';
 import type {
-  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailAttachment, MailAttachmentList, MailAttachmentQuery, MailMessage, TaskItem, WorkspaceConnector, EndedMeeting, PeoplePerson
+  BusySlot, CalendarEvent, ConnectorPrincipal, DriveFile, MailAttachment, MailAttachmentList, MailAttachmentQuery, MailHead, MailMessage, TaskItem, WorkspaceConnector, EndedMeeting, PeoplePerson
 } from './types.js';
 
 /**
@@ -125,15 +125,29 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       // 添えたファイルは中身を控えず、名前と大きさだけを残す
       const { attachments, ...rest } = mail;
       this.outbox.push({ kind: 'mail', principal: p, body: { ...rest, ...(attachments?.length ? { attachments: attachments.map((x) => ({ name: x.name, mime: x.mime, size: x.bytes.byteLength })) } : {}) } });
+      const sentId = `mock-sent-${randomUUID().slice(0, 8)}`;
+      // 見本の受信箱のメールへの返信は、そのスレッドに残す（第9.5.1.1節）
+      const inbox = mail.replyTo ? this.mails(p).find((m) => m.id === mail.replyTo) : undefined;
+      if (inbox) {
+        const threadId = inbox.threadId ?? inbox.id;
+        this.replies.set(threadId, { to: mail.to, body: mail.body, at: this.now().toISOString(), id: sentId });
+        this.mailHistory.push({ n: ++this.mailHistoryNo, threadId });
+        return { messageId: sentId, threadId };
+      }
       const threadId = `mockthread${randomUUID().replace(/-/g, '').slice(0, 12)}`;
       this.threads.set(threadId, { to: mail.to, subject: mail.subject, body: mail.body, at: this.now().toISOString() });
-      return { messageId: `mock-sent-${randomUUID().slice(0, 8)}`, threadId };
+      return { messageId: sentId, threadId };
     },
     /**
      * 見本のスレッド。送ったメールに、宛先の 1 人目から決まった返事が付く（社外との日程調整の通しの確認のため。第9.5.3.1節）。
      * 宛先に `noreply` を含めば返事は付かない。`decline` を含めば、どの候補も合わないという返事。ほかは 1 つ目の候補を選ぶ返事
      */
-    thread: async (_p: ConnectorPrincipal, threadId: string): Promise<MailMessage[]> => {
+    thread: async (p: ConnectorPrincipal, threadId: string): Promise<MailMessage[]> => {
+      const own = this.mails(p).find((x) => (x.threadId ?? x.id) === threadId);
+      if (own) {
+        const r = this.replies.get(threadId);
+        return r ? [own, { id: r.id, threadId, from: '本人 <me@example.jp>', subject: `Re: ${own.subject}`, snippet: r.body.slice(0, 80), body: r.body, receivedAt: r.at, unread: false, labels: ['SENT'] }] : [own];
+      }
       const sent = this.threads.get(threadId);
       if (!sent) return [];
       const me: MailMessage = { id: `${threadId}-1`, from: '本人 <me@example.jp>', subject: sent.subject, snippet: sent.body.slice(0, 60), body: sent.body, receivedAt: sent.at, unread: false, labels: ['SENT'] };
@@ -141,6 +155,31 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       if (!who || who.includes('noreply')) return [me];
       const text = who.includes('decline') ? 'あいにくご提示の日時はどれも都合がつきません。再来週はいかがでしょうか。' : 'ご連絡ありがとうございます。1 つ目の日時でお願いいたします。';
       return [me, { id: `${threadId}-2`, from: `相手 <${who}>`, subject: `Re: ${sent.subject}`, snippet: text, body: text, receivedAt: new Date(Date.parse(sent.at) + 60_000).toISOString(), unread: true, labels: ['INBOX'] }];
+    },
+    historyStart: async (_p: ConnectorPrincipal) => String(this.mailHistoryNo),
+    historySince: async (_p: ConnectorPrincipal, start: string) => {
+      const from = Number(start);
+      if (!Number.isFinite(from)) return null;
+      return { historyId: String(this.mailHistoryNo), threadIds: [...new Set(this.mailHistory.filter((h) => h.n > from).map((h) => h.threadId))] };
+    },
+    threadIdsOf: async (p: ConnectorPrincipal, query: string, limit: number) => {
+      // 見本では、受信箱（in:inbox）の問いなら見本のメールのスレッドを返す。送ったもの（in:sent）は返信したスレッド
+      const ids = /in:sent/.test(query) ? [...this.replies.keys()] : this.mails(p).map((m) => m.threadId ?? m.id);
+      return ids.slice(0, limit);
+    },
+    threadHeads: async (p: ConnectorPrincipal, threadId: string): Promise<MailHead[]> => {
+      const m = this.mails(p).find((x) => (x.threadId ?? x.id) === threadId);
+      if (!m) return [];
+      const head: MailHead = {
+        // 見本の受信箱は、宛先を持たない（本人の宛先を知らないため。返事の宛先は差出人だけになる）
+        id: m.id, threadId, from: m.from, to: [], cc: [], subject: m.subject, snippet: m.snippet,
+        receivedAt: m.receivedAt, labels: m.labels, bulk: m.labels.includes('CATEGORY_PROMOTIONS'),
+      };
+      const r = this.replies.get(threadId);
+      return r ? [head, {
+        id: r.id, threadId, from: '本人 <me@example.jp>', to: r.to, cc: [], subject: `Re: ${m.subject}`, snippet: r.body.slice(0, 80),
+        receivedAt: r.at, labels: ['SENT'], bulk: false,
+      }] : [head];
     },
     createDraft: async (
       p: ConnectorPrincipal,
@@ -389,6 +428,11 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
 
   /** 見本で送ったメールのスレッド（返事を決まった形で付ける。第9.5.3.1節）。 */
   private readonly threads = new Map<string, { to: string[]; subject: string; body: string; at: string }>();
+  /** 見本の受信箱のメールへ返信した記録（メールの片付けで、返信したら一覧から外れることを確かめる。第9.5.1.1節）。 */
+  private readonly replies = new Map<string, { to: string[]; body: string; at: string; id: string }>();
+  /** 見本の受信箱の履歴の番号と、番号ごとに変わったスレッド。 */
+  private mailHistory: { n: number; threadId: string }[] = [];
+  private mailHistoryNo = 1;
 
   /** 見本の終わった会議（自動テストと通しの確認が足す。第9.5.2.1節）。 */
   readonly endedMeetings: (EndedMeeting & { owner: string })[] = [];

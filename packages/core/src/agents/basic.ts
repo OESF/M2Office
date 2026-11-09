@@ -107,6 +107,9 @@ export const REPLY_FOLLOWUP: AgentDefinition = {
   routeHint: '送ったメールのうち返事の来ていないものを挙げ、催促の下書きを Gmail の下書きに用意します（送りません）',
   locale: 'ja-JP',
   compartment: null,
+  // 第 0.540.0 版で、メールの画面の「返事待ち」（第9.5.1.1節）に置き換えた。メニューと秘書の取り次ぎから外す
+  menu: false,
+  secretaryRoute: false,
   inputs: {
     type: 'object',
     properties: {

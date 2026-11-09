@@ -105,9 +105,10 @@ console.log('\n■ 1. 疎通と一覧');
   const { body } = await call('a', '/v1/agents');
   // 拡張機能を導入している場合はその分が増えるため、公式の業務エージェントだけを数える
   const official = (body.agents ?? []).filter((a) => !a.extension);
-  // 段取りの報告（第10.14節）・日程調整の招待・外部のアプリからの配信（第13.4.4節）はメニューに出ない中の業務
-  official.length === 19 && official.filter((a) => a.menu === false).map((a) => a.id).sort().join() === 'delivery-send,scheduling-confirm,secretary-plan-report'
-    ? ok(`公式の業務エージェントが 19 件（うち中の業務 3。${official.map((a) => a.name).join(' / ')}）`)
+  // 段取りの報告（第10.14節）・日程調整の招待・外部のアプリからの配信（第13.4.4節）・メールの返事を送る（第9.5.1.1節）はメニューに出ない中の業務。
+  // メールの整理と返信待ちの追跡は、第 0.540.0 版でメールの画面に置き換えた（前の実行の記録のため定義は残し、メニューに出さない）
+  official.length === 20 && official.filter((a) => a.menu === false).map((a) => a.id).sort().join() === 'delivery-send,inbox-triage,mail-reply-send,reply-followup,scheduling-confirm,secretary-plan-report'
+    ? ok(`公式の業務エージェントが 20 件（うち中の業務と置き換えた業務 6。${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 
@@ -351,15 +352,18 @@ console.log('\n■ 8. ダミー接続による照会（Google 未接続）');
     method: 'POST', body: JSON.stringify({ message: 'メールの返信を下書きして' }),
   });
   // 専門の業務は、本人に実行の可否を聞かずに頼んで実行し、結果をあとで伝える（第10.9.6節、ADR-0033）
-  routed.lookup?.runId && /担当の業務「メールの整理・下書きの作成」に頼みました/.test(routed.text) && !routed.suggestedAgent
-    ? ok('作業の依頼は照会と取り違えず、受信箱整理に頼んで実行した（実行してよいかを聞かない）')
+  // 返信の下書きは、メールの画面が裏で用意している（第9.5.1.1節。第 0.540.0 版で受信箱整理の業務を置き換えた）
+  /\]\(\/mail\)/.test(routed.text ?? '') && !routed.lookup?.runId && !routed.suggestedAgent
+    ? ok('「メールの返信を下書きして」は、メールの画面に用意した下書きを答える（実行してよいかを聞かない）')
     : ng('依頼を照会として処理してしまう、または実行してよいかを聞く', JSON.stringify(routed).slice(0, 160));
-  const delegated = routed.lookup?.runId ? await waitFor('a', routed.lookup.runId, ['completed', 'failed', 'awaiting_approval'], 20000) : null;
+  // 専門の業務に頼む作業の依頼（週次ブリーフ）。本人に実行の可否を聞かずに頼み、秘書バーに並ぶ
+  const { body: briefRouted } = await call('a', '/v1/secretary', { method: 'POST', body: JSON.stringify({ message: '週次ブリーフを作って' }) });
+  const delegated = briefRouted.lookup?.runId ? await waitFor('a', briefRouted.lookup.runId, ['completed', 'failed', 'awaiting_approval'], 20000) : null;
   const { body: bar } = await call('a', '/v1/secretary/lookups');
-  const item = (bar.items ?? []).find((x) => x.runId === routed.lookup?.runId);
-  item?.agentName === 'メールの整理・下書きの作成' && delegated?.run?.status === 'completed' && item.done
+  const item = (bar.items ?? []).find((x) => x.runId === briefRouted.lookup?.runId);
+  item?.agentName === '週次ブリーフ' && delegated?.run?.status === 'completed' && item.done
     ? ok('頼んだ業務は秘書バーの一覧に名前つきで並び、終わると伝える対象になる')
-    : ng('頼んだ業務が秘書バーに並ばない', JSON.stringify(item));
+    : ng('頼んだ業務が秘書バーに並ばない', JSON.stringify({ item, text: briefRouted.text }).slice(0, 300));
   // 最初の画面の一言（第6.1.5節）。候補は 3 つまで、会話の例は 1 つ。今日の様子は AI が作れたときだけ
   const { status: homeStatus, body: home } = await call('a', '/v1/secretary/home');
   homeStatus === 200 && Array.isArray(home.suggestions) && home.suggestions.length <= 3 && (home.message === null || typeof home.message === 'string')
@@ -745,7 +749,9 @@ console.log('\n■ 18. ダッシュボード');
   // 業務エージェントごとの受け持ち（第6.7.4.2節）。使える業務はすべて出る
   const { body: cat } = await call('a', '/v1/agents');
   const states = body.agents ?? [];
-  states.length >= (cat.items ?? cat.agents ?? []).length && states.every((a) => a.name && typeof a.running === 'number')
+  // 置き換えて使わなくなった業務（メールの整理・返信待ちの追跡。第9.5.1.1節）は、動いた日だけ並ぶので数えない
+  const usable = (cat.items ?? cat.agents ?? []).filter((a) => !['inbox-triage', 'reply-followup'].includes(a.id));
+  states.filter((a) => !['inbox-triage', 'reply-followup'].includes(a.agentId)).length >= usable.length && states.every((a) => a.name && typeof a.running === 'number')
     ? ok(`業務の状態を、使える業務すべてについて返す（${states.length} 件）`)
     : ng('業務の状態が足りない', JSON.stringify(states.map((a) => a.agentId)));
   // 絵の番号を業務ごとに返し、重ならない（第6.7.4.3節）
@@ -758,7 +764,7 @@ console.log('\n■ 18. ダッシュボード');
   const groupOf = (id) => states.find((a) => a.agentId === id)?.group;
   const cardsGroups = new Set(states.filter((a) => a.agentId.startsWith('business-cards:')).map((a) => a.group?.id));
   states.every((a) => a.group?.id && a.group?.name) && cardsGroups.size === 1 && [...cardsGroups][0] === 'area:cards'
-    && groupOf('inbox-triage')?.name === 'メール' && groupOf('reply-followup')?.id === groupOf('inbox-triage')?.id
+    && groupOf('mail-reply-send')?.name === 'メール'
     && groupOf('morning-brief')?.name === 'ブリーフ' && groupOf('slides')?.name === '資料の作成'
     && groupOf('knowledge-qa')?.name === '調べもの'
     ? ok(`業務ごとにまとまりを返す（${[...new Set(states.map((a) => a.group.name))].join('・')}）`)
@@ -867,6 +873,49 @@ console.log('\n■ 19. ヘルプと案内');
     ? ok('ウィザードの様子に、拡張機能の段を保存したかが入る') : ng('extensionsReviewed が無い', JSON.stringify(wizard).slice(0, 200));
   const fromMissing = await call('a', '/v1/admin/knowledge/from-file', { method: 'POST', body: JSON.stringify({ fileId: 'f-none' }) });
   fromMissing.status === 404 ? ok('規程をファイルから入れるとき、無いファイルは断る（404）') : ng(`無いファイルを断らない（${fromMissing.status}）`);
+
+  // メールの画面（第9.5.1.1節、ADR-0131）。見本の会社の受信箱を見回り、振り分け、本人だけが見て送れる
+  const { body: mailA } = await call('a', '/v1/mail');
+  mailA.watch?.state === 'ready' && Array.isArray(mailA.reply) && Array.isArray(mailA.waiting) && typeof mailA.promoCount === 'number'
+    ? ok(`メールの画面: 見回って振り分ける（返事が要る ${mailA.reply.length}・対応が要る ${mailA.action?.length ?? 0}・宣伝 ${mailA.promoCount}）`)
+    : ng('メールの画面の一覧が不正', JSON.stringify(mailA).slice(0, 200));
+  const anyThread = [...(mailA.reply ?? []), ...(mailA.action ?? [])][0]?.threadId;
+  if (anyThread) {
+    // 見本の接続口は、同じ会社の人の受信箱に同じ ID のメールを置く。本人の行は本人のものなので、管理者が書いた下書きが一般の人に見えないことを確かめる
+    await call('a', `/v1/mail/threads/${encodeURIComponent(anyThread)}/draft`, { method: 'PUT', body: JSON.stringify({ draft: 'SMOKE-ADMIN-ONLY' }) });
+    const otherTenant = await call('b', `/v1/mail/threads/${encodeURIComponent(anyThread)}`);
+    const otherUser = await call('a', `/v1/mail/threads/${encodeURIComponent(anyThread)}`, {}, 'member');
+    otherTenant.status === 404 && otherUser.body?.draft !== 'SMOKE-ADMIN-ONLY'
+      ? ok('メールの一覧は本人だけのもの（ほかの会社は 404、同じ会社のほかの人には本人の下書きが見えない）') : ng(`ほかの人がメールを見られる（${otherTenant.status}・${otherUser.status}）`);
+    const noTo = await call('a', `/v1/mail/threads/${encodeURIComponent(anyThread)}/send`, { method: 'POST', body: JSON.stringify({ to: [], cc: [], body: 'x' }) });
+    noTo.status === 400 ? ok('宛先の無い返事は送らない（400）') : ng(`宛先の無い返事を受け付けた（${noTo.status}）`);
+  } else {
+    ng('メールの画面に、返事か対応が要る見本のメールが無い');
+  }
+  const reply = (mailA.reply ?? []).find((t) => !t.sending);
+  if (reply) {
+    // 本人が確かめて送る → 本人の承認 → 送って片付く（承認するのは本人だけ）
+    const sent = await call('a', `/v1/mail/threads/${encodeURIComponent(reply.threadId)}/send`, { method: 'POST', body: JSON.stringify({ to: ['sato@customer.example.jp'], cc: [], body: '承知しました。確認してご連絡します。' }) });
+    let approvalId = null;
+    for (let i = 0; i < 40 && sent.status === 201 && !approvalId; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const { body: d } = await call('a', `/v1/mail/threads/${encodeURIComponent(reply.threadId)}`);
+      approvalId = d.sending?.approvalId ?? null;
+    }
+    const byMember = approvalId ? await call('a', `/v1/approvals/${approvalId}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }, 'member') : { status: 0 };
+    const byMe = approvalId ? await call('a', `/v1/approvals/${approvalId}`, { method: 'POST', body: JSON.stringify({ decision: 'approved' }) }) : { status: 0 };
+    let done = false;
+    for (let i = 0; i < 40 && byMe.status === 200 && !done; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const { body: d } = await call('a', `/v1/mail/threads/${encodeURIComponent(reply.threadId)}`);
+      done = d.done === true;
+    }
+    sent.status === 201 && approvalId && byMember.status === 403 && done
+      ? ok('メールの返事: 本人が確かめて送ると、本人の承認の後に送って一覧から外す（ほかの人は承認できない）')
+      : ng(`メールの返事の送信が不正（送る ${sent.status}・承認 ${approvalId ? 'あり' : 'なし'}・ほかの人 ${byMember.status}・片付いた ${done}）`);
+  } else {
+    ok('メールの返事: 返事が要る見本のメールは、前の回に送って片付いている');
+  }
 
   const bad = await fetch(`${API}/v1/secretary`, {
     method: 'POST', body: '{壊れた', headers: { 'content-type': 'application/json', 'x-tenant': 'a', 'x-user': 'admin@alpha.example.jp' },

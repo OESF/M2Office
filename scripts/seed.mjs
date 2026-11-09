@@ -115,7 +115,7 @@ for (const [id, tid, kind, title, body, source, comp] of knowledge) {
   );
 }
 
-// 定時実行。週次ブリーフ（毎週月曜 8:00）を全員に、受信箱整理（毎朝 8:30）を管理者に置く。
+// 定時実行。週次ブリーフ（毎週月曜 8:00）を全員に置く。
 // 次回の時刻は「今」から最も近い該当日時にする（日本時間）
 for (const t of tenants) {
   for (const who of ['admin', 'member']) {
@@ -128,14 +128,7 @@ for (const t of tenants) {
        JSON.stringify({ kind: 'weekly', weekday: 1, hour: 8, minute: 0 }), nextJst(1, 8, 0)],
     );
   }
-  await c.query(
-    `insert into schedules (id, tenant_id, user_id, agent_id, agent_version, input, rule,
-                            timezone, next_run_at, created_by)
-     values ($1,$2,$3,'inbox-triage',1,'{}',$4,'Asia/Tokyo',$5,$3)
-     on conflict (id) do nothing`,
-    [`s-${t.sub}-admin-inbox`, t.id, `u-${t.sub}-admin`,
-     JSON.stringify({ kind: 'daily', hour: 8, minute: 30 }), nextJst(null, 8, 30)],
-  );
+  // 受信箱の整理は、メールの画面の見回りに置き換えた（仕様書 第9.5.1.1節。第 0.540.0 版）。定時実行は作らない
 }
 
 await c.end();

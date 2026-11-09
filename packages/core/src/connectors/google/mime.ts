@@ -268,6 +268,16 @@ export function buildRawMessage(m: {
 const BULK_PRECEDENCE = /^(bulk|list|junk)$/i;
 
 /**
+ * 配信のメールか（第44.4節。メールの片付けの振り分けでも、推論を呼ばずに「宣伝・お知らせ」にする。第9.5.1.1節）。
+ *
+ * @param payload 見出しのある部分（`format=metadata` でも足りる）
+ */
+export function isBulkMail(payload: { headers?: { name: string; value: string }[] }, labelIds: string[]): boolean {
+  return !!header(payload, 'List-Unsubscribe') || !!header(payload, 'List-Id') || BULK_PRECEDENCE.test(header(payload, 'Precedence').trim())
+    || labelIds.includes('CATEGORY_PROMOTIONS');
+}
+
+/**
  * 1 通のメールから、添付の一覧を作る（資料の取り込み。仕様書 第44.4節）。中身は読まない。
  *
  * @param m Gmail のメール（`format=full`）
@@ -293,8 +303,7 @@ export function mailAttachmentListOf(m: { id: string; labelIds?: string[]; inter
   };
   walk(payload);
   const received = m.internalDate ? new Date(Number(m.internalDate)) : new Date(header(payload, 'Date'));
-  const bulk = !!header(payload, 'List-Unsubscribe') || !!header(payload, 'List-Id') || BULK_PRECEDENCE.test(header(payload, 'Precedence').trim())
-    || (m.labelIds ?? []).includes('CATEGORY_PROMOTIONS');
+  const bulk = isBulkMail(payload, m.labelIds ?? []);
   return {
     id: m.id,
     from: decodeHeaderWords(header(payload, 'From')),

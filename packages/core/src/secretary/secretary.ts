@@ -29,6 +29,8 @@ import { memorySemanticEnabled } from '../memory/embed.js';
 import { jstDay } from '../memory/learn.js';
 import { bulkMailRequest, contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
+import { findThread, mailCommand, mailDraftsText, mailOverviewText, mailWaitingText, type MailCommand } from '../mail/secretary.js';
+import type { MailService } from '../mail/service.js';
 import { answerAttendance, attendanceRequest, payslipRequest } from './attendance.js';
 import type { AttendanceService } from '../hr/attendance-service.js';
 import type { PayrollService } from '../hr/payroll-service.js';
@@ -75,6 +77,8 @@ export interface SecretaryReply {
 
 export interface SecretaryDeps {
   repo: Repository;
+  /** メールの画面（第9.5.1.1節）。あれば、メールの確認と返事待ちは一覧から答え、見回りの頼みを受ける。 */
+  mail?: MailService;
   /** 1 人の AI の上限を変えたことを伝える（覚えている合計を捨てる。第6.6.2節） */
   aiShareChanged?(tenantId: string): void;
   llm: LlmProvider;
@@ -563,6 +567,13 @@ export class Secretary {
     if (contact === 'ask' && lookup) {
       await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
       return this.delegate(tenantId, userId, message, lookup, '名刺を探す依頼', llm);
+    }
+    // メールの画面への頼み（第9.5.1.1節）。止める・戻す・すぐ知らせる相手・待つ日数・済んだ・返事の下書き・返事待ち
+    const mailCmd = !pastOnly && this.deps.mail ? mailCommand(cmd) : null;
+    if (mailCmd) {
+      const answer = await this.answerMailCommand(tenantId, userId, mailCmd);
+      await this.audit(tenantId, userId, 'secretary.mail', mailCmd.kind);
+      return { reply: { layer: 'light', ...answer }, keep: true };
     }
     // メールの確認（第10.9.6節）。件数だけでなく、未読を読んで振り分けて案内する。推論に選ばせずに見分け、その場で答える
     if (!pastOnly && mailCheckRequest(cmd)) {
@@ -1300,6 +1311,51 @@ export class Secretary {
       : { reason: '該当なし', tokensUsed: res.tokensUsed };
   }
 
+  /**
+   * メールの画面への頼みに答える（第9.5.1.1節「秘書」）。確認は求めず、したことを答えに示す（ADR-0028）。
+   *
+   * @remarks 送るのは画面の「送る」から（社外への送信は本人が確かめる）。差出人・件名はデータとして扱う
+   */
+  private async answerMailCommand(tenantId: string, userId: string, c: MailCommand): Promise<{ text: string; evidence: EvidenceItem[]; tokensUsed: number }> {
+    const mail = this.deps.mail!;
+    const o = { tenantId, userId };
+    const note = [{ label: 'メール', value: 'メールの画面（/mail）' }];
+    const done = (text: string) => ({ text, evidence: note, tokensUsed: 0 });
+    switch (c.kind) {
+      case 'pause':
+        await mail.setPrefs(o, (p) => ({ ...p, paused: true }));
+        return done('わかりました。これからはメールを見ません。また見てほしいときは「またメールを見て」と言ってください。');
+      case 'resume':
+        await mail.setPrefs(o, (p) => ({ ...p, paused: false }));
+        return done('わかりました。また 15 分ごとにメールを見て、片付けておきます。');
+      case 'urgent':
+        await mail.setPrefs(o, (p) => ({ ...p, urgentFrom: [...new Set([...(p.urgentFrom ?? []), c.who])].slice(0, 30) }));
+        return done(`わかりました。「${c.who}」からのメールが届いたら、すぐお知らせします。`);
+      case 'wait':
+        await mail.setPrefs(o, (p) => ({ ...p, waitDays: { ...(p.waitDays ?? {}), [c.who]: c.days } }));
+        return done(`わかりました。「${c.who}」への返事待ちは、${c.days} 営業日たってから返事待ちに並べます。`);
+      case 'waiting': {
+        const overview = await mail.overview(o);
+        return done(mailWaitingText(overview));
+      }
+      case 'drafts':
+        return done(mailDraftsText(await mail.overview(o)));
+      case 'done': {
+        const t = findThread(await mail.overview(o), c.words);
+        if (!t) return done(`「${c.words}」に合うメールが一覧に見つかりませんでした。メールの画面で「済み」を押してください。\n\n[メールを開く](/mail)`);
+        await mail.done(o, t.threadId);
+        return done(`「${t.subject}」を済みにしました。`);
+      }
+      case 'reply': {
+        const t = findThread(await mail.overview(o), c.words);
+        if (!t) return done(`「${c.words}」に合うメールが一覧に見つかりませんでした。\n\n[メールを開く](/mail)`);
+        const r = t.draftReady ? null : await mail.redraft(o, t.threadId);
+        if (r && 'error' in r) return done(`下書きを作れませんでした（${r.error}）。\n\n[メールを開く](/mail/${encodeURIComponent(t.threadId)})`);
+        return done(`「${t.subject}」への返事の下書きを用意しました。メールの画面で確かめて、「送る」を押してください。\n\n[メールを開く](/mail/${encodeURIComponent(t.threadId)})`);
+      }
+    }
+  }
+
   /** 層 1 の応答も含め、すべての応答を監査ログに残す（不変則 I-4）。 */
   /**
    * メールの確認（第10.9.6節）。受信トレイ（メイン）の未読を新しい順に 50 通まで読み、推論に 1 通ずつ振り分けさせ、
@@ -1309,6 +1365,14 @@ export class Secretary {
    */
   private async answerMailCheck(tenantId: string, userId: string, llm: LlmProvider): Promise<{ text: string; evidence: EvidenceItem[]; tokensUsed: number }> {
     const source = sourceNote(this.deps.connector, tenantId);
+    // メールの画面の見回りが済んでいれば、その一覧から答える（第9.5.1.1節「秘書」。その場で読み直さない）
+    if (this.deps.mail) {
+      const o = { tenantId, userId };
+      const overview = await this.deps.mail.overview(o).catch(() => null);
+      if (overview && overview.watch.state === 'ready') {
+        return { text: mailOverviewText(overview), evidence: [...source, { label: 'メール', value: 'メールの画面の一覧から答えました' }], tokensUsed: 0 };
+      }
+    }
     let unread: Awaited<ReturnType<WorkspaceConnector['mail']['unread']>>;
     try {
       unread = await this.deps.connector.mail.unread({ tenantId, userId }, { limit: 50 });

@@ -27,6 +27,7 @@ import type { DecisionToolContext } from '../decisions/tools.js';
 import type { MemberToolContext } from '../members/tools.js';
 import type { PrintDesignToolContext } from '../print-designs/tools.js';
 import type { LibraryToolContext } from '../library/tools.js';
+import type { MailToolContext } from '../mail/tools.js';
 import type { ReservationService } from '../reservations/service.js';
 import type { ReservationSettings } from '@m2office/shared';
 import type { DeliveryToolContext } from '../deliveries/tools.js';
@@ -149,6 +150,8 @@ export interface ToolContext {
   printDesigns?: PrintDesignToolContext;
   /** 資料（内蔵の拡張。仕様書 第44章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   library?: LibraryToolContext;
+  /** メールの片付け（仕様書 第9.5.1.1節）。メールの返事を送る業務と朝のブリーフが使う。無ければ「使えない」と返す。 */
+  mail?: MailToolContext;
   /** 予約（内蔵の拡張。仕様書 第37章）。会議の予定と一緒に会議室を取る（第37.18節）。使えるかどうかは呼ぶたびに確かめる。 */
   reservations?: { service: ReservationService; access(): Promise<ReservationSettings | null> };
 }

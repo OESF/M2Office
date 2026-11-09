@@ -7,6 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
+import type { MailOverview, MailThreadDetail } from '@m2office/shared';
 import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, LibraryFacets, LibraryItem, LibraryGraph, LibraryItemPage, LibraryItemView, LibraryMailState, LibraryProgress, LibraryShareScope, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
@@ -66,7 +67,7 @@ export function setUnauthorizedHandler(fn: () => void): void {
 /**
  * 数秒ごとに読み直す口。デバッグモードの記録では、うまくいった読み出しを残さない（直近 100 件が埋まって、見たいものが流れるため）。
  */
-const POLLED = /^\/(notifications|approvals|jobs|agents|secretary\/lookups)(\?|$)|^\/secretary\/lookups\/claim$/;
+const POLLED = /^\/(notifications|approvals|jobs|agents|secretary\/lookups|mail\/count)(\?|$)|^\/secretary\/lookups\/claim$/;
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const started = performance.now();
@@ -1942,6 +1943,18 @@ export const api = {
     },
   },
   /** 販促物の作成（内蔵の拡張。仕様書 第41章）。 */
+  /** メール（仕様書 第9.5.1.1節）。本人だけ。 */
+  mail: {
+    overview: () => call<MailOverview>('/mail'),
+    count: () => call<{ reply: number }>('/mail/count'),
+    thread: (id: string) => call<MailThreadDetail>(`/mail/threads/${encodeURIComponent(id)}`),
+    saveDraft: (id: string, draft: string) => call<{ ok: true }>(`/mail/threads/${encodeURIComponent(id)}/draft`, { method: 'PUT', body: JSON.stringify({ draft }) }),
+    redraft: (id: string, instruction?: string) => call<{ draft: string }>(`/mail/threads/${encodeURIComponent(id)}/redraft`, { method: 'POST', body: JSON.stringify(instruction ? { instruction } : {}) }),
+    done: (id: string) => call<{ ok: true }>(`/mail/threads/${encodeURIComponent(id)}/done`, { method: 'POST', body: '{}' }),
+    /** 本人が確かめた宛先・CC・本文で送る（業務「メールの返事を送る」を始める）。 */
+    send: (id: string, m: { to: string[]; cc: string[]; body: string }) => call<{ runId: string }>(`/mail/threads/${encodeURIComponent(id)}/send`, { method: 'POST', body: JSON.stringify(m) }),
+    gmailDraft: (id: string) => call<{ draftId: string; url: string }>(`/mail/threads/${encodeURIComponent(id)}/gmail-draft`, { method: 'POST', body: '{}' }),
+  },
   /** 資料（仕様書 第44章）。 */
   library: {
     list: (q: Record<string, string> = {}) => {

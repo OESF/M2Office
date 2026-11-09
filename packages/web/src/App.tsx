@@ -11,7 +11,7 @@ import { KnowledgeQa } from './knowledge-qa.js';
 import { SalesDocs } from './SalesDocs.js';
 import { QUOTE_AGENT_ID, QuoteList } from './quotes.js';
 import { DOCUMENT_AGENT_ID, SHEET_AGENT_ID, SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
-import { LIBRARY_EXTENSION_ID, CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { LIBRARY_EXTENSION_ID, CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, MAIL_MENU_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, swapCategories, togglePinned, type MenuSection,
 } from './menu.js';
@@ -52,6 +52,7 @@ import { Signage } from './Signage.js';
 import { driveFileIdOf, pickDriveFile } from './google-picker.js';
 import { Hr } from './Hr.js';
 import { MyAttendance } from './MyAttendance.js';
+import { MailScreen } from './Mail.js';
 import { isAttended, useAttention } from './attention.js';
 import { parseRoute, routePath, syncUrl, type Route } from './route.js';
 import {
@@ -138,6 +139,7 @@ type View =
   | { kind: 'members'; memberId: string | null }
   | { kind: 'printDesigns'; designId: string | null }
   | { kind: 'library'; itemId: string | null }
+  | { kind: 'mail'; threadId: string | null }
   | { kind: 'webReview'; month: string | null }
   | { kind: 'settings'; section: SettingsSection }
   | { kind: 'help'; articleId: string | null };
@@ -158,6 +160,7 @@ function viewPath(v: View): string {
     case 'sales': return routePath({ kind: 'sales', itemId: v.itemId });
     case 'members': return routePath({ kind: 'members', memberId: v.memberId });
     case 'library': return routePath({ kind: 'library', itemId: v.itemId });
+    case 'mail': return routePath({ kind: 'mail', threadId: v.threadId });
     case 'printDesigns': return routePath({ kind: 'printDesigns', designId: v.designId });
     case 'webReview': return routePath({ kind: 'webReview', month: v.month });
     case 'decisions': return routePath({ kind: 'decisions', decisionId: v.decisionId });
@@ -188,6 +191,7 @@ function viewOf(r: Route): View | null {
     case 'sales': return { kind: 'sales', itemId: r.itemId };
     case 'members': return { kind: 'members', memberId: r.memberId };
     case 'library': return { kind: 'library', itemId: r.itemId };
+    case 'mail': return { kind: 'mail', threadId: r.threadId };
     case 'printDesigns': return { kind: 'printDesigns', designId: r.designId };
     case 'webReview': return { kind: 'webReview', month: r.month };
     case 'decisions': return { kind: 'decisions', decisionId: r.decisionId };
@@ -210,6 +214,14 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // 開いているカテゴリー（端末ごとに覚える。仕様書 第6.1.1節「たたみ方」）
   const [openCategories, setCategoryOpen] = useRememberedSet('m2office.nav-open-categories');
   const [approvals, setApprovals] = useState<ApprovalView[]>([]);
+  // メールの返事が要るものの数（左のメニュー。第9.5.1.1節）。見回りは 15 分ごとなので、1 分ごとに読めば足りる
+  const [mailCount, setMailCount] = useState(0);
+  useEffect(() => {
+    const read = () => void api.mail.count().then((r) => setMailCount(r.reply)).catch(() => undefined);
+    read();
+    const t = setInterval(read, 60_000);
+    return () => clearInterval(t);
+  }, []);
   const [history, setHistory] = useState<
     { run: { id: string; status: string; startedAt: string }; job: { agentId: string } | null }[]
   >([]);
@@ -443,9 +455,13 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // キーボードの割り当て（仕様書 第6.11.3節）。表は keys.ts に 1 つだけ置く
   // スキルの user-invocable: false の業務はメニューに出さない。秘書が取り次いだときだけ使う（仕様書 第12.12.2節）
   // 名刺（内蔵の拡張）も業務の 1 つとして並べる。ピン止め・たたみ・並び・押すキーはほかの業務と同じ（仕様書 第6.1.1節）
+  const agentItems: MenuItem[] = agents.filter((a) => a.menu !== false)
+    .map((a) => ({ id: a.id, name: a.name, description: a.description, icon: agentIcon(a.category), agent: a }));
+  // メールの画面（仕様書 第9.5.1.1節「画面」）。業務の並びの項目として、議事録の作成の次に置く（はじめからピン止め）
+  const mailAt = agentItems.findIndex((a) => a.id === 'minutes') + 1;
+  agentItems.splice(mailAt, 0, { id: MAIL_MENU_ID, name: 'メール', description: '返事が要るもの・対応が要るもの・返事待ちを並べ、ここから返事を送る', icon: 'mail', agent: null });
   const menuItems: MenuItem[] = [
-    ...agents.filter((a) => a.menu !== false)
-      .map((a) => ({ id: a.id, name: a.name, description: a.description, icon: agentIcon(a.category), agent: a })),
+    ...agentItems,
     ...(me.cards ? [{ id: CARDS_EXTENSION_ID, name: '名刺管理', description: '撮るだけで連絡先になる。会社で共有する名刺の置き場', icon: 'cards' as IconName, agent: null }] : []),
     ...(me.inventory ? [{ id: INVENTORY_EXTENSION_ID, name: '在庫管理', description: '品目・場所・入出庫を記録し、使える数を出す', icon: 'inventory' as IconName, agent: null }] : []),
     // 人事・給与は人事区画の人にだけ出す（仕様書 第30.2節）
@@ -491,6 +507,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     return true;
   };
   const openItem = (m: MenuItem) => (m.agent ? setView({ kind: 'agent', agent: m.agent })
+    : m.id === MAIL_MENU_ID ? setView({ kind: 'mail', threadId: null })
     : m.id === INVENTORY_EXTENSION_ID ? setView({ kind: 'inventory', itemId: null })
       : m.id === HR_EXTENSION_ID ? setView({ kind: 'hr', employeeId: null })
         : m.id === SIGNAGE_EXTENSION_ID ? setView({ kind: 'signage' })
@@ -508,6 +525,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   : m.id === LIBRARY_EXTENSION_ID ? setView({ kind: 'library', itemId: null })
                   : m.id === WEB_REVIEW_EXTENSION_ID ? setView({ kind: 'webReview', month: null }) : setView({ kind: 'cards', contactId: null }));
   const isOpen = (m: MenuItem) => (m.agent ? view.kind === 'agent' && view.agent.id === m.id
+    : m.id === MAIL_MENU_ID ? view.kind === 'mail'
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
         : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === SALES_DOCS_EXTENSION_ID ? view.kind === 'sales' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === DECISIONS_EXTENSION_ID ? view.kind === 'decisions' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === LIBRARY_EXTENSION_ID ? view.kind === 'library' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
@@ -622,6 +640,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <MenuNavItem
                 key={a.id} menu={itemMenu(a.id, true)}
                 icon={a.icon} label={a.name} description={a.description}
+                // メールは、返事が要るものの数を出す（第9.5.1.1節）
+                count={a.id === MAIL_MENU_ID ? mailCount : undefined}
                 active={isOpen(a)}
                 // 1〜9 番目には、押すキーを併記する（仕様書 第6.11.1節 k4）
                 hint={i < 9 ? keyLabel(`Mod+Shift+${i + 1}`) : ''}
@@ -667,6 +687,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                       <MenuNavItem
                         key={a.id} menu={itemMenu(a.id, false)}
                         icon={a.icon} label={a.name} description={a.description}
+                        count={a.id === MAIL_MENU_ID ? mailCount : undefined}
                         active={isOpen(a)}
                         hint={n !== undefined && n < 9 ? keyLabel(`Mod+Shift+${n + 1}`) : ''}
                         onClick={() => openItem(a)}
@@ -853,6 +874,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <ViewTitle>会員 <HelpTip article="start-members">お客様を会員にし、来店と購入でポイントを貯めて特典と交換します。店員はスマホの会員のページで QR を読みます。</HelpTip></ViewTitle>
               <Members memberId={view.memberId} onOpen={(memberId) => setView({ kind: 'members', memberId })} changeKey={memberChangeKey} />
+            </>
+          )}
+          {view.kind === 'mail' && (
+            <>
+              <ViewTitle>メール <HelpTip article="mail">15 分ごとにメールを見て、返事が要るもの・対応が要るもの・返事待ちを並べます。下書きを直して、ここから返事を送れます。</HelpTip></ViewTitle>
+              <MailScreen threadId={view.threadId} onOpen={(threadId) => setView({ kind: 'mail', threadId })} />
             </>
           )}
           {view.kind === 'library' && (
@@ -1091,6 +1118,7 @@ const VIEW_LABELS: Record<string, string> = {
   home: 'ホーム',
   run: '実行の詳細',
   approvals: '承認トレイ',
+  mail: 'メール',
   history: '実行履歴',
   notifications: 'お知らせ',
   schedules: '定時実行',

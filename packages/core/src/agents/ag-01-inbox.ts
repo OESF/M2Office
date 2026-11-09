@@ -30,6 +30,9 @@ export const AG01_INBOX: AgentDefinition = {
   routeHint: '未処理のメールを分類し、返信が必要なものに下書きを作ります（送信はしません）',
   locale: 'ja-JP',
   compartment: null,
+  // 第 0.540.0 版で、メールの画面（第9.5.1.1節）に置き換えた。メニューと秘書の取り次ぎから外す（前の実行の記録を読むために定義は残す）
+  menu: false,
+  secretaryRoute: false,
   inputs: {
     type: 'object',
     properties: {

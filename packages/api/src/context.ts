@@ -18,7 +18,7 @@ import {
   TenantAiResolver, platformAi, secretBoxFromEnv, enqueueJob, LOOKUP_AGENT_ID, deploymentFromEnv, localLlmFromEnv,
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, withAiUsage, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, libraryAccess, libraryReaderFor, libraryContactOf, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, withAiUsage, MailService, MailWatch, PostgresMailStore, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, libraryAccess, libraryReaderFor, libraryContactOf, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   PostgresDemoStore, demoSubdomain, isDemoTenantId, seedDemoCompany, BUILTIN_EXTENSIONS, type DemoStore,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
@@ -268,6 +268,8 @@ export interface AppDeps {
     keeper: LibraryKeeper;
     access(tenantId: string, userId: string): Promise<LibrarySettings | null>;
   };
+  /** メールの画面（仕様書 第9.5.1.1節）。見回りは本物の会社はワーカー、見本の会社はこのプロセスで行う。 */
+  mail: { service: MailService; watch: MailWatch };
   /** 販促物の作成（内蔵の拡張。仕様書 第41章）。字は M2Office が組み、画像は生成 AI（文字の無い画像）か渡した写真。 */
   printDesigns: {
     service: PrintDesignService;
@@ -402,7 +404,9 @@ export function buildDeps(): AppDeps {
 
   const files = new LocalFileStore(fileStorageDir());
   // Google のデータを扱うツールは、内蔵のツールのうち権限（google）を宣言しているもの（第9.4.4節）
-  const retentionRef = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log });
+  // メールの画面の一覧（第9.5.1.1節）。片付いてから 7 日で消し、連携の解除ではすぐ消す
+  const mailStore = new PostgresMailStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
+  const retentionRef = new GoogleDataRetention({ repo, isGoogleTool: (name) => !!registry.get(name)?.google, logger: log, mailStore });
   const research = platform.research;
   if (devKey) log.warn('M2OFFICE_SECRET_KEY が未設定のため、開発用の固定の鍵で秘密の値を暗号化しています（本番では起動しません）');
   // AI の利用の記録と上限（仕様書 第6.6.2節、ADR-0079）
@@ -804,6 +808,20 @@ export function buildDeps(): AppDeps {
       return library.service.tick(tenants);
     }).catch((err: unknown) => log.warn('見本の会社の資料の整理に失敗しました', { err })).finally(() => { libraryMockBusy = false; });
   }, Number(process.env['LIBRARY_POLL_MS'] ?? 5_000)).unref();
+  // メールの画面（第9.5.1.1節）。見本の会社の受信箱はこのプロセスのメモリーにあるので、見本の会社はここで見回る
+  const mailWatch = new MailWatch({
+    store: mailStore, repo, mail: connector.mail, llmFor: (tenantId) => ai.llmFor(tenantId), isMock: (tenantId) => connector.sourceFor(tenantId) === 'mock', logger: log,
+  });
+  const mail = { watch: mailWatch, service: new MailService({ store: mailStore, repo, mail: connector.mail, watch: mailWatch, llmFor: (tenantId) => ai.llmFor(tenantId) }) };
+  let mailMockBusy = false;
+  setInterval(() => {
+    if (mailMockBusy) return;
+    mailMockBusy = true;
+    void withAiUsage({ purpose: 'worker:mail' }, async () => {
+      const tenants = (await repo.listTenantIds()).filter((id) => connector.sourceFor(id) === 'mock');
+      return mail.watch.tick(tenants);
+    }).catch((err: unknown) => log.warn('見本の会社のメールの見回りに失敗しました', { err })).finally(() => { mailMockBusy = false; });
+  }, Number(process.env['MAIL_POLL_MS'] ?? 60_000)).unref();
   // Webの分析（内蔵の拡張。仕様書 第34章）。担当の許可（アナリティクスと Search Console の読み取りだけ）で読む
   const webReview = {
     service: new WebReviewService({
@@ -849,6 +867,7 @@ export function buildDeps(): AppDeps {
   });
   const engine = new RunEngine({
     repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts, salesDocs, subsidies, decisions, members, printDesigns, library, reservations,
+    mail: { store: mailStore },
     deliveries: { service: deliveries }, slideDecks, slideThemes,
     taxTable: () => taxSide.taxRates(),
     closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day),
@@ -888,6 +907,8 @@ export function buildDeps(): AppDeps {
   const helpNotes = new PostgresHelpNoteStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office');
   const knowledgeGaps = new KnowledgeGaps({ store: new PostgresKnowledgeGapStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, logger: log });
   const secretary = new Secretary({
+    // メールの画面（第9.5.1.1節）。メールの確認と返事待ちは一覧から答え、見回りの頼みを受ける
+    mail: mail.service,
     // 不正の兆しの見張り（第16.8.3節）。管理者の「セキュリティの知らせは？」などに答える
     security: { watch: security, repo },
     aiShareChanged: (tenantId) => aiMeter.forget(tenantId),
@@ -1085,6 +1106,7 @@ export function buildDeps(): AppDeps {
     members,
     printDesigns,
     library,
+    mail,
     webReview,
     effect,
     // サイネージ（第31章）

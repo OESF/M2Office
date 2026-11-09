@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { agentDisplayName, isValidAvatar, needsCompartments, type AgentDefinition, type Approval, type AuditEvent, type Job, type Run, type RuntimeEnvironment, type User } from '@m2office/shared';
 import { runtimeEnvironment,
-  ACTIVE_WINDOW_MIN, HEALTH_WINDOW_MIN, agentFace, assignAgentFaces, buildPresence, healthView, summarizePresence, stepLabel,
+  ACTIVE_WINDOW_MIN, HEALTH_WINDOW_MIN, RETIRED_AGENT_IDS, agentFace, assignAgentFaces, buildPresence, healthView, summarizePresence, stepLabel,
   type HealthView, type TenantExtensions,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
@@ -419,6 +419,10 @@ export function dashboardRoute(deps: AppDeps) {
         ...busy, todayRuns: t.runs, todayFailed: t.failed,
       };
     });
+    // 置き換えて使わなくなった業務（第9.5.1.1節）は、いま動いているか今日動いたときだけ並べる
+    const shown = agents.filter((a) => !RETIRED_AGENT_IDS.has(a.agentId) || a.running + a.awaiting + a.queued + a.todayRuns > 0);
+    agents.length = 0;
+    agents.push(...shown);
     // 忙しい順。同じなら今日の件数の多い順
     agents.sort((x, y) =>
       (y.running + y.awaiting + y.queued) - (x.running + x.awaiting + x.queued) || y.todayRuns - x.todayRuns);
@@ -487,7 +491,8 @@ export function dashboardRoute(deps: AppDeps) {
 
     const hourly = Array.from({ length: 24 }, (_, h) => sum(rows.filter((x) => x.hour === h), 'runs'));
 
-    const byAgent = (await deps.agentsFor(tenant.id)).map((a) => {
+    // 置き換えて使わなくなった業務（第9.5.1.1節）は、その期間に動いたときだけ並べる
+    const byAgent = (await deps.agentsFor(tenant.id)).filter((a) => !RETIRED_AGENT_IDS.has(a.id) || rows.some((x) => x.agentId === a.id)).map((a) => {
       const r = rows.filter((x) => x.agentId === a.id);
       const completed = sum(r.filter((x) => x.status === 'completed'), 'runs');
       const finished = sum(r.filter((x) => ['completed', 'failed', 'cancelled'].includes(x.status)), 'runs');

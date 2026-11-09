@@ -243,6 +243,7 @@ export function Settings({ me, agents, onChanged, section, photo, onPhoto }: {
             ['approval', '承認の依頼', '', true],
             ['run', '実行の完了', '', true],
             ['failure', '失敗', '', true],
+            ['mail', 'メール', '急ぎのメール（期限が近いもの・すぐ知らせる相手から）', true],
           ]],
           ['業務', [
             ['inventory', '在庫', '残りわずか・無くなる見込み・使用期限', !!(me.inventory)],

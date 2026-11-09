@@ -26,6 +26,7 @@ import { NOTICE_TOOLS } from '../notices/tools.js';
 import { INVENTORY_TOOLS } from '../inventory/tools.js';
 import { COLUMN_TOOLS } from '../columns/tools.js';
 import { INQUIRY_TOOLS } from '../inquiries/tools.js';
+import { MAIL_TOOLS } from '../mail/tools.js';
 import { COMPETITOR_TOOLS } from '../competitors/tools.js';
 import { ANNOUNCEMENT_TOOLS } from '../announcements/tools.js';
 import { CONTRACT_TOOLS } from '../contracts/tools.js';
@@ -220,6 +221,7 @@ export const BUILTIN_TOOLS: Tool[] = [
   ...COLUMN_TOOLS,
   // 問い合わせの記録（内蔵の拡張。第33.17節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
   ...INQUIRY_TOOLS,
+  ...MAIL_TOOLS,
   // 競合の分析（内蔵の拡張。第36.18節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く
   ...COMPETITOR_TOOLS,
   // お知らせの作成（内蔵の拡張。第35.17節）。会社が使っていて、依頼者が利用範囲の中のときだけ働く

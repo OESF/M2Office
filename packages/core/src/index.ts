@@ -167,7 +167,7 @@ export {
 
 export {
   OFFICIAL_AGENTS, LOOKUP_AGENT_ID, PLAN_REPORT_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
-  agentFace, assignAgentFaces, MORNING_BRIEF, AG05_WEEKLY_BRIEF,
+  agentFace, assignAgentFaces, MORNING_BRIEF, AG05_WEEKLY_BRIEF, RETIRED_AGENT_IDS,
 } from './agents/index.js';
 export { Secretary, acceptsFile, asksConnectionData, commandText, fillInputs, readNoteRequest, recordingTaker, isRecordingName } from './secretary/secretary.js';
 export { ProactiveWatcher, PROACTIVE_TRIGGER, TRAVEL_PREFIX, PREP_WINDOW_MIN, TRAVEL_NOTICE_HOUR, isMeetingSoon, hasPlace, meetingKey } from './secretary/proactive.js';
@@ -198,6 +198,7 @@ export * from './decisions/index.js';
 export * from './billing/index.js';
 export * from './print-designs/index.js';
 export * from './library/index.js';
+export * from './mail/index.js';
 export * from './members/index.js';
 export * from './web-review/index.js';
 export * from './hr/index.js';

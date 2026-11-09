@@ -9,11 +9,11 @@
 import type { Repository } from '../../repository/types.js';
 import type { SecretBox } from '../../secrets/box.js';
 import {
-  ConnectorUnavailableError, type BusySlot, type CalendarEvent, type ConnectorPrincipal, type MailAttachment, type MailAttachmentList, type MailAttachmentQuery, type MailMessage,
+  ConnectorUnavailableError, type BusySlot, type CalendarEvent, type ConnectorPrincipal, type MailAttachment, type MailAttachmentList, type MailAttachmentQuery, type MailHead, type MailMessage,
   type MailSummary, type TaskItem, type WorkspaceConnector,
 } from '../types.js';
 import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndpoints } from './http.js';
-import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, fromBase64Url, header, mailAttachmentListOf, senderAuthenticated, type GmailPart } from './mime.js';
+import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, fromBase64Url, header, isBulkMail, mailAttachmentListOf, senderAuthenticated, type GmailPart } from './mime.js';
 import { externalOf, pickSpace, spaceIdOf, toChatText } from './chat.js';
 import { googleDocs, googleDrive } from './drive.js';
 import { googleSheets } from './sheets.js';
@@ -249,6 +249,69 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
       if (!/^[A-Za-z0-9_-]+$/.test(threadId)) return [];
       const t = await this.gmail(p, `/threads/${threadId}?format=full`) as { messages?: GmailMessage[] } | null;
       return (t?.messages ?? []).map((m) => ({ ...toSummary(m), body: m.payload ? extractBody(m.payload) : '' }));
+    },
+    /** いまの受信箱の履歴の番号（第9.5.1.1節）。 */
+    historyStart: async (p: ConnectorPrincipal): Promise<string> => {
+      const res = await this.gmail(p, '/profile');
+      const id = String(res?.['historyId'] ?? '');
+      if (!id) throw new Error('Gmail の履歴の番号を読めませんでした');
+      return id;
+    },
+    /**
+     * 履歴の番号から後に変わったスレッド（第9.5.1.1節）。届いた・送った・ラベルが変わった（アーカイブ・ごみ箱・既読）ものを見る。
+     *
+     * @returns 番号が古すぎて Google が 404 を返したら `null`
+     */
+    historySince: async (p: ConnectorPrincipal, startHistoryId: string): Promise<{ historyId: string; threadIds: string[] } | null> => {
+      if (!/^\d+$/.test(startHistoryId)) return null;
+      const threads = new Set<string>();
+      let token = '';
+      let latest = startHistoryId;
+      for (let page = 0; page < HISTORY_PAGES; page++) {
+        const q = new URLSearchParams({ startHistoryId, maxResults: '500', ...(token ? { pageToken: token } : {}) });
+        for (const t of ['messageAdded', 'labelAdded', 'labelRemoved', 'messageDeleted']) q.append('historyTypes', t);
+        const res = await this.gmail(p, `/history?${q}`);
+        if (!res) return null;
+        for (const h of (res['history'] ?? []) as { messages?: GmailMessage[] }[]) {
+          for (const m of h.messages ?? []) if (m.threadId) threads.add(m.threadId);
+        }
+        latest = String(res['historyId'] ?? latest);
+        token = String(res['nextPageToken'] ?? '');
+        if (!token) break;
+      }
+      return { historyId: latest, threadIds: [...threads] };
+    },
+    /** 検索に合うメールのスレッドの ID を、新しい順に重ねずに返す（第9.5.1.1節の最初の見直し）。 */
+    threadIdsOf: async (p: ConnectorPrincipal, query: string, limit: number): Promise<string[]> => {
+      const out: string[] = [];
+      let token = '';
+      while (out.length < limit) {
+        const q = new URLSearchParams({ q: query, maxResults: '100', ...(token ? { pageToken: token } : {}) });
+        const res = await this.gmail(p, `/messages?${q}`);
+        for (const m of (res?.['messages'] ?? []) as { threadId?: string }[]) {
+          if (m.threadId && !out.includes(m.threadId)) out.push(m.threadId);
+          if (out.length >= limit) break;
+        }
+        token = String(res?.['nextPageToken'] ?? '');
+        if (!token) break;
+      }
+      return out;
+    },
+    /** スレッドのメールの見出しを古い順に返す。本文は読まない（第9.5.1.1節）。 */
+    threadHeads: async (p: ConnectorPrincipal, threadId: string): Promise<MailHead[]> => {
+      if (!/^[A-Za-z0-9_-]+$/.test(threadId)) return [];
+      const q = ['From', 'To', 'Cc', 'Subject', 'Date', 'List-Unsubscribe', 'List-Id', 'Precedence'].map((h) => `metadataHeaders=${h}`).join('&');
+      const t = await this.gmail(p, `/threads/${threadId}?format=metadata&${q}`) as { messages?: GmailMessage[] } | null;
+      return (t?.messages ?? []).map((m) => {
+        const summary = toSummary(m);
+        const payload = m.payload ?? {};
+        return {
+          id: m.id, threadId: m.threadId ?? threadId, from: summary.from,
+          to: splitAddresses(decodeHeaderWords(header(payload, 'To'))), cc: splitAddresses(decodeHeaderWords(header(payload, 'Cc'))),
+          subject: summary.subject, snippet: summary.snippet, receivedAt: summary.receivedAt, labels: summary.labels,
+          bulk: isBulkMail(payload, m.labelIds ?? []),
+        };
+      });
     },
     createDraft: async (p: ConnectorPrincipal, draft: { replyTo: string | null; to: string; subject: string; body: string }) => {
       const thread = draft.replyTo ? await this.threadOf(p, draft.replyTo) : null;
@@ -508,6 +571,28 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
   forms = pending<WorkspaceConnector['forms']>('フォーム');
 }
 
+/** 履歴を読む頁の上限（1 頁 500 件。15 分ごとに読むので、ふつうは 1 頁で足りる）。 */
+const HISTORY_PAGES = 4;
+
+/**
+ * 宛先の見出し（`To`・`Cc`）を、1 人ずつに分ける。表示名の中のカンマ（`"山田, 太郎" <a@b>`）では分けない。
+ */
+export function splitAddresses(value: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quoted = false;
+  let angle = false;
+  for (const ch of value) {
+    if (ch === '"') quoted = !quoted;
+    else if (ch === '<') angle = true;
+    else if (ch === '>') angle = false;
+    if (ch === ',' && !quoted && !angle) { if (cur.trim()) out.push(cur.trim()); cur = ''; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
 /** 一覧の件数を 1〜50 に収める。 */
 function clampLimit(limit: number | undefined): number {
   const n = typeof limit === 'number' && Number.isFinite(limit) ? Math.floor(limit) : 20;
@@ -521,6 +606,7 @@ function toSummary(m: GmailMessage): MailSummary {
   const received = m.internalDate ? new Date(Number(m.internalDate)) : new Date(header(payload, 'Date'));
   return {
     id: m.id,
+    ...(m.threadId ? { threadId: m.threadId } : {}),
     from: decodeHeaderWords(header(payload, 'From')),
     subject: decodeHeaderWords(header(payload, 'Subject')) || '（件名なし）',
     snippet: decodeEntities(m.snippet ?? ''),

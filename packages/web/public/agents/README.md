@@ -76,8 +76,9 @@ agent01.png ～ agent60.png
 | 52 | 意思決定支援（`decisions:consult`） | 意思決定支援 |
 | 53 | 意思決定支援の材料集め（`decisions:gather`） | 意思決定支援 |
 | 54 | 資料（`library:desk`） | 資料 |
+| 55 | メールの返事を送る（`mail-reply-send`） | 公式のカタログ |
 
-**未使用: 55〜60**
+**未使用: 56〜60**
 
 ### 業務を足すとき
 
