@@ -2106,6 +2106,8 @@ export const api = {
   /** 競合の分析（内蔵の拡張。仕様書 第36章）。 */
   competitors: {
     overview: () => call<CompetitorOverview>('/competitors'),
+    /** 作業の進み具合だけ（地図を引かない。作業の間の読み直しに使う）。 */
+    progress: () => call<Pick<CompetitorOverview, 'job' | 'lastJob'>>('/competitors/progress'),
     /** 競合を探す作業を受け付ける（`radiusKm`・`nationwide`・`auto` で商圏を変える）。 */
     discover: (area: { radiusKm?: number; nationwide?: boolean; auto?: boolean }) =>
       call<{ jobId: string; already: boolean }>('/competitors/discover', { method: 'POST', body: JSON.stringify(area) }),

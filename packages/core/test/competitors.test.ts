@@ -250,6 +250,30 @@ test('自社の見分け: 地図の名前がかな書きでも、Web サイト�
   assert.ok(calls.includes('nearby') && calls.some((c) => c.startsWith('search:') && !c.includes('アルファ')));
 });
 
+test('作業の進み具合の読み直しでは、地図（Places API）を引かない。一覧を開いたときだけ引く（第36.18節「作業」。第 0.541.0 版）', async () => {
+  const ctx = setup({ website: 'https://www.alpha.example.jp/' });
+  const center = { lat: 35.68, lng: 139.76 };
+  const hit = (id: string, name: string, dLat: number) => ({ id, name, website: `https://${id}.example.jp/`, lat: center.lat + dLat, lng: center.lng, primaryType: 'doctor', attributions: [] });
+  let details = 0;
+  const places = {
+    search: async (q: string) => (q.includes('アルファ') ? [hit('place-self-000000', 'アルファ商事', 0)] : [hit('place-kw-0000001', 'ショップ A', 0.003)]),
+    nearby: async () => [hit('place-ty-0000002', 'ショップ B', 0.004)],
+    details: async (id: string) => { details += 1; return [hit('place-kw-0000001', 'ショップ A', 0.003), hit('place-ty-0000002', 'ショップ B', 0.004)].find((h) => h.id === id) ?? null; },
+  };
+  const repo = (ctx.service as unknown as { deps: { repo: Repository } }).deps.repo;
+  const service = new CompetitorService({
+    store: ctx.store, repo, llmFor: async () => new StubLlmProvider(), placesKeyFor: async () => null, sourceFor: () => 'real',
+    userAgent: 'test', fetcherFor: () => ctx.fetcher, placesFor: async () => places,
+  });
+  await service.requestDiscover(who);
+  await new CompetitorWatch({ service, store: ctx.store, repo }).tick({ wait: true });
+  details = 0;
+  for (let i = 0; i < 20; i++) await service.progress(who);
+  assert.equal(details, 0, '進み具合を何度読んでも、場所の詳しい情報を引かない');
+  await service.overview(who);
+  assert.ok(details > 0, '一覧を開いたときは、名前と Web サイトを引き直す');
+});
+
 test('上限: 自動で覚える数は既定 10 社で、管理者が 1〜20 社に変えられる。全体はその数 + 5 社', async () => {
   const shared = await import('@m2office/shared');
   assert.equal(shared.COMPETITORS_AUTO_MAX, 10);

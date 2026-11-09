@@ -353,6 +353,16 @@ export class CompetitorService {
     return enqueue(stale ? 'discover' : 'check', stale ? 'rediscover' : 'watch');
   }
 
+  /**
+   * 作業の進み具合だけ（画面が作業の間 3 秒ごとに読み直す。第36.18節「作業」。第 0.541.0 版）。
+   *
+   * @remarks **地図（Places API）は引かない。** 読み直しのたびに見ている競合ごとに場所の詳しい情報を引くと、無料の枠をすぐ超えるため
+   */
+  async progress(who: CompetitorViewer): Promise<{ job: CompetitorJob | null; lastJob: CompetitorJob | null }> {
+    const [job, lastJob] = await Promise.all([this.deps.store.activeJob(who.tenantId), this.deps.store.lastJob(who.tenantId)]);
+    return { job: job ? publicJob(job) : null, lastJob: lastJob ? publicJob(lastJob) : null };
+  }
+
   /** 画面と秘書に返す 1 社の形（名前・Web サイトは地図から引き直す）。 */
   private async view(c: StoredCompetitor, profile: CompetitorProfile | null, factCount: number, client: PlacesClient | null): Promise<Competitor> {
     let name = c.name;

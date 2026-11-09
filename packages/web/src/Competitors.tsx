@@ -162,7 +162,7 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
     api.competitors.reports().then((r) => setReports(r.reports)).catch(() => undefined);
   }, []);
   useEffect(() => { load(); }, [load, changeKey]);
-  // 探している・見回っている間は読み直す
+  // 探している・見回っている間は、作業の進み具合だけを読み直す（地図は引かない。第36.18節「作業」）。終わったら一覧を 1 回だけ読み直す
   const working = !!o?.job;
   const wasWorking = useRef(false);
   useEffect(() => {
@@ -170,7 +170,12 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
     if (wasWorking.current && !working) setTopNote(null);
     wasWorking.current = working;
     if (!working) return undefined;
-    const t = setInterval(load, 3000);
+    const t = setInterval(() => {
+      api.competitors.progress().then((p) => {
+        if (p.job) setO((cur) => (cur ? { ...cur, job: p.job, lastJob: p.lastJob } : cur));
+        else load();
+      }).catch(() => undefined);
+    }, 3000);
     return () => clearInterval(t);
   }, [working, load]);
 

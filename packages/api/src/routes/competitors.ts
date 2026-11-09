@@ -38,6 +38,9 @@ export function competitorsRoute(deps: AppDeps) {
   /** 全体（自社の像・競合・動いている作業）。地図で見つけた競合の名前は、ここで引き直す。 */
   app.get('/', async (c) => c.json(await service.overview(who(c))));
 
+  /** 作業の進み具合だけ（画面が作業の間に読み直す）。地図は引かない（第36.18節「作業」。第 0.541.0 版）。 */
+  app.get('/progress', async (c) => c.json(await service.progress(who(c))));
+
   /**
    * 競合を探す作業を受け付ける。`radiusKm` で半径、`nationwide` で全国、`auto` で商圏を AI に戻す。
    */

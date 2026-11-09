@@ -396,6 +396,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST` ／ `DELETE /v1/print-designs/:id/signage`、`POST /v1/print-designs/:id/announcement` | サイネージに流す（掲示の始まりより前なら始まりから）／ 止める ／ お知らせの作成の下書きにする（第41.18節。1 つの物を返すときに `links` でつなげる先を使えるかを添える） |
 | `GET /v1/print-designs/:id/thumb` ／ `GET /v1/print-designs/:id/versions/:vid/preview\|png\|pdf\|bleed` | 一覧の小さな画像 ／ 版の書き出し（案の画像・PNG・実寸の PDF・入稿用の PDF。`page` はパンフレットの面） |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
+| `GET /v1/competitors/progress` | 競合の分析: 作業の進み具合だけ（動いている作業・最後の作業）。**地図（Places API）を引かない**。画面が作業の間 3 秒ごとに読み直す（第 0.541.0 版） |
 | `POST /v1/competitors/discover` ／ `POST /v1/competitors/check` | 競合を探す作業（`radiusKm`・`nationwide`・`auto` で商圏を変える）／ 今すぐ見回る作業を受け付ける（202。ワーカーが行う。動いていれば `already`） |
 | `POST /v1/competitors` ／ `DELETE /v1/competitors/:id` | URL か店の名前で競合を入れる（`text`。トップを読めたときだけ。社内のアドレスは 400）／ 外す（次に探しても入れない） |
 | `GET /v1/competitors/:id/facts` | 1 社の事実（`self` なら自社。新しい回から。出典の URL つき） |
