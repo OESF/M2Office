@@ -446,7 +446,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/admin/connections/ai-policy` | 管理者: 会社の AI の方針（`mode`: `cloud`・`local-first`・`local-only`）。ローカルの方針はローカルの形（`M2O_DEPLOYMENT=onsite`）でだけ選べ、クラウドの形では 400（仕様書 第16.3.7.1節）。`GET /v1/admin/connections` の `ai` に配備の形・方針・ローカル AI の設定の有無が出る |
 | `POST /v1/admin/connections/local-llm/test` | 管理者: ローカル AI に届くかを確かめる（使えるモデルの名前を返す。何も変えない） |
 | `PUT /v1/admin/connections/gemini` | 管理者: Gemini の設定（`mode`・`apiKey`（渡したときだけ上書き）・`models`）。鍵は暗号化して保存 |
-| `DELETE /v1/admin/connections/gemini/key` | 管理者: 自社の鍵を削除（運営一括に戻る） |
+| `DELETE /v1/admin/connections/gemini/key` | 管理者: 自社の鍵を削除（運営の鍵を使える会社は運営一括に戻る。使えない会社は AI が止まる） |
 | `POST /v1/admin/connections/gemini/test` | 管理者: 接続の確認（`kind`: `text` か `live`） |
 | `PUT /v1/admin/connections/google` | 管理者: 会社の OAuth クライアント（`clientId`・`clientSecret`）。**保存の前に Google で組を確かめ、誤り（`bad-secret`・`no-client`）なら 400 で断り、保存しない**。シークレットは暗号化して保存（仕様書 第14.3.3節） |
 | `POST /v1/admin/connections/google/test` | 管理者: 登録済みの OAuth クライアントを Google で確かめる。何も変えない。`verdict`（`ok`・`bad-secret`・`no-client`・`unreachable`・`unexpected`）と文を返す |
@@ -530,7 +530,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PATCH /v1/admin/users/:id` | 管理者: 表示名・ロール・状態（管理者が 0 人になる変更は 409）。止めたときは、止めた業務の数（`stoppedRuns`）と、30 日後に削除される自分だけの名刺の数（`personalCards`。仕様書 第27.7節、Q-94）を返す。止めた日時を持ち、戻すと空にする |
 | `GET /v1/admin/knowledge` | 管理者: 組織知識の一覧（種類 `category`: `rule`・`minutes`・`learned`、状態 `status`: `active`・`retired`・`archived`、施行日と施行日が先の版。廃止・しまったものを含む）と、最後に整理した日と数（`consolidated`。仕様書 第11.11節） |
 | `POST /v1/admin/knowledge` | 管理者: 社内規程の新規の登録（`effectiveFrom` を省くと今日）。ID を発行して 201 で返す（ADR-0019） |
-| `POST /v1/admin/knowledge/from-file` | 管理者: 上げた PDF か Word（本文 `fileId`。本人のファイルだけ）から文字を取り出し、社内規程として登録する（題名はファイルの名前、施行日は今日）。文字を取り出せなければ 422、50 万字を超えれば 400、ほかの形式は 400。セットアップウィザードの段 5（仕様書 第6.10.3節） |
+| `POST /v1/admin/knowledge/from-file` | 管理者: 上げた PDF か Word（本文 `fileId`。本人のファイルだけ）から文字を取り出し、社内規程として登録する（題名はファイルの名前、施行日は今日）。文字を取り出せなければ 422、50 万字を超えれば 400、ほかの形式は 400。セットアップウィザードの段 6（仕様書 第6.10.3節） |
 | `PUT /v1/admin/knowledge/:id` | 管理者: 更新（`new` を指すか、無い ID なら新しい社内規程）。社内規程は版を残し、施行日が先なら施行日まで前の版で答える（`applied: false`）。議事録と秘書が学んだことは版を残さずに直す。廃止・しまったものは 409。本文を節に分け、分けた節を返す（50 万字まで） |
 | `GET /v1/admin/knowledge/:id/sections` | 管理者: 1 件の知識の節（見出しの経路と字数） |
 | `GET /v1/admin/knowledge/:id/versions` ／ `/versions/:version` | 管理者: 社内規程の版の一覧（施行中・施行前）／ 1 つの版の本文 |
