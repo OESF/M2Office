@@ -276,6 +276,8 @@ export interface OpsBillingSettings {
   bankAccount: string;
   /** 利用規約の版。空のあいだは申し込みを受けない。 */
   termsVersion: string;
+  /** 利用規約（クラウド版）の本文（Markdown。運営主体の名前を含むのでリポジトリに置かない。第23.3.1節。第 0.542.0 版）。 */
+  termsText: string;
 }
 
 /** 請求の一覧の 1 社分。 */
@@ -939,16 +941,16 @@ export class OpsStore {
 
   /** 料金の設定（第23.4.5節）。 */
   async billingSettings(): Promise<OpsBillingSettings> {
-    const { rows } = await this.pool.query('select signup_open, monthly_price_jpy, annual_price_jpy, tax_percent, registration_no, bank_account, terms_version from ops.billing_settings where id = 1');
+    const { rows } = await this.pool.query('select signup_open, monthly_price_jpy, annual_price_jpy, tax_percent, registration_no, bank_account, terms_version, terms_text from ops.billing_settings where id = 1');
     const r = rows[0];
-    return { signupOpen: r.signup_open, monthlyPriceJpy: r.monthly_price_jpy, annualPriceJpy: r.annual_price_jpy, taxPercent: r.tax_percent, registrationNo: r.registration_no, bankAccount: r.bank_account, termsVersion: r.terms_version };
+    return { signupOpen: r.signup_open, monthlyPriceJpy: r.monthly_price_jpy, annualPriceJpy: r.annual_price_jpy, taxPercent: r.tax_percent, registrationNo: r.registration_no, bankAccount: r.bank_account, termsVersion: r.terms_version, termsText: r.terms_text ?? '' };
   }
 
   /** 料金の設定を変える。 */
   async saveBillingSettings(v: OpsBillingSettings, operatorId: string): Promise<void> {
     await this.pool.query(
-      `update ops.billing_settings set signup_open = $1, monthly_price_jpy = $2, annual_price_jpy = $3, tax_percent = $4, registration_no = $5, bank_account = $6, terms_version = $7, updated_by = $8, updated_at = now() where id = 1`,
-      [v.signupOpen, v.monthlyPriceJpy, v.annualPriceJpy, v.taxPercent, v.registrationNo, v.bankAccount, v.termsVersion, operatorId],
+      `update ops.billing_settings set signup_open = $1, monthly_price_jpy = $2, annual_price_jpy = $3, tax_percent = $4, registration_no = $5, bank_account = $6, terms_version = $7, terms_text = $9, updated_by = $8, updated_at = now() where id = 1`,
+      [v.signupOpen, v.monthlyPriceJpy, v.annualPriceJpy, v.taxPercent, v.registrationNo, v.bankAccount, v.termsVersion, operatorId, v.termsText],
     );
   }
 

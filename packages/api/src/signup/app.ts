@@ -127,6 +127,12 @@ export function signupApp(deps: { store: SignupStore; config: SignupConfig; prov
     return c.json({ ...s, google: !!config.login, devLogin: config.devLogin, applicant: me });
   });
 
+  // 利用規約（版と本文）。申し込みのページのダイアログで見せる（仕様書 第23.3.1節。第 0.542.0 版）
+  app.get('/v1/signup/terms', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    return c.json(await store.terms());
+  });
+
   app.get('/v1/signup/challenge', (c) => {
     c.header('Cache-Control', 'no-store');
     return c.json(createDemoChallenge(config.secret));

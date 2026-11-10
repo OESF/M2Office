@@ -847,9 +847,20 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
     if (!Number.isInteger(monthly) || monthly < 0 || !Number.isInteger(annual) || annual < 0 || !Number.isInteger(tax) || tax < 0 || tax > 100) return c.json({ error: '単価と税率は整数で入れてください' }, 400);
     const registrationNo = s('registrationNo', 20);
     if (registrationNo && !/^T\d{13}$/.test(registrationNo)) return c.json({ error: '登録番号は T と 13 桁の数字で入れてください' }, 400);
-    const settings = { signupOpen: b['signupOpen'] === true, monthlyPriceJpy: monthly, annualPriceJpy: annual, taxPercent: tax, registrationNo, bankAccount: s('bankAccount', 500), termsVersion: s('termsVersion', 40) };
+    // 利用規約の本文（第23.3.1節。第 0.542.0 版）。本文を変えたら版も変える（同意した版と本文が食い違わないように）
+    const termsText = typeof b['termsText'] === 'string' ? (b['termsText'] as string).replace(/\r\n/g, '\n').trim() : '';
+    if (termsText.length > 100_000) return c.json({ error: '利用規約の本文は 10 万字までにしてください' }, 400);
+    const before = await store.billingSettings();
+    const termsVersion = s('termsVersion', 40);
+    if (before.termsText && termsText !== before.termsText && termsVersion === before.termsVersion) {
+      return c.json({ error: '利用規約の本文を変えたときは、版も変えてください（同意した人が、どの本文に同意したかを分かるように）' }, 400);
+    }
+    const settings = { signupOpen: b['signupOpen'] === true, monthlyPriceJpy: monthly, annualPriceJpy: annual, taxPercent: tax, registrationNo, bankAccount: s('bankAccount', 500), termsVersion, termsText };
     await store.saveBillingSettings(settings, c.get('operator').id);
-    await store.audit(c.get('operator').id, 'billing.settings', 'settings', 'billing', { signupOpen: settings.signupOpen, monthlyPriceJpy: monthly, annualPriceJpy: annual, taxPercent: tax, termsVersion: settings.termsVersion });
+    await store.audit(c.get('operator').id, 'billing.settings', 'settings', 'billing', {
+      signupOpen: settings.signupOpen, monthlyPriceJpy: monthly, annualPriceJpy: annual, taxPercent: tax, termsVersion,
+      termsChanged: termsText !== before.termsText, termsChars: termsText.length,
+    });
     return c.json({ settings });
   });
 

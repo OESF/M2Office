@@ -157,6 +157,13 @@ export class SignupStore {
     return { open: r.open === true, monthlyPriceJpy: r.monthly_price_jpy, annualPriceJpy: r.annual_price_jpy, taxPercent: r.tax_percent, termsVersion: r.terms_version };
   }
 
+  /** 申し込みのページが見せる利用規約（版と本文。第23.3.1節。第 0.542.0 版）。 */
+  async terms(): Promise<{ version: string; text: string }> {
+    const { rows } = await this.pool.query<{ version: string; body: string }>('select * from ops.signup_terms()');
+    const r = rows[0];
+    return { version: r?.version ?? '', text: r?.body ?? '' };
+  }
+
   /** サブドメインの空き。 */
   async subdomainFree(subdomain: string): Promise<boolean> {
     const { rows } = await this.pool.query<{ f: boolean }>('select ops.signup_subdomain_free($1) as f', [subdomain]);

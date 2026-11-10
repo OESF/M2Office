@@ -6,7 +6,8 @@
  * カードの番号を入れる欄は、どこにも置かない（第23.4.5節）。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Markdown } from './help.js';
 
 interface SignupStatus {
   open: boolean;
@@ -60,6 +61,15 @@ function Apply() {
   const [email, setEmail] = useState('');
   const [existing, setExisting] = useState<string | null>(null);
 
+  // 利用規約の本文（M2Office が持つ。押したときに読み、ダイアログで出す。第23.3.1節）
+  const termsDialog = useRef<HTMLDialogElement>(null);
+  const [termsText, setTermsText] = useState<string | null>(null);
+  const openTerms = async () => {
+    termsDialog.current?.showModal();
+    if (termsText === null) {
+      await call<{ version: string; text: string }>('/terms').then((t) => setTermsText(t.text || '利用規約が見つかりませんでした')).catch((e: Error) => setTermsText(e.message));
+    }
+  };
   const load = () => call<SignupStatus>('/status').then(setStatus).catch((e: Error) => setError(e.message));
   // 別のアカウントで入り直す（会社がもうあるドメインで来たときなど。第23.3.1節）
   const logout = () => call('/auth/logout', post({}))
@@ -133,8 +143,10 @@ function Apply() {
             </label>
             {check && (check.available ? <p className="ok-msg small">使えます</p> : <p className="error small">{check.error}</p>)}
             <label className="check">
-              <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} /> 利用規約に同意します
+              <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} />
+              <span><button type="button" className="link" onClick={(e) => { e.preventDefault(); void openTerms(); }}>利用規約</button>に同意します</span>
             </label>
+            <TermsDialog dialog={termsDialog} text={termsText} onClose={() => termsDialog.current?.close()} />
             <button className="btn" disabled={busy || !name.trim() || !check?.available || !terms} onClick={() => void submit()}>{busy ? '作っています…' : '申し込む'}</button>
           </>
         )}
@@ -174,5 +186,19 @@ function MockCard() {
         {error && <p className="error">{error}</p>}
       </div>
     </div>
+  );
+}
+
+/**
+ * 利用規約のダイアログ（仕様書 第23.3.1節「利用規約への同意」。第 0.542.0 版）。本文は運営がマスター管理画面で入れた Markdown。
+ *
+ * @param text 本文。読み込み中は `null`
+ */
+function TermsDialog({ dialog, text, onClose }: { dialog: React.RefObject<HTMLDialogElement>; text: string | null; onClose: () => void }) {
+  return (
+    <dialog ref={dialog} className="signup-terms" aria-label="利用規約">
+      <div className="signup-terms-body">{text === null ? <p className="muted">読み込んでいます…</p> : <Markdown text={text} />}</div>
+      <div className="row"><button type="button" className="btn" onClick={onClose}>閉じる</button></div>
+    </dialog>
   );
 }

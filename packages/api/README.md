@@ -651,7 +651,7 @@ src/signup/           申し込みの口（別のプロセス。仕様書 第23.
 | POST | `/v1/ops/settings/ai/test` | いま効いている運営の鍵で Gemini に問い合わせる | すべて |
 | PUT | `/v1/ops/settings/ai/limits` | 会社ごとの上限の既定と、運営の鍵の全体の月の上限（円。空なら決めない） | 運営管理者 |
 | GET | `/v1/ops/billing` | 全社の請求の一覧と料金の設定（第23.4.5節） | 見る人 |
-| PUT | `/v1/ops/billing/settings` | 料金の設定（受付・月間と年間の単価・税率・登録番号・振込先・利用規約の版） | 運営管理者 |
+| PUT | `/v1/ops/billing/settings` | 料金の設定（受付・月間と年間の単価・税率・登録番号・振込先・利用規約の版と本文）。本文を変えて版を変えなければ 400 | 運営管理者 |
 | POST | `/v1/ops/billing/invoices/:id/paid` | 請求を入金済みにする | 運営管理者 |
 | PUT | `/v1/ops/billing/tenants/:id/category` | 請求の区分を変える | 運営管理者 |
 | PUT | `/v1/ops/billing/tenants/:id/contract` | ビジネスとエンタープライズの契約を入れる（`billingClass`・`seatLimit`・`annualJpy`・`start`） | 運営管理者 |
@@ -687,6 +687,7 @@ src/signup/           申し込みの口（別のプロセス。仕様書 第23.
 | 方法 | 道 | 内容 |
 |---|---|---|
 | GET | `/v1/signup/status` | 受付の様子・料金・ログインした人 |
+| GET | `/v1/signup/terms` | 利用規約の版と本文（申し込みのページのダイアログで出す。第23.3.1節） |
 | GET | `/v1/signup/subdomain?name=` | サブドメインの空き |
 | GET | `/v1/signup/challenge` | ロボットよけの問題 |
 | GET | `/v1/signup/auth/google/start`・`/v1/signup/auth/callback` | Google のログイン（Google Workspace のアカウントだけ） |

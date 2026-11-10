@@ -604,6 +604,7 @@ function OpsBilling({ me }: { me: OpsMe }) {
             <label className="field">利用規約の版<input value={settings.termsVersion} onChange={(e) => setSettings({ ...settings, termsVersion: e.target.value })} /></label>
           </div>
           <label className="field">振込先の口座<textarea rows={3} value={settings.bankAccount} onChange={(e) => setSettings({ ...settings, bankAccount: e.target.value })} /></label>
+          <label className="field">利用規約の本文（Markdown。本文を変えたら版も変える）<textarea rows={14} value={settings.termsText} onChange={(e) => setSettings({ ...settings, termsText: e.target.value })} /></label>
           <button className="btn" onClick={() => void opsApi.setBillingSettings(settings).then(() => setMsg('保存しました')).catch(fail)}>保存</button>
         </div>
       )}

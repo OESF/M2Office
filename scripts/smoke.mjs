@@ -9164,7 +9164,14 @@ console.log('\n■ 136. 料金と申し込み（ロールの分け方・スタ�
 
     const closed = await signup.query(`select ops.signup_provision($1, 'スモーク A', $2, $3, 'smoke-terms')`, [subA, domA, `admin@${domA}`]).then(() => 'made', code);
     closed === 'signup_closed' ? ok('受付を閉じている間は、データベースも会社を作らない') : ng('受付を閉じているのに作れた', closed);
-    await owner.query('update ops.billing_settings set signup_open = true where id = 1');
+    await owner.query("update ops.billing_settings set signup_open = true, terms_text = '' where id = 1");
+    // 利用規約の本文（第23.3.1節。第 0.542.0 版）。版と本文がそろったときだけ受け付け、申し込みのロールが本文を読める
+    const noText = (await signup.query('select open from ops.signup_status()')).rows[0].open;
+    await owner.query("update ops.billing_settings set terms_text = '# スモークの利用規約' where id = 1");
+    const withText = (await signup.query('select open from ops.signup_status()')).rows[0].open;
+    const shown = (await signup.query('select * from ops.signup_terms()')).rows[0];
+    noText === false && withText === true && shown.version === 'smoke-terms' && shown.body === '# スモークの利用規約'
+      ? ok('利用規約の本文がそろったときだけ受け付け、申し込みのページが版と本文を読める') : ng('利用規約の本文の扱いが違う', JSON.stringify({ noText, withText, shown }));
     const changed = await signup.query(`select ops.signup_provision($1, 'スモーク A', $2, $3, 'old-terms')`, [subA, domA, `admin@${domA}`]).then(() => 'made', code);
     changed === 'terms_changed' ? ok('利用規約の版が変わっていれば作らない') : ng('古い利用規約で作れた', changed);
 
@@ -9406,7 +9413,7 @@ console.log('\n■ 136. 料金と申し込み（ロールの分け方・スタ�
     // 行の無い会社は請求しない
     (await app.query('select m2o_billing_category($1) as c', ['t-a'])).rows[0].c === 'none' ? ok('運営者が作った会社は請求しない（運営の鍵を使える）') : ng('請求しない会社の区分が違う', '');
   } finally {
-    await owner.query('update ops.billing_settings set signup_open = $1, terms_version = $2, registration_no = $3, bank_account = $4 where id = 1', [settings.signup_open, settings.terms_version, settings.registration_no, settings.bank_account]).catch(() => undefined);
+    await owner.query('update ops.billing_settings set signup_open = $1, terms_version = $2, registration_no = $3, bank_account = $4, terms_text = $5 where id = 1', [settings.signup_open, settings.terms_version, settings.registration_no, settings.bank_account, settings.terms_text ?? '']).catch(() => undefined);
     await owner.query('update ops.operator_profile set name_ja = $1 where id = 1', [profile.name_ja]).catch(() => undefined);
     for (const t of made) {
       await owner.query('delete from ops.billing_invoices where tenant_id = $1', [t]).catch(() => undefined);

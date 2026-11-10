@@ -56,6 +56,8 @@ export interface OpsBillingSettingsView {
   registrationNo: string;
   bankAccount: string;
   termsVersion: string;
+  /** 利用規約（クラウド版）の本文（Markdown。申し込みのページのダイアログで見せる。第23.3.1節）。 */
+  termsText: string;
 }
 
 /** 請求の一覧の 1 社分。 */

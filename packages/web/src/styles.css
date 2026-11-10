@@ -3266,3 +3266,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 @media (max-width: 640px) {
   .mail-row { grid-template-columns: 1fr auto; grid-template-areas: "from when" "subject subject" "summary summary"; }
 }
+
+/* 申し込みのページの利用規約のダイアログ（仕様書 第23.3.1節） */
+.signup-terms { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); padding: 0; }
+.signup-terms::backdrop { background: rgba(0, 0, 0, .45); }
+.signup-terms-body { max-height: calc(100vh - 160px); overflow: auto; padding: calc(16px * var(--space-scale)) calc(20px * var(--space-scale)); line-height: 1.7; }
+.signup-terms > .row { justify-content: flex-end; padding: calc(10px * var(--space-scale)) calc(20px * var(--space-scale)); border-top: 1px solid var(--line); }
