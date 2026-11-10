@@ -120,7 +120,7 @@ function Apply() {
         {!status.open && <p className="error">いまは申し込みを受け付けていません。</p>}
         {status.open && !status.applicant && <p className="muted">会社の Google Workspace のメールアドレスで申し込みます（gmail.com などの個人のアカウントでは申し込めません）。</p>}
         {status.open && !status.applicant && (
-          <div className="row">
+          <div className="row signup-login">
             {status.google && <a className="btn" href="/v1/signup/auth/google/start">Google で申し込む</a>}
             {status.devLogin && (
               <>

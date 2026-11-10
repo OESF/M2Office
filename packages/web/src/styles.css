@@ -3118,6 +3118,9 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 
 /* 申し込みのページと請求書（仕様書 第23.3.1節・第23.4.5節） */
 .signup-card { width: min(520px, 100%); display: flex; flex-direction: column; gap: calc(12px * var(--space-scale)); }
+/* 申し込みのページの「Google で申し込む」は、真ん中に置き、下線を引かない（第 0.549.2 版） */
+.signup-login { justify-content: center; }
+.signup-login a.btn { text-decoration: none; white-space: nowrap; }
 .signup-sub { display: flex; align-items: center; gap: calc(4px * var(--space-scale)); }
 .signup-sub input { flex: 1; min-width: 0; }
 .signup-applicant { justify-content: space-between; flex-wrap: nowrap; }
