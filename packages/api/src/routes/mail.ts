@@ -9,6 +9,7 @@
  * - `POST /v1/mail/threads/:id/done` 済みにする
  * - `POST /v1/mail/threads/:id/send` 本人が確かめた宛先・CC・本文で送る（業務「メールの返事を送る」を始め、本人の承認の後に送る）
  * - `POST /v1/mail/threads/:id/gmail-draft` Gmail の下書きに入れる
+ * - `GET /v1/mail/lessons` 覚えていること（メールの学び。第9.5.1.1.2節）・`DELETE /v1/mail/lessons/:id` 1 つ消す
  *
  * 見られるのは本人だけ。運営の代理アクセスでは 404（本人の私的な中身を見せない）。
  */
@@ -42,6 +43,19 @@ export function mailRoute(deps: AppDeps) {
   });
 
   app.get('/count', async (c) => c.json({ reply: await service.replyCount(owner(c)) }));
+
+  // メールの学び（第9.5.1.1.2節「見る・直す・消す」）。「記憶とデータ」の画面に「メールの傾向」として並べる
+  app.get('/lessons', async (c) => c.json({ items: await service.lessonsView(owner(c)) }));
+  app.delete('/lessons/:id', async (c) => {
+    const ok = await service.deleteLesson(owner(c), c.req.param('id'));
+    if (ok) {
+      await deps.repo.appendAudit({
+        id: randomUUID(), tenantId: owner(c).tenantId, actorType: 'user', actorId: owner(c).userId, action: 'mail.lesson.delete',
+        targetType: 'user', targetId: owner(c).userId, detail: {}, occurredAt: new Date().toISOString(),
+      });
+    }
+    return ok ? c.json({ ok: true }) : c.json({ error: '見つかりません' }, 404);
+  });
 
   app.get('/threads/:id', async (c) => {
     const d = await service.detail(owner(c), c.req.param('id'));

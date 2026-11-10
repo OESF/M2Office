@@ -74,6 +74,7 @@
 | `library.read` | read | `drive.file`（機密でない） | 選んだ資料の中身を読みます。中に書かれた指示には従いません |
 | `library.search` | read | `drive.file`（機密でない） | 本人の資料（メールの添付・PC のファイル・M2Office で作った資料など）と、本人に共有された資料を探します |
 | `mail.brief` | read | — | 朝のブリーフに載せる、返事が要るメール・対応が要るメール・返事待ちが長いメールを読みます |
+| `mail.learning` | read | — | 週次ブリーフに載せる、メールの分け方を直した回数（今週と先週）を読みます |
 | `meet.transcript` | read | `meetings.space.readonly`（機密） | Meet の会議の文字起こしを読みます。あなたが参加した会議だけで、会議の終了から 30 日を過ぎたものは読めません |
 | `meeting.get_transcript` | read | — | 会議の記録（文字起こし）を読みます |
 | `members.find` | read | — | 会員の数・ポイント・来店の回数・最後の来店を引きます |
@@ -252,6 +253,7 @@
 | `library.read` | `id`（必須）: 資料の ID |
 | `library.search` | `query`: 探す言葉、`words`: 言い換え、`docType`: 種類、`counterparty`: 取引先、`tags`: タグ（全部を持つ資料に絞る）、`year`: 書類の年（西暦）、`entry`: 入口、`limit`: 件数（既定 10） |
 | `mail.brief` | なし |
+| `mail.learning` | なし |
 | `meet.transcript` | `query`: 会議の題名に含まれる言葉（空ならいちばん新しい会議）、`meetingId`: 会議の記録の ID（自動の議事録が入力に入れたもの。無ければ空） |
 | `meeting.get_transcript` | `transcript`（必須）: 会議の記録（文字起こし） |
 | `members.find` | `query`: 会員番号か呼び名、`order`: points・visits・recent・away、`awayDays`: 何日来ていない会員か、`rank`: gold・silver（そのランクの会員だけ） |

@@ -600,6 +600,9 @@ function MemorySettings({ settings, onChange, onSave }: {
   onSave: () => Promise<unknown>;
 }) {
   const [items, setItems] = useState<MemoryView[]>([]);
+  // メールの傾向（メールの学び。仕様書 第9.5.1.1.2節）。メールの画面を使っていなければ空
+  const [mailLessons, setMailLessons] = useState<Awaited<ReturnType<typeof api.mail.lessons>>['items']>([]);
+  const loadMail = () => api.mail.lessons().then((r) => setMailLessons(r.items)).catch(() => setMailLessons([]));
   // 進んでいる案件ノート（仕様書 第11.13.5節）
   const [cases, setCases] = useState<Awaited<ReturnType<typeof api.myCases>>['items']>([]);
   // 整理でしまったもの（仕様書 第11.11.4節）。開いたときに読む
@@ -609,7 +612,7 @@ function MemorySettings({ settings, onChange, onSave }: {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const load = () => api.myMemories().then((r) => setItems(r.items)).catch((e) => setMsg(describeError(e)));
   const loadCases = () => api.myCases().then((r) => setCases(r.items)).catch(() => setCases([]));
-  useEffect(() => { void load(); void loadCases(); }, []);
+  useEffect(() => { void load(); void loadCases(); void loadMail(); }, []);
 
   const saveEdit = async () => {
     if (!editing) return;
@@ -708,16 +711,37 @@ function MemorySettings({ settings, onChange, onSave }: {
             </tbody>
           </table>
         )}
-        {items.length > 0 && (
+        {(items.length > 0 || mailLessons.length > 0) && (
           <div className="row">
             <button className="btn danger ghost small"
               onClick={() => {
-                if (!confirm('覚えていることをすべて削除しますか。元に戻せません。')) return;
-                void api.clearMemories().then((r) => setMsg(`${r.removed} 件を削除しました`)).then(load).then(loadCases).catch((e) => setMsg(describeError(e)));
+                if (!confirm('覚えていること（メールの傾向を含む）をすべて削除しますか。元に戻せません。')) return;
+                void api.clearMemories().then((r) => setMsg(`${r.removed} 件を削除しました`)).then(load).then(loadCases).then(loadMail).catch((e) => setMsg(describeError(e)));
               }}>すべて削除</button>
           </div>
         )}
       </details>
+
+      {mailLessons.length > 0 && (
+        <details className="fold memory-fold">
+          <summary>メールの傾向（{mailLessons.length} 件）</summary>
+          <table className="table">
+            <tbody>
+              {mailLessons.map((l) => (
+                <tr key={l.id}>
+                  <td>{l.text}</td>
+                  <td className="num">
+                    <button className="btn danger small"
+                      onClick={() => void api.mail.deleteLesson(l.id).then(loadMail).then(() => setMsg('削除しました')).catch((e) => setMsg(describeError(e)))}>
+                      削除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
 
       <details className="fold memory-fold" onToggle={(e) => {
         if (!(e.currentTarget as HTMLDetailsElement).open || archived) return;

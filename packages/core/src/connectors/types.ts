@@ -92,6 +92,8 @@ export interface MailHead {
 
 export interface MailMessage extends MailSummary {
   body: string;
+  /** HTML の本文（`thread` に `html: true` を渡し、HTML の部分があるときだけ。外から届いたままなので、画面に出す前に動くものを外す）。 */
+  html?: string;
   /**
    * 差出人のドメインの認証が通ったか（Gmail が付けた認証の結果で、DMARC か、差出人のドメインに合う DKIM が通っている）。
    * 分からない接続口（見本）では未定義。未定義は通っていないものとして扱う（名刺の署名。第27.6.1節）。
@@ -214,9 +216,10 @@ export interface MailConnector {
   /**
    * スレッドのメールを、本文つきで古い順に返す（社外との日程調整の返事を見る。仕様書 第9.5.3.1節）。見つからなければ空。
    *
+   * @param opts.html HTML の本文も返す（メールの画面で、Gmail と同じ見た目で出す。埋め込みの画像も中身を入れる。第9.5.1.1節）
    * @remarks 持たない接続口では未定義
    */
-  thread?(p: ConnectorPrincipal, threadId: string): Promise<MailMessage[]>;
+  thread?(p: ConnectorPrincipal, threadId: string, opts?: { html?: boolean }): Promise<MailMessage[]>;
   /**
    * いまの受信箱の履歴の番号（メールの片付けの見回りの起点。仕様書 第9.5.1.1節）。
    *

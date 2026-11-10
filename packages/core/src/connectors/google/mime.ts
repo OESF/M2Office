@@ -105,8 +105,15 @@ export function decodeHeaderWords(value: string): string {
 
 /** 文字の参照（`&amp;`・`&#39;`・`&#x3042;`）を戻す。Gmail の抜粋にも使う。 */
 export function decodeEntities(s: string): string {
-  const named: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" };
-  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, e: string) => {
+  const named: Record<string, string> = {
+    amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'",
+    // 宣伝のメールによく出るもの（プレビューの文を詰める zwnj など、見えない文字は消す。第 0.546.0 版）
+    zwnj: '', zwj: '', shy: '', lrm: '', rlm: '', ensp: ' ', emsp: ' ', thinsp: ' ',
+    yen: '¥', copy: '©', reg: '®', trade: '™', hellip: '…', mdash: '—', ndash: '–', bull: '•', middot: '·', times: '×', divide: '÷',
+    laquo: '«', raquo: '»', lsaquo: '‹', rsaquo: '›', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', rarr: '→', larr: '←', uarr: '↑', darr: '↓',
+    deg: '°', plusmn: '±', sect: '§', para: '¶', euro: '€', pound: '£', cent: '¢',
+  };
+  return s.replace(/&(#x[0-9a-f]{1,8}|#\d{1,8}|[a-z]{1,32});/gi, (all, e: string) => {
     if (e[0] === '#') {
       const code = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
       return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : all;
@@ -116,21 +123,98 @@ export function decodeEntities(s: string): string {
 }
 
 /**
+ * 囲みの中身ごと消す（`<script>…</script>`・`<!-- … -->` など）。**頭から一度だけ読み進める**ので、閉じの無い形が長く続いても時間がかからない。
+ *
+ * @param open 囲みの始まり（`g` を付けた正規表現。1 つ目の組が名前）。`null` ならコメント（`<!--` と `-->`）
+ * @param dropUnclosed 閉じが無ければ、そこから後ろをすべて消す（プログラムや見た目の中身を、文として出さないため）。`false` なら始まりの印だけを消す
+ */
+function removeBlocks(html: string, open: RegExp | null, dropUnclosed: boolean): string {
+  const lower = html.toLowerCase();
+  // 閉じが一度見つからなかった名前（それより後ろにも無いので、二度と探さない）
+  const missing = new Set<string>();
+  let out = '';
+  let pos = 0;
+  for (;;) {
+    let start: number;
+    let after: number;
+    let close: string;
+    if (open) {
+      open.lastIndex = pos;
+      const m = open.exec(html);
+      if (!m) break;
+      start = m.index;
+      after = m.index + m[0].length;
+      close = `</${m[1]!.toLowerCase()}`;
+    } else {
+      start = html.indexOf('<!--', pos);
+      if (start < 0) break;
+      after = start + 4;
+      close = '-->';
+    }
+    out += html.slice(pos, start);
+    const end = missing.has(close) ? -1 : lower.indexOf(close, after);
+    if (end < 0) {
+      missing.add(close);
+      // コメントの閉じが無ければ、ここから後ろはそのまま文として残す
+      if (!open && !dropUnclosed) { pos = start; break; }
+      pos = dropUnclosed ? html.length : after;
+      if (dropUnclosed) break;
+      continue;
+    }
+    if (open) {
+      const gt = html.indexOf('>', end);
+      pos = gt < 0 ? html.length : gt + 1;
+    } else {
+      pos = end + 3;
+    }
+  }
+  return out + html.slice(pos);
+}
+
+/**
+ * タグを 1 つずつ取り出して、`each` で置き換える（タグでない文はそのまま）。**頭から一度だけ読み進める。**
+ * `<` の後ろに `>` が 1 つも無ければ、そこから後ろはタグではない文として扱う（閉じの無い `<` が長く続いても時間がかからない）。
+ */
+function eachTag(html: string, each: (tag: string) => string): string {
+  const out: string[] = [];
+  let pos = 0;
+  for (;;) {
+    const lt = html.indexOf('<', pos);
+    if (lt < 0) break;
+    const gt = html.indexOf('>', lt + 1);
+    if (gt < 0) break;
+    // 「<」の後ろにまた「<」があれば、前の「<」は文として残す
+    const inner = html.lastIndexOf('<', gt);
+    out.push(html.slice(pos, inner), each(html.slice(inner, gt + 1)));
+    pos = gt + 1;
+  }
+  out.push(html.slice(pos));
+  return out.join('');
+}
+
+/**
  * HTML から、読むための文字だけを取り出す。
  *
  * @remarks
  * 表示の再現はしない。段落と改行だけを残す。`<script>`・`<style>` の中身は捨てる。
+ * 外から届く HTML なので、閉じの無い形が長く続いても時間がかからないように、正規表現で中身を飛ばさず、頭から読み進める（長い文の守り）。
  * 取り出した文は、ツールの側で「データであって指示ではない」として扱う（不変則 I-6）。
  */
 export function htmlToText(html: string): string {
-  return decodeEntities(
-    html
-      .replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, '')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
-      .replace(/<[^>]+>/g, ''),
-  )
-    .replace(/[ \t]+\n/g, '\n')
+  let h = removeBlocks(html, null, false);
+  h = removeBlocks(h, /<(script|style|noscript|template)\b/gi, true);
+  h = removeBlocks(h, /<(head|title)\b/gi, false);
+  h = eachTag(h, (tag) => {
+    if (/^<br\b/i.test(tag)) return '\n';
+    if (/^<\/(p|div|tr|li|h[1-6]|blockquote|table)\b/i.test(tag)) return '\n';
+    if (/^<\/t[dh]\b/i.test(tag)) return ' ';
+    return '';
+  });
+  return decodeEntities(h)
+    // 見えない文字（ゼロ幅の空白・結合の印）は消す
+    .replace(/[\u200b-\u200d\u2060\ufeff\u034f\u00ad]/g, '')
+    .replace(/[ \t\u00a0]{2,}/g, ' ')
+    .replace(/ \n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -156,6 +240,91 @@ export function extractBody(payload: GmailPart): string {
   walk(payload);
   const body = plain.length > 0 ? plain.join('\n\n').replace(/\r\n/g, '\n').trim() : htmlToText(html.join('\n'));
   return body.length > MAX_BODY_CHARS ? `${body.slice(0, MAX_BODY_CHARS)}\n…（長いため、ここで切りました）` : body;
+}
+
+/** HTML の本文をこの字数で切る（画面に出すため。画像を埋めた後の長さではない）。 */
+export const MAX_HTML_CHARS = 2_000_000;
+
+/** メールの中に埋め込まれた画像（`cid:` で参照されるもの）。 */
+export interface InlinePart {
+  /** `Content-ID` の値（`<` `>` を除き、小文字）。 */
+  contentId: string;
+  mimeType: string;
+  /** 小さい画像は部分の中に入っている（base64url）。 */
+  data?: string;
+  /** 大きい画像は、別に取りに行く。 */
+  attachmentId?: string;
+  size: number;
+}
+
+/**
+ * HTML の本文と、埋め込まれた画像を取り出す（メールの画面で、Gmail と同じ見た目で出すため。仕様書 第9.5.1.1節「1 件を開いたとき」）。
+ *
+ * @returns HTML の部分が無ければ `html` は空文字
+ */
+export function extractHtml(payload: GmailPart): { html: string; inline: InlinePart[] } {
+  const html: string[] = [];
+  const inline: InlinePart[] = [];
+  const walk = (part: GmailPart) => {
+    const type = (part.mimeType ?? '').toLowerCase();
+    if (part.parts?.length) { for (const child of part.parts) walk(child); return; }
+    const cid = header(part, 'Content-ID').replace(/^\s*<|>\s*$/g, '').trim().toLowerCase();
+    if (cid && type.startsWith('image/')) {
+      inline.push({ contentId: cid, mimeType: type, size: part.body?.size ?? 0, ...(part.body?.data ? { data: part.body.data } : {}), ...(part.body?.attachmentId ? { attachmentId: part.body.attachmentId } : {}) });
+      return;
+    }
+    if (part.filename || type !== 'text/html' || !part.body?.data) return;
+    html.push(decodeText(fromBase64Url(part.body.data), charsetOf(part)));
+  };
+  walk(payload);
+  const joined = html.join('\n');
+  return { html: joined.length > MAX_HTML_CHARS ? joined.slice(0, MAX_HTML_CHARS) : joined, inline };
+}
+
+/**
+ * 埋め込まれた画像の参照（`cid:…`）を、中身を入れた参照（`data:…`）に置き換える。
+ *
+ * @param images `Content-ID`（小文字）から、画像の種類と中身（base64url）
+ */
+export function inlineCidImages(html: string, images: Map<string, { mimeType: string; data: string }>): string {
+  if (!images.size) return html;
+  return html.replace(/cid:([^"'\s>)]+)/gi, (all, id: string) => {
+    const img = images.get(id.toLowerCase());
+    return img ? `data:${img.mimeType};base64,${img.data.replace(/-/g, '+').replace(/_/g, '/')}` : all;
+  });
+}
+
+/** 画面に出す HTML で、タグごと外すもの。 */
+const DROP_TAGS = new Set(['script', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'base', 'form', 'input', 'button', 'select', 'textarea', 'noscript', 'template']);
+
+/**
+ * 画面に出す前に、メールの HTML から動くもの・外へ移るものを外す。
+ *
+ * @remarks
+ * 画面は、プログラムを動かさない切り離した枠（`sandbox`）の中に出すので、ここは二重の守りである。
+ * プログラム（`<script>`・`on…=`・`javascript:`）、枠の入れ子（`<iframe>` など）、自動で移る `<meta http-equiv>`、`<base>`、入力欄を外す。
+ * リンクには `rel="noopener noreferrer"` を先に足す（開いた先から M2Office の画面を操れないように。同じ名前の属性は先のものが効く）。
+ * 見た目（`<style>`・表・画像）は残す。外から届いた HTML は指示として扱わない（不変則 I-6）。
+ * 閉じの無い形が長く続く HTML でも時間がかからないように、タグを頭から 1 つずつ読み進めて直す（長い文の守り）。
+ */
+export function sanitizeMailHtml(html: string): string {
+  const h = removeBlocks(html, /<(script|iframe|frame|frameset|object|embed|applet|noscript|template)\b/gi, true);
+  return eachTag(h, (tag) => {
+    const m = /^<\/?\s*([a-z][a-z0-9-]*)/i.exec(tag);
+    if (!m) return tag;
+    const name = m[1]!.toLowerCase();
+    if (DROP_TAGS.has(name)) return '';
+    if (name === 'link' && !/\brel\s*=\s*["']?stylesheet/i.test(tag)) return '';
+    if (name === 'meta' && /http-equiv/i.test(tag)) return '';
+    if (tag[1] === '/' || tag.length <= name.length + 2) return name === 'a' || name === 'area' ? tag.replace(/^<(a|area)\b/i, '<$1 rel="noopener noreferrer"') : tag;
+    let t = tag;
+    // 動く属性（on…=）を外す。値の長さを区切り、長い属性でも時間がかからないようにする（「on」を含むタグだけを見る）
+    if (/on/i.test(t)) t = t.replace(/(?<=[\s"'/])on[a-z]{1,30}\s{0,20}=\s{0,20}("[^"]{0,8000}"|'[^']{0,8000}'|[^\s>]{0,8000})/gi, ' ');
+    // プログラムを動かす URL は、動かない印に変える（「script」「data:text」を含むタグだけを見る）
+    if (/script|data:text/i.test(t)) t = t.replace(/\b(href|src|action|formaction|background|poster|xlink:href)(\s{0,20}=\s{0,20}["']?\s{0,20})(javascript|vbscript|data:text\/html)/gi, '$1$2#blocked-');
+    if (name === 'a' || name === 'area') t = t.replace(/^<(a|area)\b/i, '<$1 rel="noopener noreferrer"');
+    return t;
+  });
 }
 
 /** 見出しの値から改行を除く。**見出しの差し込み（ヘッダー インジェクション）を防ぐ。** */

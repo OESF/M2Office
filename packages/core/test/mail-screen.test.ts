@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS, type UserSettings } from '@m2office/shared';
 import {
   MailService, MailWatch, MemoryMailStore, MockWorkspaceConnector, StubLlmProvider, businessDaysSince, mailCommand, mailReplySend, outgoingDigest,
-  parseInbound, waitDaysFor, type MailHead, type Repository, type ToolContext,
+  parseInbound, waitDaysFor, categoryLessonsOf, categoryRule, newCategory, parseCategoryActions, visibleCategories, type MailHead, type Repository, type ToolContext,
 } from '../src/index.js';
 
 const T = 't-mail';
@@ -58,6 +58,7 @@ test('最初の見回りで、届いたメールをスレッドごとに振り�
   assert.deepEqual(v.reply.map((x) => x.subject).sort(), ['お打ち合わせの候補日について', '【ご確認】来月分の発注数量について'].sort());
   assert.equal(v.action.length, 1);
   assert.equal(v.promoCount, 1, 'ニュースレターは宣伝・お知らせ');
+  assert.equal(v.promo.length, 1, '宣伝・お知らせも、たたんだ一覧に並べる');
   assert.ok(v.reply.every((x) => x.draftReady), '返事が要るものには下書きがある');
   assert.equal(v.action[0]!.draftReady, false, '対応が要るものには下書きを作らない');
 });
@@ -72,6 +73,17 @@ test('15 分たっていなければ見ない。本人が止めた・積極性�
   assert.equal((await service.overview(o)).watch.state, 'paused');
   const low = setup({ proactivity: 'low' });
   assert.equal(await low.watch.runFor(o, now, true), null);
+});
+
+test('HTML のメールは、HTML の本文も返す（動くものを外し、リンクは開いた先から画面を操れない形にする）', async () => {
+  const { watch, service } = setup();
+  await watch.runFor(o, new Date(), true);
+  const promo = (await service.overview(o)).promo[0]!;
+  const d = await service.detail(o, promo.threadId);
+  const html = d?.messages[0]?.html ?? '';
+  assert.ok(html.includes('<table'), 'HTML の本文がある');
+  assert.ok(html.includes('rel="noopener noreferrer"'));
+  assert.ok(d?.messages[0]?.body, '文字に直した本文も残す（秘書と推論が使う）');
 });
 
 test('積極性が「控えめ」でも、「またメールを見て」と言えばメールは見る。「見なくていい」で止まる（第 0.543.0 版）', async () => {
@@ -252,7 +264,7 @@ test('「目を通すだけ」は開いたら片付く。ほかの人のスレ�
   await store.saveThread(o, {
     threadId: 'r1', group: 'read', state: 'open', doneReason: null, doneAt: null, lastMessageId: 'm', replyToId: 'm', from: 'a', subject: '共有', summary: '',
     dueText: '', dueDate: null, lastAt: new Date().toISOString(), sentAt: null, sentTo: '', recipients: { to: [], cc: [] }, draftState: 'none', draft: '',
-    outgoing: null, sendRunId: null, notifiedAt: null, updatedAt: new Date().toISOString(),
+    outgoing: null, sendRunId: null, notifiedAt: null, categoryId: null, updatedAt: new Date().toISOString(),
   });
   assert.equal(await service.detail({ tenantId: T, userId: 'someone-else' }, 'r1'), null);
   const d = await service.detail(o, 'r1');
@@ -277,4 +289,99 @@ test('秘書の言い回し: 止める・戻す・すぐ知らせる・待つ日
   assert.deepEqual(mailCommand('佐藤さんへの返事を書いて'), { kind: 'reply', words: '佐藤' });
   assert.deepEqual(mailCommand('返信待ちのメールは？'), { kind: 'waiting' });
   assert.equal(mailCommand('メールをチェックして'), null, 'メールの確認は別の見分け（一覧から答える）');
+});
+
+test('カテゴリー: 振り分けと一緒に付ける。2 通に満たないものは並べない。宣伝・お知らせには付けない（第9.5.1.1.1節）', async () => {
+  const { store, watch, service } = setup();
+  const now = new Date();
+  await store.saveCategory(o, newCategory('発注', '取引先からの発注', now.toISOString()));
+  await watch.runFor(o, now, true);
+  const v = await service.overview(o);
+  const order = [...v.reply, ...v.action].find((t) => t.subject.includes('発注'))!;
+  const row = await store.thread(o, order.threadId);
+  assert.ok(row?.categoryId, '件名に合うカテゴリーを付ける');
+  assert.equal(order.category, null, '1 通だけのうちは並べない');
+  assert.equal(v.categories.length, 0);
+  assert.ok(v.promo.every((t) => t.category === null));
+  const promoRow = await store.thread(o, v.promo[0]!.threadId);
+  assert.equal(promoRow?.categoryId, null, '宣伝・お知らせには付けない');
+});
+
+test('カテゴリー: 「このメールは〇〇の件」で直し、直したことを覚えて次の振り分けに渡す（学び）', async () => {
+  const { store, watch, service } = setup();
+  const now = new Date();
+  await watch.runFor(o, now, true);
+  const target = (await service.overview(o)).reply[0]!;
+  await service.detail(o, target.threadId, now);
+  const r = await service.categoryRequest(o, 'このメールは新店舗の件', new Date(now.getTime() + 60_000));
+  assert.match(r.text, /新店舗/);
+  const v = await service.overview(o);
+  const item = [...v.reply, ...v.action, ...v.read].find((t) => t.threadId === target.threadId)!;
+  assert.equal(item.category?.name, '新店舗', '本人が付けたものは、1 通でも並べる');
+  assert.deepEqual(v.categories.map((c) => c.name), ['新店舗']);
+  const lessons = categoryLessonsOf(await store.lessons(o));
+  assert.equal(lessons[0]?.category, '新店舗');
+  assert.ok(categoryRule([], lessons).includes('→ 新店舗'), '直した例を次の振り分けの決まりに入れる');
+  // 「もう終わった」で並べなくする
+  assert.equal(await service.endCategory(o, '新店舗'), '新店舗');
+  assert.equal((await service.overview(o)).categories.length, 0);
+});
+
+test('カテゴリー: 似たものをまとめる・作る。絞って答える', async () => {
+  const { store, watch, service } = setup();
+  const now = new Date();
+  await watch.runFor(o, now, true);
+  const v0 = await service.overview(o);
+  const [a, b] = [...v0.reply, ...v0.action];
+  for (const [t, name] of [[a!, 'アルファ商事'], [b!, 'アルファ物流']] as const) {
+    await service.detail(o, t.threadId, now);
+    await service.categoryRequest(o, `このメールは${name}の件`, now);
+  }
+  await service.categoryRequest(o, 'アルファ商事とアルファ物流は同じにして', now);
+  const v = await service.overview(o);
+  assert.deepEqual(v.categories.map((c) => [c.name, c.count]), [['アルファ商事', 2]]);
+  const found = await service.findByCategory(o, 'アルファ商事', now);
+  assert.equal(found.category, 'アルファ商事');
+  assert.equal(found.items.length, 2);
+  await service.categoryRequest(o, '採用というカテゴリーを作って', now);
+  assert.ok((await store.categories(o)).some((c) => c.name === '採用'));
+  // 直した例の名前も、まとめた先に付け替える
+  assert.ok(categoryLessonsOf(await store.lessons(o)).every((l) => l.category === 'アルファ商事'));
+});
+
+test('カテゴリー: 並べるのは最近 30 日に動きがあり、2 通以上で、終わっていないもの。知らないスレッドへの付け替えは無視する', () => {
+  const now = new Date('2026-11-10T00:00:00Z');
+  const c = (name: string, seen: number, daysAgo: number, ended?: number) => ({
+    ...newCategory(name, '', new Date(now.getTime() - daysAgo * 86_400_000).toISOString()), seen,
+    endedAt: ended === undefined ? null : new Date(now.getTime() - ended * 86_400_000).toISOString(),
+  });
+  const shown = visibleCategories([c('A', 2, 1), c('B', 1, 1), c('C', 3, 40), c('D', 2, 3, 1), c('E', 2, 1, 5)], now).map((x) => x.name);
+  assert.deepEqual(shown, ['A', 'E'], '終わった後にメールが来たら、また並べる');
+  const acts = parseCategoryActions('{"assign": [{"threadId": "t1", "category": "新店舗"}, {"threadId": "zzz", "category": "x"}], "end": ["採用"]}', new Set(['t1']));
+  assert.deepEqual(acts.assign, [{ threadId: 't1', category: '新店舗' }]);
+  assert.deepEqual(acts.end, ['採用']);
+});
+
+test('秘書の言い回し: カテゴリーの直しと、カテゴリーで絞る問い', () => {
+  assert.equal(mailCommand('このメールは新店舗の件')?.kind, 'teach');
+  assert.equal(mailCommand('佐藤さんからのメールはアルファ商事の件')?.kind, 'teach');
+  assert.equal(mailCommand('採用というカテゴリーを作って')?.kind, 'teach');
+  assert.deepEqual(mailCommand('アルファ商事とアルファ物流は同じにして'), { kind: 'teach', text: 'アルファ商事とアルファ物流は同じにして', weak: true });
+  assert.deepEqual(mailCommand('新店舗の件でメール来てる？'), { kind: 'categoryAsk', words: '新店舗' });
+  assert.deepEqual(mailCommand('アルファ商事から何か届いた？'), { kind: 'categoryAsk', words: 'アルファ商事' });
+  assert.equal(mailCommand('補助金の件はもう終わった')?.kind, 'done', '名前が合えば、カテゴリーを終わりにする（秘書の側で見る）');
+});
+
+test('カテゴリー: カテゴリーの前から並んでいた一覧にも、一度だけカテゴリーを付ける', async () => {
+  const { store, watch, service } = setup();
+  const now = new Date();
+  await watch.runFor(o, now, true);
+  // カテゴリーの前の状態にする（印を外し、カテゴリーを外す）
+  await service.setPrefs(o, ({ categoriesSeededAt: _, ...p }) => p);
+  for (const t of await store.openThreads(o)) await store.saveThread(o, { ...t, categoryId: null });
+  await store.saveCategory(o, newCategory('打ち合わせ', '', now.toISOString()));
+  await watch.runFor(o, new Date(now.getTime() + 20 * 60_000));
+  const rows = await store.openThreads(o);
+  assert.ok(rows.some((t) => t.subject.includes('打ち合わせ') && t.categoryId), '並んでいたメールにも付ける');
+  assert.ok((await service.prefs(o)).categoriesSeededAt, '一度だけ（印を付ける）');
 });

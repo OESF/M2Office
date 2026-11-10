@@ -1001,6 +1001,19 @@ export class OpsStore {
     return rows[0]?.d ?? null;
   }
 
+  /**
+   * メールの学びの週ごとの数（ベータテスト。第9.5.1.1.2節「ベータテスト」）。本人が秘書に共有を頼んだ人だけ。
+   *
+   * @remarks 名前・メールアドレス・メールの中身は返さない。人は、会社と利用者の ID から作った番号で表す
+   */
+  async mailLearningShared(): Promise<{ tenantId: string; person: string; week: string; corrections: number; misses: number }[]> {
+    const { rows } = await this.pool.query<{ tenant_id: string; person: string; week: string | Date; corrections: number; misses: number }>('select * from ops.mail_learning_shared()');
+    return rows.map((r) => ({
+      tenantId: r.tenant_id, person: r.person, corrections: Number(r.corrections), misses: Number(r.misses),
+      week: typeof r.week === 'string' ? r.week.slice(0, 10) : new Date(r.week.getTime() - r.week.getTimezoneOffset() * 60_000).toISOString().slice(0, 10),
+    }));
+  }
+
   /** 会社ごとの数（その場で数える）。 */
   async tenantOverview(): Promise<TenantOverview[]> {
     const [{ rows }, sec] = await Promise.all([

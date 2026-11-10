@@ -607,6 +607,49 @@ export function stubEmbedding(text: string): number[] {
  * @returns メールの画面の推論でなければ `null`
  */
 function stubMail(system: string, user: string): string | null {
+  // メールのカテゴリー（第9.5.1.1.1節）。名前が件名か冒頭に出てくるカテゴリーを選ぶ
+  const categoryNames = [...(system.split('いまのカテゴリー:')[1] ?? '').matchAll(/^- ([^（\n]+)/gm)].map((x) => x[1]!.trim());
+  const pick = (t: string) => categoryNames.find((n) => t.includes(n)) ?? '';
+  if (system.includes('カテゴリーの名前を付けてください')) {
+    // 最初の候補: 同じ差出人のドメインから 2 通以上あれば、その組織の名前にする
+    let list: { from?: string }[] = [];
+    try { list = JSON.parse(user) as { from?: string }[]; } catch { list = []; }
+    const by = new Map<string, number>();
+    for (const x of list) {
+      const d = /@([^>\s]+)/.exec(x.from ?? '')?.[1]?.split('.')[0] ?? '';
+      if (d) by.set(d, (by.get(d) ?? 0) + 1);
+    }
+    return JSON.stringify({ categories: [...by].filter(([, n]) => n >= 2).map(([d]) => ({ name: d, note: `${d} とのやり取り` })) });
+  }
+  if (system.includes('同じプロジェクト・同じ取引先・同じ用件を指すものをまとめて')) return JSON.stringify({ merges: [] });
+  if (system.includes('メールのカテゴリー（仕事のまとまり）か振り分けの直しを頼みました')) {
+    const req = /本人の頼み: (.*)$/m.exec(user)?.[1] ?? '';
+    let data: { current?: string | null; threads?: { threadId: string; from: string }[] } = {};
+    try { data = JSON.parse(/データ:\n(.*)\n\n本人の頼み/s.exec(user)?.[1] ?? '{}') as typeof data; } catch { data = {}; }
+    // 振り分けの直し（第9.5.1.1.2節）
+    const threads = data.threads ?? [];
+    let t = /^(これ|このメール)は(返事|返信)(は)?(要らない|いらない|不要)/.test(req) && data.current ? data.current : null;
+    if (t) return JSON.stringify({ teach: [{ threadId: t, scope: 'from', target: 'read' }], reply: 'この相手のメールは、これから「目を通すだけ」にします。' });
+    let y = /^(.+?)(さん|様)?の(メール)?は(大事|重要)/.exec(req);
+    t = y ? threads.find((x) => x.from.includes(y![1]!))?.threadId ?? null : null;
+    if (y && t) return JSON.stringify({ teach: [{ threadId: t, scope: 'from', target: 'important' }], reply: `「${y[1]}」さんのメールは大事なものとして扱います。` });
+    y = /^(.+?)からの?(メール|お知らせ)?は(宣伝|見なくて)/.exec(req);
+    t = y ? threads.find((x) => x.from.includes(y![1]!))?.threadId ?? null : null;
+    if (y && t) return JSON.stringify({ teach: [{ threadId: t, scope: 'from', target: 'promo' }], reply: `「${y[1]}」からのメールは宣伝・お知らせにします。` });
+    let x = /メール(は|を)(.+?)の(件|カテゴリー|プロジェクト)/.exec(req);
+    if (x && data.current) return JSON.stringify({ assign: [{ threadId: data.current, category: x[2] }], reply: `このメールを「${x[2]}」にしました。` });
+    x = /^(.+?)からの?メール(は|を)(.+?)の(件|カテゴリー|プロジェクト)/.exec(req);
+    if (x) {
+      const who = x[1]!;
+      const hits = (data.threads ?? []).filter((t) => t.from.includes(who));
+      return JSON.stringify({ assign: hits.map((t) => ({ threadId: t.threadId, category: x![3] })), reply: `「${who}」からのメールを「${x[3]}」にしました。` });
+    }
+    x = /(.+?)という(カテゴリー|プロジェクト)を作って/.exec(req);
+    if (x) return JSON.stringify({ create: [x[1]], reply: `「${x[1]}」を作りました。` });
+    x = /^(.+?)と(.+?)は同じ/.exec(req);
+    if (x) return JSON.stringify({ merge: [{ from: x[2], into: x[1] }], reply: `「${x[2]}」を「${x[1]}」にまとめました。` });
+    return JSON.stringify({ reply: '' });
+  }
   const rows = (): { i: number; subject: string; head: string }[] => {
     try {
       const v = JSON.parse(user) as { i: number; subject?: string; head?: string }[];
@@ -618,14 +661,15 @@ function stubMail(system: string, user: string): string | null {
   if (system.includes('reply（返事が要る）')) {
     const items = rows().map((x) => {
       const t = `${x.subject} ${x.head}`;
-      if (/ご教示|いかがでしょうか|お知らせください|ご回答/.test(t)) return { i: x.i, group: 'reply', summary: '回答を求められています', due: /今週中/.test(t) ? '今週中' : '', dueDate: '' };
-      if (/締め切り|期限|申請/.test(t)) return { i: x.i, group: 'action', summary: '期限までに申請', due: (/(\d+) ?日まで/.exec(t)?.[0]) ?? '', dueDate: '' };
-      return { i: x.i, group: 'read', summary: '', due: '', dueDate: '' };
+      const category = pick(t);
+      if (/ご教示|いかがでしょうか|お知らせください|ご回答/.test(t)) return { i: x.i, group: 'reply', summary: '回答を求められています', due: /今週中/.test(t) ? '今週中' : '', dueDate: '', category };
+      if (/締め切り|期限|申請/.test(t)) return { i: x.i, group: 'action', summary: '期限までに申請', due: (/(\d+) ?日まで/.exec(t)?.[0]) ?? '', dueDate: '', category };
+      return { i: x.i, group: 'read', summary: '', due: '', dueDate: '', category };
     });
     return JSON.stringify({ items });
   }
   if (system.includes('相手からの返事を待っているものか')) {
-    return JSON.stringify({ items: rows().map((x) => ({ i: x.i, waiting: /？|\?|ください|いかが|お願い/.test(`${x.subject} ${x.head}`) })) });
+    return JSON.stringify({ items: rows().map((x) => ({ i: x.i, waiting: /？|\?|ください|いかが|お願い/.test(`${x.subject} ${x.head}`), category: pick(`${x.subject} ${x.head}`) })) });
   }
   if (system.includes('の秘書です。') && (system.includes('返事の下書き') || system.includes('催促の下書き'))) {
     return system.includes('催促') ? 'お世話になっております。\n先日お送りしたメールの件、ご確認いただけましたでしょうか。\nお手すきの際にご返信いただけますと幸いです。'

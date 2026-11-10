@@ -137,7 +137,7 @@ function OpsLogin({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-type OpsPage = 'tenants' | 'billing' | 'demos' | 'requests' | 'server' | 'incidents' | 'logs' | 'operators' | 'audit' | 'law' | 'settings' | 'help';
+type OpsPage = 'tenants' | 'billing' | 'demos' | 'requests' | 'server' | 'incidents' | 'logs' | 'operators' | 'audit' | 'law' | 'learning' | 'settings' | 'help';
 const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'tenants', label: '会社一覧', icon: 'company' },
   { id: 'billing', label: '請求', icon: 'report' },
@@ -149,6 +149,8 @@ const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'operators', label: '運営者', icon: 'users' },
   { id: 'audit', label: '操作履歴', icon: 'audit' },
   { id: 'law', label: '法令の表', icon: 'doc' },
+  // メールの学びのベータテスト（第9.5.1.1.2節）。本人が共有を頼んだ人の週ごとの数だけ
+  { id: 'learning', label: 'メールの学び', icon: 'mail' },
   { id: 'settings', label: '設定', icon: 'settings' },
   // 運営者のヘルプ（第23.8.16節）。いちばん下
   { id: 'help', label: 'ヘルプ', icon: 'help' },
@@ -254,6 +256,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           {page === 'logs' && <OpsLogs me={me} />}
           {page === 'settings' && <Settings me={me} />}
           {page === 'law' && <LawTables me={me} />}
+          {page === 'learning' && <MailLearningShared />}
           {page === 'operators' && <Operators me={me} />}
           {page === 'audit' && <Audit />}
           {page === 'billing' && <OpsBilling me={me} />}
@@ -670,6 +673,40 @@ function Audit() {
               <tr key={a.id}>
                 <td>{when(a.occurredAt)}</td><td>{a.operatorEmail ?? a.operatorId}</td><td>{ACTION_LABEL[a.action] ?? a.action}</td>
                 <td>{a.targetId}</td><td className="small muted">{Object.entries(a.detail).map(([k, v]) => `${k}: ${String(v)}`).join('、')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      )}
+    </>
+  );
+}
+
+/**
+ * メールの学びのベータテスト（仕様書 第9.5.1.1.2節「ベータテスト」）。本人が秘書に共有を頼んだ人の、週ごとの直した回数と振り分けの外れ。
+ *
+ * @remarks 名前・メールアドレス・メールの中身は出さない。人は番号で表す。直す回数が週ごとに減るかで、役に立つかを判断する
+ */
+function MailLearningShared() {
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof opsApi.mailLearning>>['rows'] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { opsApi.mailLearning().then((r) => setRows(r.rows)).catch((e) => setError(e instanceof OpsApiError ? e.message : '読み込めませんでした')); }, []);
+  // 人ごとに、週の並び（古い週から）
+  const people = new Map<string, NonNullable<typeof rows>>();
+  for (const r of rows ?? []) people.set(`${r.tenantId} ${r.person}`, [...(people.get(`${r.tenantId} ${r.person}`) ?? []), r]);
+  return (
+    <>
+      <OpsTitle title="メールの学び" help={{ chapter: '03-tenants', text: '共有を頼んだ人の、メールの分け方を直した回数と外れの数です。' }} />
+      {error && <p className="error">{error}</p>}
+      {rows && rows.length === 0 && <p className="muted">共有している人はいません</p>}
+      {people.size > 0 && (
+        <div className="table-scroll"><table className="table">
+          <thead><tr><th>会社</th><th>人</th><th>週ごとの直し＋外れ（古い週から）</th></tr></thead>
+          <tbody>
+            {[...people.entries()].map(([k, xs]) => (
+              <tr key={k}>
+                <td>{xs[0]!.tenantId}</td><td>{xs[0]!.person}</td>
+                <td>{xs.map((x) => `${x.week.slice(5)}: ${x.corrections}＋${x.misses}`).join('　')}</td>
               </tr>
             ))}
           </tbody>

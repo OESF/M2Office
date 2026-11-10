@@ -47,6 +47,17 @@ function mockPhoto(color: string): Uint8Array {
   return png;
 }
 
+/** 見本の HTML のメール（宣伝のメールによくある、表で組んだ形。画像は中身を入れた参照）。 */
+const MOCK_NEWSLETTER_HTML = `<div style="background:#f3f5f7;padding:24px 0;font-family:sans-serif">
+<div style="display:none">今月の新機能&zwnj;&nbsp;&zwnj;&nbsp;</div>
+<table role="presentation" width="560" align="center" style="background:#ffffff;border-radius:8px">
+<tr><td style="padding:24px"><img alt="SaaS" width="120" height="32" src="data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="32"><rect width="120" height="32" rx="6" fill="#1a73e8"/><text x="60" y="21" font-size="14" fill="#fff" text-anchor="middle" font-family="sans-serif">SaaS</text></svg>').toString('base64')}"></td></tr>
+<tr><td style="padding:0 24px"><h1 style="font-size:20px;color:#202124">今月の新機能のお知らせ</h1><p style="color:#5f6368;line-height:1.7">今月リリースした新機能をご紹介します。</p></td></tr>
+<tr><td style="padding:8px 24px 24px"><table><tr><td style="background:#e8f0fe;padding:12px;border-radius:6px">予定の共有</td><td style="background:#e6f4ea;padding:12px;border-radius:6px">&yen;0 でお試し</td></tr></table>
+<p><a href="https://saas.example.com/news" style="display:inline-block;background:#1a73e8;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">詳しく見る</a></p></td></tr>
+<tr><td style="padding:12px 24px;color:#9aa0a6;font-size:12px">&copy; 2026 SaaS Example</td></tr>
+</table></div>`;
+
 export class MockWorkspaceConnector implements WorkspaceConnector {
   /** 見本の接続口は、どの会社でも見本である。 */
   sourceFor(_tenantId: string): 'mock' {
@@ -142,8 +153,9 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
      * 見本のスレッド。送ったメールに、宛先の 1 人目から決まった返事が付く（社外との日程調整の通しの確認のため。第9.5.3.1節）。
      * 宛先に `noreply` を含めば返事は付かない。`decline` を含めば、どの候補も合わないという返事。ほかは 1 つ目の候補を選ぶ返事
      */
-    thread: async (p: ConnectorPrincipal, threadId: string): Promise<MailMessage[]> => {
-      const own = this.mails(p).find((x) => (x.threadId ?? x.id) === threadId);
+    thread: async (p: ConnectorPrincipal, threadId: string, opts?: { html?: boolean }): Promise<MailMessage[]> => {
+      const found = this.mails(p).find((x) => (x.threadId ?? x.id) === threadId);
+      const own = found && !opts?.html ? (({ html: _, ...rest }) => rest)(found) : found;
       if (own) {
         const r = this.replies.get(threadId);
         return r ? [own, { id: r.id, threadId, from: '本人 <me@example.jp>', subject: `Re: ${own.subject}`, snippet: r.body.slice(0, 80), body: r.body, receivedAt: r.at, unread: false, labels: ['SENT'] }] : [own];
@@ -670,6 +682,8 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
         subject: '今月の新機能のお知らせ',
         snippet: '今月リリースした新機能をご紹介します。',
         body: '今月リリースした新機能をご紹介します。',
+        // HTML のメールの見本（メールの画面で、Gmail と同じ見た目で出す。第9.5.1.1節）
+        html: MOCK_NEWSLETTER_HTML,
         receivedAt: jst(addDays(today, -1), 12, 0), unread: false, labels: ['INBOX', 'CATEGORY_PROMOTIONS'],
       },
     ];

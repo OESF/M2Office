@@ -1,7 +1,8 @@
 /**
  * @file メールの画面（仕様書 第9.5.1.1節、ADR-0131）。メールを M2Office の中で片付ける。
  *
- * 一覧は「返事が要る」「対応が要る」「返事待ち」の順。「目を通すだけ」はたたみ、宣伝・お知らせは件数だけ。
+ * 一覧は「返事が要る」「対応が要る」「返事待ち」の順。「目を通すだけ」と「宣伝・お知らせ」はたたむ。
+ * 一覧の上に、AI が付けたカテゴリー（本人の仕事のまとまり）を並べ、押すとそのカテゴリーだけに絞る（第9.5.1.1.1節）。
  * 1 件を開くと、スレッドの本文（開いたときに Gmail から読む）と、用意した下書きを出す。
  * 「送る」→ 宛先と本文の確かめ →「送る」で、業務「メールの返事を送る」を始め、本人の承認として送る（社外への送信。境界 2）。
  */
@@ -48,6 +49,39 @@ function LastFetch({ watch }: { watch: MailOverview['watch'] }) {
   );
 }
 
+/** HTML のメールの枠の中の決まり。プログラムは動かさず、画像・見た目・字体だけを読む。 */
+const MAIL_FRAME_CSP = "default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https:; font-src https: data:; media-src https: data:";
+
+/**
+ * HTML のメールを、Gmail と同じ見た目で出す（仕様書 第9.5.1.1節「1 件を開いたとき」。第 0.546.0 版）。
+ *
+ * @remarks
+ * 外から届いた HTML なので、切り離した枠（`sandbox`）の中に出す。`allow-scripts` を付けないので、メールの中のプログラムは動かない。
+ * 入力欄の送信も、画面の移動もできない。リンクは新しいタブで開く（`allow-popups`）。画像やリンクの先に、M2Office の URL を渡さない（`no-referrer`）。高さは中身に合わせる（`allow-same-origin` は高さを測るためだけ。プログラムが動かないので、M2Office の画面には触れられない）。
+ * メールは明るい背景で作られているので、暗い表示のときも白い紙の上に出す（Gmail と同じ）。
+ */
+function MailHtml({ html }: { html: string }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState(120);
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${MAIL_FRAME_CSP}"><meta name="referrer" content="no-referrer"><base target="_blank">`
+    + '<style>html{color-scheme:light}body{margin:0;padding:12px;background:#fff;color:#202124;font-family:sans-serif;overflow-wrap:anywhere}img{max-width:100%}</style></head>'
+    + `<body>${html}</body></html>`;
+  useEffect(() => {
+    const frame = ref.current;
+    if (!frame) return;
+    let observer: ResizeObserver | null = null;
+    const fit = () => {
+      const body = frame.contentDocument?.body;
+      if (!body) return;
+      setHeight(Math.max(body.scrollHeight, frame.contentDocument!.documentElement.scrollHeight) + 2);
+      if (!observer) { observer = new ResizeObserver(() => fit()); observer.observe(body); }
+    };
+    frame.addEventListener('load', fit);
+    return () => { frame.removeEventListener('load', fit); observer?.disconnect(); };
+  }, [html]);
+  return <iframe ref={ref} className="mail-html" title="メールの本文" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcDoc={doc} style={{ height }} />;
+}
+
 /** 宛先の欄の文字を、1 人ずつに分ける。 */
 const splitList = (v: string) => v.split(/[,、\n]/).map((x) => x.trim()).filter(Boolean);
 
@@ -65,6 +99,8 @@ export function MailScreen({ threadId, onOpen }: { threadId: string | null; onOp
 function MailList({ onOpen }: { onOpen: (threadId: string) => void }) {
   const [data, setData] = useState<MailOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 絞っているカテゴリー（無ければすべて）
+  const [cat, setCat] = useState<string | null>(null);
   const load = useCallback(() => api.mail.overview().then((d) => { setData(d); setError(null); })
     .catch((e) => setError(describeError(e, 'メールを読み込めませんでした'))), []);
   useEffect(() => {
@@ -80,38 +116,54 @@ function MailList({ onOpen }: { onOpen: (threadId: string) => void }) {
   if (watch.state === 'off') return <p className="muted">Google と接続すると使えます。<a className="link" href="/settings/google">接続する</a></p>;
   if (watch.state === 'paused') return <><p className="muted">メールを見るのを止めています。秘書に「またメールを見て」と言えば戻ります。</p><LastFetch watch={watch} /></>;
   if (watch.state === 'starting') return <p className="muted"><Busy>最近 14 日のメールを見ています…</Busy></p>;
-  const empty = !data.reply.length && !data.action.length && !data.waiting.length;
+  const active = cat && data.categories.some((c) => c.id === cat) ? cat : null;
+  const only = (items: MailItem[]) => (active ? items.filter((t) => t.category?.id === active) : items);
+  const view = { reply: only(data.reply), action: only(data.action), waiting: only(data.waiting), read: only(data.read), promo: active ? [] : data.promo };
+  const empty = !view.reply.length && !view.action.length && !view.waiting.length;
   return (
     <div className="mail">
       <LastFetch watch={watch} />
+      {data.categories.length > 0 && (
+        <div className="mail-cats" role="group" aria-label="カテゴリー">
+          <button type="button" className={active ? 'chip-btn' : 'chip-btn on'} onClick={() => setCat(null)}>すべて</button>
+          {data.categories.map((c) => (
+            <button key={c.id} type="button" className={active === c.id ? 'chip-btn on' : 'chip-btn'} onClick={() => setCat(active === c.id ? null : c.id)}>
+              {c.name} <span className="mail-count">{c.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {watch.state === 'error' && <p className="error small">メールを読めませんでした（{watch.error}）</p>}
       {data.aiLimited && <p className="error small">AI の上限に達したため、新しいメールを振り分けていません</p>}
-      {empty && <p className="muted">返事や対応が要るメールはありません</p>}
-      {(['reply', 'action', 'waiting'] as const).map((g) => data[g].length > 0 && (
+      {empty && <p className="muted">{active ? 'このカテゴリーに、返事や対応が要るメールはありません' : '返事や対応が要るメールはありません'}</p>}
+      {(['reply', 'action', 'waiting'] as const).map((g) => view[g].length > 0 && (
         <section key={g} className="mail-group">
-          <h2>{MAIL_GROUP_LABELS[g]} <span className="mail-count">{data[g].length}</span></h2>
-          <ul className="mail-list">{data[g].map((t) => <MailRow key={t.threadId} item={t} onOpen={onOpen} />)}</ul>
+          <h2>{MAIL_GROUP_LABELS[g]} <span className="mail-count">{view[g].length}</span></h2>
+          <ul className="mail-list">{view[g].map((t) => <MailRow key={t.threadId} item={t} onOpen={onOpen} showCategory={!active} />)}</ul>
         </section>
       ))}
-      {data.read.length > 0 && (
-        <details className="mail-group">
-          <summary>{MAIL_GROUP_LABELS.read} <span className="mail-count">{data.read.length}</span></summary>
-          <ul className="mail-list">{data.read.map((t) => <MailRow key={t.threadId} item={t} onOpen={onOpen} />)}</ul>
+      {(['read', 'promo'] as const).map((g) => view[g].length > 0 && (
+        <details key={g} className="mail-group">
+          <summary>{MAIL_GROUP_LABELS[g]} <span className="mail-count">{view[g].length}</span></summary>
+          <ul className="mail-list">{view[g].map((t) => <MailRow key={t.threadId} item={t} onOpen={onOpen} showCategory={!active} />)}</ul>
         </details>
-      )}
-      {data.promoCount > 0 && <p className="muted small mail-foot">宣伝・お知らせ {data.promoCount} 件（並べていません）</p>}
+      ))}
     </div>
   );
 }
 
-/** 一覧の 1 行。 */
-function MailRow({ item: t, onOpen }: { item: MailItem; onOpen: (threadId: string) => void }) {
+/**
+ * 一覧の 1 行。
+ *
+ * @param showCategory カテゴリーの名前を添える（カテゴリーで絞っているときは添えない）
+ */
+function MailRow({ item: t, onOpen, showCategory = true }: { item: MailItem; onOpen: (threadId: string) => void; showCategory?: boolean }) {
   const soon = t.dueDate !== null && t.dueDate <= new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
   return (
     <li>
       <button type="button" className="mail-row" onClick={() => onOpen(t.threadId)}>
         <span className="mail-from">{t.group === 'waiting' ? `→ ${nameOf(t.from)}` : nameOf(t.from)}</span>
-        <span className="mail-subject">{t.subject}</span>
+        <span className="mail-subject">{t.subject}{showCategory && t.category && <span className="chip mail-cat">{t.category.name}</span>}</span>
         {(t.summary || t.due) && (
           <span className="mail-summary">
             {t.summary}
@@ -213,7 +265,7 @@ function MailThread({ threadId, onBack }: { threadId: string; onBack: () => void
           <li key={m.id} className={m.mine ? 'mine' : ''}>
             <details open={i >= messages.length - 2}>
               <summary><strong>{m.mine ? '自分' : nameOf(m.from)}</strong> <span className="muted small">{when(m.at)}</span></summary>
-              <div className="mail-body">{m.body}</div>
+              {m.html ? <MailHtml html={m.html} /> : <div className="mail-body">{m.body}</div>}
             </details>
           </li>
         ))}

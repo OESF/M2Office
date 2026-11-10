@@ -400,6 +400,9 @@ export function opsApp(deps: OpsDeps): Hono<OpsEnv> {
   // ---- 会社 ----
   app.get('/v1/ops/tenants', async (c) => c.json({ tenants: await store.tenantOverview() }));
 
+  // メールの学びの週ごとの数（ベータテスト。本人が共有を頼んだ人だけ。数だけで、名前・中身は返さない。第9.5.1.1.2節）
+  app.get('/v1/ops/mail-learning', async (c) => c.json({ rows: await store.mailLearningShared() }));
+
   // CSV の書き出し（運営の操作の記録に残す）
   app.get('/v1/ops/tenants.csv', async (c) => {
     const rows = await store.tenantOverview();

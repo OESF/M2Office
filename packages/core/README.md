@@ -87,8 +87,10 @@ src/members/     会員とポイント（内蔵の拡張。第40章の段 1・�
                  ランク（service.ts の rankCutOf・rankOf。第40.19節）、サイネージの特典の 1 枚（screen.ts）、
                  ツール（tools.ts。members.find・points・rewards・rank・send_line）、付属の業務「会員とポイント」「会員に LINE で知らせる」（agents.ts）。
                  段 2 で週の見立て・会員への LINE の知らせ（承認の後）・誕生日と誕生月の特典
-src/mail/        メールの画面（第9.5.1.1節）。置き場（store.ts。表 mail_watch・mail_threads）、見回り（watch.ts。履歴の番号で差分を読み、スレッドごとに振り分け、返信・アーカイブで片付け、返事待ち・下書き・急ぎの知らせ）、
-                 推論（triage.ts。振り分け・返事待ちの見分け・下書き）、画面の処理（service.ts）、ツール（tools.ts。mail.reply_send・mail.brief）、業務「メールの返事を送る」（agents.ts）、秘書の言い回し（secretary.ts）
+src/mail/        メールの画面（第9.5.1.1節）。置き場（store.ts。表 mail_watch・mail_threads・mail_categories）、見回り（watch.ts。履歴の番号で差分を読み、スレッドごとに振り分け、返信・アーカイブで片付け、返事待ち・下書き・急ぎの知らせ）、
+                 推論（triage.ts。振り分け・返事待ちの見分け・下書き）、画面の処理（service.ts）、ツール（tools.ts。mail.reply_send・mail.brief）、業務「メールの返事を送る」（agents.ts）、秘書の言い回し（secretary.ts）、
+                 カテゴリー（categories.ts。最初の候補・振り分けに足す決まり・似たものをまとめる・本人の直しを読む。第9.5.1.1.1節）、
+                 学び（learning.ts。本人の直しとふるまいから相手ごとの傾向を覚え、振り分けと下書きに当てる・週ごとの数。表 mail_lessons・mail_learning_weeks。第9.5.1.1.2節）
 src/library/     ナレッジの整理（内蔵の拡張。第44章の段 1〜段 5）。形式の確かめ（format.ts。拡張子と中身の先頭）、読み取り（read.ts。PDF は先頭 50 ページ・pptx・読めないものの扱い）、
                  目録の置き場（store.ts。持ち主で絞る）、処理（service.ts。ドライブに置く・同じ中身をまとめる・AI の整理とタグの付け直し・上限で止める・探す・成果物の自動の登録）、
                  メールの添付の取り込み（mail.ts。本人が入れる・直近 1 年と新しいメール・決まりで除く・1 日 500 通）、

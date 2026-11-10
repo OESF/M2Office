@@ -14,6 +14,14 @@ export const MAIL_LIMITS = {
   pollMinutes: 15,
   /** 最後の取得からこの分数を過ぎたら、画面で「見回りが止まっています」と目立たせる（間隔の 2 倍）。 */
   staleMinutes: 30,
+  /** カテゴリーを並べるのは、最近この日数に動きのあったものだけ（第9.5.1.1.1節）。 */
+  categoryActiveDays: 30,
+  /** 並べるカテゴリーがこの数を超えたら、AI が似たものをまとめる。 */
+  categoryMergeAbove: 12,
+  /** 本人の直しを覚えておく数（新しいものから。次の振り分けに生かす）。 */
+  categoryLessons: 40,
+  /** カテゴリーの名前の長さ。 */
+  categoryNameChars: 20,
   /** 最初の 1 回にさかのぼる日数と、読むスレッドの数。 */
   firstDays: 14,
   firstMax: 200,
@@ -47,6 +55,8 @@ export const MAIL_GROUP_LABELS: Record<MailGroupId, string> = {
 export interface MailItem {
   threadId: string;
   group: MailGroupId;
+  /** カテゴリー（並べているカテゴリーのものだけ。第9.5.1.1.1節）。 */
+  category: { id: string; name: string } | null;
   /** 差出人（返事待ちは送った相手）。 */
   from: string;
   subject: string;
@@ -82,8 +92,12 @@ export interface MailOverview {
   action: MailItem[];
   waiting: MailItem[];
   read: MailItem[];
-  /** 宣伝・お知らせの件数（並べない）。 */
+  /** 宣伝・お知らせ（直近 14 日の新しい順に 100 件まで。画面ではたたんで出す。第 0.544.0 版）。 */
+  promo: MailItem[];
+  /** 宣伝・お知らせの件数（直近 14 日。秘書の答えに使う）。 */
   promoCount: number;
+  /** 並べるカテゴリー（最近 30 日に動きがあり、2 通以上のもの。件数の多い順）。 */
+  categories: MailCategoryChip[];
   watch: MailWatchState;
   /** 会社の AI の上限に当たり、振り分けを止めているか。 */
   aiLimited: boolean;
@@ -95,6 +109,8 @@ export interface MailThreadMessage {
   from: string;
   at: string;
   body: string;
+  /** HTML の本文（HTML のメールだけ）。画面は、プログラムを動かさない切り離した枠の中に、Gmail と同じ見た目で出す。 */
+  html?: string;
   mine: boolean;
 }
 
@@ -116,10 +132,35 @@ export interface MailThreadDetail {
   sending: { runId: string; approvalId: string | null; status: string } | null;
 }
 
+/** 本人がカテゴリーを直した例。 */
+export interface MailCategoryLesson {
+  /** 差出人のメールアドレス（返事待ちは送った相手）。 */
+  from: string;
+  subject: string;
+  /** 直した先のカテゴリーの名前（空なら「カテゴリーなし」に直した）。 */
+  category: string;
+}
+
+/** 画面に並べるカテゴリー。 */
+export interface MailCategoryChip {
+  id: string;
+  name: string;
+  /** 一覧に並んでいるメールのうち、このカテゴリーのものの数。 */
+  count: number;
+}
+
 /** 本人が秘書に頼んだこと（第9.5.1.1節）。 */
 export interface MailPrefs {
   /** 「メールは見なくていい」。 */
   paused?: boolean;
+  /** メールの学びの週ごとの数を、運営に共有する（ベータテスト。本人が秘書に頼んだときだけ。第9.5.1.1.2節）。 */
+  shareLearning?: boolean;
+  /**
+   * カテゴリーを始めた時刻（見回りが付ける印。本人の頼みではない）。カテゴリーの前から並んでいた一覧にも、一度だけカテゴリーを付けるために使う。
+   */
+  categoriesSeededAt?: string;
+  /** 最後に開いたスレッド（秘書への「このメールは〇〇の件」の「このメール」に使う）。 */
+  lastOpened?: { threadId: string; at: string };
   /**
    * 「またメールを見て」と言った。秘書の積極性が「控えめ」でも、メールは見る（言ったことを設定より先にする。第 0.543.0 版）。
    * 「メールは見なくていい」で外す。

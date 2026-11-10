@@ -13,7 +13,7 @@ import {
   type MailSummary, type TaskItem, type WorkspaceConnector,
 } from '../types.js';
 import { GOOGLE_API_ENDPOINTS, GoogleTokenSource, callGoogle, type GoogleApiEndpoints } from './http.js';
-import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, fromBase64Url, header, isBulkMail, mailAttachmentListOf, senderAuthenticated, type GmailPart } from './mime.js';
+import { buildRawMessage, decodeEntities, decodeHeaderWords, extractBody, extractHtml, fromBase64Url, inlineCidImages, header, isBulkMail, mailAttachmentListOf, senderAuthenticated, type GmailPart } from './mime.js';
 import { externalOf, pickSpace, spaceIdOf, toChatText } from './chat.js';
 import { googleDocs, googleDrive } from './drive.js';
 import { googleSheets } from './sheets.js';
@@ -245,10 +245,15 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
       return { messageId: String(res?.['id'] ?? ''), ...(res?.['threadId'] ? { threadId: String(res['threadId']) } : {}) };
     },
     /** スレッドのメールを本文つきで古い順に返す（社外との日程調整の返事を見る。仕様書 第9.5.3.1節）。 */
-    thread: async (p: ConnectorPrincipal, threadId: string): Promise<MailMessage[]> => {
+    thread: async (p: ConnectorPrincipal, threadId: string, opts?: { html?: boolean }): Promise<MailMessage[]> => {
       if (!/^[A-Za-z0-9_-]+$/.test(threadId)) return [];
       const t = await this.gmail(p, `/threads/${threadId}?format=full`) as { messages?: GmailMessage[] } | null;
-      return (t?.messages ?? []).map((m) => ({ ...toSummary(m), body: m.payload ? extractBody(m.payload) : '' }));
+      return Promise.all((t?.messages ?? []).map(async (m) => {
+        const base: MailMessage = { ...toSummary(m), body: m.payload ? extractBody(m.payload) : '' };
+        if (!opts?.html || !m.payload) return base;
+        const html = await this.htmlOf(p, m.id, m.payload);
+        return html ? { ...base, html } : base;
+      }));
     },
     /** いまの受信箱の履歴の番号（第9.5.1.1節）。 */
     historyStart: async (p: ConnectorPrincipal): Promise<string> => {
@@ -323,6 +328,32 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
       return { draftId: String(res?.['id'] ?? '') };
     },
   };
+
+  /**
+   * 1 通の HTML の本文を取り出し、埋め込みの画像に中身を入れる（動くものは、メールの画面の処理が外す。仕様書 第9.5.1.1節「1 件を開いたとき」）。
+   *
+   * @returns HTML の部分が無ければ `null`
+   * @remarks 埋め込みの画像は、1 通あたり 30 枚・合わせて 8 MB まで取りに行く。取れなかった画像は、参照のまま残す（画面では出ない）
+   */
+  private async htmlOf(p: ConnectorPrincipal, messageId: string, payload: GmailPart): Promise<string | null> {
+    const { html, inline } = extractHtml(payload);
+    if (!html) return null;
+    const images = new Map<string, { mimeType: string; data: string }>();
+    let bytes = 0;
+    for (const part of inline.slice(0, 30)) {
+      if (!html.toLowerCase().includes(`cid:${part.contentId}`)) continue;
+      if (bytes + part.size > 8 * 1024 * 1024) break;
+      let data = part.data;
+      if (!data && part.attachmentId) {
+        const a = await this.gmail(p, `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(part.attachmentId)}`).catch(() => null) as { data?: string } | null;
+        data = a?.data;
+      }
+      if (!data) continue;
+      bytes += part.size;
+      images.set(part.contentId, { mimeType: part.mimeType, data });
+    }
+    return inlineCidImages(html, images);
+  }
 
   /**
    * 返信の相手のメールから、スレッドをつなぐための値を引く。見つからなければ `null`（新しいスレッドとして送る）。

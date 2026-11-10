@@ -403,10 +403,10 @@ export function meRoute(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
-  /** 記憶をすべて消す（第11.5節「全削除」）。 */
+  /** 記憶をすべて消す（第11.5節「全削除」）。メールの傾向（第9.5.1.1.2節）も消す。 */
   app.delete('/memories', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const removed = await deps.repo.clearMemories(tenant.id, user.id);
+    const removed = (await deps.repo.clearMemories(tenant.id, user.id)) + (await deps.mail.service.clearLessons({ tenantId: tenant.id, userId: user.id }).catch(() => 0));
     await audit(deps, tenant.id, user.id, 'memory.clear', String(removed));
     return c.json({ ok: true, removed });
   });

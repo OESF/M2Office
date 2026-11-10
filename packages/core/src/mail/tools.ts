@@ -10,6 +10,7 @@ import { MAIL_LIMITS } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { MailStore, MailOutgoing } from './store.js';
 import { businessDaysSince, doneRow, mailDay, waitDaysFor } from './watch.js';
+import { learningProgressOf } from './learning.js';
 
 /** ツールに渡すもの。 */
 export interface MailToolContext {
@@ -100,5 +101,30 @@ export const mailBrief: Tool = {
   },
 };
 
+/**
+ * メールの学びの進み具合（第9.5.1.1.2節「進み具合」）。週次ブリーフに 1 行で伝える（「今週の直しは 3 回でした（先週 7 回）」）。
+ *
+ * @remarks 危険度 `read`。数だけを返し、メールの中身は返さない
+ */
+export const mailLearning: Tool = {
+  name: 'mail.learning',
+  risk: 'read',
+  activityLabel: 'メールの学びの進み具合を読んでいます',
+  helpText: '週次ブリーフに載せる、メールの分け方を直した回数（今週と先週）を読みます',
+  description: 'メールの分け方を本人が直した回数と、振り分けの外れの数を、今週と先週で返す。line はブリーフにそのまま載せる 1 行。メールの画面を使っていなければ available が false',
+  args: { properties: {} },
+  async invoke(_args, ctx: ToolContext) {
+    if (!ctx.mail) return { available: false, note: 'メールの画面を使っていません' };
+    const w = await ctx.mail.store.watch(principal(ctx));
+    if (!w?.checkedAt) return { available: false, note: 'メールの画面をまだ使っていません' };
+    const p = await learningProgressOf(ctx.mail.store, principal(ctx), new Date());
+    const total = (x: { corrections: number; misses: number }) => x.corrections + x.misses;
+    const line = p.lastWeek
+      ? `メールの分け方の直しと外れは、今週 ${total(p.thisWeek)} 回でした（先週 ${total(p.lastWeek)} 回）。`
+      : `メールの分け方の直しと外れは、今週 ${total(p.thisWeek)} 回でした。`;
+    return { available: true, thisWeek: p.thisWeek, lastWeek: p.lastWeek, line };
+  },
+};
+
 /** メールの片付けのツール。 */
-export const MAIL_TOOLS: Tool[] = [mailReplySend, mailBrief];
+export const MAIL_TOOLS: Tool[] = [mailReplySend, mailBrief, mailLearning];

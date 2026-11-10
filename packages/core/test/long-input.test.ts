@@ -25,6 +25,8 @@ import { externalRefs } from '../src/signage/service.js';
 import { guessInquiry } from '../src/inquiries/extract.js';
 import { afterLabel, parseHeader, parseSpeech, splitReport } from '../src/decisions/format.js';
 import { libraryOkfTag } from '../src/library/okf.js';
+import { extractHtml, htmlToText, sanitizeMailHtml } from '../src/connectors/google/mime.js';
+import { mailCommand } from '../src/mail/secretary.js';
 
 /** かかった時間（ミリ秒）。 */
 const ms = (fn: () => unknown) => { const t = performance.now(); fn(); return performance.now() - t; };
@@ -147,3 +149,27 @@ test('ナレッジの整理の目録のタグの形は、空白が長く続く�
   assert.equal(libraryOkfTag(' ・ '), null);
   assert.equal(libraryOkfTag('2026'), '_2026');
 });
+
+test('メールの HTML を画面に出す・文字に直す処理は、閉じの無い形が長く続く 2 MB のメールでもすぐ終わる（第9.5.1.1節「1 件を開いたとき」）', () => {
+  const mb = 2 * 1024 * 1024;
+  const evil: [string, string][] = [
+    ['<!--', '<!--'.repeat(mb / 4)], ['<script', '<script'.repeat(mb / 7)], ['<style', '<style>'.repeat(mb / 7)], ['<', '<'.repeat(mb)],
+    ['<a', '<a'.repeat(mb / 2)], ['on="', '<a onx="'.repeat(mb / 8) + '>'], ['空白', `<a${' '.repeat(mb)}>`], ['&', '&amp'.repeat(mb / 4)],
+    ['href', '<a href=javascript'.repeat(mb / 18)], ['cid', '<img src="cid:'.repeat(mb / 14)],
+  ];
+  for (const [name, html] of evil) {
+    const took = ms(() => { sanitizeMailHtml(html); htmlToText(html); extractHtml({ mimeType: 'text/html', body: { data: Buffer.from(html).toString('base64url') } }); });
+    assert.ok(took < 2_000, `${name}（2 MB。${Math.round(took)} ms）`);
+  }
+  // ふつうの HTML は前と同じに直す
+  assert.equal(htmlToText('<p>a</p><script>x</script><p>b&amp;c</p>'), 'a\nb&c');
+  assert.equal(sanitizeMailHtml('<p onclick="x()">a</p><a href="javascript:alert(1)">b</a>'), '<p  >a</p><a rel="noopener noreferrer" href="#blocked-:alert(1)">b</a>');
+});
+
+test('メールの画面への頼みの見分けは、上限いっぱいのいじわるな文でもすぐ終わる（第9.5.1.1.1節・第9.5.1.1.2節）', () => {
+  for (const evil of ['の'.repeat(20_000), 'から'.repeat(10_000), `${'あ'.repeat(19_990)}は大事`, 'カテゴリー'.repeat(4_000), 'メール'.repeat(6_000)]) {
+    const took = ms(() => mailCommand(evil));
+    assert.ok(took < 200, `${evil.slice(0, 6)}…（${Math.round(took)} ms）`);
+  }
+});
+

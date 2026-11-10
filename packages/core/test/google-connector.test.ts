@@ -19,7 +19,7 @@ import {
   type GoogleApiEndpoints, type LlmProvider, type LlmRequest, type Repository, type WorkspaceConnector,
 } from '../src/index.js';
 import {
-  buildRawMessage, decodeHeaderWords, decodeText, extractBody, htmlToText, MAX_BODY_CHARS,
+  buildRawMessage, decodeHeaderWords, decodeText, extractBody, extractHtml, htmlToText, inlineCidImages, sanitizeMailHtml, MAX_BODY_CHARS,
 } from '../src/connectors/google/mime.js';
 import { MAX_CHAT_CHARS, pickSpace, spaceIdOf, toChatText } from '../src/connectors/google/chat.js';
 
@@ -75,6 +75,39 @@ test('MIME: 本文は text/plain を優先し、無ければ HTML から文字�
   assert.ok(long.startsWith('あ'.repeat(MAX_BODY_CHARS)));
   assert.match(long, /ここで切りました/);
   assert.equal(htmlToText('<p>a</p><p>b</p>'), 'a\nb');
+});
+
+test('MIME: HTML から文字にするとき、宣伝のメールの記号を戻し、見えない文字を消し、表のマスを区切る', () => {
+  assert.equal(htmlToText('<div>おすすめ&zwnj;&nbsp;&zwnj;&nbsp;</div><table><tr><td>セール</td><td>&yen;1,980&hellip;</td></tr></table>&copy; 2026<!-- x -->'),
+    'おすすめ\nセール ¥1,980…\n\n© 2026');
+});
+
+test('MIME: HTML の本文と埋め込みの画像を取り出し、cid の参照に中身を入れる', () => {
+  const payload = {
+    mimeType: 'multipart/related', parts: [
+      { mimeType: 'multipart/alternative', parts: [
+        { mimeType: 'text/plain', body: { data: b64url('HTML 形式のメールです') } },
+        { mimeType: 'text/html', body: { data: b64url('<p>本文</p><img src="cid:Logo@x">') } },
+      ] },
+      { mimeType: 'image/png', filename: 'logo.png', headers: [{ name: 'Content-ID', value: '<Logo@x>' }], body: { data: b64url('PNG'), size: 3 } },
+    ],
+  };
+  const { html, inline } = extractHtml(payload);
+  assert.equal(html, '<p>本文</p><img src="cid:Logo@x">');
+  assert.deepEqual(inline.map((x) => x.contentId), ['logo@x']);
+  const out = inlineCidImages(html, new Map([['logo@x', { mimeType: 'image/png', data: inline[0]!.data! }]]));
+  assert.ok(out.includes(`src="data:image/png;base64,${Buffer.from('PNG').toString('base64')}"`));
+  assert.equal(extractHtml({ mimeType: 'text/plain', body: { data: b64url('文字だけ') } }).html, '');
+});
+
+test('MIME: 画面に出す HTML から、プログラム・枠の入れ子・自動の移動・入力欄を外す（見た目は残す）', () => {
+  const dirty = '<style>p{color:red}</style><p onclick="alert(1)" style="color:blue">本文</p><script>alert(1)</script>'
+    + '<iframe src="https://evil.example"></iframe><meta http-equiv="refresh" content="0;url=https://evil.example">'
+    + '<form action="https://evil.example"><input name="pw"></form><a href="javascript:alert(1)">x</a><a href="https://ok.example">ok</a><img src="https://img.example/a.png">';
+  const clean = sanitizeMailHtml(dirty);
+  for (const bad of ['<script', 'onclick', '<iframe', 'http-equiv', '<form', '<input', 'javascript:']) assert.ok(!clean.toLowerCase().includes(bad), bad);
+  for (const keep of ['<style>p{color:red}</style>', 'style="color:blue"', 'href="https://ok.example"', 'src="https://img.example/a.png"']) assert.ok(clean.includes(keep), keep);
+  assert.ok(clean.includes('<a rel="noopener noreferrer" href="https://ok.example">'), 'リンクは開いた先から画面を操れない');
 });
 
 test('MIME: 組むメールは UTF-8。件名を符号化し、見出しに改行を差し込ませない。返信はスレッドをつなぐ', () => {

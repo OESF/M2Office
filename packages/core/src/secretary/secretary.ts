@@ -29,7 +29,7 @@ import { memorySemanticEnabled } from '../memory/embed.js';
 import { jstDay } from '../memory/learn.js';
 import { bulkMailRequest, contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
-import { findThread, mailCommand, mailDraftsText, mailOverviewText, mailWaitingText, type MailCommand } from '../mail/secretary.js';
+import { findThread, mailCategoryText, mailCommand, mailDraftsText, mailLessonsText, mailOverviewText, mailWaitingText, type MailCommand } from '../mail/secretary.js';
 import type { MailService } from '../mail/service.js';
 import { answerAttendance, attendanceRequest, payslipRequest } from './attendance.js';
 import type { AttendanceService } from '../hr/attendance-service.js';
@@ -365,6 +365,18 @@ export class Secretary {
       return { reply: await this.answerHowTo(tenantId, userId, message, this.deps.help), keep: true };
     }
 
+    // 「〇〇さんのことは忘れて」は、メールの分け方で覚えている相手に合えば、その学びを消す（第9.5.1.1.2節）。合わなければ、ふつうの記憶の「忘れて」へ
+    {
+      const forget = this.deps.mail ? mailCommand(cmd) : null;
+      if (forget?.kind === 'forget') {
+        const n = await this.deps.mail!.forgetLessonsAbout({ tenantId, userId }, forget.who).catch(() => 0);
+        if (n > 0) {
+          await this.audit(tenantId, userId, 'secretary.mail', 'forget');
+          return { reply: { layer: 'light', text: `わかりました。メールの分け方で「${forget.who}」について覚えていたことを ${n} 件忘れました。`, evidence: [], tokensUsed: 0 }, keep: true };
+        }
+      }
+    }
+
     // 「それは違う」「〇〇は忘れて」は、秘書が自分で記憶を直す（仕様書 第11.5.3節、ADR-0028）。
     // 記憶の話でなければ推論が「無し」と返し、ふつうの答えに進む
     if (CORRECTION.test(cmd)) {
@@ -569,7 +581,11 @@ export class Secretary {
       return this.delegate(tenantId, userId, message, lookup, '名刺を探す依頼', llm);
     }
     // メールの画面への頼み（第9.5.1.1節）。止める・戻す・すぐ知らせる相手・待つ日数・済んだ・返事の下書き・返事待ち
-    const mailCmd = !pastOnly && this.deps.mail ? mailCommand(cmd) : null;
+    let mailCmd = !pastOnly && this.deps.mail ? mailCommand(cmd) : null;
+    // 「A と B は同じにして」は、カテゴリーが 1 つも無ければメールの頼みとして扱わない
+    if (mailCmd?.kind === 'teach' && mailCmd.weak && !(await this.deps.mail!.store.categories({ tenantId, userId }).catch(() => [])).length) mailCmd = null;
+    // 「〇〇さんのことは忘れて」は、ふつうの記憶の直しの前に見ている（合わなかったものだけがここに来る）
+    if (mailCmd?.kind === 'forget') mailCmd = null;
     if (mailCmd) {
       const answer = await this.answerMailCommand(tenantId, userId, mailCmd);
       await this.audit(tenantId, userId, 'secretary.mail', mailCmd.kind);
@@ -1235,6 +1251,9 @@ export class Secretary {
   }
 
   private matchDirect(message: string) {
+    // メールの画面への頼み（「メールは見なくていい」「このメールは新店舗の件」「メールについて何を覚えてる？」）は、
+    // 未読の件数や記憶の一覧の照会にしない（第9.5.1.1節・第9.5.1.1.2節）
+    if (this.deps.mail && mailCommand(message) !== null) return undefined;
     return DIRECT_QUERIES.find(
       (q) => q.patterns.some((p) => p.test(message)) && !q.excludes?.some((p) => p.test(message)),
     );
@@ -1341,7 +1360,27 @@ export class Secretary {
       }
       case 'drafts':
         return done(mailDraftsText(await mail.overview(o)));
+      case 'teach': {
+        const r = await mail.categoryRequest(o, c.text);
+        return { text: r.text, evidence: note, tokensUsed: r.tokensUsed };
+      }
+      case 'lessons':
+        return done(mailLessonsText(await mail.lessonsView(o)));
+      case 'forget':
+        return done('メールの分け方で、その相手について覚えていることはありません。');
+      case 'share':
+        await mail.setPrefs(o, (p) => ({ ...p, shareLearning: c.on }));
+        return done(c.on
+          ? 'わかりました。メールの学びの週ごとの数（直した回数と振り分けの外れ）だけを、運営に共有します。メールの中身・相手・件名・お名前は共有しません。やめるときは「メールの学びの共有をやめて」と言ってください。'
+          : 'わかりました。メールの学びの数の共有をやめました。');
+      case 'categoryAsk': {
+        const r = await mail.findByCategory(o, c.words);
+        return done(mailCategoryText(c.words, r.category, r.items));
+      }
       case 'done': {
+        // 「補助金の件はもう終わった」: カテゴリーの名前に合えば、そのカテゴリーを並べなくする（第9.5.1.1.1節）
+        const ended = await mail.endCategory(o, c.words);
+        if (ended) return done(`わかりました。「${ended}」は終わったものとして、一覧の上に並べないようにしました。またメールが来たら並べます。`);
         const t = findThread(await mail.overview(o), c.words);
         if (!t) return done(`「${c.words}」に合うメールが一覧に見つかりませんでした。メールの画面で「済み」を押してください。\n\n[メールを開く](/mail)`);
         await mail.done(o, t.threadId);

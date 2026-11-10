@@ -9,3 +9,5 @@ export * from './service.js';
 export * from './tools.js';
 export * from './agents.js';
 export * from './secretary.js';
+export * from './categories.js';
+export * from './learning.js';

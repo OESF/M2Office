@@ -1947,6 +1947,9 @@ export const api = {
   mail: {
     overview: () => call<MailOverview>('/mail'),
     count: () => call<{ reply: number }>('/mail/count'),
+    /** 覚えていること（メールの学び。第9.5.1.1.2節）。 */
+    lessons: () => call<{ items: { id: string; text: string; source: 'told' | 'behavior'; at: string }[] }>('/mail/lessons'),
+    deleteLesson: (id: string) => call<{ ok: true }>(`/mail/lessons/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     thread: (id: string) => call<MailThreadDetail>(`/mail/threads/${encodeURIComponent(id)}`),
     saveDraft: (id: string, draft: string) => call<{ ok: true }>(`/mail/threads/${encodeURIComponent(id)}/draft`, { method: 'PUT', body: JSON.stringify({ draft }) }),
     redraft: (id: string, instruction?: string) => call<{ draft: string }>(`/mail/threads/${encodeURIComponent(id)}/redraft`, { method: 'POST', body: JSON.stringify(instruction ? { instruction } : {}) }),
