@@ -27,7 +27,8 @@ import { DebugOverlay } from './DebugPanel.js';
 import { setDebugMode } from './debug.js';
 
 // 読み込みの途中で明るさが変わらないよう、描画の前に反映する（仕様書 第6.1.2節）
-applyTheme();
+// 申し込みのページは、紹介のサイトから移ってきたとき急に暗くならないよう、いつも明るい表示にする（第23.3.1節）
+applyTheme(location.hostname.startsWith('signup.') ? 'light' : undefined);
 
 /** サイネージの再生のページ（仕様書 第31.9.1節）。ログインを使わないため、ワークスペースとは別に、必要なときだけ読み込む。 */
 const SignagePlayer = lazy(() => import('./SignagePlayer.js').then((m) => ({ default: m.SignagePlayer })));

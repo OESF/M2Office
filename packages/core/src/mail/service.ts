@@ -22,6 +22,8 @@ export interface MailServiceDeps {
   mail: MailConnector;
   watch: MailWatch;
   llmFor(tenantId: string): Promise<LlmProvider | null>;
+  /** いまの時刻（テスト用。既定は本当の時刻）。見回りが止まっているかを決めるのに使う。 */
+  now?: () => Date;
 }
 
 /** メールアドレスの形（宛先の確かめ）。 */
@@ -50,11 +52,14 @@ export class MailService {
   async watchState(o: MailOwner): Promise<MailWatchState> {
     const why = await this.deps.watch.reasonNotToWatch(o);
     const w = await this.deps.store.watch(o);
-    if (why === 'paused' || why === 'low') return { state: 'paused', checkedAt: w?.checkedAt ?? null, error: null };
-    if (why) return { state: 'off', checkedAt: w?.checkedAt ?? null, error: null };
-    if (!w?.checkedAt || !w.historyId) return { state: w?.error ? 'error' : 'starting', checkedAt: w?.checkedAt ?? null, error: w?.error ?? null };
-    if (w.error && !w.error.startsWith(MAIL_AI_LIMIT_MARK)) return { state: 'error', checkedAt: w.checkedAt, error: w.error };
-    return { state: 'ready', checkedAt: w.checkedAt, error: null };
+    const checkedAt = w?.checkedAt ?? null;
+    if (why === 'paused' || why === 'low') return { state: 'paused', checkedAt, error: null, stale: false };
+    if (why) return { state: 'off', checkedAt, error: null, stale: false };
+    // 見回っているはずの人で、最後の取得から間隔の 2 倍を過ぎていれば、止まっているとみなす
+    const stale = checkedAt !== null && (this.deps.now?.() ?? new Date()).getTime() - Date.parse(checkedAt) > MAIL_LIMITS.staleMinutes * 60_000;
+    if (!checkedAt || !w?.historyId) return { state: w?.error ? 'error' : 'starting', checkedAt, error: w?.error ?? null, stale };
+    if (w.error && !w.error.startsWith(MAIL_AI_LIMIT_MARK)) return { state: 'error', checkedAt, error: w.error, stale };
+    return { state: 'ready', checkedAt, error: null, stale };
   }
 
   /**

@@ -12,6 +12,8 @@ export const MAIL_MENU_ID = 'mail';
 export const MAIL_LIMITS = {
   /** 見回りの間隔（分）。 */
   pollMinutes: 15,
+  /** 最後の取得からこの分数を過ぎたら、画面で「見回りが止まっています」と目立たせる（間隔の 2 倍）。 */
+  staleMinutes: 30,
   /** 最初の 1 回にさかのぼる日数と、読むスレッドの数。 */
   firstDays: 14,
   firstMax: 200,
@@ -67,8 +69,11 @@ export interface MailItem {
 export interface MailWatchState {
   /** off（Google が未接続か、読む許可が無い）・paused（本人が止めた）・starting（最初の 1 回の前）・ready・error。 */
   state: 'off' | 'paused' | 'starting' | 'ready' | 'error';
+  /** 最後にメールを取得した日時（一覧の上に出す）。 */
   checkedAt: string | null;
   error: string | null;
+  /** 見回っているはずなのに、最後の取得から `MAIL_LIMITS.staleMinutes` 分を過ぎている（ワーカーが止まっているなど）。 */
+  stale: boolean;
 }
 
 /** メールの画面の中身。 */
@@ -115,6 +120,11 @@ export interface MailThreadDetail {
 export interface MailPrefs {
   /** 「メールは見なくていい」。 */
   paused?: boolean;
+  /**
+   * 「またメールを見て」と言った。秘書の積極性が「控えめ」でも、メールは見る（言ったことを設定より先にする。第 0.543.0 版）。
+   * 「メールは見なくていい」で外す。
+   */
+  keepWatching?: boolean;
   /** 「〇〇さんからのメールはすぐ知らせて」の相手（名前かメールアドレスの一部）。 */
   urgentFrom?: string[];
   /** 「〇〇さんは 1 週間待って」の相手ごとの営業日。 */

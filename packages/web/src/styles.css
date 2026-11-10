@@ -3248,7 +3248,7 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .mail-subject { grid-area: subject; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-summary { grid-area: summary; color: var(--muted); font-size: calc(13px * var(--font-scale)); display: flex; gap: 6px; align-items: center; min-width: 0; }
 .mail-when { grid-area: when; white-space: nowrap; align-self: center; }
-.mail-foot { margin: 0; }
+.mail-foot, .mail-fetched { margin: 0; }
 .mail-title { margin: 0; font-size: calc(18px * var(--font-scale)); }
 .mail-messages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(6px * var(--space-scale)); }
 .mail-messages > li { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); }

@@ -74,6 +74,34 @@ test('15 分たっていなければ見ない。本人が止めた・積極性�
   assert.equal(await low.watch.runFor(o, now, true), null);
 });
 
+test('積極性が「控えめ」でも、「またメールを見て」と言えばメールは見る。「見なくていい」で止まる（第 0.543.0 版）', async () => {
+  const low = setup({ proactivity: 'low' });
+  const now = new Date();
+  assert.equal(await low.watch.reasonNotToWatch(o), 'low');
+  await low.service.setPrefs(o, (p) => ({ ...p, paused: false, keepWatching: true }));
+  assert.equal(await low.watch.reasonNotToWatch(o), null);
+  assert.ok(await low.watch.runFor(o, now, true));
+  await low.service.setPrefs(o, ({ keepWatching: _, ...p }) => ({ ...p, paused: true }));
+  assert.equal(await low.watch.reasonNotToWatch(o), 'paused');
+});
+
+test('最後の取得から 30 分を過ぎたら、見回りが止まっているとみなす。止めている人は止まっているとみなさない', async () => {
+  let clock = new Date();
+  const s = setup();
+  const service = new MailService({ store: s.store, repo: s.repo, mail: s.connector.mail, watch: s.watch, llmFor: async () => null, now: () => clock });
+  await s.watch.runFor(o, clock, true);
+  const first = (await service.overview(o)).watch;
+  assert.equal(first.stale, false);
+  assert.ok(first.checkedAt, '最後の取得の日時を返す');
+  clock = new Date(clock.getTime() + 31 * 60_000);
+  assert.equal((await service.overview(o)).watch.stale, true);
+  await service.setPrefs(o, (p) => ({ ...p, paused: true }));
+  const paused = (await service.overview(o)).watch;
+  assert.equal(paused.state, 'paused');
+  assert.equal(paused.stale, false);
+  assert.ok(paused.checkedAt, '止めているときも最後の取得の日時を返す');
+});
+
 test('本人がそのスレッドに返信したら片付く（未読かどうかでは決めない）', async () => {
   const { watch, service, connector } = setup();
   const now = new Date();

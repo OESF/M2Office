@@ -1323,10 +1323,11 @@ export class Secretary {
     const done = (text: string) => ({ text, evidence: note, tokensUsed: 0 });
     switch (c.kind) {
       case 'pause':
-        await mail.setPrefs(o, (p) => ({ ...p, paused: true }));
+        await mail.setPrefs(o, ({ keepWatching: _, ...p }) => ({ ...p, paused: true }));
         return done('わかりました。これからはメールを見ません。また見てほしいときは「またメールを見て」と言ってください。');
       case 'resume':
-        await mail.setPrefs(o, (p) => ({ ...p, paused: false }));
+        // 積極性が「控えめ」でも、言われたらメールは見る（第9.5.1.1節「見る人」。第 0.543.0 版）
+        await mail.setPrefs(o, (p) => ({ ...p, paused: false, keepWatching: true }));
         return done('わかりました。また 15 分ごとにメールを見て、片付けておきます。');
       case 'urgent':
         await mail.setPrefs(o, (p) => ({ ...p, urgentFrom: [...new Set([...(p.urgentFrom ?? []), c.who])].slice(0, 30) }));

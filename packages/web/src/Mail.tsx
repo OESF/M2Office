@@ -26,6 +26,28 @@ function when(iso: string | null): string {
     : d.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' });
 }
 
+/** 日時を、今日なら時刻だけ、ほかの日は月日と時刻で。 */
+function stamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const time = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })} ${time}`;
+}
+
+/**
+ * 最後にメールを取得した日時（第9.5.1.1節「一覧」。第 0.543.0 版）。見回りが止まっているのか、新しいメールが無いのかを見分けられるようにする。
+ *
+ * @param watch 見回りの様子。止まっているとき（`stale`）は目立たせる
+ */
+function LastFetch({ watch }: { watch: MailOverview['watch'] }) {
+  if (!watch.checkedAt) return null;
+  return (
+    <p className={watch.stale ? 'error small mail-fetched' : 'muted small mail-fetched'}>
+      最終の取得 {stamp(watch.checkedAt)}{watch.stale && '・見回りが止まっています'}
+    </p>
+  );
+}
+
 /** 宛先の欄の文字を、1 人ずつに分ける。 */
 const splitList = (v: string) => v.split(/[,、\n]/).map((x) => x.trim()).filter(Boolean);
 
@@ -56,11 +78,12 @@ function MailList({ onOpen }: { onOpen: (threadId: string) => void }) {
   if (!data) return <p className="muted"><Busy>読み込んでいます…</Busy></p>;
   const { watch } = data;
   if (watch.state === 'off') return <p className="muted">Google と接続すると使えます。<a className="link" href="/settings/google">接続する</a></p>;
-  if (watch.state === 'paused') return <p className="muted">メールを見るのを止めています。秘書に「またメールを見て」と言えば戻ります。</p>;
+  if (watch.state === 'paused') return <><p className="muted">メールを見るのを止めています。秘書に「またメールを見て」と言えば戻ります。</p><LastFetch watch={watch} /></>;
   if (watch.state === 'starting') return <p className="muted"><Busy>最近 14 日のメールを見ています…</Busy></p>;
   const empty = !data.reply.length && !data.action.length && !data.waiting.length;
   return (
     <div className="mail">
+      <LastFetch watch={watch} />
       {watch.state === 'error' && <p className="error small">メールを読めませんでした（{watch.error}）</p>}
       {data.aiLimited && <p className="error small">AI の上限に達したため、新しいメールを振り分けていません</p>}
       {empty && <p className="muted">返事や対応が要るメールはありません</p>}
@@ -76,10 +99,7 @@ function MailList({ onOpen }: { onOpen: (threadId: string) => void }) {
           <ul className="mail-list">{data.read.map((t) => <MailRow key={t.threadId} item={t} onOpen={onOpen} />)}</ul>
         </details>
       )}
-      <p className="muted small mail-foot">
-        {data.promoCount > 0 && <>宣伝・お知らせ {data.promoCount} 件（並べていません）・</>}
-        {watch.checkedAt && <>{when(watch.checkedAt)} に確認</>}
-      </p>
+      {data.promoCount > 0 && <p className="muted small mail-foot">宣伝・お知らせ {data.promoCount} 件（並べていません）</p>}
     </div>
   );
 }

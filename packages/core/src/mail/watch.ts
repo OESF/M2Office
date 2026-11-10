@@ -126,8 +126,10 @@ export class MailWatch {
     const { repo, store } = this.deps;
     const user = await repo.findUserById(o.tenantId, o.userId);
     if (!user || user.status !== 'active') return 'inactive';
-    if ((await repo.getUserSettings(o.tenantId, o.userId)).secretary.proactivity === 'low') return 'low';
-    if ((await store.watch(o))?.prefs.paused) return 'paused';
+    const prefs = (await store.watch(o))?.prefs ?? {};
+    if (prefs.paused) return 'paused';
+    // 「控えめ」でも、本人が「またメールを見て」と言っていれば見る（第 0.543.0 版）
+    if (!prefs.keepWatching && (await repo.getUserSettings(o.tenantId, o.userId)).secretary.proactivity === 'low') return 'low';
     if (!this.deps.isMock(o.tenantId)) {
       const conn = await repo.getGoogleConnection(o.tenantId, o.userId).catch(() => null);
       if (!conn || !conn.scopes.includes('gmail.readonly')) return 'not-connected';

@@ -118,9 +118,10 @@ function Apply() {
         <h1>M2Office のお申し込み</h1>
         {/* 料金は紹介のサイトに書いてあるので、ここには出さない（仕様書 第23.3.1節「料金」） */}
         {!status.open && <p className="error">いまは申し込みを受け付けていません。</p>}
+        {status.open && !status.applicant && <p className="muted">会社の Google Workspace のメールアドレスで申し込みます（gmail.com などの個人のアカウントでは申し込めません）。</p>}
         {status.open && !status.applicant && (
           <div className="row">
-            {status.google && <a className="btn" href="/v1/signup/auth/google/start">Google でログイン</a>}
+            {status.google && <a className="btn" href="/v1/signup/auth/google/start">Google で申し込む</a>}
             {status.devLogin && (
               <>
                 <input aria-label="開発用のメールアドレス" placeholder="開発用のメールアドレス" value={email} onChange={(e) => setEmail(e.target.value)} />
