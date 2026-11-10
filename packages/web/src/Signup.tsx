@@ -137,11 +137,13 @@ function Apply() {
               <button className="btn ghost small" disabled={busy} onClick={() => void logout()}>ログアウト</button>
             </div>
             <label className="field">会社名
-              <input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
+              <input value={name} maxLength={200} placeholder="例: 株式会社サンプル" onChange={(e) => setName(e.target.value)} />
             </label>
             <label className="field">サブドメイン
-              <span className="signup-sub"><input value={subdomain} maxLength={63} onChange={(e) => setSubdomain(e.target.value)} /><span className="muted">.{base}</span></span>
+              <span className="signup-sub"><input value={subdomain} maxLength={63} placeholder="例: sample" onChange={(e) => setSubdomain(e.target.value)} /><span className="muted">.{base}</span></span>
             </label>
+            {/* 使える文字の決まり（三浦さんの求め。第 0.549.4 版）。サブドメインは後から変えられないので、ここで伝える */}
+            <p className="muted small signup-note">英小文字・数字・ハイフンで 3〜63 文字（先頭と末尾はハイフンにできません）。あとから変えられません。</p>
             {check && (check.available ? <p className="ok-msg small">使えます</p> : <p className="error small">{check.error}</p>)}
             <label className="check">
               <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} />
