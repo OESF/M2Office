@@ -60,10 +60,13 @@ export const SENT_RULE = [
 
 /** 推論の答えの JSON の `items` を取り出す。読めなければ空。 */
 function itemsOf(text: string): Record<string, unknown>[] {
-  const m = text.match(/\{[\s\S]*\}/);
+  // 最初の { から最後の } まで（正規表現の `\{[\s\S]*\}` は、{ が長く続くと遅くなるので、文字で探す）
+  const a = text.indexOf('{');
+  const b = text.lastIndexOf('}');
+  const m = a >= 0 && b > a ? [text.slice(a, b + 1)] : null;
   if (!m) return [];
   try {
-    const o = JSON.parse(m[0]) as { items?: unknown };
+    const o = JSON.parse(m[0]!) as { items?: unknown };
     return Array.isArray(o.items) ? o.items.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object') : [];
   } catch {
     return [];

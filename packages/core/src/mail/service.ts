@@ -32,7 +32,8 @@ export interface MailServiceDeps {
 }
 
 /** メールアドレスの形（宛先の確かめ）。 */
-const ADDRESS = /^[^\s@<>,]+@[^\s@<>,]+\.[^\s@<>,]+$/;
+// ドメインの区切りの点があいまいにならない形にし、長さを区切る（`[^…]+\.[^…]+` は、点が長く続くと遅くなる）
+const ADDRESS = /^[^\s@<>,]{1,64}@[^\s@<>,.]{1,63}(?:\.[^\s@<>,.]{1,63}){1,10}$/;
 
 /** Gmail でスレッドを開く URL。 */
 export const gmailThreadUrl = (threadId: string) => `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(threadId)}`;

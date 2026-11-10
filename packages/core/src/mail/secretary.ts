@@ -49,16 +49,41 @@ const numOf = (v: string) => (/^\d+$/.test(v) ? Number(v) : NUM[v] ?? NaN);
 /** 名前の後ろの敬称と助詞を除く。 */
 const clean = (v: string) => v.replace(/^(あの|その|この)/, '').replace(/(さん|様|さま|社|殿)$/, '').replace(/[「」『』\s]/g, '').trim();
 
+/** 末尾の「。」「！」「？」を外す（正規表現の `[。！!？?]+$` は、記号が長く続くと遅くなるので、文字で見る）。 */
+function trimEndMarks(s: string): string {
+  let end = s.length;
+  while (end > 0 && '。！!？?'.includes(s[end - 1]!)) end -= 1;
+  return s.slice(0, end);
+}
+
+/**
+ * 「〇〇は 1 週間待って」の〇〇と日数（正規表現で文の頭から読ませず、「待って」の前を文字で切り出す）。
+ *
+ * @returns 合わなければ `null`
+ */
+function waitOf(m: string): { who: string; days: number } | null {
+  const w = /([0-9]{1,3}|[一二三四五六七八九十])\s{0,3}(日|週間)待って/.exec(m);
+  if (!w) return null;
+  let who = m.slice(0, w.index).trim();
+  for (const suffix of [['は'], ['返事', '返信'], ['の'], ['へ', 'に']]) {
+    const hit = suffix.find((x) => who.endsWith(x));
+    if (hit) who = who.slice(0, -hit.length);
+  }
+  const n = numOf(w[1]!);
+  return clean(who) && Number.isFinite(n) && n > 0 ? { who: clean(who), days: w[2] === '週間' ? n * 5 : n } : null;
+}
+
 /**
  * メールの画面に関わる依頼か（言い回しで見分ける）。
  *
  * @returns 依頼の種類。当てはまらなければ `null`
  */
 export function mailCommand(message: string): MailCommand | null {
-  const m = message.trim().replace(/[。！!？?]+$/, '');
+  const m = trimEndMarks(message.trim());
   // 学び（第9.5.1.1.2節）。覚えていること・忘れる・共有
   if (/メール(について|のこと|で|の(分け方|振り分け)について)?(何|なに)を?覚えて/.test(m)) return { kind: 'lessons' };
-  if (/メールの学び.*(運営|共有)/.test(m)) return { kind: 'share', on: !/(やめ|止め|しないで|解除)/.test(m) };
+  const learn = m.indexOf('メールの学び');
+  if (learn >= 0 && /運営|共有/.test(m.slice(learn))) return { kind: 'share', on: !/(やめ|止め|しないで|解除)/.test(m) };
   const f = /^(.+?)(さん|様|さま|社)?(のこと|からのメール(のこと)?)は忘れて/.exec(m);
   if (f && clean(f[1]!)) return { kind: 'forget', who: clean(f[1]!) };
   // 振り分けの直し（「この手のメールは見なくていい」が、見回りを止める頼みに取られないよう、先に見る）
@@ -73,20 +98,18 @@ export function mailCommand(message: string): MailCommand | null {
   if (/(また|もう一度|再び)メール(を)?(見|チェックし|確認し)て|メールの見回りを(再開|戻)/.test(m)) return { kind: 'resume' };
   let x = /^(.+?)からの?メール(は|が(来|届)いたら)?(すぐ|すぐに|急ぎで)(知らせ|教え)て/.exec(m);
   if (x && clean(x[1]!)) return { kind: 'urgent', who: clean(x[1]!) };
-  x = /^(.+?)(へ|に)?の?(返事|返信)?(は)?\s*([0-9]+|[一二三四五六七八九十])\s*(日|週間)待って/.exec(m);
-  if (x && clean(x[1]!)) {
-    const n = numOf(x[5]!);
-    if (Number.isFinite(n) && n > 0) return { kind: 'wait', who: clean(x[1]!), days: x[6] === '週間' ? n * 5 : n };
-  }
+  const wait = waitOf(m);
+  if (wait) return { kind: 'wait', ...wait };
   x = /^(.+?)の(件|メール)は(もう)?(済んだ|済み|片付いた|終わった|対応した|返事した|返信した)/.exec(m);
   if (x && clean(x[1]!)) return { kind: 'done', words: clean(x[1]!) };
   // カテゴリー（第9.5.1.1.1節）。直しは推論が読むので、ここでは頼みかどうかだけを見分ける
   if (/^(この|その|さっきの|今の|いまの)?メール(は|を)(.+?)の(件|カテゴリー|プロジェクト)(に(して|入れて|分けて))?(です|だ|だよ)?$/.test(m)
-    || /^(.+?)からの?メール(は|を)(.+?)の(件|カテゴリー|プロジェクト)/.test(m)
+    || fromSenderIsCategory(m)
     || (/(カテゴリー|プロジェクト)/.test(m) && /(作って|まとめて|分けて|同じに|名前|変えて|消して|いらない|要らない|直して|付け替え|入れて|外して|終わった)/.test(m))) {
     return { kind: 'teach', text: m, weak: false };
   }
-  if (/^(.+?)と(.+?)は同じ(カテゴリー|プロジェクト|件)?(に|として|で)(して|まとめて)?/.test(m)) return { kind: 'teach', text: m, weak: true };
+  const same = m.indexOf('は同じ');
+  if (same > 1 && m.slice(0, same).includes('と') && /^は同じ(カテゴリー|プロジェクト|件)?(に|として|で)/.test(m.slice(same))) return { kind: 'teach', text: m, weak: true };
   x = /^(.+?)の(件|カテゴリー|プロジェクト)(で|の|について)の?(メール|連絡)(は|が|って)?(来|届|あ)/.exec(m);
   if (x && clean(x[1]!)) return { kind: 'categoryAsk', words: clean(x[1]!) };
   x = /^(.+?)から(何か|なにか|メール|連絡)(は|が)?(来|届)(て(る|いる|ます)|た|いた)/.exec(m);
@@ -96,6 +119,12 @@ export function mailCommand(message: string): MailCommand | null {
   if (/(返信|返事)待ちの?メール|メールの(返信|返事)待ち|(返信|返事)の来ていないメール/.test(m)) return { kind: 'waiting' };
   if (/メール/.test(m) && /(返信|返事)/.test(m) && /(下書き|書いて|作って)/.test(m)) return { kind: 'drafts' };
   return null;
+}
+
+/** 「〇〇からのメールは〇〇の件」か（目印の言葉を文字で探し、正規表現で文の頭から読ませない）。 */
+function fromSenderIsCategory(m: string): boolean {
+  const at = m.search(/からの?メール[はを]/);
+  return at > 0 && /の(件|カテゴリー|プロジェクト)/.test(m.slice(at));
 }
 
 /** 差出人の表示名（「山田 <a@b>」→「山田」）。 */

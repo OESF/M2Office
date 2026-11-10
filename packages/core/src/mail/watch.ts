@@ -24,7 +24,7 @@ import { closedReason } from '../scheduler/business-days.js';
 import { classifyInbound, classifySent, draftReply, type TriageInput } from './triage.js';
 import type { MailCategoryRow, MailOwner, MailStore, MailThreadRow, MailWatchRow } from './store.js';
 import { categoryKey, categoryRule, findCategory, mergeCategories, newCategory, promptCategories, proposeCategories, visibleCategories } from './categories.js';
-import { MailLearner, categoryLessonsOf, domainOfAddress, groupLessonFor, groupLessonRule, lessonAddress, styleFor, type GroupLesson, type MailLessonRow } from './learning.js';
+import { MailLearner, bracketed, categoryLessonsOf, domainOfAddress, groupLessonFor, groupLessonRule, lessonAddress, styleFor, type GroupLesson, type MailLessonRow } from './learning.js';
 
 /** 見回りが使うもの。 */
 export interface MailWatchDeps {
@@ -73,7 +73,7 @@ export function nextMailBusinessDay(company: { businessDays?: number[]; holidays
 }
 
 /** メールアドレスだけを取り出す（「山田 <a@b>」→「a@b」）。 */
-export const addressOf = (v: string) => (/<([^>]+)>/.exec(v)?.[1] ?? v).trim().toLowerCase();
+export const addressOf = (v: string) => (bracketed(v) ?? v).trim().toLowerCase();
 
 /** 相手ごとの返事待ちの日数（本人が秘書に頼んだもの）。無ければ既定の 3 営業日。 */
 export function waitDaysFor(prefs: MailPrefs, who: string): number {

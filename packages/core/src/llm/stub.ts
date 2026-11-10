@@ -623,31 +623,42 @@ function stubMail(system: string, user: string): string | null {
   }
   if (system.includes('同じプロジェクト・同じ取引先・同じ用件を指すものをまとめて')) return JSON.stringify({ merges: [] });
   if (system.includes('メールのカテゴリー（仕事のまとまり）か振り分けの直しを頼みました')) {
-    const req = /本人の頼み: (.*)$/m.exec(user)?.[1] ?? '';
+    // 正規表現で文の頭から読ませず、目印の言葉を文字で探して切り出す（長い文で遅くならないように）
+    const reqAt = user.lastIndexOf('本人の頼み: ');
+    const req = reqAt >= 0 ? user.slice(reqAt + 7).split('\n')[0]! : '';
+    const before = (s: string, re: RegExp) => { const i = s.search(re); return i > 0 ? s.slice(0, i) : null; };
+    const after = (s: string, re: RegExp) => { const m = re.exec(s); return m ? s.slice(m.index + m[0].length) : null; };
     let data: { current?: string | null; threads?: { threadId: string; from: string }[] } = {};
-    try { data = JSON.parse(/データ:\n(.*)\n\n本人の頼み/s.exec(user)?.[1] ?? '{}') as typeof data; } catch { data = {}; }
+    const dataAt = user.indexOf('データ:\n');
+    const dataEnd = user.indexOf('\n\n本人の頼み');
+    try { data = JSON.parse(dataAt >= 0 && dataEnd > dataAt ? user.slice(dataAt + 5, dataEnd) : '{}') as typeof data; } catch { data = {}; }
     // 振り分けの直し（第9.5.1.1.2節）
     const threads = data.threads ?? [];
     let t = /^(これ|このメール)は(返事|返信)(は)?(要らない|いらない|不要)/.test(req) && data.current ? data.current : null;
     if (t) return JSON.stringify({ teach: [{ threadId: t, scope: 'from', target: 'read' }], reply: 'この相手のメールは、これから「目を通すだけ」にします。' });
-    let y = /^(.+?)(さん|様)?の(メール)?は(大事|重要)/.exec(req);
-    t = y ? threads.find((x) => x.from.includes(y![1]!))?.threadId ?? null : null;
-    if (y && t) return JSON.stringify({ teach: [{ threadId: t, scope: 'from', target: 'important' }], reply: `「${y[1]}」さんのメールは大事なものとして扱います。` });
-    y = /^(.+?)からの?(メール|お知らせ)?は(宣伝|見なくて)/.exec(req);
-    t = y ? threads.find((x) => x.from.includes(y![1]!))?.threadId ?? null : null;
-    if (y && t) return JSON.stringify({ teach: [{ threadId: t, scope: 'from', target: 'promo' }], reply: `「${y[1]}」からのメールは宣伝・お知らせにします。` });
-    let x = /メール(は|を)(.+?)の(件|カテゴリー|プロジェクト)/.exec(req);
-    if (x && data.current) return JSON.stringify({ assign: [{ threadId: data.current, category: x[2] }], reply: `このメールを「${x[2]}」にしました。` });
-    x = /^(.+?)からの?メール(は|を)(.+?)の(件|カテゴリー|プロジェクト)/.exec(req);
-    if (x) {
-      const who = x[1]!;
-      const hits = (data.threads ?? []).filter((t) => t.from.includes(who));
-      return JSON.stringify({ assign: hits.map((t) => ({ threadId: t.threadId, category: x![3] })), reply: `「${who}」からのメールを「${x[3]}」にしました。` });
+    let who = before(req, /(さん|様)?の(メール)?は(大事|重要)/);
+    t = who ? threads.find((x) => x.from.includes(who!))?.threadId ?? null : null;
+    if (who && t) return JSON.stringify({ teach: [{ threadId: t, scope: 'from', target: 'important' }], reply: `「${who}」さんのメールは大事なものとして扱います。` });
+    who = before(req, /からの?(メール|お知らせ)?は(宣伝|見なくて)/);
+    t = who ? threads.find((x) => x.from.includes(who!))?.threadId ?? null : null;
+    if (who && t) return JSON.stringify({ teach: [{ threadId: t, scope: 'from', target: 'promo' }], reply: `「${who}」からのメールは宣伝・お知らせにします。` });
+    const categoryIn = (s: string) => before(s, /の(件|カテゴリー|プロジェクト)/);
+    who = before(req, /からの?メール[はを]/);
+    const named = categoryIn(after(req, /メール[はを]/) ?? '');
+    if (!who && named && data.current) return JSON.stringify({ assign: [{ threadId: data.current, category: named }], reply: `このメールを「${named}」にしました。` });
+    if (who && named) {
+      const hits = (data.threads ?? []).filter((x) => x.from.includes(who!));
+      return JSON.stringify({ assign: hits.map((x) => ({ threadId: x.threadId, category: named })), reply: `「${who}」からのメールを「${named}」にしました。` });
     }
-    x = /(.+?)という(カテゴリー|プロジェクト)を作って/.exec(req);
-    if (x) return JSON.stringify({ create: [x[1]], reply: `「${x[1]}」を作りました。` });
-    x = /^(.+?)と(.+?)は同じ/.exec(req);
-    if (x) return JSON.stringify({ merge: [{ from: x[2], into: x[1] }], reply: `「${x[2]}」を「${x[1]}」にまとめました。` });
+    const created = before(req, /という(カテゴリー|プロジェクト)を作って/);
+    if (created) return JSON.stringify({ create: [created], reply: `「${created}」を作りました。` });
+    const sameAt = req.indexOf('は同じ');
+    const pair = sameAt > 0 ? req.slice(0, sameAt) : '';
+    const andAt = pair.indexOf('と');
+    if (andAt > 0) {
+      const [into, from] = [pair.slice(0, andAt), pair.slice(andAt + 1)];
+      return JSON.stringify({ merge: [{ from, into }], reply: `「${from}」を「${into}」にまとめました。` });
+    }
     return JSON.stringify({ reply: '' });
   }
   const rows = (): { i: number; subject: string; head: string }[] => {
@@ -663,7 +674,7 @@ function stubMail(system: string, user: string): string | null {
       const t = `${x.subject} ${x.head}`;
       const category = pick(t);
       if (/ご教示|いかがでしょうか|お知らせください|ご回答/.test(t)) return { i: x.i, group: 'reply', summary: '回答を求められています', due: /今週中/.test(t) ? '今週中' : '', dueDate: '', category };
-      if (/締め切り|期限|申請/.test(t)) return { i: x.i, group: 'action', summary: '期限までに申請', due: (/(\d+) ?日まで/.exec(t)?.[0]) ?? '', dueDate: '', category };
+      if (/締め切り|期限|申請/.test(t)) return { i: x.i, group: 'action', summary: '期限までに申請', due: (/(\d{1,3}) ?日まで/.exec(t)?.[0]) ?? '', dueDate: '', category };
       return { i: x.i, group: 'read', summary: '', due: '', dueDate: '', category };
     });
     return JSON.stringify({ items });

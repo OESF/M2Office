@@ -60,8 +60,14 @@ export const PERSONAL_DOMAINS: ReadonlySet<string> = new Set(['gmail.com', 'goog
 
 /** メールアドレスを取り出す（「山田 <a@b>」→「a@b」。小文字）。 */
 export function lessonAddress(from: string): string {
-  const m = /<([^>]+)>/.exec(from);
-  return (m ? m[1]! : from.split(',')[0]!).trim().toLowerCase();
+  return (bracketed(from) ?? from.split(',')[0]!).trim().toLowerCase();
+}
+
+/** 「山田 <a@b>」の <> の中（正規表現の `<([^>]+)>` は、< が長く続くと遅くなるので、文字で探す）。無ければ `null`。 */
+export function bracketed(v: string): string | null {
+  const a = v.indexOf('<');
+  const b = a >= 0 ? v.indexOf('>', a + 1) : -1;
+  return b > a + 1 ? v.slice(a + 1, b) : null;
 }
 
 /** ドメイン（無ければ空）。 */

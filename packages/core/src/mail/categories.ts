@@ -83,10 +83,13 @@ export function categoryOf(v: unknown): string {
 
 /** 推論の答えの JSON を取り出す。読めなければ `null`。 */
 function jsonOf(text: string): Record<string, unknown> | null {
-  const m = text.match(/\{[\s\S]*\}/);
+  // 最初の { から最後の } まで（正規表現の `\{[\s\S]*\}` は、{ が長く続くと遅くなるので、文字で探す）
+  const a = text.indexOf('{');
+  const b = text.lastIndexOf('}');
+  const m = a >= 0 && b > a ? [text.slice(a, b + 1)] : null;
   if (!m) return null;
   try {
-    const o = JSON.parse(m[0]) as unknown;
+    const o = JSON.parse(m[0]!) as unknown;
     return o && typeof o === 'object' ? o as Record<string, unknown> : null;
   } catch {
     return null;

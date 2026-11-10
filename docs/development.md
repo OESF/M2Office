@@ -100,7 +100,7 @@ npm run build:release -- --install
 ## 動作確認
 
 ```bash
-npm test        # ファイルヘッダー・ヘルプの記事の確認と単体テスト（DB 不要）
+npm test        # ファイルヘッダー・ヘルプの記事の確認と単体テスト（DB 不要）。時間を測る long-input.test.ts は、ほかが終わってから 1 つで流す
 npm run smoke   # 通しの確認（npm run dev を起動した状態で）
 SMOKE_EXTERNAL=1 npm run smoke   # 外部の MCP サーバ（DeepWiki）への実際の問い合わせも確かめる
 npm run eval:contract-review     # 契約書チェックの評価（本物の推論。--yes で回す。費用がかかる。仕様書 第28.15節）

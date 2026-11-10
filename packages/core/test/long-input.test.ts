@@ -4,6 +4,8 @@
  *
  * 見分けの正規表現の中には、特定の文字が長く続くと時間が文の長さの 2 乗で伸びるものがある（CodeQL の js/polynomial-redos）。
  * 区切らなければ 8 万字で 1 つあたり 5〜12 秒かかったので、ここでは区切った後に 1 秒より十分短く終わることを確かめる。
+ *
+ * 時間を測るので、`npm test` はこのファイルだけを、ほかのテストが終わってから 1 つで流す（ほかのテストと並べて流すと、機械が忙しくて時間を超える）。
  */
 
 import { test } from 'node:test';
@@ -27,6 +29,9 @@ import { afterLabel, parseHeader, parseSpeech, splitReport } from '../src/decisi
 import { libraryOkfTag } from '../src/library/okf.js';
 import { extractHtml, htmlToText, sanitizeMailHtml } from '../src/connectors/google/mime.js';
 import { mailCommand } from '../src/mail/secretary.js';
+import { parseInbound } from '../src/mail/triage.js';
+import { parseCategoryActions } from '../src/mail/categories.js';
+import { addressOf } from '../src/mail/watch.js';
 
 /** かかった時間（ミリ秒）。 */
 const ms = (fn: () => unknown) => { const t = performance.now(); fn(); return performance.now() - t; };
@@ -167,9 +172,24 @@ test('メールの HTML を画面に出す・文字に直す処理は、閉じ�
 });
 
 test('メールの画面への頼みの見分けは、上限いっぱいのいじわるな文でもすぐ終わる（第9.5.1.1.1節・第9.5.1.1.2節）', () => {
-  for (const evil of ['の'.repeat(20_000), 'から'.repeat(10_000), `${'あ'.repeat(19_990)}は大事`, 'カテゴリー'.repeat(4_000), 'メール'.repeat(6_000)]) {
+  // CodeQL の js/polynomial-redos で指摘された形（末尾の記号・「メールの学び」・「待って」・「からのメールは」・「と…は同じ」）も入れる
+  for (const evil of ['の'.repeat(20_000), 'から'.repeat(10_000), `${'あ'.repeat(19_990)}は大事`, 'カテゴリー'.repeat(4_000), 'メール'.repeat(6_000),
+    `${'!'.repeat(19_999)}a`, 'メールの学び'.repeat(3_000), `a${'00'.repeat(9_999)}`, 'aからメールはa'.repeat(2_500), `aと${'aとa'.repeat(6_000)}`]) {
     const took = ms(() => mailCommand(evil));
     assert.ok(took < 200, `${evil.slice(0, 6)}…（${Math.round(took)} ms）`);
   }
+});
+
+test('推論の答えから JSON を取り出す処理と、差出人の <> を読む処理は、{ や < が長く続いてもすぐ終わる（CodeQL の js/polynomial-redos）', () => {
+  const big = 2 * 1024 * 1024;
+  for (const [name, f] of [
+    ['振り分けの答え', () => parseInbound('{'.repeat(big), 1)], ['カテゴリーの頼みの答え', () => parseCategoryActions('{'.repeat(big), new Set())],
+    ['差出人', () => addressOf('<='.repeat(big / 2))],
+  ] as const) {
+    const took = ms(f);
+    assert.ok(took < 1_000, `${name}（${Math.round(took)} ms）`);
+  }
+  assert.equal(addressOf('山田 <Yamada@Example.jp>'), 'yamada@example.jp');
+  assert.deepEqual(parseInbound('前置き {"items": [{"i": 0, "group": "reply", "summary": "回答"}]} 後ろ', 1)[0]?.group, 'reply');
 });
 
