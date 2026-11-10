@@ -95,12 +95,25 @@ export function MailScreen({ threadId, onOpen }: { threadId: string | null; onOp
   return threadId ? <MailThread threadId={threadId} onBack={() => onOpen(null)} /> : <MailList onOpen={(id) => onOpen(id)} />;
 }
 
+/**
+ * 一覧の見え方（開いているたたみと、絞っているカテゴリー）。1 件を開いて戻っても、そのままにする（仕様書 第9.5.1.1節「一覧」。第 0.549.1 版）。
+ * 1 件を開くと一覧の部品は消えるので、画面の外に持つ。読み込み直したら初めに戻る。
+ */
+const listView: { open: Set<'read' | 'promo'>; cat: string | null } = { open: new Set(), cat: null };
+
 /** 一覧。 */
 function MailList({ onOpen }: { onOpen: (threadId: string) => void }) {
   const [data, setData] = useState<MailOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 絞っているカテゴリー（無ければすべて）
-  const [cat, setCat] = useState<string | null>(null);
+  const [cat, setCatState] = useState<string | null>(listView.cat);
+  const setCat = (v: string | null) => { listView.cat = v; setCatState(v); };
+  const [folds, setFolds] = useState<Set<'read' | 'promo'>>(() => new Set(listView.open));
+  const toggle = (g: 'read' | 'promo', open: boolean) => {
+    if (open === listView.open.has(g)) return;
+    if (open) listView.open.add(g); else listView.open.delete(g);
+    setFolds(new Set(listView.open));
+  };
   const load = useCallback(() => api.mail.overview().then((d) => { setData(d); setError(null); })
     .catch((e) => setError(describeError(e, 'メールを読み込めませんでした'))), []);
   useEffect(() => {
@@ -143,7 +156,7 @@ function MailList({ onOpen }: { onOpen: (threadId: string) => void }) {
         </section>
       ))}
       {(['read', 'promo'] as const).map((g) => view[g].length > 0 && (
-        <details key={g} className="mail-group">
+        <details key={g} className="mail-group" open={folds.has(g)} onToggle={(e) => toggle(g, (e.currentTarget as HTMLDetailsElement).open)}>
           <summary>{MAIL_GROUP_LABELS[g]} <span className="mail-count">{view[g].length}</span></summary>
           <ul className="mail-list">{view[g].map((t) => <MailRow key={t.threadId} item={t} onOpen={onOpen} showCategory={!active} />)}</ul>
         </details>
