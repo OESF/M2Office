@@ -70,7 +70,7 @@ export function categoryRule(categories: MailCategoryRow[], lessons: MailCategor
       ...lessons.slice(0, MAIL_LIMITS.categoryLessons).map((l) => `- ${l.from} / ${l.subject.slice(0, 60)} → ${l.category || '（付けない）'}`)].join('\n')
     : '';
   return [
-    'あわせて、各メールに category（本人の仕事のまとまり。プロジェクト・取引先・続いている用件）を付けてください。',
+    'あわせて、各メールに category（本人の仕事のまとまり。続いている取り組み・相手（お客様・依頼人・取引先）・続いている用件）を付けてください。',
     `いまのカテゴリー:\n${list}`,
     '合うものがあれば、その名前をそのまま書く。どれにも合わず、同じ話題のメールがこれからも続きそうなら、新しい名前（' + MAIL_LIMITS.categoryNameChars + ' 字以内。短く、本人が見て分かる名前）を書く。',
     ...(caseTitles.length ? [`本人の進んでいる案件: ${caseTitles.slice(0, CASE_TITLES).map((t) => `「${t}」`).join('、')}。新しい名前を作るときは、同じまとまりの案件があれば、その題名を短くした名前にする（いまのカテゴリーの名前は変えない）。`] : []),
@@ -114,7 +114,7 @@ export interface CategorySample {
  */
 export async function proposeCategories(llm: LlmProvider, samples: CategorySample[]): Promise<{ categories: { name: string; note: string }[]; tokensUsed: number }> {
   const rule = [
-    '本人の受信トレイのメールの一覧です。本人の仕事のまとまり（プロジェクト・取引先・続いている用件）を見つけて、カテゴリーの名前を付けてください。',
+    '本人の受信トレイのメールの一覧です。本人の仕事のまとまり（続いている取り組み・相手（お客様・依頼人・取引先）・続いている用件）を見つけて、カテゴリーの名前を付けてください。',
     `2 通以上のメールにまたがるまとまりだけにする。宣伝・お知らせ・自動の通知・一度きりの話題には作らない。名前は ${MAIL_LIMITS.categoryNameChars} 字以内で、本人が見て分かる短いもの。10 個まで。`,
     'note には、何のまとまりかを 40 字以内で書く（相手の会社・プロジェクトの中身など。次のメールを振り分ける手がかりにする）。',
     '次の形の JSON だけを返す: {"categories": [{"name": "", "note": ""}]}',
@@ -141,7 +141,7 @@ export async function proposeCategories(llm: LlmProvider, samples: CategorySampl
  */
 export async function mergeCategories(llm: LlmProvider, categories: MailCategoryRow[], keep: Set<string>): Promise<{ merges: { from: string; into: string }[]; tokensUsed: number }> {
   const rule = [
-    '本人のメールのカテゴリーの一覧です。同じプロジェクト・同じ取引先・同じ用件を指すものをまとめてください。違うものはまとめない。',
+    '本人のメールのカテゴリーの一覧です。同じ取り組み・同じ相手・同じ用件を指すものをまとめてください。違うものはまとめない。',
     '次の形の JSON だけを返す: {"merges": [{"from": "まとめて消す名前", "into": "残す名前"}]}。まとめるものが無ければ {"merges": []}',
   ].join('\n');
   const list = categories.map((c) => `- ${c.name}${c.note ? `（${c.note}）` : ''}`).join('\n');
