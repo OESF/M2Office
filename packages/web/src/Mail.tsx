@@ -101,6 +101,13 @@ export function MailScreen({ threadId, onOpen }: { threadId: string | null; onOp
  */
 const listView: { open: Set<'read' | 'promo'>; cat: string | null } = { open: new Set(), cat: null };
 
+/** メールの画面を、カテゴリーで絞って開く（「記憶とデータ」の案件の行から。仕様書 第11.13.8節「本人に見せる」）。 */
+export function openMailCategory(categoryId: string): void {
+  listView.cat = categoryId;
+  history.pushState(null, '', '/mail');
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 /** 一覧。 */
 function MailList({ onOpen }: { onOpen: (threadId: string) => void }) {
   const [data, setData] = useState<MailOverview | null>(null);

@@ -8,7 +8,8 @@
 import {
   MAIL_LIMITS, type MailItem, type MailOverview, type MailPrefs, type MailThreadDetail, type MailWatchState,
 } from '@m2office/shared';
-import type { Repository } from '../repository/types.js';
+import type { CaseNote, Repository } from '../repository/types.js';
+import { countCorrection } from '../memory/corrections.js';
 import type { MailConnector } from '../connectors/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
@@ -19,6 +20,13 @@ import {
 } from './categories.js';
 import { MAIL_LEARNING, describeLesson, domainOfAddress, isActive, learningProgressOf, lessonAddress, subjectTag, type LearningProgress } from './learning.js';
 import { MAIL_AI_LIMIT_MARK, addressOf, businessDaysSince, doneRow, replySubject, waitDaysFor, type MailWatch } from './watch.js';
+
+/** 題名で案件ノートを探す（同じ形の名前か、2 文字以上で含むもの）。 */
+function findCase(cases: CaseNote[], words: string): CaseNote | undefined {
+  const k = categoryKey(words);
+  if (!k) return undefined;
+  return cases.find((c) => categoryKey(c.title) === k) ?? (k.length >= 2 ? cases.find((c) => categoryKey(c.title).includes(k) || k.includes(categoryKey(c.title))) : undefined);
+}
 
 /** 処理が使うもの。 */
 export interface MailServiceDeps {
@@ -270,7 +278,7 @@ export class MailService {
     const { store } = this.deps;
     const llm = await this.deps.llmFor(o.tenantId).catch(() => null);
     if (!llm || !aiAvailable(llm)) return { text: 'AI が使えないため、カテゴリーを直せませんでした。', tokensUsed: 0 };
-    const [cats, open, prefs] = await Promise.all([store.categories(o), store.openThreads(o), this.prefs(o)]);
+    const [cats, open, prefs, cases] = await Promise.all([store.categories(o), store.openThreads(o), this.prefs(o), this.openCases(o)]);
     const byId = new Map(cats.map((c) => [c.id, c]));
     const threads = open.filter((t) => t.group !== 'promo').slice(0, 60);
     // 「このメール」は、30 分以内に開いたスレッド
@@ -281,6 +289,7 @@ export class MailService {
     }
     const { actions, tokensUsed } = await interpretCategoryRequest(llm, request, {
       categories: cats, current,
+      cases: cases.map((c) => ({ title: c.title, category: c.mailCategoryId ? byId.get(c.mailCategoryId)?.name ?? '' : '' })),
       threads: threads.map((t) => ({ threadId: t.threadId, from: t.from, subject: t.subject, category: t.categoryId ? byId.get(t.categoryId)?.name ?? '' : '' })),
     });
     const at = now.toISOString();
@@ -351,38 +360,87 @@ export class MailService {
       }
       done += 1;
     }
+    // 案件ノートとの結び付けの直し（第11.13.8節）。1 つのカテゴリーは 1 つの案件にだけ結ぶ。直しとして数える（第11.13.7節 ①）
+    for (const l of actions.link) {
+      const c = findCase(cases, l.case);
+      if (!c) continue;
+      const cat = l.category ? findCategory(cats, l.category) : null;
+      if (l.category && !cat) continue;
+      const at = now.toISOString();
+      if (cat) {
+        for (const other of cases.filter((x) => x.id !== c.id && x.mailCategoryId === cat.id)) {
+          other.mailCategoryId = null;
+          await this.deps.repo.saveCaseNote({ ...other, updatedAt: at });
+        }
+      }
+      c.mailCategoryId = cat?.id ?? null;
+      await this.deps.repo.saveCaseNote({ ...c, updatedAt: at });
+      await countCorrection(this.deps.repo, o.tenantId, o.userId, 'conversation', now).catch(() => undefined);
+      done += 1;
+    }
     if (!done) return { text: actions.reply || 'どのメールのことか分かりませんでした。メールを開いてから「このメールは〇〇の件」と言ってください。', tokensUsed };
     return { text: `${actions.reply || 'カテゴリーを直しました。'}\n\n[メールを開く](/mail)`, tokensUsed };
   }
 
   /**
-   * カテゴリーの名前に合うものがあれば、「もう終わった」にする（「補助金の件はもう終わった」。第9.5.1.1.1節「直し方」）。
+   * カテゴリーか案件の名前に合うものがあれば、「もう終わった」にする（「補助金の件はもう終わった」。第9.5.1.1.1節「直し方」）。
+   * 結んだ案件ノートとカテゴリーは、どちらの名前に合っても、両方を終える（第11.13.8節「終わり」）。
    *
-   * @returns 終わりにしたカテゴリーの名前。合うものが無ければ `null`（スレッドの「済んだ」として扱う）
+   * @param finished 「〇〇の件は終わった」「片付いた」と言われた。このときだけ、案件の題名に合う案件も終える（「返事した」で案件を終えない）
+   * @returns 終わりにしたものの名前（カテゴリーが無ければ案件の題名）。どちらにも合わなければ `null`（スレッドの「済んだ」として扱う）
    */
-  async endCategory(o: MailOwner, words: string, now: Date = new Date()): Promise<string | null> {
-    const cats = await this.deps.store.categories(o);
-    const c = findCategory(cats, words) ?? cats.find((x) => categoryKey(x.name).includes(categoryKey(words)) && categoryKey(words).length >= 2) ?? null;
-    if (!c) return null;
+  async endCategory(o: MailOwner, words: string, now: Date = new Date(), finished = false): Promise<string | null> {
+    const [cats, cases] = await Promise.all([this.deps.store.categories(o), this.openCases(o)]);
+    const k = categoryKey(words);
+    let c = findCategory(cats, words) ?? cats.find((x) => categoryKey(x.name).includes(k) && k.length >= 2) ?? null;
+    const kase = (c ? cases.find((x) => x.mailCategoryId === c!.id) : undefined) ?? (finished ? findCase(cases, words) : undefined);
+    if (!c && kase?.mailCategoryId) c = cats.find((x) => x.id === kase.mailCategoryId) ?? null;
+    if (!c && !kase) return null;
     // 終わったときより後に動きがあれば並べ直すので、終わりの時刻は最後の動きより前にしない
     const at = now.toISOString();
-    await this.deps.store.saveCategory(o, { ...c, endedAt: at > c.lastAt ? at : c.lastAt });
-    return c.name;
+    if (c) await this.deps.store.saveCategory(o, { ...c, endedAt: at > c.lastAt ? at : c.lastAt });
+    if (kase) await this.deps.repo.saveCaseNote({ ...kase, status: 'closed', updatedAt: at });
+    return c?.name ?? kase!.title;
+  }
+
+  /** 本人の進んでいる案件ノート（第11.13.8節）。読めなければ空。 */
+  private async openCases(o: MailOwner): Promise<CaseNote[]> {
+    return Promise.resolve().then(() => this.deps.repo.listCaseNotes(o.tenantId, o.userId, { limit: 40 })).then((x) => x ?? []).catch(() => []);
+  }
+
+  /**
+   * 案件に結んだカテゴリーの、いまのメールの数（第11.13.8節「秘書の答え」）。答えるときにメールの一覧から数える（推論は呼ばない）。
+   *
+   * @returns カテゴリーの ID ごとの、名前・返事が要る・対応が要る・返事待ちの数・最後に届いた日時
+   */
+  async caseMail(o: MailOwner, categoryIds: string[]): Promise<Map<string, { name: string; reply: number; action: number; waiting: number; lastAt: string | null }>> {
+    const out = new Map<string, { name: string; reply: number; action: number; waiting: number; lastAt: string | null }>();
+    if (!categoryIds.length) return out;
+    const want = new Set(categoryIds);
+    const [cats, open] = await Promise.all([this.deps.store.categories(o), this.deps.store.openThreads(o)]);
+    for (const c of cats) if (want.has(c.id)) out.set(c.id, { name: c.name, reply: 0, action: 0, waiting: 0, lastAt: c.lastAt });
+    for (const t of open) {
+      const m = t.categoryId ? out.get(t.categoryId) : undefined;
+      if (!m) continue;
+      if (t.group === 'reply' || t.group === 'action' || t.group === 'waiting') m[t.group]++;
+    }
+    return out;
   }
 
   /**
    * カテゴリーか差出人で絞った一覧（「新店舗の件でメール来てる？」「アルファ商事から何か届いた？」。第9.5.1.1.1節「秘書」）。
    *
-   * @returns 合うカテゴリーの名前（無ければ `null`）と、合うメール
+   * @returns 合うカテゴリーの名前（無ければ `null`）と、合うメールと、そのカテゴリーに結んだ進んでいる案件（第11.13.8節。無ければ `null`）
    */
-  async findByCategory(o: MailOwner, words: string, now: Date = new Date()): Promise<{ category: string | null; items: MailItem[] }> {
+  async findByCategory(o: MailOwner, words: string, now: Date = new Date()): Promise<{ category: string | null; items: MailItem[]; case: Pick<CaseNote, 'title' | 'nextStep' | 'dueOn'> | null }> {
     const v = await this.overview(o, now);
     const k = categoryKey(words);
     const cat = v.categories.find((c) => categoryKey(c.name) === k) ?? v.categories.find((c) => k.length >= 2 && (categoryKey(c.name).includes(k) || k.includes(categoryKey(c.name)))) ?? null;
     const all = [...v.reply, ...v.action, ...v.waiting, ...v.read];
     const w = words.toLowerCase();
     const items = cat ? all.filter((t) => t.category?.id === cat.id) : all.filter((t) => t.from.toLowerCase().includes(w) || t.subject.toLowerCase().includes(w));
-    return { category: cat?.name ?? null, items };
+    const kase = cat ? (await this.openCases(o)).find((c) => c.mailCategoryId === cat.id) ?? null : null;
+    return { category: cat?.name ?? null, items, case: kase };
   }
 
   /**

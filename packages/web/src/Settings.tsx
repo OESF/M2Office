@@ -22,6 +22,7 @@ import { SortableList } from './Sortable.js';
 import { HelpTip, Markdown } from './help.js';
 import { profileSections } from './profile-sections.js';
 import { playSample } from './voice.js';
+import { openMailCategory } from './Mail.js';
 
 /** 通知の種類（個人設定で切れるもの）。 */
 type NotificationKindKey = keyof UserSettings['notifications']['kinds'];
@@ -656,7 +657,13 @@ function MemorySettings({ settings, onChange, onSave }: {
             <tbody>
               {cases.map((c) => (
                 <tr key={c.id}>
-                  <td><strong>{c.title}</strong><br />{c.state}{c.nextStep && <><br /><span className="muted">次: {c.nextStep}</span></>}</td>
+                  <td>
+                    <strong>{c.title}</strong>
+                    {c.mailCategory && (
+                      <a className="chip mail-cat" href="/mail" onClick={(e) => { e.preventDefault(); openMailCategory(c.mailCategory!.id); }}>{c.mailCategory.name}</a>
+                    )}
+                    <br />{c.state}{c.nextStep && <><br /><span className="muted">次: {c.nextStep}</span></>}
+                  </td>
                   <td className="nowrap">
                     {c.dueOn ? (c.dueOn < today ? <span className="error-inline">{c.dueOn}<br />過ぎています</span> : c.dueOn) : <span className="muted">—</span>}
                   </td>

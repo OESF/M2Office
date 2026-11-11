@@ -553,7 +553,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `DELETE /v1/me/sessions/:id` | 端末を個別にログアウト |
 | `GET /v1/me/usage` | 本人の利用状況（区画は名前 `compartments` と、画面に出す説明 `compartmentLabels`） |
 | `GET /v1/me/memories` | 本人が秘書に覚えられていること（`source` が `learned` なら秘書が会話から自分で覚えたもの。仕様書 第11.5.2節。`kind` が `preference` なら仕事のやり方の好み。第11.13.2節）。取り次ぎの好み（`kind: routing`）も並べ、好みには業務の名前（`agentName`）を添える（第11.13.7節） |
-| `GET /v1/me/cases` | 本人の進んでいる案件ノート（題名・状態・次にやること・期限・最後に動いた日。仕様書 第11.13.5節） |
+| `GET /v1/me/cases` | 本人の進んでいる案件ノート（題名・状態・次にやること・期限・最後に動いた日・結んだメールのカテゴリー `mailCategory`。仕様書 第11.13.5節・第11.13.8節） |
 | `DELETE /v1/me/cases/:id` | 案件ノートを 1 つ消す（本人だけ） |
 | `GET /v1/admin/knowledge/gaps` | 管理者: 秘書が答えられなかった問い（同じ問いをまとめた回数・最後・答えが入った知識。誰が聞いたかは返さない。第11.13.6節） |
 | `POST /v1/admin/knowledge/gaps/dismiss` | 管理者: 答えられなかった問いを外す（`{ question }`。同じ問いをまとめて） |

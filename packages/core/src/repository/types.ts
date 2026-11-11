@@ -1029,6 +1029,10 @@ export interface CaseNote {
   status: 'open' | 'closed';
   /** 最後に動いた日（`YYYY-MM-DD`） */
   lastDay: string;
+  /** 結んだメールのカテゴリー（第11.13.8節）。本人の中で 1 つの案件にだけ結ぶ */
+  mailCategoryId?: string | null;
+  /** メールの材料だけから作った（メールの一覧を消すときに一緒に消す。第11.13.8節「消す」） */
+  mailOnly?: boolean;
   createdAt: string;
   updatedAt: string;
 }

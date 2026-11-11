@@ -323,10 +323,18 @@ export function meRoute(deps: AppDeps) {
     });
   });
 
-  /** 進んでいる案件ノート（第11.13.5節）。秘書がまとめたもの。本人のものだけを返す。 */
+  /** 進んでいる案件ノート（第11.13.5節）。秘書がまとめたもの。本人のものだけを返す。結んだメールのカテゴリーの名前も添える（第11.13.8節） */
   app.get('/cases', async (c) => {
     const { tenant, user } = c.get('ctx');
-    return c.json({ items: await deps.repo.listCaseNotes(tenant.id, user.id, { limit: 50 }) });
+    const notes = await deps.repo.listCaseNotes(tenant.id, user.id, { limit: 50 });
+    const cats = notes.some((n) => n.mailCategoryId)
+      ? new Map((await deps.mail.service.store.categories({ tenantId: tenant.id, userId: user.id }).catch(() => [])).map((x) => [x.id, x.name]))
+      : new Map<string, string>();
+    return c.json({
+      items: notes.map(({ mailCategoryId, mailOnly: _, ...n }) => ({
+        ...n, mailCategory: mailCategoryId && cats.has(mailCategoryId) ? { id: mailCategoryId, name: cats.get(mailCategoryId)! } : null,
+      })),
+    });
   });
 
   /** 案件ノートを 1 つ消す（本人が要らないとした）。 */

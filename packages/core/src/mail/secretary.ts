@@ -25,7 +25,8 @@ export type MailCommand =
   | { kind: 'resume' }
   | { kind: 'urgent'; who: string }
   | { kind: 'wait'; who: string; days: number }
-  | { kind: 'done'; words: string }
+  /** `finished`: 「〇〇の件は終わった」「片付いた」（案件も終える。第11.13.8節「終わり」） */
+  | { kind: 'done'; words: string; finished: boolean }
   | { kind: 'reply'; words: string }
   /** 相手を言わない「メールの返信を下書きして」。用意してある下書きを答える。 */
   | { kind: 'drafts' }
@@ -103,11 +104,15 @@ export function mailCommand(message: string): MailCommand | null {
   const wait = waitOf(m);
   if (wait) return { kind: 'wait', ...wait };
   x = /^(.+?)の(件|メール)は(もう)?(済んだ|済み|片付いた|終わった|対応した|返事した|返信した)/.exec(m);
-  if (x && clean(x[1]!)) return { kind: 'done', words: clean(x[1]!) };
+  if (x && clean(x[1]!)) return { kind: 'done', words: clean(x[1]!), finished: x[2] === '件' && /終わった|片付いた/.test(x[4]!) };
   // カテゴリー（第9.5.1.1.1節）。直しは推論が読むので、ここでは頼みかどうかだけを見分ける
   if (/^(この|その|さっきの|今の|いまの)?メール(は|を)(.+?)の(件|カテゴリー|プロジェクト)(に(して|入れて|分けて))?(です|だ|だよ)?$/.test(m)
     || fromSenderIsCategory(m)
     || (/(カテゴリー|プロジェクト)/.test(m) && /(作って|まとめて|分けて|同じに|名前|変えて|消して|いらない|要らない|直して|付け替え|入れて|外して|終わった)/.test(m))) {
+    return { kind: 'teach', text: m, weak: false };
+  }
+  // 案件との結び付けの直し（第11.13.8節）:「見本商事のメールは見積の件とは別」「新店舗の件のメールは内装の案件に入れて」
+  if (/メール/.test(m) && (/案件/.test(m) || /の件(とは|と)(別|違う|関係ない)/.test(m)) && /(別|違う|関係ない|入れて|結んで|つなげて|まとめて|一緒|同じ|外して|分けて)/.test(m)) {
     return { kind: 'teach', text: m, weak: false };
   }
   const same = m.indexOf('は同じ');
@@ -143,12 +148,16 @@ export function findThread(o: MailOverview, words: string): MailItem | null {
  * カテゴリーか差出人で絞った答え（「新店舗の件でメール来てる？」）。
  *
  * @param category 合ったカテゴリーの名前（差出人・件名で探したときは `null`）
+ * @param kase そのカテゴリーに結んだ進んでいる案件（第11.13.8節）。あれば、次にやることと期限を 1 行添える
  */
-export function mailCategoryText(words: string, category: string | null, items: MailItem[]): string {
+export function mailCategoryText(words: string, category: string | null, items: MailItem[], kase: { title: string; nextStep: string; dueOn: string | null } | null = null): string {
   const what = category ? `「${category}」のメール` : `「${words}」に合うメール`;
-  if (!items.length) return `一覧には、${what}はありません。\n\n[メールを開く](/mail)`;
+  const caseLine = kase && (kase.nextStep || kase.dueOn)
+    ? [`案件「${kase.title}」${kase.nextStep ? `の次にやること: ${kase.nextStep}` : ''}${kase.dueOn ? `（期限 ${kase.dueOn}）` : ''}`, '']
+    : [];
+  if (!items.length) return [`一覧には、${what}はありません。`, '', ...caseLine, '[メールを開く](/mail)'].join('\n');
   const label: Record<string, string> = { reply: '返事が要る', action: '対応が要る', waiting: '返事待ち', read: '目を通すだけ' };
-  return [`一覧に、${what}が ${items.length} 件あります。`, '', ...items.slice(0, 10).map((t) => `${line(t)}［${label[t.group] ?? ''}］`), '', '[メールを開く](/mail)'].join('\n');
+  return [`一覧に、${what}が ${items.length} 件あります。`, '', ...items.slice(0, 10).map((t) => `${line(t)}［${label[t.group] ?? ''}］`), '', ...caseLine, '[メールを開く](/mail)'].join('\n');
 }
 
 /** 覚えていることの答え（第9.5.1.1.2節「見る・直す・消す」）。 */

@@ -1835,20 +1835,22 @@ export class PostgresRepository implements Repository {
     const status = opts.status ?? 'open';
     return this.q<CaseNote>(tenantId,
       `select id, tenant_id as "tenantId", user_id as "userId", title, state, next_step as "nextStep", due_on::text as "dueOn",
-              status, last_day::text as "lastDay", created_at as "createdAt", updated_at as "updatedAt"
+              status, last_day::text as "lastDay", mail_category_id as "mailCategoryId", mail_only as "mailOnly",
+              created_at as "createdAt", updated_at as "updatedAt"
          from case_notes where tenant_id = $1 and user_id = $2 and ($3 = 'all' or status = $3)
         order by last_day desc, updated_at desc limit $4`, [tenantId, userId, status, opts.limit ?? 200]);
   }
 
   async saveCaseNote(n: CaseNote): Promise<void> {
     await this.q(n.tenantId,
-      `insert into case_notes (id, tenant_id, user_id, title, state, next_step, due_on, status, last_day, closed_at, created_at, updated_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9, case when $8 = 'closed' then $11::timestamptz else null end, $10, $11)
+      `insert into case_notes (id, tenant_id, user_id, title, state, next_step, due_on, status, last_day, closed_at, created_at, updated_at, mail_category_id, mail_only)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9, case when $8 = 'closed' then $11::timestamptz else null end, $10, $11, $12, $13)
        on conflict (id) do update set title = excluded.title, state = excluded.state, next_step = excluded.next_step, due_on = excluded.due_on,
          status = excluded.status, last_day = excluded.last_day, updated_at = excluded.updated_at,
+         mail_category_id = excluded.mail_category_id, mail_only = excluded.mail_only,
          closed_at = case when excluded.status = 'closed' then coalesce(case_notes.closed_at, excluded.updated_at) else null end
        where case_notes.tenant_id = excluded.tenant_id and case_notes.user_id = excluded.user_id`,
-      [n.id, n.tenantId, n.userId, n.title, n.state, n.nextStep, n.dueOn, n.status, n.lastDay, n.createdAt, n.updatedAt]);
+      [n.id, n.tenantId, n.userId, n.title, n.state, n.nextStep, n.dueOn, n.status, n.lastDay, n.createdAt, n.updatedAt, n.mailCategoryId ?? null, n.mailOnly ?? false]);
   }
 
   async deleteCaseNote(tenantId: string, userId: string, id: string): Promise<boolean> {

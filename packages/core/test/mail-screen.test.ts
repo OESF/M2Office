@@ -285,7 +285,7 @@ test('秘書の言い回し: 止める・戻す・すぐ知らせる・待つ日
   assert.deepEqual(mailCommand('佐藤さんからのメールはすぐ知らせて'), { kind: 'urgent', who: '佐藤' });
   assert.deepEqual(mailCommand('佐藤さんは1週間待って'), { kind: 'wait', who: '佐藤', days: 5 });
   assert.deepEqual(mailCommand('田中さんは三日待って'), { kind: 'wait', who: '田中', days: 3 });
-  assert.deepEqual(mailCommand('見積の件は済んだ'), { kind: 'done', words: '見積' });
+  assert.deepEqual(mailCommand('見積の件は済んだ'), { kind: 'done', words: '見積', finished: false });
   assert.deepEqual(mailCommand('佐藤さんへの返事を書いて'), { kind: 'reply', words: '佐藤' });
   assert.deepEqual(mailCommand('返信待ちのメールは？'), { kind: 'waiting' });
   assert.equal(mailCommand('メールをチェックして'), null, 'メールの確認は別の見分け（一覧から答える）');

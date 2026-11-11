@@ -173,7 +173,7 @@ export {
 export { Secretary, acceptsFile, asksConnectionData, commandText, fillInputs, readNoteRequest, recordingTaker, isRecordingName } from './secretary/secretary.js';
 export { ProactiveWatcher, PROACTIVE_TRIGGER, TRAVEL_PREFIX, PREP_WINDOW_MIN, TRAVEL_NOTICE_HOUR, isMeetingSoon, hasPlace, meetingKey } from './secretary/proactive.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
-export { REFERS_TO_PAST, closeness, recall, type Recall } from './secretary/recall.js';
+export { REFERS_TO_PAST, caseMailLine, closeness, recall, type CaseMailCounts, type Recall } from './secretary/recall.js';
 export { LIST_MIN, SPOKEN_MAX, needsCanvas } from './secretary/canvas.js';
 export { HOME_SUGGESTIONS_MAX, homeBriefPrompt, parseHomeBrief, pickSome, secretaryExamples, type HomeBrief } from './secretary/home.js';
 export { secretaryClockLine } from './secretary/clock.js';

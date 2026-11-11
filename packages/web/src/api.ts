@@ -2672,7 +2672,7 @@ export const api = {
   myMemories: () => call<{ items: MemoryView[] }>('/me/memories'),
   /** 秘書の成長（本人の像と数。仕様書 第11.13.3節）。 */
   /** 進んでいる案件ノート（仕様書 第11.13.5節）。 */
-  myCases: () => call<{ items: { id: string; title: string; state: string; nextStep: string; dueOn: string | null; lastDay: string }[] }>('/me/cases'),
+  myCases: () => call<{ items: { id: string; title: string; state: string; nextStep: string; dueOn: string | null; lastDay: string; mailCategory: { id: string; name: string } | null }[] }>('/me/cases'),
   deleteCase: (id: string) => call<{ ok: true }>(`/me/cases/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   myGrowth: () => call<{
     profile: { body: string; updatedAt: string } | null; memories: number; preferences: number; learnedThisWeek: number; promoted: number;

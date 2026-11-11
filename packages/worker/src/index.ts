@@ -744,7 +744,7 @@ const PROFILE_INTERVAL_MS = Number(process.env['PROFILE_INTERVAL_MS'] ?? 600_000
 let lastProfileCheck = 0;
 // 案件ノート（第11.13.5節）。10 分ごとに見て、本人ごとに 1 日 1 回（4 時を過ぎてから）書き足す
 const cases = new CaseNoteBuilder({
-  repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log, mail: { store: mailStore },
   agentName: async (tenantId, agentId) => (await hub.forTenant(tenantId)).allAgents.find((a) => a.id === agentId)?.name ?? agentId,
 });
 const profiles = new ProfileBuilder({

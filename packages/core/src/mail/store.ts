@@ -85,15 +85,20 @@ export interface MailStore {
   thread(o: MailOwner, threadId: string): Promise<MailThreadRow | null>;
   /** 片付いていないもの（`state = open`）をすべて。 */
   openThreads(o: MailOwner): Promise<MailThreadRow[]>;
+  /** カテゴリーの付いたスレッドのうち、`since` より後に動いたもの（片付いたものも。新しいものから 300 件まで）。案件ノートの材料（第11.13.8節）。 */
+  categorizedSince(o: MailOwner, since: string): Promise<MailThreadRow[]>;
   saveThread(o: MailOwner, t: MailThreadRow): Promise<void>;
   /** 片付いてから `cutoff` より前のものを消す。 */
   deleteDoneBefore(tenantId: string, cutoff: string): Promise<number>;
-  /** 本人の分をすべて消す（Google の連携の解除・データの削除の求め）。 */
+  /**
+   * 本人の分をすべて消す（Google の連携の解除・データの削除の求め）。
+   * 案件ノートの結びも外し、メールの材料だけから作った案件ノートも消す（第11.13.8節「消す」）。
+   */
   purgeUser(o: MailOwner): Promise<void>;
   /** 本人のカテゴリーをすべて。 */
   categories(o: MailOwner): Promise<MailCategoryRow[]>;
   saveCategory(o: MailOwner, c: MailCategoryRow): Promise<void>;
-  /** カテゴリーを消す。スレッドは `moveTo` に移す（`null` ならカテゴリーなしにする）。 */
+  /** カテゴリーを消す。スレッドは `moveTo` に移す（`null` ならカテゴリーなしにする）。結んだ案件ノートも `moveTo` に結び直す（`moveTo` が別の案件に結んであれば外す）。 */
   deleteCategory(o: MailOwner, id: string, moveTo: string | null): Promise<void>;
   /** 本人の学び（第9.5.1.1.2節）をすべて。 */
   lessons(o: MailOwner): Promise<MailLessonRow[]>;
@@ -201,6 +206,13 @@ export class PostgresMailStore implements MailStore {
     return rows.map(threadOf);
   }
 
+  async categorizedSince(o: MailOwner, since: string): Promise<MailThreadRow[]> {
+    const rows = await this.q<ThreadDb>(o.tenantId,
+      `select ${THREAD_COLS} from mail_threads where tenant_id = $1 and user_id = $2 and category_id is not null and grp <> 'promo' and last_at > $3
+        order by last_at desc limit 300`, [o.tenantId, o.userId, since]);
+    return rows.map(threadOf);
+  }
+
   async saveThread(o: MailOwner, t: MailThreadRow): Promise<void> {
     await this.q(o.tenantId,
       `insert into mail_threads (tenant_id, user_id, thread_id, grp, state, done_reason, done_at, last_message_id, reply_to_id, from_text, subject, summary,
@@ -226,6 +238,9 @@ export class PostgresMailStore implements MailStore {
     await this.q(o.tenantId, `delete from mail_threads where tenant_id = $1 and user_id = $2`, [o.tenantId, o.userId]);
     await this.q(o.tenantId, `delete from mail_watch where tenant_id = $1 and user_id = $2`, [o.tenantId, o.userId]);
     await this.q(o.tenantId, `delete from mail_categories where tenant_id = $1 and user_id = $2`, [o.tenantId, o.userId]);
+    // メールの材料だけから作った案件ノートは消し、ほかの案件ノートは結びだけを外す（第11.13.8節「消す」）
+    await this.q(o.tenantId, `delete from case_notes where tenant_id = $1 and user_id = $2 and mail_only`, [o.tenantId, o.userId]);
+    await this.q(o.tenantId, `update case_notes set mail_category_id = null where tenant_id = $1 and user_id = $2 and mail_category_id is not null`, [o.tenantId, o.userId]);
     await this.clearLessons(o);
   }
 
@@ -289,6 +304,11 @@ export class PostgresMailStore implements MailStore {
 
   async deleteCategory(o: MailOwner, id: string, moveTo: string | null): Promise<void> {
     await this.q(o.tenantId, `update mail_threads set category_id = $4 where tenant_id = $1 and user_id = $2 and category_id = $3`, [o.tenantId, o.userId, id, moveTo]);
+    // 結んだ案件ノートは、まとめた先に結び直す（まとめた先がほかの案件に結んであれば外す。1 つのカテゴリーは 1 つの案件にだけ。第11.13.8節）
+    await this.q(o.tenantId,
+      `update case_notes set mail_category_id = case when $4::text is not null and not exists (
+          select 1 from case_notes x where x.tenant_id = $1 and x.user_id = $2 and x.mail_category_id = $4 and x.status = 'open') then $4 else null end
+        where tenant_id = $1 and user_id = $2 and mail_category_id = $3`, [o.tenantId, o.userId, id, moveTo]);
     await this.q(o.tenantId, `delete from mail_categories where tenant_id = $1 and user_id = $2 and id = $3`, [o.tenantId, o.userId, id]);
   }
 
@@ -316,6 +336,11 @@ export class MemoryMailStore implements MailStore {
     const prefix = this.key(o);
     return [...this.threads.entries()].filter(([k, t]) => k.startsWith(prefix) && t.state === 'open')
       .map(([, t]) => structuredClone(t)).sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+  }
+  async categorizedSince(o: MailOwner, since: string) {
+    const prefix = this.key(o);
+    return [...this.threads.entries()].filter(([k, t]) => k.startsWith(prefix) && t.categoryId !== null && t.group !== 'promo' && t.lastAt > since)
+      .map(([, t]) => structuredClone(t)).sort((a, b) => b.lastAt.localeCompare(a.lastAt)).slice(0, 300);
   }
   async saveThread(o: MailOwner, t: MailThreadRow) { this.threads.set(this.key(o, t.threadId), { ...structuredClone(t), updatedAt: new Date().toISOString() }); }
   async deleteDoneBefore(tenantId: string, cutoff: string) {

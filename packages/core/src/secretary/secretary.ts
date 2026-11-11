@@ -648,7 +648,11 @@ export class Secretary {
       this.deps.repo.findUserById(tenantId, userId),
       // 本人についての記憶（今日のやり取り・会話の要約・覚えた事実・頼んだ業務）。答えるたびに使う（第10.7.3節）。
       // 本人との対話でだけ使い、ほかの利用者と業務エージェントには渡さない（仕様書 第11.1節）
-      recall(this.deps.repo, tenantId, userId, message, available, new Date(), memorySemanticEnabled() && queryEmbed ? { embed: queryEmbed } : {}),
+      recall(this.deps.repo, tenantId, userId, message, available, new Date(), {
+        ...(memorySemanticEnabled() && queryEmbed ? { embed: queryEmbed } : {}),
+        // 案件に結んだメールのいまの数（第11.13.8節）。メールの画面を使っている人だけ
+        ...(this.deps.mail ? { caseMail: (ids: string[]) => this.deps.mail!.caseMail({ tenantId, userId }, ids) } : {}),
+      }),
       // **必ず組織知識を検索する**（第10.9.4.1節）。これが無いと、会社の規程を見ずに
       // 法律や世間の相場を会社の決まりのように答えてしまう。区画の絞り込みは効く（不変則 I-12）
       this.searchKnowledge(tenantId, userId, message, semanticSearchEnabled() ? queryEmbed : undefined),
@@ -1431,12 +1435,12 @@ export class Secretary {
           : 'わかりました。メールの学びの数の共有をやめました。');
       case 'categoryAsk': {
         const r = await mail.findByCategory(o, c.words);
-        return done(mailCategoryText(c.words, r.category, r.items));
+        return done(mailCategoryText(c.words, r.category, r.items, r.case));
       }
       case 'done': {
         // 「補助金の件はもう終わった」: カテゴリーの名前に合えば、そのカテゴリーを並べなくする（第9.5.1.1.1節）
-        const ended = await mail.endCategory(o, c.words);
-        if (ended) return done(`わかりました。「${ended}」は終わったものとして、一覧の上に並べないようにしました。またメールが来たら並べます。`);
+        const ended = await mail.endCategory(o, c.words, new Date(), c.finished);
+        if (ended) return done(`わかりました。「${ended}」は終わったものとしました。メールの一覧の上にも並べません。またメールが来たら並べます。`);
         const t = findThread(await mail.overview(o), c.words);
         if (!t) return done(`「${c.words}」に合うメールが一覧に見つかりませんでした。メールの画面で「済み」を押してください。\n\n[メールを開く](/mail)`);
         await mail.done(o, t.threadId);

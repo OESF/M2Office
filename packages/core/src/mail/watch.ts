@@ -23,7 +23,7 @@ import { silentLogger, type Logger } from '../log/logger.js';
 import { closedReason } from '../scheduler/business-days.js';
 import { classifyInbound, classifySent, draftReply, type TriageInput } from './triage.js';
 import type { MailCategoryRow, MailOwner, MailStore, MailThreadRow, MailWatchRow } from './store.js';
-import { categoryKey, categoryRule, findCategory, mergeCategories, newCategory, promptCategories, proposeCategories, visibleCategories } from './categories.js';
+import { CASE_TITLES, categoryKey, categoryRule, findCategory, mergeCategories, newCategory, promptCategories, proposeCategories, visibleCategories } from './categories.js';
 import { preferencesForAgent } from '../memory/corrections.js';
 import { MailLearner, bracketed, categoryLessonsOf, domainOfAddress, groupLessonFor, groupLessonRule, lessonAddress, styleFor, type GroupLesson, type MailLessonRow } from './learning.js';
 
@@ -306,7 +306,7 @@ export class MailWatch {
         else this.log.warn('メールのカテゴリーの候補を作れませんでした', { tenantId: o.tenantId, err });
       }
     }
-    const catRule = categoryRule(promptCategories(categories, now), lessons);
+    const catRule = categoryRule(promptCategories(categories, now), lessons, await this.caseTitles(o));
     const nameOf = (id: string | null) => (id ? categories.find((c) => c.id === id)?.name ?? '' : '');
 
     // 1 通ずつ当たる傾向（推論に例として渡し、本人の直しは分け先をそのとおりにする）
@@ -419,6 +419,12 @@ export class MailWatch {
    * 並んでいる一覧のうち、カテゴリーの無いものに一度だけカテゴリーを付ける。カテゴリーが 1 つも無ければ、先に候補を作る。
    * 振り分け（返事が要る など）は変えない。宣伝・お知らせには付けない。
    */
+  /** 本人の進んでいる案件の題名（新しいカテゴリーの名前をそろえる。第11.13.8節）。読めなければ空。 */
+  private async caseTitles(o: MailOwner): Promise<string[]> {
+    const notes = await Promise.resolve().then(() => this.deps.repo.listCaseNotes(o.tenantId, o.userId, { limit: CASE_TITLES })).catch(() => []);
+    return (notes ?? []).map((n) => n.title);
+  }
+
   private async seedCategories(o: MailOwner, llm: LlmProvider, categories: MailCategoryRow[], lessons: MailCategoryLesson[], now: Date): Promise<void> {
     const open = (await this.deps.store.openThreads(o)).filter((t) => t.group !== 'promo' && !t.categoryId).slice(0, MAIL_LIMITS.classifyPerTick);
     if (!open.length) return;
@@ -430,7 +436,7 @@ export class MailWatch {
         categories.push(row);
       }
     }
-    const { verdicts } = await classifyInbound(llm, mailDay(now), samples, categoryRule(promptCategories(categories, now), lessons));
+    const { verdicts } = await classifyInbound(llm, mailDay(now), samples, categoryRule(promptCategories(categories, now), lessons, await this.caseTitles(o)));
     for (let i = 0; i < open.length; i++) {
       const name = verdicts[i]?.category ?? '';
       if (!name) continue;

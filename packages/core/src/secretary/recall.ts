@@ -81,16 +81,26 @@ export interface Recall {
 /** 依頼の文を埋め込む口（第11.13.4節）。使えなければ `null`。 */
 export type QueryEmbed = (query: string) => Promise<{ vector: number[]; model: string } | null>;
 
+/** 案件に結んだメールのカテゴリーの、いまのメールの数を引く口（第11.13.8節）。カテゴリーの ID ごと。 */
+export type CaseMailCounts = (categoryIds: string[]) => Promise<Map<string, { name: string; reply: number; action: number; waiting: number; lastAt: string | null }>>;
+
+/** 案件の 1 行に添える、結んだメールの動き（「メール〔見本商事〕: 返事が要る 2・返事待ち 1／最後に届いた日 2026-11-10」）。 */
+export function caseMailLine(m: { name: string; reply: number; action: number; waiting: number; lastAt: string | null }): string {
+  const counts = [m.reply ? `返事が要る ${m.reply}` : '', m.action ? `対応が要る ${m.action}` : '', m.waiting ? `返事待ち ${m.waiting}` : ''].filter(Boolean).join('・') || '残っているメールなし';
+  return `メール〔${m.name}〕: ${counts}${m.lastAt ? `／最後に動いた日 ${new Date(new Date(m.lastAt).getTime() + 9 * 3_600_000).toISOString().slice(0, 10)}` : ''}`;
+}
+
 /**
  * 本人についての記憶を集める。
  *
  * @param agents 業務の名前を引くための定義
  * @param opts.embed 依頼の文を埋め込む口。あれば、意味の近い記憶と要約を選ぶ（第11.13.4節）。無ければ言葉の重なりと新しさで選ぶ
+ * @param opts.caseMail 案件に結んだメールの数を引く口。あれば、案件の 1 行にいまのメールの動きを添える（第11.13.8節）
  * @returns 推論に渡す文（何も無ければ空）と、答えに添える根拠
  */
 export async function recall(
   repo: Repository, tenantId: string, userId: string, message: string, agents: AgentDefinition[], now: Date = new Date(),
-  opts: { embed?: QueryEmbed } = {},
+  opts: { embed?: QueryEmbed; caseMail?: CaseMailCounts } = {},
 ): Promise<Recall> {
   // 1 つが読めなくても答えは返す（記憶が欠けても、秘書が使えなくなるよりよい）
   const safe = <T>(read: () => Promise<T[]>): Promise<T[]> => Promise.resolve().then(read).catch(() => []);
@@ -173,7 +183,14 @@ export async function recall(
   const blocks: string[] = [];
   if (profileText) blocks.push('## 本人の像（あなたがこの人についてまとめたもの）', profileText, '');
   // 進んでいる案件（第11.13.5節）。「あれどうなった」の材料
-  const caseLines = cases.map((c) => `- 〔${c.title}〕${cut(c.state, 200)}${c.nextStep ? `／次: ${cut(c.nextStep, 120)}` : ''}${c.dueOn ? `／期限: ${c.dueOn}` : ''}（最後に動いた日 ${c.lastDay}）`);
+  // 結んだメールのカテゴリーがあれば、いまのメールの数を添える（第11.13.8節。読めなくても案件は渡す）
+  const linkedIds = cases.map((c) => c.mailCategoryId).filter((x): x is string => !!x);
+  const caseMail = opts.caseMail && linkedIds.length ? await opts.caseMail(linkedIds).catch(() => new Map()) : new Map();
+  const caseLines = cases.map((c) => {
+    const m = c.mailCategoryId ? caseMail.get(c.mailCategoryId) : undefined;
+    return `- 〔${c.title}〕${cut(c.state, 200)}${c.nextStep ? `／次: ${cut(c.nextStep, 120)}` : ''}${c.dueOn ? `／期限: ${c.dueOn}` : ''}（最後に動いた日 ${c.lastDay}）`
+      + (m ? `\n  ${caseMailLine(m)}` : '');
+  });
   if (caseLines.length) blocks.push('## 進んでいる案件（あなたがまとめたもの。新しい順）', ...caseLines, '');
   if (preferenceLines.length) blocks.push('## 仕事のやり方の好み（いつも守る。会社の決まりと食い違えば会社の決まりを採る）', ...preferenceLines, '');
   if (memoryLines.length) blocks.push('## 覚えている事実', ...memoryLines, '');

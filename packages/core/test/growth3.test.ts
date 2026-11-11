@@ -27,7 +27,7 @@ test('案件の書き足しの答えから、範囲の外の番号・空の題�
     create: [{ title: 'B 社の保守契約', state: '更新の相談', next: '', due: 'いつか', lastDay: '2026-10-14' }, { title: '', lastDay: '2026-10-14' }, { title: '日付なし' }],
   }), 2);
   assert.deepEqual(p.update, [{ n: 1, state: '見積を送った', next: '返事を待つ', due: '2026-10-20', lastDay: '2026-10-14' }]);
-  assert.deepEqual(p.create, [{ title: 'B 社の保守契約', state: '更新の相談', next: '', due: null, lastDay: '2026-10-14' }]);
+  assert.deepEqual(p.create, [{ title: 'B 社の保守契約', state: '更新の相談', next: '', due: null, lastDay: '2026-10-14', mail: null, onlyMail: false }]);
 });
 
 function caseRepo() {
