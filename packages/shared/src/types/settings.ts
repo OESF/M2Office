@@ -515,8 +515,16 @@ export interface UserSettings {
   notifications: {
     /** 受け取る種類（第6.5.5節）。`false` にしたものは届けない。 */
     kinds: Record<'brief' | 'run' | 'approval' | 'failure' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'decision' | 'member' | 'print' | 'library' | 'mail', boolean>;
-    /** 通知しない時間帯（例: 22:00〜7:00）。`null` は指定なし。 */
+    /**
+     * Chat に送らない時間帯（例: 21:00〜7:00。第6.5.5節・第10.16.5節）。`null` は時間で控えない（いつでも送る）。
+     *
+     * @remarks 既定は {@link DEFAULT_QUIET_HOURS}。夜勤の人は昼を控える時間にできる。本人の時間帯（`profile.timezone`）で見る
+     */
     quietHours: { from: string; to: string } | null;
+    /** 会社の営業日でない日（第6.6.1節）は Chat に送らないか（第10.16.5節）。既定は送らない。会社の休みの日に働く人は切る。 */
+    quietDaysOff: boolean;
+    /** Chat に送らない通知の種類（通知の `kind` の値。第10.16.5節「種類ごとの Chat」）。画面内には届く。 */
+    chatOff: string[];
     /**
      * 画面内のお知らせに加えて控えを届ける先（第6.5.5.2節）。既定は切（画面内のみ）。
      *
@@ -743,12 +751,17 @@ export function checkLauncherUrl(raw: string): { url: string } | { error: string
 // メールの整理は、第 0.540.0 版でメールの画面「メール」（業務の並びの項目。ID は MAIL_MENU_ID）に置き換えた
 export const DEFAULT_PINNED = ['minutes', 'mail', 'knowledge-qa', 'scheduling', 'slides', 'document-draft', 'business-cards', 'inventory'];
 
+/** Chat に送らない時間帯の既定（第10.16.5節。2026-11-11 に三浦さんが決めた）。 */
+export const DEFAULT_QUIET_HOURS = { from: '21:00', to: '07:00' } as const;
+
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   profile: { furigana: '', title: '', timezone: 'Asia/Tokyo', home: '', workplace: '' },
   secretary: { name: '', callMe: '', style: 'polite', proactivity: 'normal', speak: true, captions: true, voice: '', voiceStyle: '', avatar: '' },
   notifications: {
     kinds: { brief: true, run: true, approval: true, failure: true, inventory: true, attendance: true, signage: true, inquiry: true, competitor: true, announcement: true, webReview: true, column: true, contract: true, reservation: true, subsidy: true, decision: true, member: true, print: true, library: true, mail: true },
-    quietHours: null,
+    quietHours: DEFAULT_QUIET_HOURS,
+    quietDaysOff: true,
+    chatOff: [],
     channels: { chat: false },
   },
   memory: { learning: true, excludes: [], keepConversations: true },

@@ -249,6 +249,14 @@ export interface ServiceReportView {
 }
 
 /** 途中の録音（仕様書 第9.4.5.1節）。`seconds` は録れている長さ、`nextSeq` は次に送る欠片の番号。 */
+/** いま行われている会議の予定（第9.4.5.2節）。参加者は本人を除くアドレス。 */
+export interface OngoingMeetingView {
+  title: string;
+  start: string;
+  end: string;
+  attendees: string[];
+}
+
 export interface LiveRecordingView {
   id: string;
   createdAt: string;
@@ -1134,7 +1142,8 @@ export interface ConnectionSettings {
     /** Google Cloud のプロジェクトの番号（クライアント ID の頭）。 */
     projectNumber?: string | null;
     /** 通知の控えを送る会社の Chat アプリの鍵（第6.5.5.2.1節）。 */
-    chatApp?: { registered: boolean; clientEmail: string; updatedAt: string | null };
+    /** 会社の Chat アプリ（通知の控えと、Chat で秘書に頼む受け口。第6.5.5.2.1節・第10.16.3節）。 */
+    chatApp?: { registered: boolean; clientEmail: string; updatedAt: string | null; hook?: boolean; subscription?: string };
     requiredScopes: { scope: string; level: string; label: string }[];
     workspaceSource: string;
     users: { userId: string; name: string; email: string; connected: boolean; googleEmail: string | null; connectedAt: string | null; missing: string[] }[];
@@ -1541,7 +1550,10 @@ export const api = {
     /** 欠片（16 kHz・モノラル・16 ビットの PCM）を送る。同じ番号は置き換わる。 */
     putPart: (id: string, seq: number, pcm: Blob) => sendRaw<{ recording: LiveRecordingView }>('PUT', `/files/recordings/${encodeURIComponent(id)}/parts/${seq}`, pcm),
     /** 止めて 1 つの WAV のファイルにする。 */
-    finish: (id: string) => call<{ id: string; name: string }>(`/files/recordings/${encodeURIComponent(id)}/finish`, { method: 'POST', body: '{}' }),
+    finish: (id: string, meta: { meeting?: boolean } = {}) =>
+      call<{ id: string; name: string }>(`/files/recordings/${encodeURIComponent(id)}/finish`, { method: 'POST', body: JSON.stringify(meta) }),
+    /** いま行われている会議の予定（第9.4.5.2節）。無い・読めないときは `null`。 */
+    meeting: () => call<{ meeting: OngoingMeetingView | null }>('/files/recordings/meeting'),
     /** 途中の録音を消す。 */
     discard: (id: string) => call<{ ok: true }>(`/files/recordings/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
@@ -2814,6 +2826,11 @@ export const api = {
     /** 通知の控えを送る会社の Chat アプリの鍵（サービスアカウントの JSON）を登録する・消す（第6.5.5.2.1節）。 */
     saveChatAppKey: (key: string) => call<{ ok: true; clientEmail: string }>('/admin/connections/google/chat-app', { method: 'PUT', body: JSON.stringify({ key }) }),
     deleteChatAppKey: () => call<{ ok: true }>('/admin/connections/google/chat-app', { method: 'DELETE' }),
+    /** Chat で秘書に頼む受け口の URL を作る（作り直すと前の URL は使えない。URL はこのときだけ返る。第10.16.3節）。 */
+    createChatHook: () => call<{ ok: true; url: string }>('/admin/connections/google/chat-app/hook', { method: 'POST' }),
+    deleteChatHook: () => call<{ ok: true }>('/admin/connections/google/chat-app/hook', { method: 'DELETE' }),
+    /** Chat の出来事を取りに行く Cloud Pub/Sub の購読（ローカル・自社運用。空で外す）。 */
+    saveChatSubscription: (subscription: string) => call<{ ok: true }>('/admin/connections/google/chat-app/subscription', { method: 'PUT', body: JSON.stringify({ subscription }) }),
     /** Google のログインの記録の担当の許可の状態（不正の兆しの見張りの段 3）。 */
     googleLoginAudit: () => call<GoogleLoginAuditStatus>('/admin/connections/google/login-audit'),
     /** 担当の許可をつなぐ（Google の認可の画面の URL。見本の会社ではすぐつなぐ）。 */

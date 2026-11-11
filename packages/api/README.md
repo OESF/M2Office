@@ -299,6 +299,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/bookings/:id/use` ／ `cancel` | 予約の人が来た（取り置きを使用の記録にする）／ 取り消す（使える数に戻す） |
 | `POST /v1/inventory/menus` | メニューで使う品目を覚える（`menu`・`items`: itemId と qty。空なら在庫を使わない）。品目の分からない予約を取り置き直す |
 | `POST /v1/hooks/line/:key` | **認証なしの受け口**。LINE 公式アカウントの Webhook（仕様書 第33.19節）。会社は鍵（32 文字）のハッシュから引き、その会社のチャネルのシークレットで `X-Line-Signature` を確かめる。知らない鍵・問い合わせの記録か LINE を切った会社は 404、署名が違えば 401、1 MB を超えれば 413。確かめたらすぐ 200 を返し、取り込みは後ろで行う（出来事の ID で 2 度残さない） |
+| `POST /v1/hooks/google-chat/:key` | **認証なしの受け口**。会社の Chat アプリの「HTTP エンドポイント URL」（仕様書 第10.16.3節、ADR-0138）。会社は鍵（32 文字）のハッシュから引き、Google の ID トークン（`Authorization: Bearer`。送り主 `chat@system.gserviceaccount.com`・宛先がこの道）を確かめる。知らない鍵・止めた会社は 404、署名が違えば 401、256 KB を超えれば 413。確かめたらすぐ空の答えを返し、秘書への受け渡しは後ろで行う（発言の名前で 2 度扱わない）。答えは会社の Chat アプリから送る。見本の会社は `Bearer mock-chat` を受ける |
 | `GET /v1/inventory/publications` | 管理者: Web への公開のまとまりの一覧（作った順。`max` は 1 社の上限 8）。1 つも無ければ「公開 1」を作って返す。「Web への公開」を切った会社と管理者でない人は 403（第29.12.1節・第29.12.2節） |
 | `POST /v1/inventory/publications` | 管理者: まとまりを足す（承認する前の形。`name` を省けば「公開 N」）。8 つを超えると 400 |
 | `POST /v1/inventory/publications/preview` | 管理者: 承認する前の見本（`itemIds`・`fields`（`category`・`price`）・`showCount`）。公開されるとおりの中身を返す |
@@ -394,6 +395,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/deliveries/:requestId/results` ／ `GET /v1/deliveries/stops` | 外部のアプリの鍵（機能 `deliveries.send`）: 配信の結果 ／ 配信の停止を、`after`（前の答えの `next`）より後から 500 件まで渡す。結果の `done` は送り終えて 24 時間たってから |
 | `GET /v1/admin/apps/:id/deliveries` | 管理者: そのアプリの配信の一覧（宛先は出さない） |
 | `PUT・DELETE /v1/admin/connections/google/chat-app` | 管理者: 通知を送る会社の Chat アプリの鍵（サービスアカウントの JSON。本文 `key`）。保存の前に Google でアプリとして認証できるかを確かめる。鍵は返さない（仕様書 第6.5.5.2.1節） |
+| `POST・DELETE /v1/admin/connections/google/chat-app/hook` | 管理者: Chat で秘書に頼む受け口の URL を作る・消す（仕様書 第10.16.3節）。作ると `url` を返す（このときだけ。鍵はハッシュだけを持つ）。作り直すと前の URL は使えない |
+| `PUT /v1/admin/connections/google/chat-app/subscription` | 管理者: Chat の出来事を取りに行く Cloud Pub/Sub の購読（本文 `subscription`。`projects/…/subscriptions/…`。空で外す）。ローカル・自社運用で、API が 5 秒ごとに取りに行く（`chat/pubsub.ts`） |
 | `POST` ／ `DELETE /v1/print-designs/:id/signage`、`POST /v1/print-designs/:id/announcement` | サイネージに流す（掲示の始まりより前なら始まりから）／ 止める ／ お知らせの作成の下書きにする（第41.18節。1 つの物を返すときに `links` でつなげる先を使えるかを添える） |
 | `GET /v1/print-designs/:id/thumb` ／ `GET /v1/print-designs/:id/versions/:vid/preview\|png\|pdf\|bleed` | 一覧の小さな画像 ／ 版の書き出し（案の画像・PNG・実寸の PDF・入稿用の PDF。`page` はパンフレットの面） |
 | `GET /v1/competitors` | 競合の分析（仕様書 第36.18節）: 全体（自社の像・競合・動いている作業・最後の作業・地図の注意）。地図で見つけた競合の名前と Web サイトはここで引き直す。使えない会社と利用範囲の外の人には、`/v1/competitors` のどの口も 403 |
@@ -587,7 +590,8 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/files/recordings/current` | 本人の途中の録音（その場で録る録音。第9.4.5.1節）。無ければ `recording: null` |
 | `POST /v1/files/recordings` | その場で録り始める。録音を受け取れない会社（ローカルの方針・AI の設定が無い）は 422。本人の途中の録音があれば作らずに返す（`resumed: true`。1 人 1 つ） |
 | `PUT /v1/files/recordings/:id/parts/:seq` | 録音の欠片（16 kHz・モノラル・16 ビットの PCM。本文はそのままのバイト。30 秒分まで）。同じ番号は置き換える。合わせて 3 時間まで（413）。本人だけ |
-| `POST /v1/files/recordings/:id/finish` | 止めて、欠片を番号の順につないだ 1 つの WAV のファイルにする（渡された録音と同じに扱う）。監査ログ `file.upload`（`live: true`） |
+| `GET /v1/files/recordings/meeting` | いま行われている会議の予定（始まりの 15 分前から終わりまで。題名・始まり・終わり・本人を除く参加者。読めなければ `null`。第9.4.5.2節） |
+| `POST /v1/files/recordings/:id/finish` | 止めて、欠片を番号の順につないだ 1 つの WAV のファイルにする（渡された録音と同じに扱う）。本文 `{ meeting: true }` で会議の音も録った印を残す。監査ログ `file.upload`（`live: true`・`meetingAudio`） |
 | `DELETE /v1/files/recordings/:id` | 途中の録音を消す。監査ログ `file.audio_discard` |
 | `GET /v1/files/drive-picker` | 秘書に渡すドライブのファイルを選ぶ画面の材料（`drive.file` だけに絞ったトークン。見本の会社は見本の一覧。仕様書 第10.10.8節） |
 | `POST /v1/files/from-drive` | 本人がドライブで選んだファイル（`fileId`）を受け取る。Google のドキュメント・スプレッドシート・スライドは Word・Excel・PDF に書き出す。201 |
@@ -610,6 +614,7 @@ src/auth/             認証の設定とログイン状態（Cookie）
 src/middleware/       テナント解決、利用者の確認、ロールの確認、要求のログと想定外のエラーの処理
 src/routes/           エンドポイント
 src/secretary/        秘書の調べものと秘書が頼んだ業務の状態、朝のブリーフの自動の用意
+src/chat/             Chat で秘書に頼む橋渡し（bridge.ts。送った人の秘書に渡し、答えと後ろへ回した依頼の結果を Chat に返す）と、Pub/Sub から取りに行く見回り（pubsub.ts）。仕様書 第10.16.3節
 src/voice/            音声の中継（Gemini Live）、秘書の名乗りの指示、声を試す
 src/audit/            監査ログの見せ方（人の名前・業務の言葉・CSV。仕様書 第6.6.8.1節）
 src/debug/            デバッグモードの記録（メモリーだけ・本人の分だけ）と、秘書の振り分けの 1 行（仕様書 第20.4.1節）

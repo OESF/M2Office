@@ -10,7 +10,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import {
   detectKind, discardLiveRecording, finishLiveRecording, isAudioName, LIVE_PART_MAX_BYTES, liveSeconds, LiveRecordingError, loadFile, MAX_AUDIO_BYTES, MAX_FILE_BYTES,
-  putLiveRecordingPart, saveFile, startLiveRecording, type LiveRecording,
+  ONGOING_LEAD_MIN, ongoingMeeting, putLiveRecordingPart, saveFile, startLiveRecording, type LiveRecording,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { driveFilesFor } from '../drive-files.js';
@@ -60,6 +60,23 @@ export function filesRoute(deps: AppDeps) {
     throw err;
   };
 
+  /**
+   * いま行われている会議の予定（第9.4.5.2節。始まりの 15 分前から終わりまで）。会議の音も録るときの選びと、議事録の題名と参加者に使う。
+   * 予定を読めない（Google と接続していない・失敗した）ときも `meeting: null` を返す（録音はマイクだけでも使えるため、止めない）。
+   */
+  app.get('/recordings/meeting', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const now = new Date();
+    try {
+      const events = await deps.connector.calendar.list({ tenantId: tenant.id, userId: user.id }, {
+        from: new Date(now.getTime() - 6 * 3_600_000).toISOString(), to: new Date(now.getTime() + ONGOING_LEAD_MIN * 60_000).toISOString(),
+      });
+      return c.json({ meeting: ongoingMeeting(events, now, user.email) });
+    } catch {
+      return c.json({ meeting: null });
+    }
+  });
+
   /** 本人の途中の録音（第9.4.5.1節）。無ければ `recording: null`。 */
   app.get('/recordings/current', async (c) => {
     const { tenant, user } = c.get('ctx');
@@ -97,11 +114,13 @@ export function filesRoute(deps: AppDeps) {
   app.post('/recordings/:id/finish', async (c) => {
     const { tenant, user } = c.get('ctx');
     try {
+      // 会議の音も録ったか（第9.4.5.2節「監査」）。中身は見ず、印だけを残す
+      const meeting = (await c.req.json<{ meeting?: unknown }>().catch(() => ({} as { meeting?: unknown }))).meeting === true;
       const { file, seconds } = await finishLiveRecording(deps.repo, deps.files, { tenantId: tenant.id, userId: user.id }, c.req.param('id'));
       await deps.repo.appendAudit({
         id: crypto.randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id,
         action: 'file.upload', targetType: 'file', targetId: file.id,
-        detail: { kind: file.kind, size: file.size, sha256: file.sha256, seconds, live: true }, occurredAt: new Date().toISOString(),
+        detail: { kind: file.kind, size: file.size, sha256: file.sha256, seconds, live: true, ...(meeting ? { meetingAudio: true } : {}) }, occurredAt: new Date().toISOString(),
       });
       return c.json(file, 201);
     } catch (err) {

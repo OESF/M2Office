@@ -161,7 +161,7 @@ export async function claimUntold(
     const claimed = await repo.claimLookupDelivery(tenantId, x.runId);
     if (claimed && fresh) {
       out.push(x);
-      await remember(repo, tenantId, userId, x);
+      await rememberLookup(repo, tenantId, userId, x);
       // 秘書が伝えたブリーフは、同じ中身の通知を既読にする（第9.5.5.1節、ADR-0047）。二度読ませない
       if (isBrief(x.agentId)) await readBriefNotice(repo, tenantId, userId, x.runId);
     }
@@ -189,7 +189,7 @@ async function readBriefNotice(repo: Repository, tenantId: string, userId: strin
  *
  * @remarks 本人が「会話を残す」を切っていれば残さない。残せなくても伝えることは止めない
  */
-async function remember(repo: Repository, tenantId: string, userId: string, x: LookupView): Promise<void> {
+export async function rememberLookup(repo: Repository, tenantId: string, userId: string, x: LookupView): Promise<void> {
   try {
     const prefs = await repo.getUserSettings(tenantId, userId);
     if (!prefs.memory.keepConversations) return;

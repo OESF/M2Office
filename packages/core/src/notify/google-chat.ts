@@ -24,11 +24,15 @@ export interface ServiceAccountKey {
 /** 呼び先。テストでは手元の偽の Google に向ける。 */
 export interface ChatAppEndpoints {
   chat: string;
+  /** Cloud Pub/Sub（ローカル・自社運用で、Chat の出来事を取りに行く。第10.16.3節「受け口」）。 */
+  pubsub?: string;
   /** 鍵の `token_uri` の代わりに使う口（テストだけ）。 */
   token?: string;
 }
 
-export const CHAT_APP_ENDPOINTS: ChatAppEndpoints = { chat: 'https://chat.googleapis.com/v1' };
+export const CHAT_APP_ENDPOINTS: ChatAppEndpoints = { chat: 'https://chat.googleapis.com/v1', pubsub: 'https://pubsub.googleapis.com/v1' };
+/** Cloud Pub/Sub の購読から取りに行く権限（第10.16.3節「受け口」）。 */
+export const PUBSUB_SCOPE = 'https://www.googleapis.com/auth/pubsub';
 /** アプリとして送る権限（管理者の承認は要らない）。 */
 export const CHAT_BOT_SCOPE = 'https://www.googleapis.com/auth/chat.bot';
 /** 本人とアプリの個別メッセージの場所を作るための、本人の許可（短い名前。使う人だけに求める）。 */
@@ -59,9 +63,14 @@ export function parseServiceAccountKey(text: string): ServiceAccountKey | { erro
 }
 
 /** 本文を載せない控えの文（第6.5.5.2節）。Chat のリンクの書き方 `<URL|文字>` を使う。 */
-export function chatNotificationText(e: Pick<NotificationEnvelope, 'kindLabel' | 'title' | 'link'>): string {
-  const title = e.title.replace(/[<>|]/g, ' ').slice(0, 200);
-  return `【${e.kindLabel}】${title}\n<${e.link}|画面で開く>`;
+export function chatNotificationText(e: Pick<NotificationEnvelope, 'kindLabel' | 'title' | 'link' | 'items' | 'more'>): string {
+  const clean = (t: string) => t.replace(/[<>|]/g, ' ').slice(0, 200);
+  const head = `【${e.kindLabel}】${clean(e.title)}`;
+  if (!e.items?.length) return `${head}\n<${e.link}|画面で開く>`;
+  // たまった分をまとめた 1 通（第10.16.5節「明けたとき」）。題名だけを並べ、本文は載せない
+  const lines = e.items.map((i) => `・【${i.kindLabel}】${clean(i.title)}`);
+  if (e.more) lines.push(`ほか ${e.more} 件`);
+  return [head, ...lines, `<${e.link}|画面で開く>`].join('\n');
 }
 
 /**
@@ -70,7 +79,7 @@ export function chatNotificationText(e: Pick<NotificationEnvelope, 'kindLabel' |
  * @remarks トークンは期限の 1 分前まで使い回す。断りの文に応答の中身を入れない
  */
 export class ChatAppClient {
-  private cached: { token: string; expiresAt: number } | null = null;
+  private readonly cached = new Map<string, { token: string; expiresAt: number }>();
 
   constructor(
     private readonly key: ServiceAccountKey,
@@ -78,12 +87,13 @@ export class ChatAppClient {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
-  /** アプリとしてのアクセス トークン（JWT で取る）。 */
-  async token(): Promise<string> {
-    if (this.cached && this.cached.expiresAt - 60_000 > this.now()) return this.cached.token;
+  /** アプリとしてのアクセス トークン（JWT で取る）。権限ごとに使い回す。 */
+  async token(scope: string = CHAT_BOT_SCOPE): Promise<string> {
+    const hit = this.cached.get(scope);
+    if (hit && hit.expiresAt - 60_000 > this.now()) return hit.token;
     const iat = Math.floor(this.now() / 1000);
     const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
-    const body = `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64({ iss: this.key.clientEmail, scope: CHAT_BOT_SCOPE, aud: this.key.tokenUri, iat, exp: iat + 3600 })}`;
+    const body = `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64({ iss: this.key.clientEmail, scope, aud: this.key.tokenUri, iat, exp: iat + 3600 })}`;
     let signature: string;
     try {
       signature = createSign('RSA-SHA256').update(body).sign(this.key.privateKey, 'base64url');
@@ -103,8 +113,9 @@ export class ChatAppClient {
         ? '会社の Chat アプリの鍵が Google に認められません（消された鍵か、サービスアカウントが止まっています）'
         : `会社の Chat アプリの鍵で認証できません（${code}）`);
     }
-    this.cached = { token: j['access_token'], expiresAt: this.now() + Number(j['expires_in'] ?? 3600) * 1000 };
-    return this.cached.token;
+    const token = j['access_token'];
+    this.cached.set(scope, { token, expiresAt: this.now() + Number(j['expires_in'] ?? 3600) * 1000 });
+    return token;
   }
 
   private async call(path: string, init: { method?: string; body?: unknown } = {}): Promise<{ status: number; json: Record<string, unknown> }> {
@@ -143,7 +154,73 @@ export class ChatAppClient {
     if (r.status >= 400) throw new ConnectorUnavailableError('unreachable', `Google Chat に送れませんでした（${r.status}）`);
     return true;
   }
+
+  /**
+   * 秘書の答えを返す（第10.16.3節）。スレッドがあれば同じスレッドに、`privateViewer` があればその人にだけ見える形で送る。
+   *
+   * @returns 送れたら `true`。場所が無い・アプリが入っていないなら `false`
+   * @remarks 本人にだけ見える返事は、アプリとして送るときだけ使える（Google の決まり）。ファイルは添えない
+   */
+  async reply(space: string, text: string, opts: { thread?: string | null; privateViewer?: string | null } = {}): Promise<boolean> {
+    if (!/^spaces\/[A-Za-z0-9_-]+$/.test(space)) return false;
+    const thread = opts.thread && /^spaces\/[A-Za-z0-9_-]+\/threads\/[A-Za-z0-9_.-]+$/.test(opts.thread) ? opts.thread : null;
+    const viewer = opts.privateViewer && /^users\/[A-Za-z0-9_-]+$/.test(opts.privateViewer) ? opts.privateViewer : null;
+    const body: Record<string, unknown> = { text };
+    if (thread) body['thread'] = { name: thread };
+    if (viewer) body['privateMessageViewer'] = { name: viewer };
+    const q = thread ? '?messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD' : '';
+    const r = await this.call(`/${space}/messages${q}`, { method: 'POST', body });
+    if (r.status === 404 || r.status === 403) return false;
+    if (r.status >= 400) throw new ConnectorUnavailableError('unreachable', `Google Chat に送れませんでした（${r.status}）`);
+    return true;
+  }
+
+  /**
+   * Cloud Pub/Sub の購読から、Chat の出来事を取りに行く（ローカル・自社運用。第10.16.3節「受け口」）。
+   *
+   * @param subscription 購読（`projects/…/subscriptions/…`）
+   * @returns 届いていた出来事と、受け取りの印（読み終えたら {@link ack} する）
+   */
+  async pull(subscription: string, max = 10): Promise<{ ackId: string; event: unknown }[]> {
+    if (!PUBSUB_SUBSCRIPTION.test(subscription)) throw new ConnectorUnavailableError('client-error', 'Pub/Sub の購読の名前が違います（projects/…/subscriptions/…）');
+    const base = this.endpoints.pubsub ?? CHAT_APP_ENDPOINTS.pubsub!;
+    const res = await fetch(`${base}/${subscription}:pull`, {
+      method: 'POST', signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { authorization: `Bearer ${await this.token(PUBSUB_SCOPE)}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ maxMessages: max }),
+    }).catch(() => null);
+    if (!res) throw new ConnectorUnavailableError('unreachable', 'Cloud Pub/Sub に届きませんでした');
+    if (res.status === 403 || res.status === 404) throw new ConnectorUnavailableError('client-error', `Pub/Sub の購読を読めません（${res.status}。購読の名前と、サービスアカウントの「Pub/Sub サブスクライバー」の役割を確かめてください）`);
+    if (!res.ok) throw new ConnectorUnavailableError('unreachable', `Cloud Pub/Sub が答えませんでした（${res.status}）`);
+    const j = (await res.json().catch(() => ({}))) as { receivedMessages?: { ackId?: string; message?: { data?: string } }[] };
+    const out: { ackId: string; event: unknown }[] = [];
+    for (const m of j.receivedMessages ?? []) {
+      if (!m.ackId) continue;
+      let event: unknown = null;
+      try {
+        event = JSON.parse(Buffer.from(m.message?.data ?? '', 'base64').toString('utf8'));
+      } catch {
+        event = null;
+      }
+      out.push({ ackId: m.ackId, event });
+    }
+    return out;
+  }
+
+  /** 取りに行った出来事を読み終えたと Pub/Sub に伝える（もう届かないようにする）。 */
+  async ack(subscription: string, ackIds: string[]): Promise<void> {
+    if (!ackIds.length || !PUBSUB_SUBSCRIPTION.test(subscription)) return;
+    const base = this.endpoints.pubsub ?? CHAT_APP_ENDPOINTS.pubsub!;
+    await fetch(`${base}/${subscription}:acknowledge`, {
+      method: 'POST', signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { authorization: `Bearer ${await this.token(PUBSUB_SCOPE)}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ackIds }),
+    }).catch(() => null);
+  }
 }
+
+/** Pub/Sub の購読の名前の形。 */
+export const PUBSUB_SUBSCRIPTION = /^projects\/[a-z][a-z0-9-]{4,28}[a-z0-9]\/subscriptions\/[A-Za-z][A-Za-z0-9._~%+-]{2,254}$/;
 
 /** 会社の Chat アプリの鍵を読む。無い・読めなければ `null`。 */
 async function keyOf(repo: Repository, box: SecretBox, tenantId: string): Promise<ServiceAccountKey | null> {

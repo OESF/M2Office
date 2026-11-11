@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { AVATAR_PRESETS, TEXT_SIZES, TEXT_SIZE_STANDARD, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, type AppBindingView, type BriefSettings, type UserSettings } from '@m2office/shared';
+import { AVATAR_PRESETS, TEXT_SIZES, TEXT_SIZE_STANDARD, BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, showsCaptions, DEFAULT_QUIET_HOURS, type AppBindingView, type BriefSettings, type UserSettings } from '@m2office/shared';
 import {
   api, describeError, type MyConnectionView,
   type AgentSummary, type ConversationView, type Me, type MemoryView,
@@ -100,6 +100,33 @@ export function Settings({ me, agents, onChanged, section, photo, onPhoto }: {
 
   // 1 度に 1 区分だけを出す（仕様書 第6.5.0節）
   const on = (id: SettingsSection) => section === id;
+  // 通知の種類（仕様書 第6.5.5節）。受け取る種類と、Chat に送る種類（第10.16.5節）の両方に使う
+  const notifyGroups = ([
+    ['基本', [
+      ['brief', 'ブリーフ', '朝・週次', true],
+      ['approval', '承認の依頼', '', true],
+      ['run', '実行の完了', '', true],
+      ['failure', '失敗', '', true],
+      ['mail', 'メール', '急ぎのメール（期限が近いもの・すぐ知らせる相手から）', true],
+    ]],
+    ['業務', [
+      ['inventory', '在庫', '残りわずか・無くなる見込み・使用期限', !!(me.inventory)],
+      ['attendance', '給与・勤怠', '給与明細・打刻の直し・有給・時間外の上限・有給の取得義務', !!(me.hr || me.hrSelf)],
+      ['signage', 'サイネージ', '画面が未接続', !!(me.signage)],
+      ['inquiry', '問い合わせ', '次にやることの期限・対応中のまま', !!(me.inquiries)],
+      ['competitor', '競合の分析', '探し終えた・見回り終えた', !!(me.competitors)],
+      ['announcement', 'お知らせの作成', '出せなかった出し先', !!(me.announcements)],
+      ['webReview', 'Webの分析', '月の便り', !!(me.webReview)],
+      ['reservation', '予約', '管理者が変えた・取り消した、予約できるものを止めた', !!(me.reservations)],
+      ['subsidy', '補助金・助成金', '月の案内・「気になる」の締め切り', !!(me.subsidies)],
+      ['decision', '意思決定支援', '討論が終わった', !!(me.decisions)],
+      ['member', '会員', '週の見立て・LINE の知らせの結果', !!(me.members)],
+      ['print', '販促物の作成', '掲示の期間が終わった', !!(me.printDesigns)],
+      ['library', 'ナレッジの整理', '古い版が見つかった', !!(me.library)],
+      ['contract', '契約', '解約の申し出の期限・契約の終わり・自動更新', !!(me.contracts)],
+      ['column', 'コラムの作成', 'テーマ案・予定表・予約', !!(me.webColumns)],
+    ]],
+  ] as [string, [NotificationKindKey, string, string, boolean][]][]);
 
   return (
     <>
@@ -238,32 +265,7 @@ export function Settings({ me, agents, onChanged, section, photo, onPhoto }: {
       <div className="card">
         <h3>通知</h3>
         <p className="muted small">切った種類は画面内にも届きません</p>
-        {([
-          ['基本', [
-            ['brief', 'ブリーフ', '朝・週次', true],
-            ['approval', '承認の依頼', '', true],
-            ['run', '実行の完了', '', true],
-            ['failure', '失敗', '', true],
-            ['mail', 'メール', '急ぎのメール（期限が近いもの・すぐ知らせる相手から）', true],
-          ]],
-          ['業務', [
-            ['inventory', '在庫', '残りわずか・無くなる見込み・使用期限', !!(me.inventory)],
-            ['attendance', '給与・勤怠', '給与明細・打刻の直し・有給・時間外の上限・有給の取得義務', !!(me.hr || me.hrSelf)],
-            ['signage', 'サイネージ', '画面が未接続', !!(me.signage)],
-            ['inquiry', '問い合わせ', '次にやることの期限・対応中のまま', !!(me.inquiries)],
-            ['competitor', '競合の分析', '探し終えた・見回り終えた', !!(me.competitors)],
-            ['announcement', 'お知らせの作成', '出せなかった出し先', !!(me.announcements)],
-            ['webReview', 'Webの分析', '月の便り', !!(me.webReview)],
-            ['reservation', '予約', '管理者が変えた・取り消した、予約できるものを止めた', !!(me.reservations)],
-            ['subsidy', '補助金・助成金', '月の案内・「気になる」の締め切り', !!(me.subsidies)],
-            ['decision', '意思決定支援', '討論が終わった', !!(me.decisions)],
-            ['member', '会員', '週の見立て・LINE の知らせの結果', !!(me.members)],
-            ['print', '販促物の作成', '掲示の期間が終わった', !!(me.printDesigns)],
-            ['library', 'ナレッジの整理', '古い版が見つかった', !!(me.library)],
-            ['contract', '契約', '解約の申し出の期限・契約の終わり・自動更新', !!(me.contracts)],
-            ['column', 'コラムの作成', 'テーマ案・予定表・予約', !!(me.webColumns)],
-          ]],
-        ] as [string, [NotificationKindKey, string, string, boolean][]][]).map(([group, kinds]) => {
+        {notifyGroups.map(([group, kinds]) => {
           const shown = kinds.filter(([, , , on]) => on);
           if (shown.length === 0) return null;
           return (
@@ -285,23 +287,29 @@ export function Settings({ me, agents, onChanged, section, photo, onPhoto }: {
             </div>
           );
         })}
-        <h4>通知しない時間帯</h4>
-        <p className="muted small">Chat だけ、明けてから送ります</p>
+        <h4>Chat に送らない時間</h4>
         <div className="row quiet-hours">
-          <input type="time" value={s.notifications.quietHours?.from ?? ''}
-            onChange={(e) => set('notifications', {
-              quietHours: e.target.value ? { from: e.target.value, to: s.notifications.quietHours?.to ?? '07:00' } : null,
-            })} />
-          <span>〜</span>
-          <input type="time" value={s.notifications.quietHours?.to ?? ''}
-            onChange={(e) => set('notifications', {
-              quietHours: e.target.value ? { from: s.notifications.quietHours?.from ?? '22:00', to: e.target.value } : null,
-            })} />
-          <button className="btn ghost small" onClick={() => set('notifications', { quietHours: null })}>指定しない</button>
+          {s.notifications.quietHours ? <>
+            <input type="time" value={s.notifications.quietHours.from}
+              onChange={(e) => e.target.value && set('notifications', { quietHours: { from: e.target.value, to: s.notifications.quietHours?.to ?? DEFAULT_QUIET_HOURS.to } })} />
+            <span>〜</span>
+            <input type="time" value={s.notifications.quietHours.to}
+              onChange={(e) => e.target.value && set('notifications', { quietHours: { from: s.notifications.quietHours?.from ?? DEFAULT_QUIET_HOURS.from, to: e.target.value } })} />
+            <button className="btn ghost small" onClick={() => set('notifications', { quietHours: null })}>いつでも送る</button>
+          </> : <>
+            <span className="muted">いつでも送る</span>
+            <button className="btn ghost small" onClick={() => set('notifications', { quietHours: { ...DEFAULT_QUIET_HOURS } })}>時間を決める</button>
+          </>}
         </div>
+        <label className="check">
+          <input type="checkbox" checked={s.notifications.quietDaysOff !== false} onChange={(e) => set('notifications', { quietDaysOff: e.target.checked })} />
+          会社の休みの日は送らない
+        </label>
 
         <h4>受け取り方 <HelpTip article="start-settings">会社の Chat アプリから、あなたへの個別メッセージで届きます。載せるのは種類・題名・画面へのリンクだけです（本文なし）</HelpTip></h4>
         <ChatCopy checked={s.notifications.channels.chat} onChange={(v) => set('notifications', { channels: { chat: v } })} />
+        {s.notifications.channels.chat && <ChatKinds groups={notifyGroups} off={s.notifications.chatOff ?? []} received={s.notifications.kinds}
+          onChange={(chatOff) => set('notifications', { chatOff })} />}
         <div style={{ marginTop: 'calc(12px * var(--space-scale))' }}>
           <SaveButton run={() => api.saveMySettings('notifications', s.notifications).then(onChanged)} />
         </div>
@@ -1270,6 +1278,35 @@ function BriefCard({ brief, onSaved }: { brief: BriefSettings; onSaved: (b: Brie
  * 入れたら、本人と会社の Chat アプリの個別メッセージの場所を M2Office が用意する。本人の Google の許可が足りなければ、
  * 許可を足すボタンを出す（許可の画面から戻ったら、開いたときにもう一度用意する）。会社の鍵が無ければ入れられない
  */
+/**
+ * Chat に送る種類（仕様書 第10.16.5節「種類ごとの Chat」）。受け取っている種類と社内のお知らせを並べ、外したものは画面にだけ届く。
+ */
+function ChatKinds({ groups, off, received, onChange }: {
+  groups: [string, [NotificationKindKey, string, string, boolean][]][];
+  off: string[];
+  received: UserSettings['notifications']['kinds'];
+  onChange: (off: string[]) => void;
+}) {
+  const kinds: [string, string][] = [
+    ...groups.flatMap(([, list]) => list.filter(([k, , , shown]) => shown && received[k]).map(([k, name]) => [k, name] as [string, string])),
+    ['notice', '社内のお知らせ'],
+  ];
+  return (
+    <div className="chat-kinds">
+      <h4>Chat に送る種類</h4>
+      <div className="row wrap">
+        {kinds.map(([k, name]) => (
+          <label key={k} className="check">
+            <input type="checkbox" checked={!off.includes(k)}
+              onChange={(e) => onChange(e.target.checked ? off.filter((x) => x !== k) : [...off, k])} />
+            {name}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ChatCopy({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   const [status, setStatus] = useState<{ appReady: boolean; dmReady: boolean } | null>(null);
   const [needsScope, setNeedsScope] = useState<string | null>(null);

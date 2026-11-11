@@ -26,6 +26,10 @@ export interface NotificationEnvelope {
   title: string;
   /** M2Office の画面へのリンク。 */
   link: string;
+  /** たまった分を 1 通にまとめたとき、並べる題名（第10.16.5節「明けたとき」）。本文は持たない。 */
+  items?: { kindLabel: string; title: string }[];
+  /** まとめたうち、並べなかった数。 */
+  more?: number;
 }
 
 /**

@@ -30,6 +30,7 @@ import { startVoice, type VoiceCall } from './voice.js';
 import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
 import { RecorderDialog } from './Recorder.js';
+import { meetingMinutesRequest } from './meeting-request.js';
 import { AgentForm, ApprovalTray, AskBox, Elapsed, FILE_ACCEPT, isRecordingFile, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner, tooLargeMessage } from './components.js';
 import { DemoBanner } from './demo-terms.js';
 import { Sources } from './sources.js';
@@ -1550,11 +1551,17 @@ function SecretaryBar({ drive, lookups, avatar, captions, request, onRequestTake
   /**
    * 秘書に頼む。`chosen` は最初の画面の候補を押したとき（第6.1.5節）で、書きかけの文と渡すファイルには触れない。
    */
-  async function send(chosen?: string) {
+  /**
+   * 秘書に頼む。
+   *
+   * @param chosen 書いた文の代わりに頼む文（候補を選んだときなど）
+   * @param attach 書いた文の代わりに頼むときに渡すファイル（会議の録音など）
+   */
+  async function send(chosen?: string, attach?: { id: string; name: string }[]) {
     const asked = chosen ?? text;
     if (!asked.trim() || busy) return;
     setBusy(true);
-    const withFiles = chosen ? [] : files;
+    const withFiles = attach ?? (chosen ? [] : files);
     try {
       if (!chosen) {
         setText('');
@@ -1676,8 +1683,10 @@ function SecretaryBar({ drive, lookups, avatar, captions, request, onRequestTake
       </button>
       {recording && (
         <RecorderDialog
-          onDone={(f) => {
+          onDone={(f, info) => {
             setRecording(false);
+            // 会議の音も録ったものは、そのまま議事録を頼む（議事録にしたいことが明らかなため。確かめない。第9.4.5.2節「止めたあと」）
+            if (info.meeting) { void send(meetingMinutesRequest(info.event, new Date()), [{ id: f.id, name: f.name }]); return; }
             setFiles((cur) => [...cur, { id: f.id, name: f.name }]);
             setHint(`「${f.name}」を渡しました。「議事録にして」「まとめて」「文字起こしして」のように頼んでください`);
           }}

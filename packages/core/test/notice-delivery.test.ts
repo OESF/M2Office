@@ -2,7 +2,8 @@
  * @file 社内のお知らせのブリーフ以外の届け方の単体テスト（仕様書 第10.15.1節、ADR-0080）。
  * 済んだ人の数（出した人と管理者だけ・済んでいない人の名前は締切の後だけ）、もう知らせない、
  * 締切の 3 日前と当日の知らせ（済んだ人・止めた人には出さない・1 度だけ・朝 8 時から）、
- * Chat への投稿（グループに合うスペース・社内だけと確かめたときだけ・1 回だけ）を確かめる。
+ * Chat への投稿（グループに合うスペース・社内だけと確かめたときだけ・1 回だけ）、
+ * 出たときの宛先の人への通知（出した本人には届けない・投稿したスペースに入っている人には Chat を重ねない。第10.16.4節）を確かめる。
  */
 
 import { test } from 'node:test';
@@ -20,6 +21,7 @@ const USERS = [
 function setup(chat?: { members: Record<string, { in: string[]; external?: number }>; spaces: { space: string; displayName: string; external: boolean }[] }) {
   const groups: UserGroup[] = [{ id: 'g-dev', tenantId: 't1', name: '開発', description: '', memberIds: ['u-a', 'u-b'], chatSpace: null }];
   const sent: Notification[] = [];
+  const delivered: { id: string; note: string }[] = [];
   const audits: string[] = [];
   const posts: { space: string; text: string }[] = [];
   const repo = {
@@ -29,6 +31,7 @@ function setup(chat?: { members: Record<string, { in: string[]; external?: numbe
     findUserById: async (_t: string, u: string) => USERS.find((x) => x.id === u) ?? null,
     listUsers: async () => USERS,
     createNotification: async (n: Notification) => { sent.push(n); },
+    markNotificationDelivered: async (_t: string, id: string, _at: string | null, note: string) => { delivered.push({ id, note }); },
     appendAudit: async (e: { action: string }) => { audits.push(e.action); },
     getGoogleConnection: async () => null,
     setGroupChatSpace: async () => undefined,
@@ -48,7 +51,7 @@ function setup(chat?: { members: Record<string, { in: string[]; external?: numbe
   } as unknown as WorkspaceConnector : null;
   const store = new MemoryNoticeStore({ 'u-admin': '管理者', 'u-a': '佐藤' });
   const notices = new NoticeService({ store, repo, ...(connector ? { chat: { connector, repo } } : {}) });
-  return { notices, store, sent, audits, posts };
+  return { notices, store, sent, delivered, audits, posts };
 }
 
 /** 2026-11-20 10:00（日本時間）。 */
@@ -73,6 +76,11 @@ test('締切の前の知らせ: 3 日前と当日の朝 8 時から、済んで�
   const s = setup();
   const r = await s.notices.create('t1', 'u-admin', { title: '健康診断の申し込み', all: false, groupIds: ['g-dev'], dueOn: '2026-11-25' }, NOW);
   assert.ok('notice' in r);
+  // 出たときに、宛先の人へ通知を作る（第10.16.4節）
+  assert.deepEqual(s.sent.map((n) => [n.userId, n.kind, n.title]), [
+    ['u-a', 'notice', '健康診断の申し込み（締切 11/25）'], ['u-b', 'notice', '健康診断の申し込み（締切 11/25）'],
+  ]);
+  s.sent.length = 0;
   assert.equal(await s.notices.remind('t1', at('2026-11-22', 7)), 0, '朝 8 時より前は出さない');
   assert.equal(await s.notices.remind('t1', at('2026-11-22', 9)), 2);
   assert.deepEqual(s.sent.map((n) => [n.userId, n.kind, n.title]), [
@@ -101,6 +109,10 @@ test('Chat: グループ宛ては合うスペースに、社内の人だけと�
   assert.equal(s.posts[0]!.space, 'spaces/dev');
   assert.equal(s.posts[0]!.text, '【お知らせ】健康診断の申し込み（締切 12/5）\nhttps://example.jp/k\n管理者 より');
   assert.ok(s.audits.includes('notice.chat_post'));
+  // 投稿したスペースに入っている人には、Chat の個別メッセージを重ねない（画面の通知は作る。第10.16.4節）
+  await new Promise((x) => setTimeout(x, 0));
+  assert.deepEqual(s.sent.map((n) => n.userId), ['u-a', 'u-b']);
+  assert.deepEqual(s.delivered.map((d) => d.note), ['スペースに投稿済み', 'スペースに投稿済み']);
   assert.deepEqual(await s.notices.postToChat('t1', r.notice), { skipped: 'すでに投稿しています' });
   // 会社の外の人がいるスペースには投稿しない
   const ext = setup({
@@ -120,6 +132,15 @@ test('Chat: グループ宛ては合うスペースに、社内の人だけと�
   assert.ok('notice' in r3);
   await new Promise((x) => setTimeout(x, 0));
   assert.deepEqual(all.posts.map((p) => p.space), ['spaces/all']);
+});
+
+test('出たときの通知: 出した本人には届けず、Chat に投稿できなければ全員に通知だけを作る', async () => {
+  const s = setup();
+  const r = await s.notices.create('t1', 'u-a', { title: '大掃除', all: true }, NOW);
+  assert.ok('notice' in r);
+  assert.deepEqual(s.sent.map((n) => n.userId), ['u-admin', 'u-b', 'u-c'], '出した佐藤さんには届けない');
+  assert.match(s.sent[0]!.body, /^佐藤さんからのお知らせです。/);
+  assert.equal(s.delivered.length, 0, 'Chat に投稿していなければ、Chat の控えはふつうに届く');
 });
 
 test('秘書: 出した人が「何人済んだ？」と聞けば数で答え、本人が「もう知らせないで」と言えば締切の前の知らせを止める', async () => {

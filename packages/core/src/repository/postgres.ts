@@ -1356,10 +1356,10 @@ export class PostgresRepository implements Repository {
   async appendConversation(c: Conversation): Promise<void> {
     await this.q(c.tenantId,
       `insert into conversations
-         (id, tenant_id, user_id, message, reply, layer, agent_id, run_id, search_text, created_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+         (id, tenant_id, user_id, message, reply, layer, agent_id, run_id, search_text, created_at, channel)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [c.id, c.tenantId, c.userId, c.message, c.reply, c.layer, c.agentId, c.runId,
-        normalizeForSearch(`${c.message} ${c.reply}`), c.createdAt]);
+        normalizeForSearch(`${c.message} ${c.reply}`), c.createdAt, c.channel ?? null]);
   }
 
   async listConversations(
@@ -1914,7 +1914,10 @@ export class PostgresRepository implements Repository {
       secretary: { ...d.secretary, ...(r.secretary ?? {}) },
       notifications: {
         kinds: { ...d.notifications.kinds, ...(n.kinds ?? {}) },
-        quietHours: n.quietHours ?? d.notifications.quietHours,
+        // 決めていない人（移行 197 の前に保存した空も含む）は既定の時間帯。`null` は「時間で控えない」（第10.16.5節）
+        quietHours: n.quietHours === undefined ? { ...d.notifications.quietHours! } : n.quietHours,
+        quietDaysOff: n.quietDaysOff ?? d.notifications.quietDaysOff,
+        chatOff: Array.isArray(n.chatOff) ? n.chatOff.filter((k): k is string => typeof k === 'string') : [],
         channels: { ...d.notifications.channels, ...(n.channels ?? {}) },
       },
       memory: { ...d.memory, ...(r.memory ?? {}) },

@@ -126,6 +126,8 @@ export interface ReachNotes {
   notes: string[];
   /** メンバーを確かめ、会社の外の人も Google のグループも入っていないと分かった */
   internalOnly: boolean;
+  /** 確かめた人のうち、スペースに入っていた人のメールアドレス（確かめられなければ空） */
+  present?: string[];
 }
 
 /**
@@ -160,7 +162,7 @@ export async function reachNotes(
     if (extra) notes.push(`スペースにいて、グループにいない人（届きます）: ${extra} 人`);
     if (m.unknown.length) notes.push(`確かめられなかった人: ${(await displayNames(deps.repo, p.tenantId, group.group, m.unknown)).join('、')}`);
   }
-  return { notes, internalOnly: m.external === 0 && m.googleGroups === 0 };
+  return { notes, internalOnly: m.external === 0 && m.googleGroups === 0, present: m.present };
 }
 
 /** グループの人のメールアドレスを、M2Office の名前にする。 */

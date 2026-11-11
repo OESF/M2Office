@@ -2597,6 +2597,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .notify-kind strong { font-size: calc(14px * var(--font-scale)); }
 .quiet-hours { align-items: center; }
 .quiet-hours input[type=time] { width: 9em; flex: none; }
+.chat-kinds .row { flex-wrap: wrap; gap: calc(6px * var(--space-scale)) calc(16px * var(--space-scale)); }
+.chat-hook-url { user-select: all; word-break: break-all; }
 .notify-kind small { font-size: calc(12px * var(--font-scale)); color: var(--muted); line-height: 1.4; }
 /* 本人のアバター（個人設定の「プロフィール」。仕様書 第6.5.1.2節） */
 .profile-avatar { display: flex; align-items: center; gap: calc(10px * var(--space-scale)); flex-wrap: wrap; }

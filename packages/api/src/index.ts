@@ -59,6 +59,9 @@ import { signageRoute } from './routes/signage.js';
 import { signagePlayRoute } from './routes/signage-play.js';
 import { hrTerminalRoute } from './routes/hr-terminal.js';
 import { lineHooksRoute } from './routes/line-hooks.js';
+import { chatHooksRoute, CHAT_HOOK_PATH } from './routes/chat-hooks.js';
+import { ChatSecretaryBridge, GoogleChatReplySender, MockChatReplySender } from './chat/bridge.js';
+import { ChatPubSubPoller } from './chat/pubsub.js';
 import { unsubscribeRoute } from './routes/unsubscribe.js';
 import { columnsPublicRoute } from './routes/columns-public.js';
 import { inventoryPublicRoute } from './routes/inventory-public.js';
@@ -93,6 +96,12 @@ import { hrPhotosRoute } from './routes/hr-photos.js';
  * 画面専用の抜け道を作らない。SPA 構成により、これは構造として保たれる。
  */
 const deps = buildDeps();
+
+/**
+ * 会社の画面の入口（Chat に返すリンクに使う）。`APP_BASE_URL` の `{tenant}` をサブドメインに置き換える（ワーカーと同じ）。
+ */
+const tenantAppUrl = (subdomain: string): string =>
+  (process.env['APP_BASE_URL'] ?? `http://{tenant}.${process.env['BASE_DOMAIN'] ?? 'lvh.me'}:${process.env['WEB_PORT'] ?? 3100}`).replace('{tenant}', subdomain);
 
 /**
  * サーバーの版（ルートの `package.json`。仕様書 第6.1.1.1節）。起動のときに 1 度だけ読む。
@@ -155,6 +164,16 @@ app.route('/v1/public/columns', columnsPublicRoute(deps));
 app.route('/v1/public/slide-images', slideImagesPublicRoute(deps));
 // LINE 公式アカウントの受け口（仕様書 第33.19節）。会社の判定とログインより前に置く
 app.route('/v1/hooks/line', lineHooksRoute(deps));
+// 会社の Chat アプリの受け口（仕様書 第10.16.3節、ADR-0138）。Google Chat がログインの無いまま呼ぶ。会社の判定とログインより前に置く
+const chatMockReplies = new MockChatReplySender();
+const chatGoogleReplies = new GoogleChatReplySender({ repo: deps.repo, box: deps.box });
+const chatBridge = new ChatSecretaryBridge({
+  repo: deps.repo, secretary: deps.secretary, store: deps.chatInbox, log: deps.log, debug: deps.debug,
+  senderFor: (tenantId) => (deps.connector.sourceFor(tenantId) === 'mock' ? chatMockReplies : chatGoogleReplies),
+  appUrl: async (tenantId) => tenantAppUrl((await deps.repo.findTenantById(tenantId))?.subdomain ?? ''),
+  agentNames: async (tenantId) => { const view = await deps.tenantView(tenantId); return (agentId) => view.agents.find((a) => a.id === agentId)?.name; },
+});
+app.route(CHAT_HOOK_PATH, chatHooksRoute(deps, chatBridge));
 // まとめてのメールの配信の停止（第27.9.1節）。受け取った人がログインなしに開く。URL の鍵から会社を決めるため、会社の判定より前に置く
 app.route('/v1/unsubscribe', unsubscribeRoute(deps));
 // ローカルの形の機械の管理者（第8.6.3節）。会社の判定より前に置く（データベースが止まっても機械の様子を見られるように）
@@ -385,6 +404,11 @@ const apiVersion = (() => { try { return (JSON.parse(readFileSync(appPath('packa
 const beat = () => void writeRuntimeBeat(deps.runtime.store, 'api', apiVersion, deps.runtime.startedAt, fileStorageDir()).catch((err) => deps.log.warn('動いている環境の知らせを置けませんでした', { err }));
 beat();
 setInterval(beat, RUNTIME_BEAT_INTERVAL_MS).unref();
+
+// Chat で頼まれて後ろへ回した依頼の結果を返す（20 秒ごと）。ローカル・自社運用は Pub/Sub から出来事を取りに行く（5 秒ごと。仕様書 第10.16.3節）
+setInterval(() => void chatBridge.sweep().catch((err) => deps.log.warn('Chat への結果の返しに失敗しました', { err })), 20_000).unref();
+const chatPubSub = new ChatPubSubPoller({ repo: deps.repo, box: deps.box, bridge: chatBridge, log: deps.log, isMock: (tenantId) => deps.connector.sourceFor(tenantId) === 'mock' });
+setInterval(() => void chatPubSub.sweep().catch((err) => deps.log.warn('Pub/Sub の見回りに失敗しました', { err })), 5_000).unref();
 
 // 音声の対話の中継（仕様書 第10.5.5節）。WebSocket は Hono の外側で受ける
 attachVoiceRelay(deps, server as unknown as HttpServer);

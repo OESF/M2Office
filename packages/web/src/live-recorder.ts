@@ -4,6 +4,9 @@
  * マイクの音を 16 kHz・モノラル・16 ビットの PCM にし、10 秒ごとの欠片にして録りながら送る。止めたらサーバーが 1 つの WAV にする。
  * スマホで画面が消えるなどしてブラウザが録音を止めたら、そこまでを送り切り、画面に知らせる（続けて録れば同じ録音の後ろにつなぐ）。
  * 録音は画面に残さない（送り終えた欠片は捨てる）。
+ *
+ * 「会議の音も」（第9.4.5.2節、ADR-0137）では、ブラウザの画面の共有で会議のタブの音（相手の声）を受け、マイクの音と合わせて 1 つにする。
+ * 映像は使わずにすぐ止める。共有が終わった（会議のタブを閉じた・共有を止めた）ら、会議が終わったとして画面に知らせる。
  */
 
 import { api, ApiError } from './api.js';
@@ -30,6 +33,55 @@ export interface LiveRecorderHandlers {
   onLimit(): void;
   /** まだ送れていない欠片の数（つながらないときに知らせる）。 */
   onPending(n: number): void;
+  /** 会議の音の共有が終わった（会議のタブを閉じた・共有を止めた）。画面は止めて渡す（第9.4.5.2節「終わり方」）。 */
+  onMeetingEnded?(): void;
+}
+
+/** 録り方。`meeting` は会議の画面の音とマイクを合わせて録る（第9.4.5.2節）。 */
+export type CaptureMode = 'mic' | 'meeting';
+
+/** 会議の音を取れなかった（共有の選びで「音声も共有する」を入れなかったなど）。画面は選び直すか、マイクだけで録るかを出す。 */
+export class MeetingAudioMissing extends Error {
+  constructor() {
+    super('会議の音を取れませんでした。共有の選びで「音声も共有する」を入れてください');
+  }
+}
+
+/**
+ * 会議の音を録れる環境か（パソコンの Chrome・Edge。第9.4.5.2節「使える環境」）。
+ * Safari・Firefox・スマホはタブの音を共有できないため、選びを出さない。
+ */
+export function meetingAudioSupported(): boolean {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') return false;
+  const ua = navigator.userAgent;
+  if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua) || /Firefox\//.test(ua)) return false;
+  return /Chrome\/|Edg\//.test(ua);
+}
+
+/**
+ * 会議の画面の音を受ける（映像はすぐ止める）。共有の選びを出すので、押した操作の中から呼ぶ。
+ *
+ * @throws MeetingAudioMissing 音が来なかったとき
+ * @throws Error 共有を断られたとき
+ */
+async function displayAudio(): Promise<MediaStream> {
+  let shared: MediaStream;
+  try {
+    // 型の定義に無い選び（systemAudio など）があるため、広い形で渡す
+    const options = {
+      video: true, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: false },
+      systemAudio: 'include', selfBrowserSurface: 'exclude', surfaceSwitching: 'include',
+    } as unknown as DisplayMediaStreamOptions;
+    shared = await navigator.mediaDevices.getDisplayMedia(options);
+  } catch (err) {
+    throw new Error(err instanceof DOMException && err.name === 'NotAllowedError' ? '会議の画面の共有がキャンセルされました' : '会議の画面を共有できませんでした');
+  }
+  for (const v of shared.getVideoTracks()) v.stop();
+  if (!shared.getAudioTracks().length) {
+    for (const t of shared.getTracks()) t.stop();
+    throw new MeetingAudioMissing();
+  }
+  return new MediaStream(shared.getAudioTracks());
 }
 
 /** 秒を「12:34」「1:02:03」にする。 */
@@ -62,6 +114,9 @@ export class LiveRecorder {
   private lastFrame = 0;
   private watchdog: number | null = null;
   private capturing = false;
+  private display: MediaStream | null = null;
+  /** いまの録り方（続けて録るときも同じにする） */
+  mode: CaptureMode = 'mic';
 
   constructor(readonly id: string, nextSeq: number, private readonly startSec: number, private readonly h: LiveRecorderHandlers) {
     this.seq = nextSeq;
@@ -78,23 +133,29 @@ export class LiveRecorder {
   }
 
   /**
-   * マイクを取り、録り始める。
+   * マイクを取り、録り始める。`meeting` なら、先に会議の画面の音を受ける（共有の選びを出すので、押した操作の中から呼ぶ）。
    *
-   * @throws Error マイクを使えないとき（利用者に見せる理由）
+   * @throws MeetingAudioMissing 会議の音が来なかったとき
+   * @throws Error マイクを使えないとき・共有を断られたとき（利用者に見せる理由）
    */
-  async capture(): Promise<void> {
+  async capture(mode: CaptureMode = this.mode): Promise<void> {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error(micUnavailableReason());
+    const display = mode === 'meeting' ? await displayAudio() : null;
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
     } catch (err) {
+      for (const t of display?.getTracks() ?? []) t.stop();
       throw new Error(micErrorReason(err));
     }
+    this.mode = mode;
     const context = new AudioContext({ sampleRate: RATE });
     await context.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' })));
     const node = new AudioWorkletNode(context, 'm2o-mic', { processorOptions: { frames: RATE / 10 } });
     node.port.onmessage = (ev: MessageEvent<Float32Array>) => this.take(ev.data);
     context.createMediaStreamSource(stream).connect(node);
+    // 会議の音は、マイクの音と同じ取り込みにつなぐ（つないだ音は足し合わされて 1 つになる）
+    if (display) context.createMediaStreamSource(display).connect(node);
     // 音を出さずに動かすため、無音の行き先へつなぐ
     const silent = context.createGain();
     silent.gain.value = 0;
@@ -104,6 +165,9 @@ export class LiveRecorder {
     this.capturing = true;
     this.lastFrame = Date.now();
     for (const track of stream.getTracks()) track.addEventListener('ended', () => this.interrupted());
+    this.display = display;
+    // 会議のタブを閉じた・共有を止めたら、会議が終わったとみなす（第9.4.5.2節「終わり方」）
+    for (const track of display?.getTracks() ?? []) track.addEventListener('ended', () => this.meetingEnded());
     context.addEventListener('statechange', () => { if (context.state !== 'running') this.interrupted(); });
     document.addEventListener('visibilitychange', this.onVisible);
     this.watchdog = window.setInterval(() => {
@@ -128,7 +192,7 @@ export class LiveRecorder {
     this.pause();
     while (this.queue.length) await this.drain();
     this.closed = true;
-    return api.recordings.finish(this.id);
+    return api.recordings.finish(this.id, { meeting: this.mode === 'meeting' });
   }
 
   /** 録るのをやめて、途中の録音を消す。 */
@@ -167,6 +231,13 @@ export class LiveRecorder {
     this.h.onInterrupted();
   }
 
+  private meetingEnded(): void {
+    if (!this.capturing) return;
+    this.pause();
+    if (this.h.onMeetingEnded) this.h.onMeetingEnded();
+    else this.h.onInterrupted();
+  }
+
   private release(): void {
     this.capturing = false;
     if (this.watchdog !== null) window.clearInterval(this.watchdog);
@@ -174,6 +245,8 @@ export class LiveRecorder {
     document.removeEventListener('visibilitychange', this.onVisible);
     for (const track of this.stream?.getTracks() ?? []) track.stop();
     this.stream = null;
+    for (const track of this.display?.getTracks() ?? []) track.stop();
+    this.display = null;
     if (this.context && this.context.state !== 'closed') void this.context.close();
     this.context = null;
     void this.wake?.release().catch(() => undefined);

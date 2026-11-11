@@ -33,7 +33,7 @@ export const NOTICE_LIMITS = { title: 60, body: 1000, link: 500 } as const;
 type Deps = {
   store: NoticeStore;
   repo: Pick<Repository, 'listGroups' | 'listUserGroupIds' | 'findUserById' | 'getUserSettings' | 'appendAudit'>
-    & Partial<Pick<Repository, 'listUsers' | 'createNotification'>>;
+    & Partial<Pick<Repository, 'listUsers' | 'createNotification' | 'markNotificationDelivered' | 'getGoogleConnection'>>;
   /**
    * Chat への投稿（第10.15.1節、ADR-0080）。出した人の Google で、宛先に合うスペースへ 1 回投稿する。
    * 無ければ投稿しない（ブリーフと通知で届く）。
@@ -170,8 +170,15 @@ export class NoticeService {
       targetType: 'notice', targetId: notice.id,
       detail: { title, all: notice.audience.all, groups: notice.audience.groupIds.length, dueOn, until }, occurredAt: notice.createdAt,
     });
-    // 宛先に合う Chat のスペースにも 1 回投稿する（第10.15.1節）。待たせない。投稿できなくてもブリーフと通知で届く
-    if (this.deps.chat && !byApp) void this.postToChat(tenantId, notice).catch(() => undefined);
+    // 宛先に合う Chat のスペースにも 1 回投稿する（第10.15.1節）。待たせない。投稿できなくてもブリーフと通知で届く。
+    // 投稿の後に、宛先の人へ通知を作る（Chat の控えを入れている人には Chat でも届く。投稿したスペースに入っている人には重ねない。第10.16.4節）
+    if (this.deps.chat && !byApp) {
+      void this.postToChat(tenantId, notice)
+        .then((r) => this.announce(tenantId, notice, 'space' in r ? r.present : []), () => this.announce(tenantId, notice, []))
+        .catch(() => undefined);
+    } else {
+      await this.announce(tenantId, notice, []).catch(() => 0);
+    }
     return { notice };
   }
 
@@ -242,6 +249,37 @@ export class NoticeService {
   }
 
   /**
+   * お知らせが出たことを、宛先の人への通知にする（種類「社内のお知らせ」。第10.16.4節、ADR-0138）。出した本人には届けない。
+   *
+   * @param present お知らせを投稿した Chat のスペースに入っていた人のメールアドレス。その人には Chat の個別メッセージを重ねない（画面の通知は作る）
+   * @returns 作った通知の数
+   */
+  async announce(tenantId: string, notice: Notice, present: string[]): Promise<number> {
+    const repo = this.deps.repo;
+    if (!repo.createNotification || !repo.listUsers) return 0;
+    const inSpace = new Set(present.map((e) => e.toLowerCase()));
+    const due = notice.dueOn ? `（締切 ${Number(notice.dueOn.slice(5, 7))}/${Number(notice.dueOn.slice(8, 10))}）` : '';
+    const users = new Map((await repo.listUsers(tenantId)).map((u) => [u.id, u]));
+    let made = 0;
+    for (const p of await this.recipients(tenantId, notice)) {
+      if (p.id === notice.authorId) continue;
+      const id = randomUUID();
+      await repo.createNotification({
+        id, tenantId, userId: p.id, kind: 'notice', title: `${notice.title}${due}`,
+        body: `${notice.authorName ? `${notice.authorName}さんからのお知らせです。` : ''}${notice.body.slice(0, 300)}`,
+        runId: null, readAt: null, createdAt: notice.createdAt,
+      });
+      made++;
+      if (inSpace.size && repo.markNotificationDelivered) {
+        const google = repo.getGoogleConnection ? await repo.getGoogleConnection(tenantId, p.id).catch(() => null) : null;
+        const email = (google?.googleEmail ?? users.get(p.id)?.email ?? '').toLowerCase();
+        if (email && inSpace.has(email)) await repo.markNotificationDelivered(tenantId, id, new Date().toISOString(), 'スペースに投稿済み');
+      }
+    }
+    return made;
+  }
+
+  /**
    * 締切の前の知らせ（3 日前と当日の朝 8 時から。第10.15.1節）。まだ済んでいない・止めていない宛先の人へ、画面の通知を 1 回ずつ届ける。
    * ワーカーが 1 時間ごとに呼ぶ。
    *
@@ -282,11 +320,12 @@ export class NoticeService {
    * （確かめられなければ投稿しない。承認を求めずに、ブリーフと通知で届ける。第9.4.0節）。合うスペースが 1 つに決まらなければ投稿しない
    * @returns 投稿したスペースの名前。しなければ理由
    */
-  async postToChat(tenantId: string, notice: Notice): Promise<{ space: string } | { skipped: string }> {
+  async postToChat(tenantId: string, notice: Notice): Promise<{ space: string; present: string[] } | { skipped: string }> {
     const chat = this.deps.chat;
     if (!chat) return { skipped: 'Chat につないでいません' };
     const p = { tenantId, userId: notice.authorId };
     const deps = { repo: chat.repo, connector: chat.connector };
+    let allEmails: string[] = [];
     try {
       let target: { space: string; name: string; external: boolean; group: { group: import('@m2office/shared').UserGroup; by: 'name' | 'members' | 'told'; emails: string[] } | null } | null = null;
       if (notice.audience.all) {
@@ -300,6 +339,7 @@ export class NoticeService {
           if (m && m.present.length === emails.length) hits.push(s);
         }
         if (hits.length !== 1) return { skipped: hits.length ? '会社の全員が入っているスペースが 1 つに決まりません' : '会社の全員が入っているスペースがありません' };
+        allEmails = emails;
         target = { space: hits[0]!.space, name: hits[0]!.displayName, external: hits[0]!.external, group: null };
       } else {
         if (notice.audience.groupIds.length !== 1) return { skipped: '宛先のグループが 2 つ以上あります' };
@@ -326,7 +366,7 @@ export class NoticeService {
         id: randomUUID(), tenantId, actorType: 'user', actorId: notice.authorId, action: 'notice.chat_post',
         targetType: 'notice', targetId: notice.id, detail: { space: target.name }, occurredAt: new Date().toISOString(),
       });
-      return { space: target.name };
+      return { space: target.name, present: target.group ? (reach.present ?? []) : allEmails };
     } catch (err) {
       return { skipped: err instanceof Error ? err.message : 'Chat に投稿できませんでした' };
     }

@@ -55,6 +55,7 @@ export * from './notify/sender.js';
 export * from './notify/delivery.js';
 export * from './notify/google-chat.js';
 export * from './notify/list.js';
+export * from './notify/preferences.js';
 export * from './retention/google-data.js';
 export * from './retention/revocation.js';
 export * from './health/index.js';
@@ -212,6 +213,7 @@ export { signageRequest, signageFileRequest, answerSignage, signageConfirmText, 
 export { securityRequest, answerSecurity, type SecurityRequest, type SecuritySecretaryDeps } from './secretary/security.js';
 export { answerReservation, maybeReservation, parseReservation, timesOf, itemIn, seriesOf, type ReservationSecretaryDeps, type ReservationAsk, type SeriesAsk } from './secretary/reservations.js';
 export * from './chat/group-share.js';
+export * from './chat/inbound.js';
 export {
   AiUsageMeter, AiLimitError, PostgresAiUsageStore, aiUsageMeterFromEnv, withAiUsage, enterAiUsage, currentAiUsage, meterLlm, meterResearch,
   effectiveMonthlyLimit, jstMonth, purposeGroup, AI_LIMIT_COMPANY_MESSAGE, AI_LIMIT_USER_MESSAGE, AI_LIMIT_PLATFORM_MESSAGE, AI_LIMIT_TRIAL_MESSAGE,
@@ -220,6 +222,7 @@ export {
 export { purposeLabel } from './usage/purpose-labels.js';
 export * from './effect/index.js';
 export { voiceWords, voiceWordsLine, correctHeard, mishearOf, addMishear, toKatakana, VOICE_WORDS_MAX, MISHEARS_MAX, type VoiceWord, type Mishear, type VoiceWordsDeps } from './secretary/voice-words.js';
+export { ONGOING_LEAD_MIN, ongoingMeeting, type OngoingMeeting } from './meetings/ongoing.js';
 export { AutoMinutes, autoMinutesRequest, meetingTitleKey, minutesStopped, MINUTES_AGENT_ID, type AutoMinutesDeps } from './meetings/auto-minutes.js';
 export { appRoot, appPath } from './app-root.js';
 export {

@@ -351,7 +351,7 @@ function PickerKey({ registered, onSaved }: { registered: boolean; onSaved: () =
  *
  * @remarks 登録のときに Google で Chat アプリとして認証できるかを確かめ、できなければ保存しない。鍵は画面に戻さない
  */
-function ChatAppKey({ data, onSaved }: { data: { registered: boolean; clientEmail: string } | null; onSaved: () => void }) {
+function ChatAppKey({ data, onSaved }: { data: { registered: boolean; clientEmail: string; hook?: boolean; subscription?: string } | null; onSaved: () => void }) {
   const [key, setKey] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -387,6 +387,44 @@ function ChatAppKey({ data, onSaved }: { data: { registered: boolean; clientEmai
       </div>
       <input ref={file} type="file" accept=".json,application/json" hidden
         onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f && f.size < 20_000) void f.text().then(setKey); }} />
+      {msg && <p className={msg.ok ? 'ok-msg small' : 'error small'}>{msg.text}</p>}
+      {data?.registered && <ChatAppInbound data={data} onSaved={onSaved} />}
+    </div>
+  );
+}
+
+/**
+ * Chat で秘書に頼む受け口（仕様書 第10.16.3節「受け口」「会社の準備」）。
+ *
+ * @remarks クラウド版は HTTP の受け口の URL を作って Chat アプリの設定に貼る（URL は作ったときに 1 度だけ出す）。
+ * 外から届かない機械では、Chat アプリの接続を Cloud Pub/Sub にして、その購読の名前を入れる
+ */
+function ChatAppInbound({ data, onSaved }: { data: { hook?: boolean; subscription?: string }; onSaved: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [sub, setSub] = useState(data.subscription ?? '');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (f: () => Promise<void>, fail: string) => {
+    setBusy(true); setMsg(null);
+    try { await f(); } catch (e) { setMsg({ ok: false, text: describeError(e, fail) }); } finally { setBusy(false); }
+  };
+  return (
+    <div className="field">
+      <label>Chat で秘書に頼む</label>
+      <div className="row">
+        <button className="btn ghost small" disabled={busy} onClick={() => void run(async () => { const r = await api.admin.createChatHook(); setUrl(r.url); onSaved(); }, 'URL を作れませんでした')}>
+          {data.hook ? '受け口の URL を作り直す' : '受け口の URL を作る'}
+        </button>
+        {data.hook && <button className="link danger small" disabled={busy} onClick={() => void run(async () => { await api.admin.deleteChatHook(); setUrl(null); setMsg({ ok: true, text: '削除しました' }); onSaved(); }, '削除できませんでした')}>削除</button>}
+      </div>
+      {url && <p className="small"><code className="chat-hook-url">{url}</code></p>}
+      <div className="row">
+        <input value={sub} placeholder="Pub/Sub の購読（projects/…/subscriptions/…）" autoComplete="off" spellCheck={false} onChange={(e) => setSub(e.target.value)} />
+        <button className="btn ghost small" disabled={busy || sub.trim() === (data.subscription ?? '')}
+          onClick={() => void run(async () => { await api.admin.saveChatSubscription(sub.trim()); setMsg({ ok: true, text: sub.trim() ? '登録しました' : '外しました' }); onSaved(); }, '登録できませんでした')}>
+          保存
+        </button>
+      </div>
       {msg && <p className={msg.ok ? 'ok-msg small' : 'error small'}>{msg.text}</p>}
     </div>
   );

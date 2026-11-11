@@ -10,9 +10,9 @@ import {
   agentDisplayName, needsCompartments,
   BRIEF_SECTIONS, WEEKLY_SECTIONS, VOICE_CHOICES, VOICE_STYLE_MAX, isValidAvatar, type UserSettings, type MenuCategory,
   LIBRARY_EXTENSION_ID, CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
-  GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink, isTextSize,
+  GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink, isTextSize, DEFAULT_QUIET_HOURS,
 } from '@m2office/shared';
-import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, correctionProgress, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE, photoMime, HR_PHOTO_MAX_BYTES } from '@m2office/core';
+import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, correctionProgress, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE, NOTIFICATION_KIND_LABELS, photoMime, HR_PHOTO_MAX_BYTES } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -621,7 +621,7 @@ function validate(
       const kinds = {
         brief: k['brief'] !== false, run: k['run'] !== false,
         approval: k['approval'] !== false, failure: k['failure'] !== false, inventory: k['inventory'] !== false, attendance: k['attendance'] !== false,
-        signage: k['signage'] !== false, inquiry: k['inquiry'] !== false, competitor: k['competitor'] !== false, announcement: k['announcement'] !== false, webReview: k['webReview'] !== false, column: k['column'] !== false, contract: k['contract'] !== false, reservation: k['reservation'] !== false, subsidy: k['subsidy'] !== false, decision: k['decision'] !== false, member: k['member'] !== false, print: k['print'] !== false, library: k['library'] !== false,
+        signage: k['signage'] !== false, inquiry: k['inquiry'] !== false, competitor: k['competitor'] !== false, announcement: k['announcement'] !== false, webReview: k['webReview'] !== false, column: k['column'] !== false, contract: k['contract'] !== false, reservation: k['reservation'] !== false, subsidy: k['subsidy'] !== false, decision: k['decision'] !== false, member: k['member'] !== false, print: k['print'] !== false, library: k['library'] !== false, mail: k['mail'] !== false,
       };
       const q = o['quietHours'] as { from?: string; to?: string } | null | undefined;
       const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -631,7 +631,12 @@ function validate(
       // 控えの届け先（第6.5.5.2節）。既定はどちらも切で、画面内は切れない
       const ch = (o['channels'] ?? {}) as Record<string, unknown>;
       const channels = { chat: ch['chat'] === true };
-      return { section, value: { kinds, quietHours: q ? { from: q.from, to: q.to } : null, channels } };
+      // 休みの日に送らないか・Chat に送らない種類（第10.16.5節）。知らない種類は捨てる
+      const quietDaysOff = o['quietDaysOff'] !== false;
+      const chatOff = [...new Set((Array.isArray(o['chatOff']) ? o['chatOff'] : []).filter((x): x is string => typeof x === 'string' && x in NOTIFICATION_KIND_LABELS))];
+      // `null` は「時間で控えない」。項目が無いときは既定の時間帯（第10.16.5節）
+      const quietHours = q === null ? null : q ? { from: q.from!, to: q.to! } : { ...DEFAULT_QUIET_HOURS };
+      return { section, value: { kinds, quietHours, quietDaysOff, chatOff, channels } };
     }
     case 'memory': {
       // 記憶とデータ（第6.5.4節）。対象外の言葉は 1 行に 1 つ、空行は落とす

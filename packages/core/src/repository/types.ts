@@ -860,6 +860,8 @@ export interface Conversation {
   /** そこから始まった実行。評価はこの実行の承認から引く。 */
   runId: string | null;
   createdAt: string;
+  /** 頼まれた経路。Chat で頼まれたものは `chat`（第10.16.3節「会話の記録」）。画面と音声は無し。 */
+  channel?: 'chat' | null;
 }
 
 /** その日の会話の要約（仕様書 第11.9.6節）。逐語が消えた後も残る。 */

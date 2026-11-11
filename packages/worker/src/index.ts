@@ -533,13 +533,13 @@ const proactive = new ProactiveWatcher({
   },
 });
 
-// 通知の控えを Chat へ届ける（仕様書 第6.5.5.2節）。送信口は B-2 のあとに差し替える
-
 // 通知の控えの送信口（第6.5.5.2.1節）。見本の接続口を使う会社（開発）は見本、ほかは会社の Chat アプリ
 const notifier = new NotificationDelivery({
   repo, logger: log,
   sender: new RoutingNotificationSender((tenantId) => connector.sourceFor(tenantId) === 'mock', new MockNotificationSender(log), new GoogleChatAppSender({ repo, box })),
   linkFor: (tenant) => appUrl(tenant.subdomain),
+  // 会社の営業日でない日は、休みの日に送らない人へ送らない（仕様書 第10.16.5節）
+  businessDay: businessDayChecker({ repo, closedOn: (tenantId, day) => announcementStore.closedOn(tenantId, day) }),
 });
 
 // 会話ログ（逐語）の入れ替え。4 週を過ぎたものを消す（仕様書 第11.9.6節）

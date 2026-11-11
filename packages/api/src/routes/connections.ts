@@ -15,11 +15,14 @@ import {
   buildGoogleAuthUrl, checkGeminiLive, checkGeminiText, checkGoogleClient, createPkce, exchangeGoogleCode, exchangeGoogleLoginCode,
   fetchGooglePhoto, googleGrantedScopes, googleScopeLabel, googleUserInfo, isGoogleClientError, refreshGoogleAccessToken,
   revokeGoogleToken, toolGoogleScopes, buildDataRecipients,
-  GoogleOAuthError, MAILBOX_SCOPES, GOOGLE_CONTACTS_SCOPE, CHAT_DM_SETUP_SCOPE, parseServiceAccountKey, checkChatAppKey,
+  GoogleOAuthError, MAILBOX_SCOPES, GOOGLE_CONTACTS_SCOPE, CHAT_DM_SETUP_SCOPE, parseServiceAccountKey, checkChatAppKey, chatHookHash, PUBSUB_SUBSCRIPTION,
   GOOGLE_LOGIN_KIND, GOOGLE_LOGIN_SCOPES, googleLoginConnection,
   type GeminiModels, type GeminiSettingsMeta, type GoogleClientVerdict,
 } from '@m2office/core';
 import { agentDisplayName, WEB_REVIEW_SCOPES, googleApiLabel, googleProjectNumber } from '@m2office/shared';
+import { randomBytes } from 'node:crypto';
+import { tenantOrigin } from '../tenant-origin.js';
+import { CHAT_HOOK_PATH } from './chat-hooks.js';
 import type { AppDeps } from '../context.js';
 import { isOperational, requireRole, type AppEnv } from '../middleware/tenant.js';
 import { registerConnectionCallback } from './connection-auth.js';
@@ -162,7 +165,12 @@ export function connectionsRoute(deps: AppDeps) {
         apiGaps: (await deps.apiGaps.list(tenant.id).catch(() => [])).map((g) => ({ ...g, label: googleApiLabel(g.service) })),
         projectNumber: googleProjectNumber(typeof google?.meta['clientId'] === 'string' ? google.meta['clientId'] : ''),
         // 通知の控えを送る会社の Chat アプリの鍵（第6.5.5.2.1節）。秘密の値は返さず、サービスアカウントの名前だけ
-        chatApp: { registered: !!chatApp?.secretEnc, clientEmail: typeof chatApp?.meta['clientEmail'] === 'string' ? chatApp.meta['clientEmail'] : '', updatedAt: chatApp?.updatedAt ?? null },
+        chatApp: {
+          registered: !!chatApp?.secretEnc, clientEmail: typeof chatApp?.meta['clientEmail'] === 'string' ? chatApp.meta['clientEmail'] : '', updatedAt: chatApp?.updatedAt ?? null,
+          // Chat で秘書に頼む受け口（第10.16.3節）。URL は作ったときに 1 度だけ返す。Pub/Sub の購読は名前を返す
+          hook: await deps.chatInbox.hasHook(tenant.id).catch(() => false),
+          subscription: typeof chatApp?.meta['subscription'] === 'string' ? chatApp.meta['subscription'] : '',
+        },
         updatedAt: google?.updatedAt ?? null,
         redirectUri: deps.oauth.redirectUri,
         requiredScopes: required.map((r) => ({ ...r, label: googleScopeLabel(r.scope) })),
@@ -382,8 +390,11 @@ export function connectionsRoute(deps: AppDeps) {
       await audit(deps, tenant.id, user.id, 'connection.google.chat_app_rejected', 'google_chat_app', { clientEmail: key.clientEmail });
       return c.json({ error: problem }, 400);
     }
+    // 鍵を登録し直しても、Pub/Sub の購読（第10.16.3節）はそのまま残す
+    const before = await deps.repo.getTenantCredential(tenant.id, 'google_chat_app');
+    const subscription = typeof before?.meta['subscription'] === 'string' ? before.meta['subscription'] : '';
     await deps.repo.saveTenantCredential({
-      tenantId: tenant.id, kind: 'google_chat_app', secretEnc: deps.box.encrypt(text), meta: { clientEmail: key.clientEmail, projectId: key.projectId },
+      tenantId: tenant.id, kind: 'google_chat_app', secretEnc: deps.box.encrypt(text), meta: { clientEmail: key.clientEmail, projectId: key.projectId, ...(subscription ? { subscription } : {}) },
       updatedBy: user.id, updatedAt: new Date().toISOString(),
     });
     await audit(deps, tenant.id, user.id, 'connection.google.chat_app', 'google_chat_app', { clientEmail: key.clientEmail, projectId: key.projectId });
@@ -443,6 +454,45 @@ export function connectionsRoute(deps: AppDeps) {
     if (cred.secretEnc) await revokeGoogleToken(deps.box.decrypt(cred.secretEnc)).catch(() => false);
     await deps.repo.deleteTenantCredential(tenant.id, GOOGLE_LOGIN_KIND);
     await audit(deps, tenant.id, user.id, 'connection.google.login_audit_delete', GOOGLE_LOGIN_KIND, { email: typeof cred.meta['email'] === 'string' ? cred.meta['email'] : '' });
+    return c.json({ ok: true });
+  });
+
+  /**
+   * Chat で秘書に頼む受け口の URL を作る（仕様書 第10.16.3節「会社の準備」）。作り直すと、前の URL は使えなくなる。
+   *
+   * @remarks URL は返すこのときだけ見せる（M2Office は鍵のハッシュだけを持つ）。会社の Chat アプリの設定の「HTTP エンドポイント URL」に貼る
+   */
+  app.post('/google/chat-app/hook', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const key = randomBytes(24).toString('base64url');
+    await deps.chatInbox.setHook(tenant.id, chatHookHash(key));
+    await audit(deps, tenant.id, user.id, 'connection.google.chat_hook', 'google_chat_app', {});
+    return c.json({ ok: true, url: `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}${CHAT_HOOK_PATH}/${key}` });
+  });
+
+  /** Chat で秘書に頼む受け口の URL を消す（Chat に届いた発言を受けなくなる）。 */
+  app.delete('/google/chat-app/hook', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    await deps.chatInbox.deleteHook(tenant.id);
+    await audit(deps, tenant.id, user.id, 'connection.google.chat_hook_delete', 'google_chat_app', {});
+    return c.json({ ok: true });
+  });
+
+  /**
+   * Chat の出来事を取りに行く Cloud Pub/Sub の購読を登録する（ローカル・自社運用。第10.16.3節「受け口」）。本文 `{ subscription }`。空なら外す。
+   *
+   * @remarks 会社の Chat アプリの鍵（サービスアカウント）で読む。サービスアカウントに購読の「Pub/Sub サブスクライバー」の役割が要る
+   */
+  app.put('/google/chat-app/subscription', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ subscription?: unknown }>().catch(() => ({} as { subscription?: unknown }));
+    const subscription = typeof body.subscription === 'string' ? body.subscription.trim() : '';
+    if (subscription && !PUBSUB_SUBSCRIPTION.test(subscription)) return c.json({ error: '購読の名前は projects/プロジェクト/subscriptions/購読 の形で入れてください' }, 400);
+    const current = await deps.repo.getTenantCredential(tenant.id, 'google_chat_app');
+    if (!current?.secretEnc) return c.json({ error: '先に Chat アプリの鍵を登録してください' }, 400);
+    const { subscription: _old, ...rest } = current.meta as Record<string, unknown>;
+    await deps.repo.saveTenantCredential({ ...current, meta: { ...rest, ...(subscription ? { subscription } : {}) }, updatedBy: user.id, updatedAt: new Date().toISOString() });
+    await audit(deps, tenant.id, user.id, subscription ? 'connection.google.chat_subscription' : 'connection.google.chat_subscription_delete', 'google_chat_app', subscription ? { subscription } : {});
     return c.json({ ok: true });
   });
 

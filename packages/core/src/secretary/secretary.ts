@@ -6,6 +6,7 @@
  */
 
 import { autoMinutesRequest } from '../meetings/auto-minutes.js';
+import { applyNotifyPreference, notifyPreferenceRequest } from '../notify/preferences.js';
 import { AiLimitError } from '../usage/ai-usage.js';
 import { randomUUID } from 'node:crypto';
 import { SECRETARY_COMMAND_CHARS, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, SECRETARY_MESSAGE_TOO_LONG, fileInputKey, routeText, secondFileInputKey, type AgentDefinition, type UserSettings } from '@m2office/shared';
@@ -189,10 +190,11 @@ export class Secretary {
    * @param message 依頼の本文
    * @param options.record 会話ログに残すか（既定は残す）。音声の対話は、終わったときに聞こえた文字と応答を
    *   まとめて残すため、取次に渡した 1 件ずつは残さない（仕様書 第10.5.7節）
+   * @param options.channel 頼まれた経路。Chat で頼まれたものは `chat`（第10.16.3節）。会話ログに残す
    * @returns 応答と、用いた層
    */
   async respond(
-    tenantId: string, userId: string, message: string, fileId?: string | string[], options: { record?: boolean } = {},
+    tenantId: string, userId: string, message: string, fileId?: string | string[], options: { record?: boolean; channel?: 'chat' } = {},
   ): Promise<SecretaryReply> {
     // 長すぎる文は受け取らない（仕様書 第10.9.9節）。API のほか、秘書を呼ぶどの口からでも同じ
     if (message.length > SECRETARY_MESSAGE_MAX) return { layer: 'direct', text: SECRETARY_MESSAGE_TOO_LONG, evidence: [], tokensUsed: 0 };
@@ -222,7 +224,7 @@ export class Secretary {
     if (options.record === false) return reply;
     // 会話ログに残すのはファイルの**名前だけ**。中身はファイルの側にある（仕様書 第10.10.5節）
     const logged = reply.file ? `${message}\n（渡したファイル: ${reply.file.name}）` : message;
-    if (keep) await this.record(tenantId, userId, logged, reply);
+    if (keep) await this.record(tenantId, userId, logged, reply, options.channel);
     return reply;
   }
 
@@ -279,14 +281,14 @@ export class Secretary {
    * （会話ログの不具合で秘書が使えなくなることを避ける）。
    */
   private async record(
-    tenantId: string, userId: string, message: string, reply: SecretaryReply,
+    tenantId: string, userId: string, message: string, reply: SecretaryReply, channel?: 'chat',
   ): Promise<void> {
     try {
       const prefs = await this.deps.repo.getUserSettings(tenantId, userId);
       if (!prefs.memory.keepConversations) return;
       await this.deps.repo.appendConversation({
         id: randomUUID(), tenantId, userId, message, reply: reply.text, layer: reply.layer,
-        agentId: reply.suggestedAgent?.id ?? null, runId: null, createdAt: new Date().toISOString(),
+        agentId: reply.suggestedAgent?.id ?? null, runId: null, createdAt: new Date().toISOString(), ...(channel ? { channel } : {}),
       });
     } catch {
       // 会話ログに残せなくても、応答は返す
@@ -351,6 +353,16 @@ export class Secretary {
       const text = minutesReq.kind === 'skip' ? `「${minutesReq.title}」の会議は、終わっても議事録を自動で作りません。`
         : minutesReq.kind === 'off' ? '会議が終わっても、議事録を自動で作らないようにしました。作るときは「〇〇の議事録を作って」と頼んでください。'
         : '会議が終わったら、主催した会議の議事録を自動で作り始めます。';
+      return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+    }
+
+    // Chat への通知の届け方（「夜 10 時から朝 8 時は送らないで」「完了は Chat に送らなくていい」。第10.16.5節）。本人の設定だけを変える
+    const notifyReq = notifyPreferenceRequest(cmd);
+    if (notifyReq) {
+      const cur = await this.deps.repo.getUserSettings(tenantId, userId);
+      const { next, text } = applyNotifyPreference(cur.notifications, notifyReq);
+      await this.deps.repo.saveUserSettings(tenantId, userId, 'notifications', next);
+      await this.audit(tenantId, userId, 'secretary.notify_preference', notifyReq.kind);
       return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
     }
 
