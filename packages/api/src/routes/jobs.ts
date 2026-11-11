@@ -8,7 +8,8 @@
 
 import { Hono } from 'hono';
 import type { Job } from '@m2office/shared';
-import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable, enqueueJob } from '@m2office/core';
+import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable, countRequest, enqueueJob } from '@m2office/core';
+import { passCorrection } from '../corrections.js';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -55,6 +56,15 @@ export function jobsRoute(deps: AppDeps) {
       tenantId: ctx.tenant.id, requestedBy: ctx.user.id, def, input: body.input ?? {},
       origin, actor: { type: 'user', id: ctx.user.id },
     });
+    // 頼んだ数を数える（秘書からの依頼は秘書の側で数える。第11.13.7節「数える」）
+    if (origin !== 'secretary') void countRequest(deps.repo, ctx.tenant.id, ctx.user.id).catch(() => undefined);
+    // 前の結果を直して作り直す頼み（スライド・文書の「直してほしいこと」）は、直しとして学ぶ（第11.13.7節 ②）
+    const input = body.input ?? {};
+    if (typeof input['deckId'] === 'string' && typeof input['request'] === 'string' && input['request'].trim()) {
+      passCorrection(deps, {
+        tenantId: ctx.tenant.id, userId: ctx.user.id, kind: 'remake', agentId: def.id, agentName: def.name, correction: input['request'], context: '',
+      });
+    }
     // 秘書から始めた実行は、直前の会話に結び付ける。評価（承認されたか）を引くため（仕様書 第11.9.5節 第 4 項）
     if (origin === 'secretary') {
       const since = new Date(Date.now() - 10 * 60_000).toISOString();

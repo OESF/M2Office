@@ -24,6 +24,7 @@ import { closedReason } from '../scheduler/business-days.js';
 import { classifyInbound, classifySent, draftReply, type TriageInput } from './triage.js';
 import type { MailCategoryRow, MailOwner, MailStore, MailThreadRow, MailWatchRow } from './store.js';
 import { categoryKey, categoryRule, findCategory, mergeCategories, newCategory, promptCategories, proposeCategories, visibleCategories } from './categories.js';
+import { preferencesForAgent } from '../memory/corrections.js';
 import { MailLearner, bracketed, categoryLessonsOf, domainOfAddress, groupLessonFor, groupLessonRule, lessonAddress, styleFor, type GroupLesson, type MailLessonRow } from './learning.js';
 
 /** 見回りが使うもの。 */
@@ -519,6 +520,8 @@ export class MailWatch {
     const to = t.recipients.to[0] ?? (t.group === 'waiting' ? t.sentTo : t.from);
     const examples = await this.sentExamples(o, to, t.threadId, me).catch(() => []);
     const style = styleFor(await this.deps.store.lessons(o).catch(() => []), to, new Date());
+    // 本人の好み（メールの下書きの好みと、業務を決めない好み。第11.13.7節「業務ごとの好み」）
+    const preferences = preferencesForAgent(await Promise.resolve().then(() => repo.listMemories(o.tenantId, o.userId)).catch(() => []), 'mail').map((m) => m.text);
     const { text } = await draftReply(llm, {
       kind: t.group === 'waiting' ? 'nudge' : 'reply',
       me: { name: user?.displayName ?? '', company: settings.company.shortName || settings.company.legalName || '' },
@@ -526,6 +529,7 @@ export class MailWatch {
       ...(instruction ? { instruction, current: t.draft } : {}),
       ...(examples.length ? { examples } : {}),
       ...(style ? { style } : {}),
+      ...(preferences.length ? { preferences } : {}),
     });
     return text || null;
   }

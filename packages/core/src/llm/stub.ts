@@ -607,6 +607,13 @@ export function stubEmbedding(text: string): number[] {
  * @returns メールの画面の推論でなければ `null`
  */
 function stubMail(system: string, user: string): string | null {
+  // 直しから学ぶ（第11.13.7節）。「いつも」「次から」「毎回」を含む直しだけを、次からもの好みとみなす
+  if (system.includes('次からもそうしてほしい仕事のやり方の好み')) {
+    let d: { 直し?: string } = {};
+    try { d = JSON.parse(user) as { 直し?: string }; } catch { d = {}; }
+    const text = (d.直し ?? '').trim();
+    return /いつも|次から|毎回|常に/.test(text) ? JSON.stringify({ keep: true, preference: text.replace(/^(次から(は)?|いつも)/, '').slice(0, 60) }) : JSON.stringify({ keep: false, preference: '' });
+  }
   // メールのカテゴリー（第9.5.1.1.1節）。名前が件名か冒頭に出てくるカテゴリーを選ぶ
   const categoryNames = [...(system.split('いまのカテゴリー:')[1] ?? '').matchAll(/^- ([^（\n]+)/gm)].map((x) => x[1]!.trim());
   const pick = (t: string) => categoryNames.find((n) => t.includes(n)) ?? '';

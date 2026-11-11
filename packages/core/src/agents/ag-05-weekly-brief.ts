@@ -34,7 +34,7 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
   locale: 'ja-JP',
   compartment: null,
   inputs: { type: 'object', properties: {} },
-  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'contacts.changes', 'web_review.report', 'mail.learning', 'web.research'],
+  tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'contacts.changes', 'web_review.report', 'learning.progress', 'web.research'],
   steps: [
     {
       id: 'collect',
@@ -42,8 +42,8 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
       // この段で使えるツール（仕様書 第9.2.7節）。段の区切りを推論の行儀に頼らない
       // 名刺が新しくなった人（contacts.changes）は、名刺管理を使える人だけが取れる（第27.6.1節、第 0.205.0 版）
       // Web の月の便りの要点（web_review.report）は、Webの分析を使える人だけが取れる（第34.4節、第 0.245.0 版）
-      // メールの学びの進み具合（mail.learning）は、メールの画面を使っている人だけが取れる（第9.5.1.1.2節、第 0.549.0 版）
-      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'contacts.changes', 'web_review.report', 'mail.learning'],
+      // 秘書の学びの進み具合（learning.progress。第11.13.7節、第 0.550.0 版。メールの学びの数を含む）
+      tools: ['profile.read', 'brief.settings', 'notices.list', 'calendar.list', 'tasks.list', 'gmail.unread', 'approvals.pending', 'contacts.changes', 'web_review.report', 'learning.progress'],
       required: ['profile.read', 'brief.settings', 'notices.list'],
       label: '収集',
       instruction: [
@@ -52,7 +52,7 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
         '続けて、weeklyOmit に入っていないものだけ呼ぶ: calendar.list（今日から 7 日分。「予定」）・tasks.list（「ToDo」）・gmail.unread（「返事の要りそうなメール」）・approvals.pending（「承認待ち」）。',
         'contacts.changes を days 7・mine true で呼ぶ（先週、本人が受け取ったメールの署名から新しくなった名刺）。使えない（available が false）なら書かない。',
         'web_review.report を recent true で呼ぶ（この 8 日に届いた Web の月の便りの要点）。使えない・無い（available が false）なら書かない。',
-        'mail.learning を呼ぶ（メールの分け方の学びの進み具合）。使えない（available が false）なら書かない。',
+        'learning.progress を呼ぶ（秘書への直しの回数。秘書の学びの進み具合）。使えない（available が false）なら書かない。',
         '取れなかったものは、推測で埋めずに「取得できなかった」と書く。',
         '**この段ではブリーフの文章を書かない。** ツールを呼び終えたら、次の形だけを書く（ほかの見出しは書かない。天気・分野・イベントは次の段で調べるので、ここでは一切触れない）:',
         '【予定】日付ごとに 1 行（今日から次の日曜日まで）',
@@ -62,7 +62,7 @@ export const AG05_WEEKLY_BRIEF: AgentDefinition = {
         '【お知らせ】題名・締切・isNew',
         '【名刺】contacts.changes の結果（氏名・会社名・変わった項目の前と後）。0 件か使えなければ書かない',
         '【Web】web_review.report の summary と next の 1 つ目と path。無いか使えなければ書かない',
-        '【学び】mail.learning の line をそのまま。無いか使えなければ書かない',
+        '【学び】learning.progress の line をそのまま。無いか使えなければ書かない',
       ].join('\n'),
       onError: 'continue',
     },

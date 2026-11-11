@@ -10,7 +10,7 @@ import { MAIL_LIMITS } from '@m2office/shared';
 import type { Tool, ToolContext } from '../tools/registry.js';
 import type { MailStore, MailOutgoing } from './store.js';
 import { businessDaysSince, doneRow, mailDay, waitDaysFor } from './watch.js';
-import { learningProgressOf } from './learning.js';
+import { correctionLine, correctionProgress } from '../memory/corrections.js';
 
 /** ツールに渡すもの。 */
 export interface MailToolContext {
@@ -102,29 +102,26 @@ export const mailBrief: Tool = {
 };
 
 /**
- * メールの学びの進み具合（第9.5.1.1.2節「進み具合」）。週次ブリーフに 1 行で伝える（「今週の直しは 3 回でした（先週 7 回）」）。
+ * 秘書の学びの進み具合（第11.13.7節「見せ方」。第9.5.1.1.2節のメールの数を含む）。週次ブリーフに 1 行で伝える
+ * （「今週の秘書への直しは 6 回でした（頼んだ 100 件あたり 4 回。先週は 7 回）」）。
  *
- * @remarks 危険度 `read`。数だけを返し、メールの中身は返さない
+ * @remarks 危険度 `read`。数だけを返し、直しの文やメールの中身は返さない
  */
-export const mailLearning: Tool = {
-  name: 'mail.learning',
+export const learningProgress: Tool = {
+  name: 'learning.progress',
   risk: 'read',
-  activityLabel: 'メールの学びの進み具合を読んでいます',
-  helpText: '週次ブリーフに載せる、メールの分け方を直した回数（今週と先週）を読みます',
-  description: 'メールの分け方を本人が直した回数と、振り分けの外れの数を、今週と先週で返す。line はブリーフにそのまま載せる 1 行。メールの画面を使っていなければ available が false',
+  activityLabel: '秘書の学びの進み具合を読んでいます',
+  helpText: '週次ブリーフに載せる、秘書への直しの回数（今週と先週・頼んだ 100 件あたり）を読みます',
+  description: '本人が秘書と業務を直した回数（会話での訂正・作り直しの頼み・差し戻し・取り次ぎの頼み直し・メール）を、今週と先週で返す。line はブリーフにそのまま載せる 1 行。まだ数が無ければ available が false',
   args: { properties: {} },
   async invoke(_args, ctx: ToolContext) {
-    if (!ctx.mail) return { available: false, note: 'メールの画面を使っていません' };
-    const w = await ctx.mail.store.watch(principal(ctx));
-    if (!w?.checkedAt) return { available: false, note: 'メールの画面をまだ使っていません' };
-    const p = await learningProgressOf(ctx.mail.store, principal(ctx), new Date());
-    const total = (x: { corrections: number; misses: number }) => x.corrections + x.misses;
-    const line = p.lastWeek
-      ? `メールの分け方の直しと外れは、今週 ${total(p.thisWeek)} 回でした（先週 ${total(p.lastWeek)} 回）。`
-      : `メールの分け方の直しと外れは、今週 ${total(p.thisWeek)} 回でした。`;
-    return { available: true, thisWeek: p.thisWeek, lastWeek: p.lastWeek, line };
+    const now = new Date();
+    const mailWeeks = ctx.mail ? await ctx.mail.store.weeks(principal(ctx), 2).catch(() => []) : [];
+    const p = await correctionProgress(ctx.repo, ctx.tenantId, ctx.userId, now, mailWeeks).catch(() => null);
+    if (!p || (p.thisWeek.total === 0 && p.thisWeek.requests === 0 && !p.lastWeek)) return { available: false, note: 'まだ数がありません' };
+    return { available: true, thisWeek: p.thisWeek, lastWeek: p.lastWeek, line: correctionLine(p) };
   },
 };
 
 /** メールの片付けのツール。 */
-export const MAIL_TOOLS: Tool[] = [mailReplySend, mailBrief, mailLearning];
+export const MAIL_TOOLS: Tool[] = [mailReplySend, mailBrief, learningProgress];

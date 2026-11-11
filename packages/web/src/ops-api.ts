@@ -352,8 +352,8 @@ export const opsApi = {
   resetPasskeys: (operatorId: string) => call<{ ok: true }>(`/operators/${encodeURIComponent(operatorId)}/passkeys`, { method: 'DELETE' }),
   logout: () => call<{ ok: true }>('/auth/logout', send('POST')),
   tenants: () => call<{ tenants: TenantRow[] }>('/tenants'),
-  /** メールの学びの週ごとの数（ベータテスト。本人が共有を頼んだ人だけ）。 */
-  mailLearning: () => call<{ rows: { tenantId: string; person: string; week: string; corrections: number; misses: number }[] }>('/mail-learning'),
+  /** 秘書の学びの週ごとの数（ベータテスト。本人が共有を頼んだ人だけ。種類ごとの直しと、頼んだ数 `requests`）。 */
+  learning: () => call<{ rows: { tenantId: string; person: string; week: string; kind: string; count: number }[] }>('/learning'),
   createTenant: (b: { subdomain: string; name: string; domain: string; admin: string; status: 'trial' | 'active' }) =>
     call<{ id: string; loginUrl: string; welcome: string }>('/tenants', send('POST', b)),
   setTenantStatus: (id: string, status: 'trial' | 'active') => call<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/status`, send('PUT', { status })),

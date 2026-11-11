@@ -10,6 +10,7 @@ import { Hono } from 'hono';
 import { agentDisplayName, canDecide } from '@m2office/shared';
 import { ApprovalForbiddenError, RunNotResumableError, describeContext, executedCalls, withCompartments } from '@m2office/core';
 import type { AppDeps } from '../context.js';
+import { passCorrection } from '../corrections.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
 /**
@@ -103,6 +104,17 @@ export function approvalsRoute(deps: AppDeps) {
         ctx.tenant.id, id, body.decision, { id: ctx.user.id, roles: ctx.user.roles },
         body.comment ?? null,
       );
+      // 本人が自分の業務を理由を添えて差し戻したら、直しとして学ぶ（第11.13.7節 ③）。ほかの人の業務の差し戻しは、その人の好みにしない
+      if (body.decision === 'rejected' && body.comment?.trim()) {
+        const run = await deps.repo.getRun(ctx.tenant.id, result.runId).catch(() => null);
+        const job = run ? await deps.repo.getJob(ctx.tenant.id, run.jobId).catch(() => null) : null;
+        if (job && job.requestedBy === ctx.user.id) {
+          passCorrection(deps, {
+            tenantId: ctx.tenant.id, userId: ctx.user.id, kind: 'reject', agentId: job.agentId, agentName: job.agentName ?? job.agentId,
+            correction: body.comment, context: '',
+          });
+        }
+      }
       return c.json({ runId: result.runId, decision: body.decision });
     } catch (err) {
       if (err instanceof ApprovalForbiddenError) {

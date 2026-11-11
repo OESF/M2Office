@@ -67,6 +67,7 @@ import { answerOfSteps } from '../memory/work.js';
 import { substituteArguments } from '../extensions/skill.js';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable } from '../llm/unconfigured.js';
 import { parseToolCalls } from './tool-protocol.js';
+import { preferencesForAgent } from '../memory/corrections.js';
 
 /** 実行を 1 歩進めた結果。ワーカーが次の行動を決めるのに使う。 */
 export type AdvanceResult =
@@ -843,7 +844,7 @@ export class RunEngine {
       // 見せなかったツールがあれば、それは承認のあとの段で行うことを伝える。伝えないと推論が「ツールが使えないため行えない」と
       // 書き、承認の前の組み立てがその文をなぞって送る操作を記録せず、承認が自動で通ってしまった（2026-09-27 に Slack で確認）
       const held = allowed.length - tools.length;
-      const system = buildSystemPrompt(def, tools, settings.writingStyle, await this.companyNames(run.tenantId, settings), await this.preferencesOf(run.tenantId, requestedBy));
+      const system = buildSystemPrompt(def, tools, settings.writingStyle, await this.companyNames(run.tenantId, settings), await this.preferencesOf(run.tenantId, requestedBy, def.id));
       // 承認の前の組み立てでは、記録された操作を「待つ」ものと取り違えさせない（2026-09-25 に本物の推論で、
       // 社内への共有を記録したあと「承認待ち」として投稿と登録を出さずに終えた）
       // スキルの業務は、指示の $ARGUMENTS・$名前 を入力で置き換える（スキルと同じ。仕様書 第12.12.2節）
@@ -1085,13 +1086,14 @@ export class RunEngine {
    * 会社の名前（正式名称と略称。仕様書 第12.12.5節）。会社情報に無ければ、申し込みのときの会社名を正式名称にする。
    */
   /**
-   * 依頼した人の仕事のやり方の好み（秘書が会話から覚えたもの。仕様書 第11.13.2節、ADR-0095）。新しいものから 20 件。
+   * 依頼した人の仕事のやり方の好み（秘書が会話と直しから覚えたもの。仕様書 第11.13.2節・第11.13.7節、ADR-0095・ADR-0134）。
+   * その業務の好み（新しいもの 20 件）と、業務を決めない好み（新しいもの 10 件）。
    *
    * @remarks 好みのほかの記憶は業務に渡さない（第11.1節）。読めなくても業務は止めない
    */
-  private async preferencesOf(tenantId: string, userId: string): Promise<string[]> {
+  private async preferencesOf(tenantId: string, userId: string, agentId: string): Promise<string[]> {
     const memories = await Promise.resolve().then(() => this.deps.repo.listMemories(tenantId, userId)).catch(() => []);
-    return memories.filter((m) => m.kind === 'preference').slice(0, PREFERENCES_FOR_AGENTS).map((m) => m.text.replace(/\s+/g, ' ').slice(0, 200));
+    return preferencesForAgent(memories, agentId).map((m) => m.text.replace(/\s+/g, ' ').slice(0, 200));
   }
 
   private async companyNames(tenantId: string, settings: TenantSettings): Promise<{ legalName: string; shortName: string }> {
@@ -1571,7 +1573,6 @@ function companyLines(c: { legalName: string; shortName: string }): string[] {
 }
 
 /** 業務に渡す、依頼した人の仕事のやり方の好みの数（第11.13.2節）。 */
-const PREFERENCES_FOR_AGENTS = 20;
 
 /**
  * 依頼した人の仕事のやり方の好み（第11.13.2節）。データとして渡し、業務の「必ず守ること」と会社の決まりを先にする。

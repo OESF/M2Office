@@ -961,8 +961,10 @@ export interface ConversationView {
 /** 個人記憶の 1 件（仕様書 第11.5.1節）。 */
 export interface MemoryView {
   id: string; text: string; source: string; createdAt: string;
-  /** 種類（`preference` は仕事のやり方の好み。仕様書 第11.13.2節）。 */
-  kind?: 'fact' | 'preference';
+  /** 種類（`preference` は仕事のやり方の好み、`routing` は取り次ぎの好み。仕様書 第11.13.2節・第11.13.7節）。 */
+  kind?: 'fact' | 'preference' | 'routing';
+  /** どの業務の好みか（業務の名前。無ければ業務を決めない好み）。 */
+  agentName?: string | null;
   /** しまった日と理由（しまったものの一覧でだけ。仕様書 第11.11.4節）。 */
   archivedAt?: string | null; archiveReason?: string | null;
 }
@@ -2672,7 +2674,11 @@ export const api = {
   /** 進んでいる案件ノート（仕様書 第11.13.5節）。 */
   myCases: () => call<{ items: { id: string; title: string; state: string; nextStep: string; dueOn: string | null; lastDay: string }[] }>('/me/cases'),
   deleteCase: (id: string) => call<{ ok: true }>(`/me/cases/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  myGrowth: () => call<{ profile: { body: string; updatedAt: string } | null; memories: number; preferences: number; learnedThisWeek: number; promoted: number }>('/me/growth'),
+  myGrowth: () => call<{
+    profile: { body: string; updatedAt: string } | null; memories: number; preferences: number; learnedThisWeek: number; promoted: number;
+    /** 秘書への直しの数（今週・先週・頼んだ 100 件あたり。第11.13.7節）。 */
+    corrections: { thisWeek: number; lastWeek: number | null; per100: number | null } | null;
+  }>('/me/growth'),
   deleteMemory: (id: string) => call(`/me/memories/${id}`, { method: 'DELETE' }),
   updateMemory: (id: string, text: string) =>
     call(`/me/memories/${id}`, { method: 'PATCH', body: JSON.stringify({ text }) }),

@@ -11,6 +11,7 @@
 import { Hono, type Context } from 'hono';
 import type { PrintExport, PrintViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
+import { passCorrection } from '../corrections.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
@@ -89,9 +90,17 @@ export function printDesignsRoute(deps: AppDeps) {
     return problem(c, await service.choose(who(c), c.req.param('id'), typeof b['versionId'] === 'string' ? b['versionId'] : ''));
   });
 
+  /** 直す頼みを、直しとして学ぶ（第11.13.7節 ②）。印刷物の好みとして覚える。 */
+  const learnPrint = (c: Context<AppEnv>, instruction: unknown) => {
+    if (typeof instruction !== 'string') return;
+    const { tenant, user } = c.get('ctx');
+    passCorrection(deps, { tenantId: tenant.id, userId: user.id, kind: 'remake', agentId: 'print-designs', agentName: '販促物の作成', correction: instruction });
+  };
+
   /** 会話で直す（`instruction`・`photoFileId`・`driveFileId`）。新しい版にする。 */
   app.post('/:id/revise', async (c) => {
     const b = await body(c);
+    learnPrint(c, b['instruction']);
     return result(c, await service.revise(who(c), c.req.param('id'), b['instruction'], b['photoFileId'], b['driveFileId']));
   });
 
@@ -110,6 +119,7 @@ export function printDesignsRoute(deps: AppDeps) {
   /** 作り直す（`instruction`。「今年の日付で」など）。新しい物を返す。 */
   app.post('/:id/remake', async (c) => {
     const b = await body(c);
+    learnPrint(c, b['instruction']);
     return result(c, await service.remake(who(c), c.req.param('id'), b['instruction']), 201);
   });
 

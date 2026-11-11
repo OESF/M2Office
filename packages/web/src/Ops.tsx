@@ -149,8 +149,8 @@ const PAGES: { id: OpsPage; label: string; icon: IconName }[] = [
   { id: 'operators', label: '運営者', icon: 'users' },
   { id: 'audit', label: '操作履歴', icon: 'audit' },
   { id: 'law', label: '法令の表', icon: 'doc' },
-  // メールの学びのベータテスト（第9.5.1.1.2節）。本人が共有を頼んだ人の週ごとの数だけ
-  { id: 'learning', label: 'メールの学び', icon: 'mail' },
+  // 秘書の学びのベータテスト（第11.13.7節）。本人が共有を頼んだ人の週ごとの数だけ
+  { id: 'learning', label: '秘書の学び', icon: 'agent' },
   { id: 'settings', label: '設定', icon: 'settings' },
   // 運営者のヘルプ（第23.8.16節）。いちばん下
   { id: 'help', label: 'ヘルプ', icon: 'help' },
@@ -256,7 +256,7 @@ function OpsConsole({ me, onLogout }: { me: OpsMe; onLogout: () => void }) {
           {page === 'logs' && <OpsLogs me={me} />}
           {page === 'settings' && <Settings me={me} />}
           {page === 'law' && <LawTables me={me} />}
-          {page === 'learning' && <MailLearningShared />}
+          {page === 'learning' && <LearningShared />}
           {page === 'operators' && <Operators me={me} />}
           {page === 'audit' && <Audit />}
           {page === 'billing' && <OpsBilling me={me} />}
@@ -682,33 +682,47 @@ function Audit() {
   );
 }
 
+/** 直しの種類の言い方（第11.13.7節「直しの入口」）。 */
+const CORRECTION_LABEL: Record<string, string> = { conversation: '会話', remake: '作り直し', reject: '差し戻し', reroute: '頼み直し', mail: 'メール' };
+
 /**
- * メールの学びのベータテスト（仕様書 第9.5.1.1.2節「ベータテスト」）。本人が秘書に共有を頼んだ人の、週ごとの直した回数と振り分けの外れ。
+ * 秘書の学びのベータテスト（仕様書 第11.13.7節「見せ方」）。本人が秘書に共有を頼んだ人の、週ごとの直しの数（種類ごと）と、頼んだ 100 件あたりの直し。
  *
- * @remarks 名前・メールアドレス・メールの中身は出さない。人は番号で表す。直す回数が週ごとに減るかで、役に立つかを判断する
+ * @remarks 名前・メールアドレス・直しの文・メールの中身は出さない。人は番号で表す。直しが週ごとに減るかで、秘書が賢くなっているかを見る
  */
-function MailLearningShared() {
-  const [rows, setRows] = useState<Awaited<ReturnType<typeof opsApi.mailLearning>>['rows'] | null>(null);
+function LearningShared() {
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof opsApi.learning>>['rows'] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { opsApi.mailLearning().then((r) => setRows(r.rows)).catch((e) => setError(e instanceof OpsApiError ? e.message : '読み込めませんでした')); }, []);
-  // 人ごとに、週の並び（古い週から）
-  const people = new Map<string, NonNullable<typeof rows>>();
-  for (const r of rows ?? []) people.set(`${r.tenantId} ${r.person}`, [...(people.get(`${r.tenantId} ${r.person}`) ?? []), r]);
+  useEffect(() => { opsApi.learning().then((r) => setRows(r.rows)).catch((e) => setError(e instanceof OpsApiError ? e.message : '読み込めませんでした')); }, []);
+  // 人と週ごとにまとめる
+  const weeks = new Map<string, { tenantId: string; person: string; week: string; byKind: Record<string, number>; requests: number }>();
+  for (const r of rows ?? []) {
+    const k = `${r.tenantId} ${r.person} ${r.week}`;
+    const w = weeks.get(k) ?? { tenantId: r.tenantId, person: r.person, week: r.week, byKind: {}, requests: 0 };
+    if (r.kind === 'requests') w.requests += r.count; else w.byKind[r.kind] = (w.byKind[r.kind] ?? 0) + r.count;
+    weeks.set(k, w);
+  }
+  const list = [...weeks.values()];
   return (
     <>
-      <OpsTitle title="メールの学び" help={{ chapter: '03-tenants', text: '共有を頼んだ人の、メールの分け方を直した回数と外れの数です。' }} />
+      <OpsTitle title="秘書の学び" help={{ chapter: '03-tenants', text: '共有を頼んだ人の、秘書への直しの数です。' }} />
       {error && <p className="error">{error}</p>}
       {rows && rows.length === 0 && <p className="muted">共有している人はいません</p>}
-      {people.size > 0 && (
+      {list.length > 0 && (
         <div className="table-scroll"><table className="table">
-          <thead><tr><th>会社</th><th>人</th><th>週ごとの直し＋外れ（古い週から）</th></tr></thead>
+          <thead><tr><th>会社</th><th>人</th><th>週</th><th className="num">直し</th><th className="num">頼んだ数</th><th className="num">100 件あたり</th><th>種類</th></tr></thead>
           <tbody>
-            {[...people.entries()].map(([k, xs]) => (
-              <tr key={k}>
-                <td>{xs[0]!.tenantId}</td><td>{xs[0]!.person}</td>
-                <td>{xs.map((x) => `${x.week.slice(5)}: ${x.corrections}＋${x.misses}`).join('　')}</td>
-              </tr>
-            ))}
+            {list.map((w) => {
+              const total = Object.values(w.byKind).reduce((a, b) => a + b, 0);
+              return (
+                <tr key={`${w.tenantId}${w.person}${w.week}`}>
+                  <td>{w.tenantId}</td><td>{w.person}</td><td>{w.week}</td>
+                  <td className="num">{total}</td><td className="num">{w.requests}</td>
+                  <td className="num">{w.requests > 0 ? Math.round((total / w.requests) * 1000) / 10 : '—'}</td>
+                  <td className="small muted">{Object.entries(w.byKind).map(([k, n]) => `${CORRECTION_LABEL[k] ?? k} ${n}`).join('・')}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table></div>
       )}

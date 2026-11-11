@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, DEFAULT_USER_SETTINGS } from '@m2office/shared';
 import {
-  MailService, MailWatch, MemoryMailStore, MockWorkspaceConnector, PERSONAL_DOMAINS, StubLlmProvider, groupLessonFor, lessonId, mailCommand, mailLearning,
+  MailService, MailWatch, MemoryMailStore, MockWorkspaceConnector, PERSONAL_DOMAINS, StubLlmProvider, groupLessonFor, lessonId, mailCommand, learningProgress,
   styleFor, subjectTag, weekOf, type MailLessonRow, type Repository, type ToolContext,
 } from '../src/index.js';
 
@@ -102,9 +102,11 @@ test('ふるまいを数える: 「返事が要る」を返事せずに済みに
   const lessons = await store.lessons(o);
   assert.ok(lessons.some((l) => l.source === 'behavior' && l.target === 'read' && l.hits.length === 1), '返事が要らないことが多い、を 1 回数える');
   assert.deepEqual((await service.learningProgress(o, now)).thisWeek, { corrections: 0, misses: 1 });
-  const r = await mailLearning.invoke({}, { tenantId: T, userId: U, mail: { store } } as unknown as ToolContext) as { available: boolean; line: string };
+  // 週次ブリーフの 1 行は、秘書全体の直しの数（メールを含む。第11.13.7節）
+  const repo0 = { learningCounts: async () => [] };
+  const r = await learningProgress.invoke({}, { tenantId: T, userId: U, repo: repo0, mail: { store } } as unknown as ToolContext) as { available: boolean; line: string };
   assert.equal(r.available, true);
-  assert.match(r.line, /今週 1 回/);
+  assert.match(r.line, /今週の秘書への直しは 1 回/);
   assert.equal(weekOf(new Date('2026-11-10T03:00:00Z')), '2026-11-09', '週は日本時間の月曜日から');
 });
 

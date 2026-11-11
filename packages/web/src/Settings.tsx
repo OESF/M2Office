@@ -694,7 +694,10 @@ function MemorySettings({ settings, onChange, onSave }: {
                     </td>
                   ) : (
                     <>
-                      <td>{m.kind === 'preference' && <span className="badge">好み</span>} {m.text}</td>
+                      <td>
+                        {m.kind === 'preference' && <span className="badge">{m.agentName ? `好み・${m.agentName}` : '好み'}</span>}
+                        {m.kind === 'routing' && <span className="badge">取り次ぎ</span>} {m.text}
+                      </td>
                       <td className="num">
                         <button className="btn ghost small" onClick={() => setEditing({ id: m.id, text: m.text })}>直す</button>
                       </td>
@@ -794,6 +797,10 @@ function SecretaryGrowth({ reloadKey }: { reloadKey: number }) {
         <div className="tile"><span>この 7 日に覚えたこと</span><strong>{g.learnedThisWeek.toLocaleString()}<small> 件</small></strong></div>
         <div className="tile"><span>直して覚えた好み</span><strong>{g.preferences.toLocaleString()}<small> 件</small></strong></div>
         <div className="tile"><span>会社の知識になったもの</span><strong>{g.promoted.toLocaleString()}<small> 件</small></strong></div>
+        {/* 直しの数（第11.13.7節）。減っていけば、秘書があなたのやり方に近づいている */}
+        {g.corrections && (
+          <div className="tile"><span>今週の直し</span><strong>{g.corrections.thisWeek.toLocaleString()}<small> 回{g.corrections.lastWeek !== null ? `（先週 ${g.corrections.lastWeek} 回）` : ''}</small></strong></div>
+        )}
       </div>
       <div className="growth-head">
         <h4>秘書から見たあなた</h4>

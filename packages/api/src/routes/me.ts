@@ -12,9 +12,12 @@ import {
   LIBRARY_EXTENSION_ID, CARDS_EXTENSION_ID, HR_EXTENSION_ID, SIGNAGE_EXTENSION_ID, INVENTORY_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, MENU_CATEGORY_MAX, MENU_CATEGORY_NAME_MAX,
   GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink, isTextSize,
 } from '@m2office/shared';
-import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE, photoMime, HR_PHOTO_MAX_BYTES } from '@m2office/core';
+import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, correctionProgress, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE, photoMime, HR_PHOTO_MAX_BYTES } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+
+/** 業務の定義に無い、好みの持ち主の名前（メールの下書き・販促物。第11.13.7節）。 */
+const AGENT_LABEL: Record<string, string> = { mail: 'メールの返事の下書き', 'print-designs': '販促物の作成' };
 import { speakSample } from '../voice/sample.js';
 import { voiceNameOf } from '../voice/persona.js';
 
@@ -284,8 +287,13 @@ export function meRoute(deps: AppDeps) {
    */
   app.get('/memories', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const items = await deps.repo.listMemories(tenant.id, user.id);
-    return c.json({ items });
+    // 取り次ぎの好み（第11.13.7節）も、覚えていることとして並べる（見て、直して、消せるように。第10.7節）
+    const [facts, routing] = await Promise.all([deps.repo.listMemories(tenant.id, user.id), deps.repo.listRoutingMemories(tenant.id, user.id)]);
+    const items = [...facts, ...routing].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    // 好みに業務の名前を添える（どの業務の好みか）
+    const view = await deps.tenantView(tenant.id);
+    const name = (id: string | null | undefined) => (id ? view.resolve(id, 1)?.name ?? AGENT_LABEL[id] ?? id : null);
+    return c.json({ items: items.map((m) => ({ ...m, agentName: name(m.agentId) })) });
   });
 
   /**
@@ -295,10 +303,13 @@ export function meRoute(deps: AppDeps) {
    */
   app.get('/growth', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const [memories, profile, promotions, settings] = await Promise.all([
+    const [memories, profile, promotions, settings, mailWeeks] = await Promise.all([
       deps.repo.listMemories(tenant.id, user.id), deps.repo.getUserProfile(tenant.id, user.id),
       deps.repo.listPromotions(tenant.id, { userId: user.id }), deps.repo.getUserSettings(tenant.id, user.id),
+      deps.mail.service.store.weeks({ tenantId: tenant.id, userId: user.id }, 2).catch(() => []),
     ]);
+    // 直しの数（第11.13.7節「見せ方」）。今週と先週・頼んだ 100 件あたり
+    const corrections = await correctionProgress(deps.repo, tenant.id, user.id, new Date(), mailWeeks).catch(() => null);
     const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
     return c.json({
       profile: profile && settings.memory.learning ? { body: profile.body, updatedAt: profile.updatedAt } : null,
@@ -306,6 +317,9 @@ export function meRoute(deps: AppDeps) {
       preferences: memories.filter((m) => m.kind === 'preference').length,
       learnedThisWeek: memories.filter((m) => m.createdAt >= weekAgo).length,
       promoted: promotions.filter((p) => p.status === 'approved').length,
+      corrections: corrections ? {
+        thisWeek: corrections.thisWeek.total, lastWeek: corrections.lastWeek?.total ?? null, per100: corrections.thisWeek.per100,
+      } : null,
     });
   });
 

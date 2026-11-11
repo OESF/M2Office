@@ -18,6 +18,7 @@ import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
 import { AI_NOT_CONFIGURED_MESSAGE, MAIL_REPLY_SEND, aiAvailable, enqueueJob } from '@m2office/core';
 import type { AppDeps } from '../context.js';
+import { passCorrection } from '../corrections.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
 /** メールの画面の API。 */
@@ -70,7 +71,10 @@ export function mailRoute(deps: AppDeps) {
 
   app.post('/threads/:id/redraft', async (c) => {
     const body = await c.req.json<{ instruction?: unknown }>().catch(() => ({ instruction: undefined }));
-    const res = await service.redraft(owner(c), c.req.param('id'), typeof body.instruction === 'string' ? body.instruction : undefined);
+    const instruction = typeof body.instruction === 'string' ? body.instruction : undefined;
+    // 下書きを直す頼みは、直しとして学ぶ（第11.13.7節 ②）。メールの下書きの好みとして覚え、次の下書きに渡す
+    if (instruction?.trim()) passCorrection(deps, { ...owner(c), kind: 'remake', agentId: 'mail', agentName: 'メールの返事の下書き', correction: instruction });
+    const res = await service.redraft(owner(c), c.req.param('id'), instruction);
     return 'error' in res ? c.json({ error: res.error }, res.status) : c.json(res);
   });
 

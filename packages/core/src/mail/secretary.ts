@@ -82,7 +82,9 @@ export function mailCommand(message: string): MailCommand | null {
   const m = trimEndMarks(message.trim());
   // 学び（第9.5.1.1.2節）。覚えていること・忘れる・共有
   if (/メール(について|のこと|で|の(分け方|振り分け)について)?(何|なに)を?覚えて/.test(m)) return { kind: 'lessons' };
-  const learn = m.indexOf('メールの学び');
+  // 「学びの数を運営に共有して」「メールの学びの数を…」（第11.13.7節「見せ方」。第9.5.1.1.2節）
+  // 「勉強会の学びを共有して」のような、ほかの頼みと取り違えないよう、「学びの数」「メールの学び」のときだけ見る
+  const learn = Math.max(m.indexOf('学びの数'), m.indexOf('メールの学び'));
   if (learn >= 0 && /運営|共有/.test(m.slice(learn))) return { kind: 'share', on: !/(やめ|止め|しないで|解除)/.test(m) };
   const f = /^(.+?)(さん|様|さま|社)?(のこと|からのメール(のこと)?)は忘れて/.exec(m);
   if (f && clean(f[1]!)) return { kind: 'forget', who: clean(f[1]!) };

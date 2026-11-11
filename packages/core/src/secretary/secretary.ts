@@ -29,6 +29,7 @@ import { memorySemanticEnabled } from '../memory/embed.js';
 import { jstDay } from '../memory/learn.js';
 import { bulkMailRequest, contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
+import { CORRECTION_LIMITS, countCorrection, countRequest, phraseKey, rememberRoute, routeHints } from '../memory/corrections.js';
 import { findThread, mailCategoryText, mailCommand, mailDraftsText, mailLessonsText, mailOverviewText, mailWaitingText, type MailCommand } from '../mail/secretary.js';
 import type { MailService } from '../mail/service.js';
 import { answerAttendance, attendanceRequest, payslipRequest } from './attendance.js';
@@ -174,6 +175,9 @@ export class Secretary {
   /** 確かめに答えるのを待っている、サイネージの割り込み（会社と人ごと。5 分で忘れる。第31.11.1節） */
   private readonly signagePending = new Map<string, { req: SignageRequest; until: number }>();
 
+  /** 本人ごとの、最後に取り次いだ業務（取り消して別の業務を頼んだら、頼み直しとして学ぶ。第11.13.7節 ④）。 */
+  private readonly lastRoutes = new Map<string, { request: string; agentId: string; runId: string; at: number }>();
+
   constructor(private readonly deps: SecretaryDeps) {}
 
   /**
@@ -194,6 +198,8 @@ export class Secretary {
     // 推論が使えない会社では、何を聞かれても設定されていないことだけを伝える（仕様書 第20.2.4節、ADR-0030）
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
     if (!aiAvailable(llm)) return { layer: 'direct', text: AI_NOT_CONFIGURED_MESSAGE, evidence: [], tokensUsed: 0 };
+    // 頼んだ数を数える（直しを頼んだ 100 件あたりで見るため。第11.13.7節「数える」）。数えられなくても答える
+    if (options.record !== false) void Promise.resolve().then(() => countRequest(this.deps.repo, tenantId, userId)).catch(() => undefined);
     // 「あとで〇〇する」は本人の ToDo に入れる（第10.12節）。答えと同時に行い、待たせない
     const todo = this.captureTodo(tenantId, userId, message, llm).catch(() => null);
     // 渡せるファイルは 5 つまで。同じものは 1 つにする（第10.10.2節）
@@ -385,6 +391,8 @@ export class Secretary {
         const fixed = await correctMemory({ repo: this.deps.repo, llm }, tenantId, userId, message).catch(() => null);
         if (fixed?.text) {
           await this.audit(tenantId, userId, 'secretary.correct', 'memory');
+          // 直しとして数える（第11.13.7節 ①）
+          await Promise.resolve().then(() => countCorrection(this.deps.repo, tenantId, userId, 'conversation')).catch(() => undefined);
           return { reply: { layer: 'full', text: fixed.text, evidence: fixed.changes, tokensUsed: 0 }, keep: true };
         }
       }
@@ -597,9 +605,20 @@ export class Secretary {
       await this.audit(tenantId, userId, 'secretary.mail', 'check');
       return { reply: { layer: 'light', ...answer }, keep: true };
     }
+    // 取り次ぎの頼み直し（第11.13.7節 ④）。「それじゃなくて〇〇」は、〇〇を頼み直したものとして取り次ぐ
+    const routeKey = `${tenantId}\u0000${userId}`;
+    const lastRoute = this.lastRoutes.get(routeKey);
+    const recentRoute = lastRoute && Date.now() - lastRoute.at < CORRECTION_LIMITS.rerouteWindowMs ? lastRoute : null;
+    const redo = recentRoute ? rerouteRest(cmd) : null;
+    const routeMessage = redo ?? message;
+    // 本人の取り次ぎの好み（「この人はこの言い方のとき、この業務を頼む」）
+    const routingMemories = pastOnly ? [] : await Promise.resolve().then(() => this.deps.repo.listRoutingMemories(tenantId, userId)).catch(() => []);
     const routed = pastOnly
       ? { agent: undefined, plan: false, reason: '', tokensUsed: 0 }
-      : await this.route(message, enabled, llm, lookup, true, connections.map((c) => c.name));
+      : await this.route(routeMessage, enabled, llm, lookup, true, connections.map((c) => c.name), false, routeHints(routingMemories, routeMessage));
+    if (routed.agent && recentRoute && routed.agent.id !== recentRoute.agentId) {
+      await this.learnReroute(tenantId, userId, recentRoute, routed.agent, redo !== null).catch(() => undefined);
+    }
     if (routed.plan) {
       // 2 つ以上の業務を組み合わせる依頼は、段取りを作って分身に任せ、すぐ返す（第10.14節、ADR-0040）。黙り込まない
       const plan = await createPlan(this.deps.repo, tenantId, userId, message, await this.todayContext(tenantId, userId));
@@ -614,7 +633,11 @@ export class Secretary {
     if (routed.agent) {
       await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
       // 専門の業務は頼んで実行し、結果をあとで伝える。本人に実行の可否を聞かない（第10.9.6節、ADR-0033）
-      return this.delegate(tenantId, userId, message, routed.agent, routed.reason, llm);
+      const delegated = await this.delegate(tenantId, userId, routeMessage, routed.agent, routed.reason, llm);
+      // 取り次いだ業務を覚えておく（すぐ取り消して別の業務を頼んだら、頼み直しとして学ぶ）
+      const runId = delegated.reply.lookup?.runId;
+      if (runId && !runId.startsWith('plan:')) this.lastRoutes.set(routeKey, { request: routeMessage, agentId: routed.agent.id, runId, at: Date.now() });
+      return delegated;
     }
 
     // 層 3: 完全な対話。本人が決めた名前・呼ばれ方・応対スタイルに合わせる（仕様書 第6.5.3節）
@@ -1260,6 +1283,34 @@ export class Secretary {
   }
 
   /**
+   * 取り次ぎの頼み直しから学ぶ（第11.13.7節 ④）。「それじゃなくて〇〇」は 1 回で、取り消してから別の業務を頼んだときは、同じ言い方で 2 回そろったら覚える。
+   *
+   * @param explicit 「それじゃなくて〇〇」と言われた
+   */
+  private async learnReroute(
+    tenantId: string, userId: string, last: { request: string; agentId: string; runId: string }, agent: AgentDefinition, explicit: boolean,
+  ): Promise<void> {
+    const repo = this.deps.repo;
+    if (!explicit) {
+      // 頼み直しとみなすのは、秘書が始めた業務を本人が取り消したときだけ
+      const run = await repo.getRun(tenantId, last.runId).catch(() => null);
+      if (run?.status !== 'cancelled') return;
+    }
+    await countCorrection(repo, tenantId, userId, 'reroute');
+    const at = new Date().toISOString();
+    if (!explicit) {
+      const key = phraseKey(last.request);
+      const hits = await repo.noteReroute(tenantId, userId, key, last.request, agent.id, at);
+      if (hits < CORRECTION_LIMITS.rerouteHits) return;
+      await repo.clearReroute(tenantId, userId, key, agent.id);
+    }
+    if (await rememberRoute(repo, tenantId, userId, last.request, agent.id, agent.name)) {
+      await this.audit(tenantId, userId, 'memory.learn', 'routing');
+    }
+    this.lastRoutes.delete(`${tenantId}\u0000${userId}`);
+  }
+
+  /**
    * 依頼に対応する業務エージェントを判定する。
    *
    * @remarks
@@ -1274,6 +1325,7 @@ export class Secretary {
     allowPlan = false,
     connectionNames: string[] = [],
     fileGiven = false,
+    routing: { direct: string | null; hints: string[] } = { direct: null, hints: [] },
   ): Promise<{ agent?: AgentDefinition; plan?: boolean; reason: string; tokensUsed: number }> {
     // **照会は業務に取り次がない**（仕様書 第10.9.4.1節）。層 3 が組織知識を根拠に答える。
     // ただし外の最新の情報や本人の予定が要る照会（出張の行程など）は、秘書の調べものに回す（第10.9.6節）。
@@ -1281,6 +1333,9 @@ export class Secretary {
     const asking = !fileGiven && ASKING.test(message) && !DOING.test(message);
     const candidates = asking ? (lookup ? [lookup] : []) : [...agents, ...(lookup ? [lookup] : [])];
     if (candidates.length === 0) return { reason: asking ? '照会のため、秘書が答えます' : '使える業務がありません', tokensUsed: 0 };
+    // 本人の取り次ぎの好み（第11.13.7節 ④）。言い方がほぼ同じなら、その業務に取り次ぐ
+    const preferred = routing.direct ? candidates.find((a) => a.id === routing.direct) : undefined;
+    if (preferred && !asking) return { agent: preferred, reason: '本人の取り次ぎの好み', tokensUsed: 0 };
 
     // 段取りを頼む言い回しなら、語句の一致で 1 つの業務に決めずに推論に選ばせる（第10.14節）。
     // 「次の会議の準備、規程の確認、天気の確認をそれぞれ頼んで」を「会議の準備」だけに取り次がないため
@@ -1314,6 +1369,7 @@ export class Secretary {
             '依頼に最も合う業務を 1 つ選び、その ID だけを返してください。',
             '会社の決まりの質問・相談・文章の手直しなど、秘書がその場で答えられるものは none と返してください。',
             '該当しない場合も none と返してください。',
+            ...(routing.hints.length ? ['', 'この人の取り次ぎの好み（この人はこの言い方のとき、この業務を頼む。似た依頼なら従う）:', ...routing.hints.map((h) => `- ${h}`)] : []),
             '',
             list,
           ].join('\n'),
@@ -1798,4 +1854,23 @@ function onceEmbed(embed: QueryEmbed | undefined): QueryEmbed | undefined {
     memo.set(query, p);
     return p;
   };
+}
+
+/** 頼み直しの目印（「それじゃなくて」「そうではなくて」）。 */
+const REROUTE_MARKS = ['じゃなくて', 'ではなくて', 'じゃなく', 'でなくて'];
+
+/**
+ * 「それじゃなくて〇〇」の〇〇を取り出す（第11.13.7節 ④）。目印は文の頭の近く（8 字まで）にあるときだけ見る。
+ *
+ * @returns 頼み直した依頼。頼み直しでなければ `null`
+ * @remarks 正規表現で文の頭から読ませず、目印を文字で探す（長い文で遅くならないように）
+ */
+export function rerouteRest(cmd: string): string | null {
+  for (const mark of REROUTE_MARKS) {
+    const at = cmd.indexOf(mark);
+    if (at < 0 || at > 8) continue;
+    const rest = cmd.slice(at + mark.length).replace(/^[、,\s]+/, '').trim();
+    return rest.length >= 2 ? rest : null;
+  }
+  return null;
 }

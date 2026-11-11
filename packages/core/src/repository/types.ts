@@ -289,8 +289,26 @@ export interface Repository {
   getPromotion(tenantId: string, id: string): Promise<Promotion | null>;
   updatePromotion(p: Promotion): Promise<void>;
 
-  /** 本人の個人記憶（使っているものだけ。新しい順。仕様書 第11.5.1節）。本人以外に渡さない。 */
+  /**
+   * 本人の個人記憶（使っているものだけ。新しい順。仕様書 第11.5.1節）。本人以外に渡さない。
+   *
+   * @remarks 取り次ぎの好み（`routing`）は含めない（事実や好みとして答えの材料に混ぜないため）。取り次ぎの好みは {@link Repository.listRoutingMemories}
+   */
   listMemories(tenantId: string, userId: string): Promise<Memory[]>;
+  /** 本人の取り次ぎの好み（使っているものだけ。新しい順。第11.13.7節）。秘書が業務を選ぶときにだけ使う。 */
+  listRoutingMemories(tenantId: string, userId: string): Promise<Memory[]>;
+  /** 週ごとの直しの数と頼んだ数を足す（第11.13.7節「数える」。種類は `conversation`・`remake`・`reject`・`reroute`・`requests`）。 */
+  addLearningCount(tenantId: string, userId: string, week: string, kind: string, n: number): Promise<void>;
+  /** 週ごとの直しの数と頼んだ数（`since` の週から。新しい週から）。 */
+  learningCounts(tenantId: string, userId: string, since: string): Promise<{ week: string; kind: string; count: number }[]>;
+  /**
+   * 取り消しと頼み直しを 1 回数える（第11.13.7節「取り次ぎの学び」）。
+   *
+   * @returns 同じ言い方と業務の、これまでの回数（今回を含む）
+   */
+  noteReroute(tenantId: string, userId: string, phraseKey: string, phrase: string, agentId: string, at: string): Promise<number>;
+  /** 取り次ぎの好みとして覚えた後に、数えていたものを消す。 */
+  clearReroute(tenantId: string, userId: string, phraseKey: string, agentId: string): Promise<void>;
   /** 本人の記憶のうち、整理でしまったもの（新しい順。第11.11.4節）。 */
   listArchivedMemories(tenantId: string, userId: string): Promise<Memory[]>;
   /**
@@ -909,8 +927,10 @@ export interface Memory {
   archiveReason?: string | null;
   /** 会話の材料に最後に使った日。 */
   lastUsedAt?: string | null;
-  /** 種類（`fact`: 事実、`preference`: 仕事のやり方の好み。第11.13.2節）。無ければ事実。 */
+  /** 種類（`fact`: 事実、`preference`: 仕事のやり方の好み、`routing`: 取り次ぎの好み。第11.13.2節・第11.13.7節）。無ければ事実。 */
   kind?: MemoryKind;
+  /** どの業務の好みか（好みだけ。無ければ業務を決めない好み。取り次ぎの好みは頼みたかった業務。第11.13.7節）。 */
+  agentId?: string | null;
 }
 
 /** 社外との日程調整の候補（第9.5.3.1節）。`holdEventId` は本人のカレンダーの仮押さえ。 */
@@ -1023,7 +1043,7 @@ export interface MemoryEmbedItem {
 }
 
 /** 覚えていることの種類（第11.13.2節）。 */
-export type MemoryKind = 'fact' | 'preference';
+export type MemoryKind = 'fact' | 'preference' | 'routing';
 
 /**
  * 本人の像（秘書がまとめた本人についての文。仕様書 第11.13.1節）。

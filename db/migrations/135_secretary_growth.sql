@@ -4,7 +4,8 @@
 -- 本人の像は本人だけのもの。記憶を直す・消すと作り直す印を付け、記憶をすべて消すと像も消す（リポジトリが行う）。
 alter table memories add column if not exists kind text not null default 'fact';
 alter table memories drop constraint if exists memories_kind_check;
-alter table memories add constraint memories_kind_check check (kind in ('fact', 'preference'));
+-- 移行 194 で取り次ぎの好み（routing）を足して付け直すので、ここでは not valid で付ける（毎回すべて流しても止まらないように）
+alter table memories add constraint memories_kind_check check (kind in ('fact', 'preference')) not valid;
 
 create table if not exists user_profiles (
   tenant_id     text not null references tenants(id) on delete cascade,

@@ -1002,14 +1002,14 @@ export class OpsStore {
   }
 
   /**
-   * メールの学びの週ごとの数（ベータテスト。第9.5.1.1.2節「ベータテスト」）。本人が秘書に共有を頼んだ人だけ。
+   * 秘書の学びの週ごとの数（ベータテスト。第11.13.7節「見せ方」）。本人が秘書に共有を頼んだ人だけ。種類ごとの直しの数と、頼んだ数（`requests`）。
    *
-   * @remarks 名前・メールアドレス・メールの中身は返さない。人は、会社と利用者の ID から作った番号で表す
+   * @remarks 名前・メールアドレス・直しの文・メールの中身は返さない。人は、会社と利用者の ID から作った番号で表す
    */
-  async mailLearningShared(): Promise<{ tenantId: string; person: string; week: string; corrections: number; misses: number }[]> {
-    const { rows } = await this.pool.query<{ tenant_id: string; person: string; week: string | Date; corrections: number; misses: number }>('select * from ops.mail_learning_shared()');
+  async learningShared(): Promise<{ tenantId: string; person: string; week: string; kind: string; count: number }[]> {
+    const { rows } = await this.pool.query<{ tenant_id: string; person: string; week: string | Date; kind: string; count: number }>('select * from ops.learning_shared()');
     return rows.map((r) => ({
-      tenantId: r.tenant_id, person: r.person, corrections: Number(r.corrections), misses: Number(r.misses),
+      tenantId: r.tenant_id, person: r.person, kind: r.kind, count: Number(r.count),
       week: typeof r.week === 'string' ? r.week.slice(0, 10) : new Date(r.week.getTime() - r.week.getTimezoneOffset() * 60_000).toISOString().slice(0, 10),
     }));
   }

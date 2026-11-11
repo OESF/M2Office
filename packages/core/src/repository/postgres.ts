@@ -1633,10 +1633,48 @@ export class PostgresRepository implements Repository {
 
   async listMemories(tenantId: string, userId: string): Promise<Memory[]> {
     return this.q<Memory>(tenantId,
-      `select id, tenant_id as "tenantId", user_id as "userId", text, source, kind,
+      `select id, tenant_id as "tenantId", user_id as "userId", text, source, kind, agent_id as "agentId",
               created_at as "createdAt", last_used_at as "lastUsedAt"
-         from memories where tenant_id = $1 and user_id = $2 and status = 'active' order by created_at desc`,
+         from memories where tenant_id = $1 and user_id = $2 and status = 'active' and kind <> 'routing' order by created_at desc`,
       [tenantId, userId]);
+  }
+
+  async listRoutingMemories(tenantId: string, userId: string): Promise<Memory[]> {
+    return this.q<Memory>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", text, source, kind, agent_id as "agentId",
+              created_at as "createdAt", last_used_at as "lastUsedAt"
+         from memories where tenant_id = $1 and user_id = $2 and status = 'active' and kind = 'routing' order by created_at desc limit 200`,
+      [tenantId, userId]);
+  }
+
+  async addLearningCount(tenantId: string, userId: string, week: string, kind: string, n: number): Promise<void> {
+    await this.q(tenantId,
+      `insert into learning_weeks (tenant_id, user_id, week, kind, count) values ($1, $2, $3, $4, $5)
+       on conflict (tenant_id, user_id, week, kind) do update set count = learning_weeks.count + excluded.count`,
+      [tenantId, userId, week, kind, n]);
+  }
+
+  async learningCounts(tenantId: string, userId: string, since: string): Promise<{ week: string; kind: string; count: number }[]> {
+    const rows = await this.q<{ week: string | Date; kind: string; count: number }>(tenantId,
+      `select week, kind, count from learning_weeks where tenant_id = $1 and user_id = $2 and week >= $3 order by week desc`,
+      [tenantId, userId, since]);
+    return rows.map((r) => ({
+      week: typeof r.week === 'string' ? r.week.slice(0, 10) : new Date(r.week.getTime() - r.week.getTimezoneOffset() * 60_000).toISOString().slice(0, 10),
+      kind: r.kind, count: Number(r.count),
+    }));
+  }
+
+  async noteReroute(tenantId: string, userId: string, phraseKey: string, phrase: string, agentId: string, at: string): Promise<number> {
+    const [r] = await this.q<{ hits: number }>(tenantId,
+      `insert into secretary_reroutes (tenant_id, user_id, phrase_key, phrase, agent_id, hits, last_at) values ($1, $2, $3, $4, $5, 1, $6)
+       on conflict (tenant_id, user_id, phrase_key, agent_id) do update set hits = secretary_reroutes.hits + 1, phrase = excluded.phrase, last_at = excluded.last_at
+       returning hits`,
+      [tenantId, userId, phraseKey, phrase.slice(0, 200), agentId, at]);
+    return Number(r?.hits ?? 1);
+  }
+
+  async clearReroute(tenantId: string, userId: string, phraseKey: string, agentId: string): Promise<void> {
+    await this.q(tenantId, `delete from secretary_reroutes where tenant_id = $1 and user_id = $2 and phrase_key = $3 and agent_id = $4`, [tenantId, userId, phraseKey, agentId]);
   }
 
   async listArchivedMemories(tenantId: string, userId: string): Promise<Memory[]> {
@@ -1675,9 +1713,9 @@ export class PostgresRepository implements Repository {
 
   async createMemory(m: Memory): Promise<void> {
     await this.q(m.tenantId,
-      `insert into memories (id, tenant_id, user_id, text, source, kind, created_at, last_used_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$7)`,
-      [m.id, m.tenantId, m.userId, m.text, m.source, m.kind ?? 'fact', m.createdAt]);
+      `insert into memories (id, tenant_id, user_id, text, source, kind, agent_id, created_at, last_used_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$8)`,
+      [m.id, m.tenantId, m.userId, m.text, m.source, m.kind ?? 'fact', m.agentId ?? null, m.createdAt]);
   }
 
   async deleteMemory(tenantId: string, userId: string, id: string): Promise<boolean> {
