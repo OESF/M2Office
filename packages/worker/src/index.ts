@@ -748,7 +748,7 @@ const cases = new CaseNoteBuilder({
   agentName: async (tenantId, agentId) => (await hub.forTenant(tenantId)).allAgents.find((a) => a.id === agentId)?.name ?? agentId,
 });
 const profiles = new ProfileBuilder({
-  repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log, mail: { store: mailStore },
   agentName: async (tenantId, agentId) => (await hub.forTenant(tenantId)).allAgents.find((a) => a.id === agentId)?.name ?? agentId,
 });
 

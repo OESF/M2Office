@@ -32,6 +32,7 @@ import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } 
 import { CORRECTION_LIMITS, countCorrection, countRequest, phraseKey, rememberRoute, routeHints } from '../memory/corrections.js';
 import { findThread, mailCategoryText, mailCommand, mailDraftsText, mailLessonsText, mailOverviewText, mailWaitingText, type MailCommand } from '../mail/secretary.js';
 import type { MailService } from '../mail/service.js';
+import { mailPeopleFor } from '../memory/feature-learning.js';
 import { answerAttendance, attendanceRequest, payslipRequest } from './attendance.js';
 import type { AttendanceService } from '../hr/attendance-service.js';
 import type { PayrollService } from '../hr/payroll-service.js';
@@ -651,7 +652,11 @@ export class Secretary {
       recall(this.deps.repo, tenantId, userId, message, available, new Date(), {
         ...(memorySemanticEnabled() && queryEmbed ? { embed: queryEmbed } : {}),
         // 案件に結んだメールのいまの数（第11.13.8節）。メールの画面を使っている人だけ
-        ...(this.deps.mail ? { caseMail: (ids: string[]) => this.deps.mail!.caseMail({ tenantId, userId }, ids) } : {}),
+        ...(this.deps.mail ? {
+          caseMail: (ids: string[]) => this.deps.mail!.caseMail({ tenantId, userId }, ids),
+          // メールで覚えている相手（第11.13.9節）
+          mailPeople: (text: string) => mailPeopleFor(this.deps.mail!.store, { tenantId, userId }, text, new Date()),
+        } : {}),
       }),
       // **必ず組織知識を検索する**（第10.9.4.1節）。これが無いと、会社の規程を見ずに
       // 法律や世間の相場を会社の決まりのように答えてしまう。区画の絞り込みは効く（不変則 I-12）

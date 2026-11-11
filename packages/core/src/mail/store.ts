@@ -85,6 +85,8 @@ export interface MailStore {
   thread(o: MailOwner, threadId: string): Promise<MailThreadRow | null>;
   /** 片付いていないもの（`state = open`）をすべて。 */
   openThreads(o: MailOwner): Promise<MailThreadRow[]>;
+  /** 宣伝・お知らせを除くスレッドのうち、`since` より後に動いたもの（片付いたものも。新しいものから 500 件まで）。本人の像の材料（第11.13.9節）。 */
+  threadsSince(o: MailOwner, since: string): Promise<MailThreadRow[]>;
   /** カテゴリーの付いたスレッドのうち、`since` より後に動いたもの（片付いたものも。新しいものから 300 件まで）。案件ノートの材料（第11.13.8節）。 */
   categorizedSince(o: MailOwner, since: string): Promise<MailThreadRow[]>;
   saveThread(o: MailOwner, t: MailThreadRow): Promise<void>;
@@ -93,6 +95,7 @@ export interface MailStore {
   /**
    * 本人の分をすべて消す（Google の連携の解除・データの削除の求め）。
    * 案件ノートの結びも外し、メールの材料だけから作った案件ノートも消す（第11.13.8節「消す」）。
+   * メールを材料にした本人の像も消す（次の見回りで、メールの材料なしに作り直す。第11.13.9節「消す」）。
    */
   purgeUser(o: MailOwner): Promise<void>;
   /** 本人のカテゴリーをすべて。 */
@@ -206,6 +209,13 @@ export class PostgresMailStore implements MailStore {
     return rows.map(threadOf);
   }
 
+  async threadsSince(o: MailOwner, since: string): Promise<MailThreadRow[]> {
+    const rows = await this.q<ThreadDb>(o.tenantId,
+      `select ${THREAD_COLS} from mail_threads where tenant_id = $1 and user_id = $2 and grp <> 'promo' and last_at > $3
+        order by last_at desc limit 500`, [o.tenantId, o.userId, since]);
+    return rows.map(threadOf);
+  }
+
   async categorizedSince(o: MailOwner, since: string): Promise<MailThreadRow[]> {
     const rows = await this.q<ThreadDb>(o.tenantId,
       `select ${THREAD_COLS} from mail_threads where tenant_id = $1 and user_id = $2 and category_id is not null and grp <> 'promo' and last_at > $3
@@ -241,6 +251,8 @@ export class PostgresMailStore implements MailStore {
     // メールの材料だけから作った案件ノートは消し、ほかの案件ノートは結びだけを外す（第11.13.8節「消す」）
     await this.q(o.tenantId, `delete from case_notes where tenant_id = $1 and user_id = $2 and mail_only`, [o.tenantId, o.userId]);
     await this.q(o.tenantId, `update case_notes set mail_category_id = null where tenant_id = $1 and user_id = $2 and mail_category_id is not null`, [o.tenantId, o.userId]);
+    // メールを材料にした本人の像は消す。次の見回りで、メールの材料なしに作り直す（第11.13.9節「消す」）
+    await this.q(o.tenantId, `delete from user_profiles where tenant_id = $1 and user_id = $2 and used_mail`, [o.tenantId, o.userId]);
     await this.clearLessons(o);
   }
 
@@ -336,6 +348,11 @@ export class MemoryMailStore implements MailStore {
     const prefix = this.key(o);
     return [...this.threads.entries()].filter(([k, t]) => k.startsWith(prefix) && t.state === 'open')
       .map(([, t]) => structuredClone(t)).sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+  }
+  async threadsSince(o: MailOwner, since: string) {
+    const prefix = this.key(o);
+    return [...this.threads.entries()].filter(([k, t]) => k.startsWith(prefix) && t.group !== 'promo' && t.lastAt > since)
+      .map(([, t]) => structuredClone(t)).sort((a, b) => b.lastAt.localeCompare(a.lastAt)).slice(0, 500);
   }
   async categorizedSince(o: MailOwner, since: string) {
     const prefix = this.key(o);

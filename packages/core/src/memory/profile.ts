@@ -2,6 +2,8 @@
  * @file 本人の像（仕様書 第11.13.1節、ADR-0095）。秘書が、本人の覚えていること・会話の要約・頼んだ業務の回数から、本人についての文をまとめ直す。
  *
  * 秘書は答えるたびにこの像をいつも使う。貯めた記憶の量が答えの良さに結び付くよう、記憶を 1 つの像に育てる。
+ * 機能ごとの学び（進んでいる案件・メールで覚えた相手・よくやり取りする相手・メールのカテゴリー・朝のブリーフの関心の分野）も材料にする
+ * （第11.13.9節、ADR-0136。写さずに読む。メールの件名と本文は渡さない）。
  * 本人だけのもの（不変則 I-10）。会社の知識にせず、業務にも渡さない。材料の文はデータであり、指示として扱わせない（不変則 I-6）。
  */
 
@@ -10,6 +12,7 @@ import type { LlmProvider } from '../llm/provider.js';
 import type { Memory, Repository } from '../repository/types.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { STOCK_FACT } from './learn.js';
+import { lastMailCorrection, profileMailMaterial, type MailLearningSource, type ProfileMailMaterial } from './feature-learning.js';
 
 /** 本人の像の長さの上限（字）。 */
 export const PROFILE_MAX_CHARS = 1500;
@@ -44,9 +47,18 @@ export const PROFILE_HEADINGS = ['役割と担当', 'よく関わる人と取引
  *
  * @param previous 前の本人の像（続けて育てる）。無ければ空
  */
-export function profilePrompt(input: { memories: Pick<Memory, 'text' | 'kind'>[]; digests: { day: string; summary: string }[]; work: { name: string; count: number }[]; previous: string }): string {
+export function profilePrompt(input: {
+  memories: Pick<Memory, 'text' | 'kind'>[]; digests: { day: string; summary: string }[]; work: { name: string; count: number }[]; previous: string;
+  /** 進んでいる案件（第11.13.5節） */
+  cases?: { title: string; state: string }[];
+  /** メールの学び・よくやり取りする相手・カテゴリー（第11.13.9節） */
+  mail?: ProfileMailMaterial | null;
+  /** 朝のブリーフの関心の分野の名前 */
+  topics?: string[];
+}): string {
+  const mail = input.mail;
   return [
-    'あなたは、ある従業員の専属の秘書です。下の材料（あなたがこの人について覚えていること・会話の要約・頼まれた業務の回数）から、',
+    'あなたは、ある従業員の専属の秘書です。下の材料（あなたがこの人について覚えていること・会話の要約・頼まれた業務の回数・進んでいる案件・メールでのやり取り・関心の分野）から、',
     `この人について、次からの会話で役に立つ「本人の像」を Markdown で書いてください。材料が多ければ全体で 800〜${PROFILE_MAX_CHARS} 字を目安にし、材料が少なければ短くてよい。`,
     `見出しは「## ${PROFILE_HEADINGS.join('」「## ')}」の順にし、それぞれ材料から分かることを箇条書きで 3〜8 行書きます（人や取引先の名前・案件の名前・期限など、具体的に）。材料に無い見出しだけ「- （まだ分かりません）」とします。`,
     '材料に無いことは書かない・推し量らない。新しい材料と古い材料が食い違えば新しいほうを採る。前の本人の像は参考にし、材料で確かめられないことは消す。',
@@ -58,7 +70,12 @@ export function profilePrompt(input: { memories: Pick<Memory, 'text' | 'kind'>[]
     ...input.memories.map((m) => `- ${m.kind === 'preference' ? '好み: ' : ''}${m.text.replace(/\s+/g, ' ')}`),
     '',
     ...(input.digests.length ? ['# 会話の要約（日付順）', ...input.digests.map((d) => `- ${d.day}: ${d.summary.replace(/\s+/g, ' ').slice(0, 400)}`), ''] : []),
-    ...(input.work.length ? ['# 頼まれた業務（回数の多い順）', ...input.work.map((w) => `- ${w.name}: ${w.count} 回`)] : []),
+    ...(input.work.length ? ['# 頼まれた業務（回数の多い順）', ...input.work.map((w) => `- ${w.name}: ${w.count} 回`), ''] : []),
+    ...(input.cases?.length ? ['# 進んでいる案件（あなたがまとめたもの）', ...input.cases.map((c) => `- ${c.title}: ${c.state.replace(/\s+/g, ' ').slice(0, 150)}`), ''] : []),
+    ...(mail?.people.length ? ['# メールで覚えた相手（メールの画面での本人の直しと、ふだんの扱いから）', ...mail.people.map((p) => `- ${p}`), ''] : []),
+    ...(mail?.frequent.length ? ['# メールでよくやり取りする相手（直近 30 日の通数の多い順）', ...mail.frequent.map((f) => `- ${f.name}: ${f.count} 通`), ''] : []),
+    ...(mail?.categories.length ? ['# メールの仕事のまとまり（カテゴリー）', `- ${mail.categories.join('、')}`, ''] : []),
+    ...(input.topics?.length ? ['# 朝のブリーフの関心の分野', `- ${input.topics.join('、')}`] : []),
   ].join('\n');
 }
 
@@ -76,6 +93,8 @@ export interface ProfileBuilderDeps {
   llmFor(tenantId: string): Promise<LlmProvider>;
   /** 業務の名前を引く（頼んだ業務の回数に名前を付ける） */
   agentName(tenantId: string, agentId: string): Promise<string>;
+  /** メールの一覧（あれば、メールの学び・よくやり取りする相手・カテゴリーを材料にする。第11.13.9節） */
+  mail?: { store: MailLearningSource };
   logger?: Logger;
 }
 
@@ -94,15 +113,17 @@ export class ProfileBuilder {
   }
 
   /**
-   * 作り直す時か（まだ無く記憶が 5 件以上・作り直す印がある・7 日を過ぎてその後に覚えたことがある）。
+   * 作り直す時か（まだ無く記憶が 5 件以上・作り直す印がある・7 日を過ぎてその後に覚えたことか、メールで直したことがある）。
+   *
+   * @param mailCorrectedAt 本人がメールで最後に直した時刻（第11.13.9節「作り直す時」）
    */
-  static due(profile: { stale: boolean; updatedAt: string } | null, memories: Pick<Memory, 'createdAt'>[], now: Date): boolean {
+  static due(profile: { stale: boolean; updatedAt: string } | null, memories: Pick<Memory, 'createdAt'>[], now: Date, mailCorrectedAt: string | null = null): boolean {
     if (!profile) return memories.length >= PROFILE_MIN_MEMORIES;
     if (profile.stale) return true;
     // 作り方を改める前に作った像は作り直す
     if (profile.updatedAt < PROFILE_FORMAT_SINCE) return true;
     if (now.getTime() - Date.parse(profile.updatedAt) < PROFILE_REFRESH_DAYS * 86_400_000) return false;
-    return memories.some((m) => m.createdAt > profile.updatedAt);
+    return memories.some((m) => m.createdAt > profile.updatedAt) || (mailCorrectedAt !== null && mailCorrectedAt > profile.updatedAt);
   }
 
   /** 1 回分の見回り。会社ごとの失敗はほかの会社を止めない。 */
@@ -135,8 +156,13 @@ export class ProfileBuilder {
     const settings = await repo.getUserSettings(tenantId, userId);
     // 覚えることを止めている人の像は作らない
     if (!settings.memory.learning) return false;
-    const [profile, memories] = await Promise.all([repo.getUserProfile(tenantId, userId), repo.listMemories(tenantId, userId)]);
-    if (!ProfileBuilder.due(profile, memories, now)) return false;
+    const o = { tenantId, userId };
+    const mailStore = this.deps.mail?.store;
+    const [profile, memories, mailCorrectedAt] = await Promise.all([
+      repo.getUserProfile(tenantId, userId), repo.listMemories(tenantId, userId),
+      mailStore ? lastMailCorrection(mailStore, o).catch(() => null) : Promise.resolve(null),
+    ]);
+    if (!ProfileBuilder.due(profile, memories, now, mailCorrectedAt)) return false;
     const usable = memories.filter((m) => !STOCK_FACT.test(m.text)).slice(0, MEMORY_LIMIT);
     const since = new Date(now.getTime() - DIGEST_DAYS * 86_400_000).toISOString().slice(0, 10);
     const digests = (await repo.listConversationDigests(tenantId, userId, DIGEST_DAYS).catch(() => []))
@@ -144,12 +170,16 @@ export class ProfileBuilder {
       .filter((d) => d.compartment === null && d.day >= since)
       .sort((a, b) => a.day.localeCompare(b.day));
     const work = await this.workCounts(tenantId, userId, now);
+    // 機能ごとの学び（第11.13.9節）。読めなくても本人の像は作る
+    const cases = await Promise.resolve().then(() => repo.listCaseNotes(tenantId, userId, { limit: 15 })).then((x) => x ?? []).catch(() => []);
+    const mail = mailStore ? await profileMailMaterial(mailStore, o, now).catch(() => null) : null;
+    const topics = (settings.brief?.topics ?? []).map((t) => t.label).filter(Boolean);
     // 記憶をまとめ直す大事な処理なので高性能のモデルを使う（標準のモデルでは数行しか書かなかった）。考える分も含めて余裕を持たせる
     const res = await llm.complete({
       tier: 'advanced', maxOutputTokens: 6000,
       messages: [
         { role: 'system', content: '日本語で答えます。指定された形式だけを出力します。' },
-        { role: 'user', content: profilePrompt({ memories: usable, digests, work, previous: profile?.body ?? '' }) },
+        { role: 'user', content: profilePrompt({ memories: usable, digests, work, previous: profile?.body ?? '', cases, mail, topics }) },
       ],
     });
     const body = parseProfile(res.text);
@@ -158,7 +188,7 @@ export class ProfileBuilder {
       return false;
     }
     const at = now.toISOString();
-    await repo.saveUserProfile({ tenantId, userId, body, memoryCount: usable.length, stale: false, updatedAt: at });
+    await repo.saveUserProfile({ tenantId, userId, body, memoryCount: usable.length, stale: false, updatedAt: at, usedMail: mail !== null });
     // 文字数だけを残す。中身は監査ログに入れない（第11.13.1節）
     await repo.appendAudit({
       id: randomUUID(), tenantId, actorType: 'system', actorId: 'secretary', action: 'memory.profile',

@@ -1880,7 +1880,7 @@ export class PostgresRepository implements Repository {
 
   async getUserProfile(tenantId: string, userId: string): Promise<UserProfile | null> {
     const rows = await this.q<UserProfile>(tenantId,
-      `select tenant_id as "tenantId", user_id as "userId", body, memory_count as "memoryCount", stale, updated_at as "updatedAt"
+      `select tenant_id as "tenantId", user_id as "userId", body, memory_count as "memoryCount", stale, used_mail as "usedMail", updated_at as "updatedAt"
          from user_profiles where tenant_id = $1 and user_id = $2`, [tenantId, userId]);
     const r = rows[0];
     return r ? { ...r, updatedAt: new Date(r.updatedAt).toISOString() } : null;
@@ -1888,9 +1888,10 @@ export class PostgresRepository implements Repository {
 
   async saveUserProfile(p: UserProfile): Promise<void> {
     await this.q(p.tenantId,
-      `insert into user_profiles (tenant_id, user_id, body, memory_count, stale, updated_at) values ($1,$2,$3,$4,false,$5)
-       on conflict (tenant_id, user_id) do update set body = excluded.body, memory_count = excluded.memory_count, stale = false, updated_at = excluded.updated_at`,
-      [p.tenantId, p.userId, p.body, p.memoryCount, p.updatedAt]);
+      `insert into user_profiles (tenant_id, user_id, body, memory_count, stale, updated_at, used_mail) values ($1,$2,$3,$4,false,$5,$6)
+       on conflict (tenant_id, user_id) do update set body = excluded.body, memory_count = excluded.memory_count, stale = false, updated_at = excluded.updated_at,
+         used_mail = excluded.used_mail`,
+      [p.tenantId, p.userId, p.body, p.memoryCount, p.updatedAt, p.usedMail ?? false]);
   }
 
   async markUserProfileStale(tenantId: string, userId: string): Promise<void> {

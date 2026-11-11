@@ -96,11 +96,12 @@ export function caseMailLine(m: { name: string; reply: number; action: number; w
  * @param agents 業務の名前を引くための定義
  * @param opts.embed 依頼の文を埋め込む口。あれば、意味の近い記憶と要約を選ぶ（第11.13.4節）。無ければ言葉の重なりと新しさで選ぶ
  * @param opts.caseMail 案件に結んだメールの数を引く口。あれば、案件の 1 行にいまのメールの動きを添える（第11.13.8節）
+ * @param opts.mailPeople 依頼の文に出てくる相手と、本人が「大事」と直した相手について、メールで覚えていることを引く口（第11.13.9節）
  * @returns 推論に渡す文（何も無ければ空）と、答えに添える根拠
  */
 export async function recall(
   repo: Repository, tenantId: string, userId: string, message: string, agents: AgentDefinition[], now: Date = new Date(),
-  opts: { embed?: QueryEmbed; caseMail?: CaseMailCounts } = {},
+  opts: { embed?: QueryEmbed; caseMail?: CaseMailCounts; mailPeople?: (message: string) => Promise<string[]> } = {},
 ): Promise<Recall> {
   // 1 つが読めなくても答えは返す（記憶が欠けても、秘書が使えなくなるよりよい）
   const safe = <T>(read: () => Promise<T[]>): Promise<T[]> => Promise.resolve().then(read).catch(() => []);
@@ -192,6 +193,10 @@ export async function recall(
       + (m ? `\n  ${caseMailLine(m)}` : '');
   });
   if (caseLines.length) blocks.push('## 進んでいる案件（あなたがまとめたもの。新しい順）', ...caseLines, '');
+  // メールで覚えている相手（第11.13.9節）。覚えることを止めた人には使わない
+  const peopleLines = opts.mailPeople && settings?.memory.learning !== false
+    ? (await opts.mailPeople(message).catch(() => [])).map((x) => `- ${cut(x, 200)}`) : [];
+  if (peopleLines.length) blocks.push('## メールで覚えている相手（メールの画面での本人の直しと、ふだんの扱いから）', ...peopleLines, '');
   if (preferenceLines.length) blocks.push('## 仕事のやり方の好み（いつも守る。会社の決まりと食い違えば会社の決まりを採る）', ...preferenceLines, '');
   if (memoryLines.length) blocks.push('## 覚えている事実', ...memoryLines, '');
   if (todayLines.length) blocks.push('## 今日のやり取り（古い順）', ...todayLines, '');
@@ -211,6 +216,7 @@ export async function recall(
     profileText ? '本人の像' : '',
     preferenceLines.length ? `仕事のやり方の好み ${preferenceLines.length} 件` : '',
     caseLines.length ? `進んでいる案件 ${caseLines.length} 件` : '',
+    peopleLines.length ? `メールで覚えている相手 ${peopleLines.length} 件` : '',
     memoryLines.length ? `覚えている事実 ${memoryLines.length} 件` : '',
     todayLines.length ? `今日のやり取り ${todayLines.length} 件` : '',
     digestLines.length ? `会話の要約 ${digestLines.length} 日分` : '',

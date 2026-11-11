@@ -40,3 +40,16 @@ test('公式の業務の絵は重ならない', () => {
   const faces = OFFICIAL_AGENTS.map((a) => a.face);
   assert.equal(new Set(faces).size, faces.length);
 });
+
+test('会議の準備: ほかの参加者とのやり取りだけでメールを探し、関係の無いお知らせを並べず、見出しは番号を付けない（第9.5.5.2節。第 0.555.1 版）', () => {
+  const def = OFFICIAL_AGENTS.find((a) => a.id === 'meeting-prep')!;
+  const gather = def.steps.find((s) => s.id === 'gather')!.instruction!;
+  const write = def.steps.find((s) => s.id === 'write')!.instruction!;
+  assert.match(gather, /本人以外の参加者のアドレス/);
+  assert.match(gather, /本人（依頼した人）のアドレスと名前では探さない/);
+  assert.match(gather, /人の名前だけの題名では探さない/);
+  assert.match(write, /関係するメールは見つかりませんでした/);
+  assert.match(write, /銀行・カード・買い物・SNS/);
+  assert.ok(!/^\d\. /m.test(write), '見出しを番号の並びにしない');
+  assert.match(write, /## 会議/);
+});

@@ -48,6 +48,7 @@ export * from './memory/work.js';
 export * from './memory/profile.js';
 export * from './memory/embed.js';
 export * from './memory/cases.js';
+export * from './memory/feature-learning.js';
 export * from './memory/corrections.js';
 export * from './dashboard/presence.js';
 export * from './notify/sender.js';

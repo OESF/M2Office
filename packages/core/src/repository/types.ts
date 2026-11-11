@@ -1063,6 +1063,8 @@ export interface UserProfile {
   memoryCount: number;
   /** 作り直す印（本人が記憶を直した・消した） */
   stale: boolean;
+  /** メールの学び・相手・カテゴリーを材料にした（メールの一覧を消すときに一緒に消す。第11.13.9節） */
+  usedMail?: boolean;
   updatedAt: string;
 }
 
