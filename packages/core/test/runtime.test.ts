@@ -41,17 +41,19 @@ test('サポートの終わりの 6 か月前から知らせ、終わったら e
   assert.equal(nodeSupport('v24.22.1', '2026-10-22').warn, false);
 });
 
-test('セキュリティの修正の下限: 版は数として比べ、下限より古ければ知らせる（2026-10-21 の発表）', () => {
+test('セキュリティの修正の下限: 版は数として比べ、下限より古ければ知らせる（2026-11-11 の発表）', () => {
   assert.ok(compareNodeVersions('v24.9.0', 'v24.22.1')! < 0, '文字の並びでは v24.9.0 のほうが後になるが、数としては古い');
   assert.equal(compareNodeVersions('v24.22.1', '24.22.1'), 0);
   assert.ok(compareNodeVersions('v24.22.10', 'v24.22.9')! > 0);
   assert.equal(compareNodeVersions('v24.22.1-rc.1', 'v24.22.1'), null, '読めない版は比べない');
-  assert.deepEqual(NODE_RELEASE_LINES.map((x) => [x.major, x.secure]), [[20, null], [22, 'v22.23.4'], [24, 'v24.22.1'], [25, null], [26, 'v26.12.1'], [27, null]], 'M2Medical と同じ値');
+  assert.deepEqual(NODE_RELEASE_LINES.map((x) => [x.major, x.secure]), [[20, null], [22, 'v22.23.5'], [24, 'v24.22.3'], [25, null], [26, 'v26.13.1'], [27, null]], 'M2Medical と同じ値（2026-11-11 の発表）');
   const old = nodeSupport('v24.9.0', '2026-10-23');
-  assert.deepEqual([old.secure, old.insecure], ['v24.22.1', true]);
-  assert.equal(nodeSupport('v24.22.1', '2026-10-23').insecure, false, '下限と同じ版は直してある');
+  assert.deepEqual([old.secure, old.insecure], ['v24.22.3', true]);
+  assert.equal(nodeSupport('v24.22.3', '2026-11-12').insecure, false, '下限と同じ版は直してある');
+  assert.equal(nodeSupport('v24.22.1', '2026-11-12').insecure, true, '2026-10-21 の修正だけでは足りない');
   assert.equal(nodeSupport('v22.23.3', '2026-10-23').insecure, true);
-  assert.equal(nodeSupport('v26.13.0', '2026-10-23').insecure, false);
+  assert.equal(nodeSupport('v26.13.1', '2026-11-12').insecure, false);
+  assert.equal(nodeSupport('v26.13.0', '2026-11-12').insecure, true);
   assert.equal(nodeSupport('v20.19.0', '2026-10-23').insecure, false, 'サポートの終わった系は下限を持たない（サポートの終わりで知らせる）');
   assert.equal(nodeSupport('壊れた値', '2026-10-23').insecure, false);
 });
@@ -81,14 +83,14 @@ const beat = (role: 'api' | 'worker', node: string, at: string, version = '0.19.
 
 test('API とワーカーの知らせから組み立てる: 止まった知らせ・違う版・更新の知らせ・取れなかった値', () => {
   const now = new Date('2026-11-01T03:00:00Z');
-  const env = runtimeEnvironment([beat('api', 'v24.22.1', '2026-11-01T02:58:00Z'), beat('worker', 'v22.23.4', '2026-11-01T02:40:00Z', '0.18.0')], '17.6', {
+  const env = runtimeEnvironment([beat('api', 'v24.22.3', '2026-11-01T02:58:00Z'), beat('worker', 'v22.23.5', '2026-11-01T02:40:00Z', '0.18.0')], '17.6', {
     deployment: 'onsite', debug: false, inference: 'ローカル AI（gemma）', now,
   });
   assert.equal(env.api?.node.stage, 'maintenance');
   assert.equal(env.api?.stale, false);
   assert.equal(env.worker?.stale, true, '12 分より古い知らせは止まっているかもしれない');
   assert.equal(env.worker?.version, '0.18.0');
-  assert.deepEqual(env.nodeWarn, { expired: false, end: '2027-04-30', version: 'v22.23.4' }, 'ワーカーの 22 系は 6 か月を切った');
+  assert.deepEqual(env.nodeWarn, { expired: false, end: '2027-04-30', version: 'v22.23.5' }, 'ワーカーの 22 系は 6 か月を切った');
   assert.equal(env.nodeSecurity, null, 'どちらも下限以上');
   assert.equal(env.machine?.cores, 8);
   assert.equal(env.postgres, '17.6');
@@ -98,13 +100,13 @@ test('API とワーカーの知らせから組み立てる: 止まった知ら�
 
 test('下限より古い部分を、API・ワーカーごとに知らせる。起動は止めない', () => {
   const now = new Date('2026-10-23T03:00:00Z');
-  const env = runtimeEnvironment([beat('api', 'v24.9.0', '2026-10-23T02:58:00Z'), beat('worker', 'v24.22.1', '2026-10-23T02:58:00Z')], null, {
+  const env = runtimeEnvironment([beat('api', 'v24.9.0', '2026-10-23T02:58:00Z'), beat('worker', 'v24.22.3', '2026-10-23T02:58:00Z')], null, {
     deployment: 'cloud', debug: false, inference: null, now,
   });
-  assert.deepEqual(env.nodeSecurity, [{ role: 'api', version: 'v24.9.0', secure: 'v24.22.1' }]);
+  assert.deepEqual(env.nodeSecurity, [{ role: 'api', version: 'v24.9.0', secure: 'v24.22.3' }]);
   assert.equal(env.api?.node.insecure, true);
   const both = runtimeEnvironment([beat('api', 'v24.9.0', '2026-10-23T02:58:00Z'), beat('worker', 'v22.1.0', '2026-10-23T02:58:00Z')], null, { deployment: 'onsite', debug: false, inference: null, now });
-  assert.deepEqual(both.nodeSecurity?.map((x) => `${x.role}:${x.secure}`), ['api:v24.22.1', 'worker:v22.23.4']);
+  assert.deepEqual(both.nodeSecurity?.map((x) => `${x.role}:${x.secure}`), ['api:v24.22.3', 'worker:v22.23.5']);
 });
 
 test('推論の説明に、秘密の値や口の URL を入れない', () => {

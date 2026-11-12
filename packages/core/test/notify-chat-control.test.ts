@@ -109,6 +109,10 @@ test('時刻の読み方: 夜・朝・午後・半・コロン', () => {
 
 test('秘書への頼みの読み取り: 時間帯・いつでも・休みの日・種類', () => {
   assert.deepEqual(notifyPreferenceRequest('夜 10 時から朝 8 時は送らないで'), { kind: 'quiet', from: '22:00', to: '08:00' });
+  assert.deepEqual(notifyPreferenceRequest('夜 10 時から朝 8 時は送らないで！！。'), { kind: 'quiet', from: '22:00', to: '08:00' }, '終わりの感嘆符と句点は外す');
+  const t0 = Date.now();
+  assert.equal(notifyPreferenceRequest('!'.repeat(50_000) + 'a'), null, '長い文は読まない');
+  assert.ok(Date.now() - t0 < 200, '同じ字が並ぶ文でも時間がかからない');
   assert.deepEqual(notifyPreferenceRequest('9時〜17時は Chat に通知しないで'), { kind: 'quiet', from: '09:00', to: '17:00' });
   assert.deepEqual(notifyPreferenceRequest('夜も送っていい'), { kind: 'quietOff' });
   assert.deepEqual(notifyPreferenceRequest('時間を気にせず Chat に送って'), { kind: 'quietOff' });

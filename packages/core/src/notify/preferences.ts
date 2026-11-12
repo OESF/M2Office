@@ -78,7 +78,12 @@ const TIME = '(?:夜|朝|午前|午後|昼|夕方|深夜)?\\d{1,2}(?::\\d{2}|時
  * @returns 読み取れた変更。通知の届け方の頼みでなければ `null`
  */
 export function notifyPreferenceRequest(message: string): NotifyPreferenceRequest | null {
-  const m = message.normalize('NFKC').replace(/\s+/g, '').replace(/[。．.!！]+$/, '');
+  const squeezed = message.normalize('NFKC').replace(/\s+/g, '');
+  if (squeezed.length > 200) return null;
+  // 終わりの句点と感嘆符を外す。正規表現（`[…]+$`）だと、途中に同じ字が並ぶ文で時間がかかるため、後ろから数える
+  let end = squeezed.length;
+  while (end > 0 && '。．.!！'.includes(squeezed[end - 1]!)) end--;
+  const m = squeezed.slice(0, end);
   if (m.length > 80) return null;
   // 時間帯: 「夜 10 時から朝 8 時は（Chat に）送らないで」「9 時〜17 時は通知しないで」
   const range = new RegExp(`^(?:${CHAT}(?:に|は|には))?(${TIME})(?:から|〜|~|-|ー)(${TIME})(?:まで)?(?:の間)?(?:は|には)?(?:${CHAT}(?:に|には|は))?(?:通知を)?${STOP}`).exec(m);
