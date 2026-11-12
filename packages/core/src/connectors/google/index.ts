@@ -461,7 +461,7 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
 
   // ─── Chat（仕様書 第14.3.4節「Chat」） ──────────────────────────────
 
-  private chatApi(p: ConnectorPrincipal, path: string, init?: { method?: string; body?: unknown }) {
+  private chatApi(p: ConnectorPrincipal, path: string, init?: { method?: string; body?: unknown; explain?: boolean }) {
     return callGoogle(this.tokens, p, 'Chat', `${this.endpoints.chat}${path}`, init);
   }
 
@@ -496,7 +496,7 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
   chat = {
     /** 本人と会社の Chat アプリの個別メッセージの場所を、本人の許可で用意する（仕様書 第6.5.5.2.1節。`spaces.setup`）。 */
     setupAppDm: async (p: ConnectorPrincipal) => {
-      const res = await this.chatApi(p, '/spaces:setup', { method: 'POST', body: { space: { spaceType: 'DIRECT_MESSAGE', singleUserBotDm: true } } });
+      const res = await this.chatApi(p, '/spaces:setup', { method: 'POST', body: { space: { spaceType: 'DIRECT_MESSAGE', singleUserBotDm: true } }, explain: true });
       const name = String(res?.['name'] ?? '');
       if (!/^spaces\/[A-Za-z0-9_-]+$/.test(name)) throw new ConnectorUnavailableError('unreachable', 'Chat の個別メッセージの場所を用意できませんでした');
       return name;

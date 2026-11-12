@@ -2,7 +2,8 @@
  * @file Chat への通知の控えの本物の送信口（仕様書 第6.5.5.2.1節、ADR-0102）の単体テスト。手元の偽の Google に向けて呼ぶ。
  *
  * サービスアカウントの鍵の読み方、アプリとしての認証（JWT の署名を偽の Google が確かめる）、覚えた個別メッセージの場所への送信、
- * 場所が無くなったときの探し直し、場所の用意（既存を探す → 本人の許可で作る → 許可が足りない）、本文を載せないことを確かめる。
+ * 場所が無くなったときの探し直し、場所の用意（既存を探す → 本人の許可で作る → 許可が足りない）、本文を載せないこと、
+ * Pub/Sub から取りに行くとき、届いたものが無くて待ちを打ち切ったのを失敗と扱わないことを確かめる。
  */
 
 import { test } from 'node:test';
@@ -21,7 +22,7 @@ const KEY_JSON = JSON.stringify({
   private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), token_uri: 'https://oauth2.googleapis.com/token',
 });
 
-async function fakeGoogle(opts: { dm?: string | null; dead?: string[] } = {}) {
+async function fakeGoogle(opts: { dm?: string | null; dead?: string[]; aliasRefused?: boolean; queued?: unknown[] } = {}) {
   const posts: { space: string; text: string }[] = [];
   let tokens = 0;
   const server = createServer(async (req, res) => {
@@ -34,12 +35,20 @@ async function fakeGoogle(opts: { dm?: string | null; dead?: string[] } = {}) {
       const [h, p, sig] = assertion.split('.');
       const ok = createVerify('RSA-SHA256').update(`${h}.${p}`).verify(publicKey, Buffer.from(sig!, 'base64url'));
       const claims = JSON.parse(Buffer.from(p!, 'base64url').toString()) as { scope: string; iss: string };
-      if (!ok || claims.scope !== 'https://www.googleapis.com/auth/chat.bot') return json(400, { error: 'invalid_grant' });
+      if (!ok || !['https://www.googleapis.com/auth/chat.bot', 'https://www.googleapis.com/auth/pubsub'].includes(claims.scope)) return json(400, { error: 'invalid_grant' });
       tokens++;
       return json(200, { access_token: 'app-token', expires_in: 3600 });
     }
     if ((req.headers['authorization'] ?? '') !== 'Bearer app-token') return json(401, {});
+    if (url.pathname === '/pubsub/projects/m2o-example/subscriptions/chat-sub:pull') {
+      // 届いたものが無ければ、本物と同じく答えずに待つ
+      const queued = opts.queued ?? [];
+      if (!queued.length) { await new Promise((r) => setTimeout(r, 500)); return json(200, {}); }
+      return json(200, { receivedMessages: queued.splice(0).map((e, i) => ({ ackId: `a${i}`, message: { data: Buffer.from(JSON.stringify(e)).toString('base64') } })) });
+    }
     if (url.pathname === '/chat/spaces:findDirectMessage') {
+      // 本物の Google は、アプリの権限でメールアドレスを使うと 403 で断る（2026-11-12 に確認）
+      if (opts.aliasRefused) return json(403, { error: { code: 403, status: 'PERMISSION_DENIED', message: "Service account authentication doesn't support access to user information using email aliases. To get user information using email aliases, authenticate as a user." } });
       return opts.dm ? json(200, { name: opts.dm }) : json(404, { error: { code: 404 } });
     }
     const m = /^\/chat\/(spaces\/[A-Za-z0-9_-]+)\/messages$/.exec(url.pathname);
@@ -52,7 +61,7 @@ async function fakeGoogle(opts: { dm?: string | null; dead?: string[] } = {}) {
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return { endpoints: { chat: `${base}/chat`, token: `${base}/token` }, posts, tokens: () => tokens, close: () => new Promise<void>((r) => server.close(() => r())) };
+  return { endpoints: { chat: `${base}/chat`, token: `${base}/token`, pubsub: `${base}/pubsub` }, posts, tokens: () => tokens, close: () => new Promise<void>((r) => server.close(() => r())) };
 }
 
 function repoWith(box: SecretBox, opts: { key?: boolean; space?: string | null } = {}) {
@@ -75,6 +84,24 @@ test('サービスアカウントの鍵を読み分け、違う形は理由つ�
   assert.match((parseServiceAccountKey('{') as { error: string }).error, /読めません/);
   assert.match((parseServiceAccountKey(JSON.stringify({ type: 'authorized_user' })) as { error: string }).error, /サービスアカウントの鍵ではありません/);
   assert.match((parseServiceAccountKey(JSON.stringify({ ...JSON.parse(KEY_JSON), token_uri: 'https://evil.example/token' })) as { error: string }).error, /token_uri/);
+});
+
+test('Pub/Sub: 届いたものが無くて待ちを打ち切ったのは、失敗でなく「無し」。届いたものは出来事に直す', async () => {
+  const g = await fakeGoogle({ queued: [] });
+  try {
+    const k = parseServiceAccountKey(KEY_JSON);
+    assert.ok(!('error' in k));
+    const c = new ChatAppClient(k, g.endpoints);
+    const sub = 'projects/m2o-example/subscriptions/chat-sub';
+    assert.deepEqual(await c.pull(sub, 10, 100), []);
+  } finally { await g.close(); }
+  const g2 = await fakeGoogle({ queued: [{ type: 'MESSAGE', message: { text: '今日の予定は？' } }] });
+  try {
+    const k = parseServiceAccountKey(KEY_JSON);
+    assert.ok(!('error' in k));
+    const got = await new ChatAppClient(k, g2.endpoints).pull('projects/m2o-example/subscriptions/chat-sub', 10, 2000);
+    assert.deepEqual(got, [{ ackId: 'a0', event: { type: 'MESSAGE', message: { text: '今日の予定は？' } } }]);
+  } finally { await g2.close(); }
 });
 
 test('アプリとして認証し（JWT の署名）、トークンを使い回す', async () => {
@@ -145,6 +172,14 @@ test('場所の用意: 既存を探し、無ければ本人の許可で作り、
     assert.deepEqual(r, { space: 'spaces/HAS' });
     assert.equal(called, false, 'アプリを追加済みなら、本人の許可を求めない');
   } finally { await found.close(); }
+  // アプリの権限でメールアドレスを使えないと断られたら、本人の許可で用意する（すでにある場所なら Google がそれを返す）
+  const alias = await fakeGoogle({ aliasRefused: true });
+  try {
+    const { repo, spaces } = repoWith(box);
+    const r = await ensureChatDm({ repo, box, connector: connector(async () => 'spaces/SETUP'), endpoints: alias.endpoints }, ENV);
+    assert.deepEqual(r, { space: 'spaces/SETUP' });
+    assert.equal(spaces.get('t1/u1'), 'spaces/SETUP');
+  } finally { await alias.close(); }
 });
 
 test('見本の接続口の会社は見本の送信口に、ほかは本物に振り分ける', async () => {

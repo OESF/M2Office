@@ -39,6 +39,8 @@ export const CHAT_BOT_SCOPE = 'https://www.googleapis.com/auth/chat.bot';
 export const CHAT_DM_SETUP_SCOPE = 'chat.spaces.create';
 /** 1 回の呼び出しの待ち時間の上限（ミリ秒）。 */
 const TIMEOUT_MS = 20_000;
+/** Pub/Sub から取りに行くときに待つ長さ。届いたものが無ければ、ここで打ち切って次の見回りでまた待つ。 */
+const PULL_WAIT_MS = 15_000;
 
 /**
  * サービスアカウントの鍵（JSON）を読む。
@@ -131,13 +133,15 @@ export class ChatAppClient {
   /**
    * 本人とアプリの個別メッセージの場所を探す（本人がアプリを追加していれば見つかる）。
    *
-   * @returns 場所。無ければ `null`
+   * @returns 場所。無ければ `null`。アプリの権限ではメールアドレスで人を指せない Google の決まりで断られたときも `null`
+   *   （呼び出し側は本人の許可で用意する道へ進む。2026-11-12 に本物で確認）
    */
   async findDirectMessage(email: string): Promise<string | null> {
     const r = await this.call(`/spaces:findDirectMessage?name=${encodeURIComponent(`users/${email}`)}`);
     if (r.status === 404) return null;
-    if (r.status === 403) throw new ConnectorUnavailableError('client-error', 'Google Chat がアプリの呼び出しを断りました（Chat アプリの設定と、鍵のプロジェクトが同じか確かめてください）');
-    if (r.status >= 400) throw new ConnectorUnavailableError('unreachable', `Google Chat が答えませんでした（${r.status}）`);
+    if (r.status === 403 && EMAIL_ALIAS_REFUSED.test(googleReason(r.json))) return null;
+    if (r.status === 403) throw new ConnectorUnavailableError('client-error', `Google Chat がアプリの呼び出しを断りました（Chat アプリの設定と、鍵のプロジェクトが同じか確かめてください）${googleReason(r.json)}`);
+    if (r.status >= 400) throw new ConnectorUnavailableError('unreachable', `Google Chat が答えませんでした（${r.status}）${googleReason(r.json)}`);
     const name = String(r.json['name'] ?? '');
     return /^spaces\/[A-Za-z0-9_-]+$/.test(name) ? name : null;
   }
@@ -181,14 +185,18 @@ export class ChatAppClient {
    * @param subscription 購読（`projects/…/subscriptions/…`）
    * @returns 届いていた出来事と、受け取りの印（読み終えたら {@link ack} する）
    */
-  async pull(subscription: string, max = 10): Promise<{ ackId: string; event: unknown }[]> {
+  async pull(subscription: string, max = 10, waitMs = PULL_WAIT_MS): Promise<{ ackId: string; event: unknown }[]> {
     if (!PUBSUB_SUBSCRIPTION.test(subscription)) throw new ConnectorUnavailableError('client-error', 'Pub/Sub の購読の名前が違います（projects/…/subscriptions/…）');
     const base = this.endpoints.pubsub ?? CHAT_APP_ENDPOINTS.pubsub!;
+    const token = await this.token(PUBSUB_SCOPE);
+    // 届いたものが無いと、Google は答えずに待つ（長い待ち）。待ちを打ち切ったのは「届いたもの無し」で、届かなかったのではない
+    // （2026-11-12 に本物で確認。打ち切りを失敗と扱い、何も無いたびに警告を出していた）
     const res = await fetch(`${base}/${subscription}:pull`, {
-      method: 'POST', signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { authorization: `Bearer ${await this.token(PUBSUB_SCOPE)}`, 'content-type': 'application/json' },
+      method: 'POST', signal: AbortSignal.timeout(waitMs),
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ maxMessages: max }),
-    }).catch(() => null);
+    }).catch((err: unknown) => (err instanceof Error && err.name === 'TimeoutError' ? 'idle' as const : null));
+    if (res === 'idle') return [];
     if (!res) throw new ConnectorUnavailableError('unreachable', 'Cloud Pub/Sub に届きませんでした');
     if (res.status === 403 || res.status === 404) throw new ConnectorUnavailableError('client-error', `Pub/Sub の購読を読めません（${res.status}。購読の名前と、サービスアカウントの「Pub/Sub サブスクライバー」の役割を確かめてください）`);
     if (!res.ok) throw new ConnectorUnavailableError('unreachable', `Cloud Pub/Sub が答えませんでした（${res.status}）`);
@@ -258,6 +266,23 @@ export class ChatAppClients {
     this.clients.set(tenantId, { secretEnc: cred.secretEnc, client });
     return client;
   }
+}
+
+/** アプリの権限でメールアドレスを使って人を指したときの、Google の断りの文（本人の許可なら使える）。 */
+const EMAIL_ALIAS_REFUSED = /email aliases/i;
+
+/**
+ * Google の答えの本文から、断った理由を短く取り出す（原因を確かめられるよう、エラーの文に添える）。
+ *
+ * @returns 「。Google の答え: …」の形の文。理由が無ければ空
+ */
+export function googleReason(json: Record<string, unknown>): string {
+  const err = json['error'];
+  if (!err || typeof err !== 'object') return '';
+  const e = err as Record<string, unknown>;
+  const parts = [typeof e['status'] === 'string' ? e['status'] : '', typeof e['message'] === 'string' ? e['message'] : '']
+    .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  return parts ? `。Google の答え: ${parts.slice(0, 300)}` : '';
 }
 
 /**

@@ -41,12 +41,14 @@ const USER = /^users\/[A-Za-z0-9_-]+$/;
  * Chat の出来事から、秘書に向けた発言を取り出す（第10.16.2節）。
  *
  * @returns 人が送った発言（個別メッセージか、アプリへの言及）。ほかの出来事（アプリの追加・外し・ボタン）や読めないものは `null`
- * @remarks Google が届けるのは、個別メッセージの発言とアプリへの言及だけ。言及の部分は `argumentText` で除かれている
+ * @remarks Google が届けるのは、個別メッセージの発言とアプリへの言及だけ。言及の部分は `argumentText` で除かれている。
+ *   出来事の形は 2 つある。Chat アプリとして作った形（`type: 'MESSAGE'`）と、Google Workspace アドオンとして作った形
+ *   （`chat.messagePayload`）。どちらでも読む（2026-11-12 に、構成の作り方で形が変わることに気づいた）
  */
 export function parseChatEvent(payload: unknown): ChatInboundMessage | null {
   if (!payload || typeof payload !== 'object') return null;
-  const e = payload as Record<string, unknown>;
-  if (e['type'] !== 'MESSAGE') return null;
+  const e = fromAddOnEvent(payload as Record<string, unknown>);
+  if (!e || e['type'] !== 'MESSAGE') return null;
   const m = (e['message'] ?? {}) as Record<string, unknown>;
   const sender = (m['sender'] ?? e['user'] ?? {}) as Record<string, unknown>;
   if (sender['type'] && sender['type'] !== 'HUMAN') return null;
@@ -62,6 +64,26 @@ export function parseChatEvent(payload: unknown): ChatInboundMessage | null {
   const direct = space['spaceType'] === 'DIRECT_MESSAGE' || space['type'] === 'DM';
   const threadName = String(((m['thread'] ?? {}) as Record<string, unknown>)['name'] ?? '');
   return { messageName, text, senderEmail, senderName, space: spaceName, direct, thread: THREAD.test(threadName) ? threadName : null };
+}
+
+/**
+ * Google Workspace アドオンの形の出来事（`{ chat: { user, messagePayload: { message, space } } }`）を、Chat アプリの形に直す。
+ *
+ * @returns Chat アプリの形。アドオンの形でなければそのまま。アドオンの形で発言でなければ `null`
+ */
+function fromAddOnEvent(e: Record<string, unknown>): Record<string, unknown> | null {
+  const chat = e['chat'];
+  if (!chat || typeof chat !== 'object' || 'type' in e) return e;
+  const c = chat as Record<string, unknown>;
+  const payload = c['messagePayload'];
+  if (!payload || typeof payload !== 'object') return null;
+  const p = payload as Record<string, unknown>;
+  const message = (p['message'] ?? {}) as Record<string, unknown>;
+  const user = (c['user'] ?? {}) as Record<string, unknown>;
+  // 発言の送り主にメールアドレスが無ければ、出来事の利用者（同じ人）のものを使う
+  const sender = { ...user, ...((message['sender'] ?? {}) as Record<string, unknown>) };
+  if (!sender['email'] && user['email']) sender['email'] = user['email'];
+  return { type: 'MESSAGE', message: { ...message, sender, space: message['space'] ?? p['space'] }, space: p['space'], user };
 }
 
 /** 受け口の鍵のハッシュ（置き場には鍵そのものを残さない）。 */

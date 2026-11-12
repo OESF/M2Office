@@ -41,6 +41,25 @@ test('出来事から、秘書に向けた発言を取り出す', () => {
   assert.equal(mention?.thread, null);
 });
 
+test('Google Workspace アドオンの形の出来事も読む', () => {
+  const addOn = {
+    commonEventObject: { hostApp: 'CHAT' },
+    chat: {
+      user: { name: 'users/111', email: 'Sato@A.example.jp', type: 'HUMAN' },
+      eventTime: '2026-11-12T05:00:00Z',
+      messagePayload: {
+        space: { name: 'spaces/AAA', spaceType: 'DIRECT_MESSAGE' },
+        message: { name: 'spaces/AAA/messages/m1', text: '今日の予定は？', argumentText: '今日の予定は？', sender: { name: 'users/111', type: 'HUMAN' }, thread: { name: 'spaces/AAA/threads/t1' } },
+      },
+    },
+  };
+  assert.deepEqual(parseChatEvent(addOn), {
+    messageName: 'spaces/AAA/messages/m1', text: '今日の予定は？', senderEmail: 'sato@a.example.jp', senderName: 'users/111',
+    space: 'spaces/AAA', direct: true, thread: 'spaces/AAA/threads/t1',
+  });
+  assert.equal(parseChatEvent({ chat: { user: { name: 'users/1' }, addedToSpacePayload: { space: { name: 'spaces/AAA' } } } }), null, 'アプリの追加は取らない');
+});
+
 test('人の発言でないもの・ほかの出来事・読めないものは取らない', () => {
   assert.equal(parseChatEvent({ type: 'ADDED_TO_SPACE', space: { name: 'spaces/AAA' } }), null);
   assert.equal(parseChatEvent(dm({ message: { ...dm().message, sender: { name: 'users/9', email: 'bot@a.example.jp', type: 'BOT' } } })), null);

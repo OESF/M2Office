@@ -92,7 +92,11 @@ export class ChatSecretaryBridge {
    */
   async handle(tenantId: string, payload: unknown, now: Date = new Date()): Promise<'ignored' | 'duplicate' | 'rejected' | 'answered' | 'failed'> {
     const msg = parseChatEvent(payload);
-    if (!msg) return 'ignored';
+    if (!msg) {
+      // 読めなかった出来事の形だけを残す（中身は残さない）。形が変わったときに気づけるように
+      this.deps.log.info('Chat の出来事を扱いませんでした', { tenantId, shape: eventShape(payload) });
+      return 'ignored';
+    }
     if (!(await this.deps.store.takeMessage(tenantId, msg.messageName, now.toISOString()))) return 'duplicate';
     await this.purgeOld(tenantId, now);
     const sender = this.deps.senderFor(tenantId);
@@ -196,4 +200,14 @@ export class ChatSecretaryBridge {
 /** Chat の発言を受ける見本の会社か（開発。Google の署名の代わりに決まった印を受ける）。 */
 export function isMockTenant(connector: Pick<WorkspaceConnector, 'sourceFor'>, tenantId: string): boolean {
   return connector.sourceFor(tenantId) === 'mock';
+}
+
+/** 出来事の形（上の段の項目の名前と、出来事の種類）。中身は含めない。 */
+function eventShape(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return typeof payload;
+  const e = payload as Record<string, unknown>;
+  const keys = Object.keys(e).slice(0, 12).join(',');
+  const type = typeof e['type'] === 'string' ? e['type'] : '';
+  const chat = e['chat'] && typeof e['chat'] === 'object' ? Object.keys(e['chat'] as object).slice(0, 12).join(',') : '';
+  return [keys, type && `type=${type}`, chat && `chat=${chat}`].filter(Boolean).join(' ');
 }

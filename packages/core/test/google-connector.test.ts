@@ -344,6 +344,18 @@ test('許可: 取り直しで取り消しが分かったら、本人と使った
   }
 });
 
+test('許可: 許可を足して接続し直した直後は、使い回しのトークンを捨てて 1 回だけ取り直す', async () => {
+  await withConnector(async (c, g) => {
+    await c.mail.list(P, {});
+    assert.equal(g.refreshes(), 1);
+    await c.calendar.list(P, { from: '2026-09-26T00:00:00+09:00', to: '2026-09-27T00:00:00+09:00' });
+    assert.equal(g.refreshes(), 2, '許可が足りないと言われたら取り直す');
+    assert.equal(g.seen.filter((s) => s.path.startsWith('/cal/')).at(-1)!.auth, 'Bearer at-2', '新しいトークンで呼び直す');
+  }, {}, (s) => (s.path.startsWith('/cal/') && s.auth === 'Bearer at-1' ? {
+    status: 403, json: { error: { code: 403, status: 'PERMISSION_DENIED', details: [{ reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' }] } },
+  } : undefined));
+});
+
 test('許可: 権限が足りない・API が無効・混み合っている、を見分ける。断りの文に応答の中身を入れない', async () => {
   await withConnector(async (c) => assert.equal(await kindOf(c.mail.list(P, {})), 'insufficient-scope'), {},
     (s) => (!s.path.startsWith('/gmail') ? undefined : {

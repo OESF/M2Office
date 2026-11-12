@@ -203,6 +203,11 @@ export interface GoogleRequestInit {
   /** 待つ時間（ミリ秒）。大きいファイルを送るときだけ長くする。 */
   timeoutMs?: number;
   missingOn400?: boolean;
+  /**
+   * 断られたときに、Google の理由の文も添える。中身（メールの件名など）を含まない、設定を確かめる呼び出しだけに使う
+   * （Chat の個別メッセージの場所の用意など。原因が会社の Google Cloud の設定にあるとき、文が無いと確かめられない）。
+   */
+  explain?: boolean;
 }
 
 /**
@@ -311,7 +316,10 @@ async function requestGoogleOnce(
     if (res.status === 401) {
       throw new ConnectorUnavailableError('revoked', 'Google の許可が取り消されたか、期限が切れています。個人設定の「Google 連携」で接続し直してください');
     }
-    if (res.status === 403 && reasons.some((r) => /SCOPE_INSUFFICIENT|insufficientPermissions/i.test(r))) {
+    const scopeShort = res.status === 403 && reasons.some((r) => /SCOPE_INSUFFICIENT|insufficientPermissions/i.test(r));
+    // 本人が許可を足して接続し直した直後は、使い回しているトークンが足す前のもの。捨てて 1 回だけ取り直す（2026-11-12 に本物で確認）
+    if (scopeShort && attempt === 1) { tokens.forget(p); continue; }
+    if (scopeShort) {
       throw new ConnectorUnavailableError('insufficient-scope', `この操作に要る Google の許可（${api}）がありません。個人設定の「Google 連携」で接続し直して、許可を追加してください`);
     }
     if (res.status === 403 && reasons.some((r) => /SERVICE_DISABLED|accessNotConfigured/i.test(r))) {
@@ -330,6 +338,7 @@ async function requestGoogleOnce(
       throw new ConnectorUnavailableError('unreachable', `${api}（Google）が混み合っています。しばらくしてからもう一度お試しください`);
     }
     // それ以外（400 など）は、こちらの組み立ての誤り。理由の符号だけを添える
-    throw new Error(`${api}（Google）が要求を受け付けませんでした（HTTP ${res.status}${reasons[0] ? `・${reasons[0]}` : ''}）`);
+    const why = init.explain && typeof body.error?.message === 'string' ? `。Google の答え: ${body.error.message.replace(/\s+/g, ' ').slice(0, 300)}` : '';
+    throw new Error(`${api}（Google）が要求を受け付けませんでした（HTTP ${res.status}${reasons[0] ? `・${reasons[0]}` : ''}）${why}`);
   }
 }
