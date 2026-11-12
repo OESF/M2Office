@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSign, generateKeyPairSync } from 'node:crypto';
-import { ChatTokenVerifier, MemoryChatInboxStore, chatHookHash, chatReplyText, parseChatEvent } from '../src/index.js';
+import { ChatTokenVerifier, MemoryChatInboxStore, chatAddOnIssuer, chatHookHash, chatReplyText, parseChatEvent, projectNumberOfClientId } from '../src/index.js';
 
 const dm = (over: Record<string, unknown> = {}) => ({
   type: 'MESSAGE',
@@ -99,6 +99,32 @@ test('署名の確かめ: Google の鍵・発行元・期限・送り主が Chat
   // ほかの鍵で署名したものは通さない
   const other = signer();
   assert.equal(await v.check(other.sign(good), path), '署名が合いません');
+});
+
+test('署名の確かめ: アドオンの形の Chat アプリは、その会社のプロジェクトの送り主だけを受ける', async () => {
+  const { jwk, sign } = signer();
+  const now = Date.parse('2026-11-12T03:00:00Z');
+  const v = new ChatTokenVerifier(async () => ({ keys: [jwk] }), () => now);
+  const path = '/v1/hooks/google-chat/abcdefghijklmnopqrstuvwxyz012345';
+  const claims = (email: string) => ({
+    iss: 'https://accounts.google.com', aud: `https://a.m2office.example${path}`, email, email_verified: true,
+    iat: Math.floor(now / 1000) - 10, exp: Math.floor(now / 1000) + 3000,
+  });
+  const mine = chatAddOnIssuer('123456789012');
+  assert.match(mine, /^service-123456789012@gcp-sa-gsuiteaddons\.iam\.gserviceaccount\.com$/);
+  assert.equal(await v.check(sign(claims(mine)), path, '123456789012'), null);
+  assert.equal(await v.check(sign(claims(chatAddOnIssuer('999999999999'))), path, '123456789012'), '送り主が Chat ではありません', 'ほかのプロジェクト');
+  assert.equal(await v.check(sign(claims(mine)), path), '送り主が Chat ではありません', '会社の番号が分からなければ受けない');
+  assert.equal(await v.check(sign(claims('chat@system.gserviceaccount.com')), path, '123456789012'), null, '前の形も受ける');
+  assert.equal(await v.check(sign({ ...claims(mine), email_verified: false }), path, '123456789012'), '送り主が Chat ではありません');
+});
+
+test('OAuth クライアント ID の先頭から、プロジェクトの番号を取る', () => {
+  assert.equal(projectNumberOfClientId('123456789012-abc123def456.apps.googleusercontent.com'), '123456789012');
+  assert.equal(projectNumberOfClientId(' 123456789012-abc.apps.googleusercontent.com '), '123456789012');
+  assert.equal(projectNumberOfClientId('abc-def.apps.googleusercontent.com'), null);
+  assert.equal(projectNumberOfClientId('123456789012-abc.example.com'), null);
+  assert.equal(projectNumberOfClientId(''), null);
 });
 
 test('置き場: 鍵のハッシュから会社を引き、同じ発言は 1 回だけ扱う', async () => {

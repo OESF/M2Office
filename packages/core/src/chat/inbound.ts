@@ -91,8 +91,30 @@ export function chatHookHash(key: string): string {
   return createHash('sha256').update(key).digest('hex');
 }
 
-/** Chat が送ってくる ID トークンの、送り主のアカウント（Google の決まり）。 */
+/** Chat が送ってくる ID トークンの、送り主のアカウント（Google の決まり。アドオンでない、前の形の Chat アプリ）。 */
 export const CHAT_ISSUER_EMAIL = 'chat@system.gserviceaccount.com';
+
+/**
+ * アドオンの形の Chat アプリが、HTTP の受け口に付ける署名の送り主（第10.16.7節「クラウド版の受け口のアドオン対応」）。
+ *
+ * @param projectNumber Chat アプリを作った Google Cloud のプロジェクトの番号（数字だけ）
+ * @returns `service-{番号}@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`
+ * @remarks 新しく作る Chat アプリは Workspace アドオンの形に決まっていて、送り主はプロジェクトごとに違う
+ */
+export function chatAddOnIssuer(projectNumber: string): string {
+  return `service-${projectNumber}@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`;
+}
+
+/**
+ * OAuth クライアント ID（`{番号}-….apps.googleusercontent.com`）の先頭から、プロジェクトの番号を取る。
+ *
+ * @returns 番号。形が違えば `null`
+ * @remarks Chat アプリは、ログインの OAuth クライアントと同じプロジェクトに作る決まり（第10.16.7節）。
+ * そのため、この番号のアドオンのアカウントだけを、その会社の受け口の送り主として受ける
+ */
+export function projectNumberOfClientId(clientId: string): string | null {
+  return /^(\d{6,20})-[a-z0-9]+\.apps\.googleusercontent\.com$/.exec(clientId.trim())?.[1] ?? null;
+}
 /** Google の ID トークンの鍵の置き場。 */
 export const GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs';
 
@@ -109,8 +131,9 @@ const defaultJwks: JwksFetcher = async () => {
  * Chat の HTTP の受け口に付く ID トークンを確かめる（第10.16.3節「受け口」）。
  *
  * @remarks
- * 署名（RS256。Google の鍵）・発行元（`accounts.google.com`）・期限・送り主（`chat@system.gserviceaccount.com`）・
- * 宛先（`aud` が受け口の URL）を確かめる。鍵は 1 時間使い回し、知らない鍵の ID が来たら 5 分に 1 回まで取り直す
+ * 署名（RS256。Google の鍵）・発行元（`accounts.google.com`）・期限・送り主・宛先（`aud` が受け口の URL）を確かめる。
+ * 送り主は `chat@system.gserviceaccount.com` か、その会社のプロジェクトのアドオンのアカウント（{@link chatAddOnIssuer}）だけ。
+ * 鍵は 1 時間使い回し、知らない鍵の ID が来たら 5 分に 1 回まで取り直す
  */
 export class ChatTokenVerifier {
   private keys: Map<string, JsonWebKey> | null = null;
@@ -131,9 +154,11 @@ export class ChatTokenVerifier {
   /**
    * @param authorization `Authorization` の値（`Bearer …`）
    * @param audiencePath 受け口の道（`/v1/hooks/google-chat/鍵`）。`aud` の URL の道がこれと同じでなければ断る
+   * @param projectNumber その会社の Chat アプリのプロジェクトの番号。あれば、そのアドオンのアカウントも送り主として受ける。
+   *   `null` なら前の形（`chat@system.gserviceaccount.com`）だけを受ける
    * @returns 確かめられたら `null`、断るなら理由（記録だけに残す）
    */
-  async check(authorization: string | undefined, audiencePath: string): Promise<string | null> {
+  async check(authorization: string | undefined, audiencePath: string, projectNumber: string | null = null): Promise<string | null> {
     const token = /^Bearer\s+(\S+)$/.exec(authorization ?? '')?.[1];
     if (!token) return 'トークンがありません';
     const [h, p, sig] = token.split('.');
@@ -160,7 +185,8 @@ export class ChatTokenVerifier {
     if (claims['iss'] !== 'https://accounts.google.com' && claims['iss'] !== 'accounts.google.com') return '発行元が違います';
     if (typeof claims['exp'] !== 'number' || claims['exp'] < nowSec) return '期限が切れています';
     if (typeof claims['iat'] === 'number' && claims['iat'] > nowSec + 300) return '発行の時刻が先です';
-    if (claims['email'] !== CHAT_ISSUER_EMAIL || claims['email_verified'] !== true) return '送り主が Chat ではありません';
+    const senders = projectNumber ? [CHAT_ISSUER_EMAIL, chatAddOnIssuer(projectNumber)] : [CHAT_ISSUER_EMAIL];
+    if (!senders.includes(String(claims['email'] ?? '')) || claims['email_verified'] !== true) return '送り主が Chat ではありません';
     let path = '';
     try {
       path = new URL(String(claims['aud'] ?? '')).pathname;

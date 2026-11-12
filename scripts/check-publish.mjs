@@ -75,8 +75,8 @@ const SECRET = [
 // 見本として書いてよいメールアドレスのドメイン（RFC 2606・6761 で予約された名前と、example.* とその下。
 // テストの架空の Google のサービスアカウント（プロジェクト名が example で終わるもの。鍵の読み方がこの形を求めるため）
 const OK_MAIL = /@(([a-z0-9-]+\.)*(example|test|invalid|localhost)|([a-z0-9-]+\.)*example\.(com|net|org|jp|co\.jp)|([a-z0-9-]+-)?example\.iam\.gserviceaccount\.com|users\.noreply\.github\.com)$/i;
-// 公開されている決まった宛先（共著者の行・依存の説明文・個人向けの Google アカウントの例・URL の利用者名の例・Google Chat が受け口に送る署名の送り主）
-const OK_ADDRESS = new Set(['noreply@anthropic.com', 'i@izs.me', 'someone@gmail.com', 'pass@lh3.googleusercontent.com', 'chat@system.gserviceaccount.com']);
+// 公開されている決まった宛先（共著者の行・依存の説明文・個人向けの Google アカウントの例・URL の利用者名の例・Google Chat が受け口に送る署名の送り主・前の形の Chat アプリが Pub/Sub に書き込むアカウント）
+const OK_ADDRESS = new Set(['noreply@anthropic.com', 'i@izs.me', 'someone@gmail.com', 'pass@lh3.googleusercontent.com', 'chat@system.gserviceaccount.com', 'chat-api-push@system.gserviceaccount.com']);
 
 for (const f of files) {
   if (!TEXT.test(f) || f.startsWith('node_modules/')) continue;

@@ -299,7 +299,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/inventory/bookings/:id/use` ／ `cancel` | 予約の人が来た（取り置きを使用の記録にする）／ 取り消す（使える数に戻す） |
 | `POST /v1/inventory/menus` | メニューで使う品目を覚える（`menu`・`items`: itemId と qty。空なら在庫を使わない）。品目の分からない予約を取り置き直す |
 | `POST /v1/hooks/line/:key` | **認証なしの受け口**。LINE 公式アカウントの Webhook（仕様書 第33.19節）。会社は鍵（32 文字）のハッシュから引き、その会社のチャネルのシークレットで `X-Line-Signature` を確かめる。知らない鍵・問い合わせの記録か LINE を切った会社は 404、署名が違えば 401、1 MB を超えれば 413。確かめたらすぐ 200 を返し、取り込みは後ろで行う（出来事の ID で 2 度残さない） |
-| `POST /v1/hooks/google-chat/:key` | **認証なしの受け口**。会社の Chat アプリの「HTTP エンドポイント URL」（仕様書 第10.16.3節、ADR-0138）。会社は鍵（32 文字）のハッシュから引き、Google の ID トークン（`Authorization: Bearer`。送り主 `chat@system.gserviceaccount.com`・宛先がこの道）を確かめる。知らない鍵・止めた会社は 404、署名が違えば 401、256 KB を超えれば 413。確かめたらすぐ空の答えを返し、秘書への受け渡しは後ろで行う（発言の名前で 2 度扱わない）。答えは会社の Chat アプリから送る。見本の会社は `Bearer mock-chat` を受ける |
+| `POST /v1/hooks/google-chat/:key` | **認証なしの受け口**。会社の Chat アプリの「HTTP エンドポイント URL」（仕様書 第10.16.3節、ADR-0138）。会社は鍵（32 文字）のハッシュから引き、Google の ID トークン（`Authorization: Bearer`。送り主 `chat@system.gserviceaccount.com` か、会社の OAuth クライアントと同じプロジェクトのアドオンのアカウント `service-{番号}@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`・宛先がこの道）を確かめる。知らない鍵・止めた会社は 404、署名が違えば 401、256 KB を超えれば 413。確かめたらすぐ空の答えを返し、秘書への受け渡しは後ろで行う（発言の名前で 2 度扱わない）。答えは会社の Chat アプリから送る。見本の会社は `Bearer mock-chat` を受ける |
 | `GET /v1/inventory/publications` | 管理者: Web への公開のまとまりの一覧（作った順。`max` は 1 社の上限 8）。1 つも無ければ「公開 1」を作って返す。「Web への公開」を切った会社と管理者でない人は 403（第29.12.1節・第29.12.2節） |
 | `POST /v1/inventory/publications` | 管理者: まとまりを足す（承認する前の形。`name` を省けば「公開 N」）。8 つを超えると 400 |
 | `POST /v1/inventory/publications/preview` | 管理者: 承認する前の見本（`itemIds`・`fields`（`category`・`price`）・`showCount`）。公開されるとおりの中身を返す |

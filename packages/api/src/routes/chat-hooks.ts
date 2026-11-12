@@ -3,6 +3,7 @@
  *
  * 会社の判定とログインより前に置き、URL の鍵（M2Office はハッシュだけを持つ）から会社を引き、
  * **Google が付ける署名（ID トークン）を確かめる**（送り主が Chat であること・宛先がこの受け口であること）。合わないものは捨てる。
+ * 送り主は、前の形の Chat アプリの決まったアカウントか、その会社の OAuth クライアントと同じプロジェクトのアドオンのアカウント（第10.16.7節）。
  * 確かめたらすぐに空の答えを返し、秘書への受け渡しは後ろで行う（答えは後から Chat の API で送る）。
  * 見本の会社（開発）では、Google の署名の代わりに決まった印（`Bearer mock-chat`）を受ける。
  * 本文は 256 KB まで。記録には文を残さない。
@@ -10,7 +11,7 @@
 
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { ChatTokenVerifier, chatHookHash } from '@m2office/core';
+import { ChatTokenVerifier, chatHookHash, projectNumberOfClientId } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { isOperational } from '../middleware/tenant.js';
 import type { ChatSecretaryBridge } from '../chat/bridge.js';
@@ -22,6 +23,17 @@ export const CHAT_HOOK_PATH = '/v1/hooks/google-chat';
 const MAX_BYTES = 256 * 1024;
 /** 見本の会社で、署名の代わりに受ける印。 */
 export const MOCK_CHAT_TOKEN = 'Bearer mock-chat';
+
+/**
+ * 会社の Chat アプリのプロジェクトの番号。会社の OAuth クライアント ID の先頭から取る（Chat アプリは同じプロジェクトに作る決まり。第10.16.7節）。
+ *
+ * @returns 番号。OAuth クライアントが無い・形が違えば `null`（アドオンの形の送り主は受けない）
+ */
+async function chatProjectNumber(deps: AppDeps, tenantId: string): Promise<string | null> {
+  const cred = await deps.repo.getTenantCredential(tenantId, 'google_oauth').catch(() => null);
+  const clientId = typeof cred?.meta['clientId'] === 'string' ? cred.meta['clientId'] : '';
+  return clientId ? projectNumberOfClientId(clientId) : null;
+}
 
 /**
  * Chat の受け口の API（`POST /v1/hooks/google-chat/:key`）。
@@ -42,7 +54,7 @@ export function chatHooksRoute(deps: AppDeps, bridge: ChatSecretaryBridge, verif
     if (!tenant || !isOperational(tenant)) return c.json({}, 404);
     const auth = c.req.header('authorization');
     const mock = deps.connector.sourceFor(tenantId) === 'mock';
-    const problem = mock && auth === MOCK_CHAT_TOKEN ? null : await verifier.check(auth, `${CHAT_HOOK_PATH}/${key}`);
+    const problem = mock && auth === MOCK_CHAT_TOKEN ? null : await verifier.check(auth, `${CHAT_HOOK_PATH}/${key}`, await chatProjectNumber(deps, tenantId));
     if (problem) {
       deps.log.warn('Chat の受け口で署名を確かめられませんでした', { tenantId, reason: problem });
       return c.json({}, 401);
