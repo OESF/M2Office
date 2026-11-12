@@ -12,7 +12,7 @@ import { buildDataRecipients, type DataRecipientFacts } from '../src/index.js';
 const base: DataRecipientFacts = {
   deployment: 'cloud', hosting: { provider: null, location: null },
   ai: { policy: 'cloud', geminiSource: 'platform', localConfigured: false },
-  credentials: new Set(), extensions: { webReview: false, printDesigns: false, competitors: false, columns: false, inquiries: false, library: false },
+  credentials: new Set(), extensions: { webReview: false, printDesigns: false, competitors: false, columns: false, inquiries: false, library: false, siteUpdates: false },
   canvaAvailable: false, connectors: [],
 };
 const byId = (f: DataRecipientFacts) => new Map(buildDataRecipients(f).map((x) => [x.id, x]));

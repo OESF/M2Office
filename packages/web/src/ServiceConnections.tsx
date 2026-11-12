@@ -72,7 +72,33 @@ function WordPressCard({ settings, onChanged }: { settings: WebColumnSettings; o
         </div>
       )}
       {error && <p className="error">{error}</p>}
+      {settings.wordpress && <WordPressUsers />}
     </div>
+  );
+}
+
+/**
+ * 一人ひとりの WordPress の接続をしている人（仕様書 第45.16節、Q-337）。サイトの更新を入れている会社で、つないでいる人がいるときだけ出す。
+ * WordPress の利用者名と役割だけで、パスワードは出さない。
+ */
+function WordPressUsers() {
+  const [items, setItems] = useState<{ userId: string; name: string; username: string; displayName: string; roles: string[]; connectedAt: string }[]>([]);
+  useEffect(() => {
+    api.admin.siteUpdatesWordPressUsers().then((r) => setItems(r.items)).catch(() => setItems([]));
+  }, []);
+  if (!items.length) return null;
+  return (
+    <table className="table small">
+      <thead><tr><th>M2Office の利用者</th><th>WordPress の利用者</th><th>役割</th><th>つないだ日時</th></tr></thead>
+      <tbody>
+        {items.map((u) => (
+          <tr key={u.userId}>
+            <td>{u.name}</td><td>{u.displayName && u.displayName !== u.username ? `${u.displayName}（${u.username}）` : u.username}</td>
+            <td>{u.roles.join('・')}</td><td>{new Date(u.connectedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

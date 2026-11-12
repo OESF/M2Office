@@ -11,7 +11,7 @@ import { KnowledgeQa } from './knowledge-qa.js';
 import { SalesDocs } from './SalesDocs.js';
 import { QUOTE_AGENT_ID, QuoteList } from './quotes.js';
 import { DOCUMENT_AGENT_ID, SHEET_AGENT_ID, SLIDES_AGENT_ID, SlideDeckList } from './slide-decks.js';
-import { LIBRARY_EXTENSION_ID, CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, MAIL_MENU_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
+import { LIBRARY_EXTENSION_ID, SITE_UPDATES_EXTENSION_ID, CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, SIGNAGE_EXTENSION_ID, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, RESERVATIONS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, DECISIONS_EXTENSION_ID, MEMBERS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, MAIL_MENU_ID, showsCaptions, type Notification, type UserSettings } from '@m2office/shared';
 import {
   addCategory, assignCategory, checkCategoryName, groupMenu, removeCategory, swapCategories, togglePinned, type MenuSection,
 } from './menu.js';
@@ -44,6 +44,7 @@ import { Announcements } from './Announcements.js';
 import { CONTRACT_REVIEW_AGENT_ID, ContractFromReview, Contracts } from './Contracts.js';
 import { Reservations } from './Reservations.js';
 import { Subsidies } from './Subsidies.js';
+import { SiteUpdates } from './SiteUpdates.js';
 import { Decisions } from './Decisions.js';
 import { PrintDesigns } from './PrintDesigns.js';
 import { Library } from './Library.js';
@@ -136,6 +137,7 @@ type View =
   | { kind: 'sales'; itemId: string | null }
   | { kind: 'reservations' }
   | { kind: 'subsidies' }
+  | { kind: 'siteUpdates' }
   | { kind: 'decisions'; decisionId: string | null }
   | { kind: 'members'; memberId: string | null }
   | { kind: 'printDesigns'; designId: string | null }
@@ -379,6 +381,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const reservationChangeKey = result?.id ?? '';
   // 秘書が補助金・助成金を調べ終えた・状態を変えたら、補助金・助成金の画面を読み直す
   const decisionChangeKey = history.filter((h) => h.job?.agentId === 'decisions:consult' && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
+  const siteUpdateChangeKey = history.filter((h) => h.job?.agentId?.startsWith('site-updates:') && ['completed', 'failed', 'awaiting_approval'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   const subsidyChangeKey = history.filter((h) => h.job?.agentId?.startsWith('subsidies:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
   // 秘書が会員のポイントや特典を直したら、会員の画面を読み直す
   const libraryChangeKey = history.filter((h) => h.job?.agentId?.startsWith('library:') && ['completed', 'failed'].includes(h.run.status)).map((h) => `${h.run.id}:${h.run.status}`).join(',');
@@ -485,6 +488,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // 販促物の作成（仕様書 第41章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.printDesigns ? [{ id: PRINT_DESIGNS_EXTENSION_ID, name: '販促物の作成', description: 'ポップ・チラシ・パンフレット・案内・ポスターを、頼むだけで作る', icon: 'slides' as IconName, agent: null }] : []),
     ...(me.decisions ? [{ id: DECISIONS_EXTENSION_ID, name: '意思決定支援', description: '経営の判断について、慎重と推進の AI が社内の材料で討論し、見立てと論点を報告する', icon: 'report' as IconName, agent: null }] : []),
+    // サイトの更新（仕様書 第45章）。会社で入れていて利用範囲の人にだけ出す
+    ...(me.siteUpdates ? [{ id: SITE_UPDATES_EXTENSION_ID, name: 'サイトの更新', description: '会社の Web サイトのいまあるページを、秘書に頼んで直す', icon: 'doc' as IconName, agent: null }] : []),
     ...(me.subsidies ? [{ id: SUBSIDIES_EXTENSION_ID, name: '補助金・助成金', description: '会社に合いそうな補助金・助成金を、締め切りと出典と一緒に知らせる', icon: 'research' as IconName, agent: null }] : []),
     // 販売の書類と受注（仕様書 第42章）。会社で入れていて利用範囲の人にだけ出す
     ...(me.salesDocs ? [{ id: SALES_DOCS_EXTENSION_ID, name: '受注と販売の書類', description: '注文書を取り込んで受注を整理し、納品書・請求書・領収書・注文書を作る', icon: 'doc' as IconName, agent: null }] : []),
@@ -520,6 +525,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   : m.id === SALES_DOCS_EXTENSION_ID ? setView({ kind: 'sales', itemId: null })
                   : m.id === RESERVATIONS_EXTENSION_ID ? setView({ kind: 'reservations' })
                   : m.id === SUBSIDIES_EXTENSION_ID ? setView({ kind: 'subsidies' })
+                  : m.id === SITE_UPDATES_EXTENSION_ID ? setView({ kind: 'siteUpdates' })
                   : m.id === DECISIONS_EXTENSION_ID ? setView({ kind: 'decisions', decisionId: null })
                   : m.id === MEMBERS_EXTENSION_ID ? setView({ kind: 'members', memberId: null })
                   : m.id === PRINT_DESIGNS_EXTENSION_ID ? setView({ kind: 'printDesigns', designId: null })
@@ -529,7 +535,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     : m.id === MAIL_MENU_ID ? view.kind === 'mail'
     : m.id === INVENTORY_EXTENSION_ID ? view.kind === 'inventory' : m.id === HR_EXTENSION_ID ? view.kind === 'hr'
       : m.id === SIGNAGE_EXTENSION_ID ? view.kind === 'signage' : m.id === WEB_COLUMNS_EXTENSION_ID ? view.kind === 'columns'
-        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === SALES_DOCS_EXTENSION_ID ? view.kind === 'sales' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === DECISIONS_EXTENSION_ID ? view.kind === 'decisions' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === LIBRARY_EXTENSION_ID ? view.kind === 'library' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
+        : m.id === INQUIRIES_EXTENSION_ID ? view.kind === 'inquiries' : m.id === COMPETITORS_EXTENSION_ID ? view.kind === 'competitors' : m.id === ANNOUNCEMENTS_EXTENSION_ID ? view.kind === 'announcements' : m.id === CONTRACTS_EXTENSION_ID ? view.kind === 'contracts' : m.id === SALES_DOCS_EXTENSION_ID ? view.kind === 'sales' : m.id === RESERVATIONS_EXTENSION_ID ? view.kind === 'reservations' : m.id === SUBSIDIES_EXTENSION_ID ? view.kind === 'subsidies' : m.id === SITE_UPDATES_EXTENSION_ID ? view.kind === 'siteUpdates' : m.id === DECISIONS_EXTENSION_ID ? view.kind === 'decisions' : m.id === MEMBERS_EXTENSION_ID ? view.kind === 'members' : m.id === PRINT_DESIGNS_EXTENSION_ID ? view.kind === 'printDesigns' : m.id === LIBRARY_EXTENSION_ID ? view.kind === 'library' : m.id === WEB_REVIEW_EXTENSION_ID ? view.kind === 'webReview' : view.kind === 'cards');
   // ピン止めとカテゴリーは個人設定（メニュー）に保存し、端末をまたいで同じにする。保存に失敗したら読み直す
   const saveMenu = (saved: UserSettings['menu']) => {
     setMenu(saved);
@@ -902,6 +908,12 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <Subsidies changeKey={subsidyChangeKey} />
             </>
           )}
+          {view.kind === 'siteUpdates' && (
+            <>
+              <ViewTitle>サイトの更新 <HelpTip article="start-site-updates">会社の Web サイトのいまあるページを、秘書に頼んで直します。直す前と後を見て承認すると、サイトに入ります。</HelpTip></ViewTitle>
+              <SiteUpdates changeKey={siteUpdateChangeKey} />
+            </>
+          )}
           {view.kind === 'decisions' && (
             <>
               <ViewTitle>意思決定支援 <HelpTip article="start-decisions">慎重の役と推進の役の AI が社内の材料で討論し、判定の役が見立て・論点の流れ・やめる目安を報告します。決めるのは経営者です。</HelpTip></ViewTitle>
@@ -1136,6 +1148,7 @@ const VIEW_LABELS: Record<string, string> = {
   sales: '受注と販売の書類',
   reservations: '予約',
   subsidies: '補助金・助成金',
+  siteUpdates: 'サイトの更新',
   decisions: '意思決定支援',
   members: '会員',
   printDesigns: '販促物の作成',

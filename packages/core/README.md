@@ -97,6 +97,9 @@ src/library/     ナレッジの整理（内蔵の拡張。第44章の段 1〜�
                  目録（OKF）の書き出しと古い版の知らせ（okf.ts。OKF v0.2 の形・常に書き出す・変わったものだけ・関連する資料へのリンク・タグ・タグごとの一覧）、
                  つながり（links.ts。同じメール・同じ資料の版・同じタグ・同じ語・同じフォルダを決まりで見つける）、
                  ツール（tools.ts。library.search・read・add・update・share・knowledge）、付属の業務「ナレッジの整理」（agents.ts）。本体は本人のドライブで、全文は持たない
+src/site-updates/ サイトの更新（内蔵の拡張。第45章の段 1）。本文の分け方と組み直し（segments.ts。印と札はプログラムが持ち、文のかたまりだけを推論に渡す）、
+                 WordPress の固定ページと投稿の読み書きと権限・利用者の役割・公開のページ（wordpress.ts）、置き場（store.ts。site_edits と本人の WordPress の接続）、直し案・入れる・確かめ・元に戻す（service.ts）、
+                 新しい記事と固定ページ・公開の状態・前の版・アイキャッチ（actions.ts。段 2a）、サイトのカテゴリーとタグ（terms.ts。作る・名前を変える・付ける・外す・元に戻す、「カテゴリー」の見分け）、ツール（tools.ts。site_updates.propose・actions・terms・term_list・revert・list・apply）、付属の業務「サイトの直し案」「サイトに入れる」（agents.ts）
 src/print-designs/ 販促物の作成（内蔵の拡張。第41章の段 1）。型 12 種と組み版（templates.ts。mm の SVG・塗り足し・配色 3 通り・字の大きさを枠に合わせる）、
                  書き出し（render.ts。案の小さな画像・印刷の解像度の PNG・実寸と入稿用の PDF）、点検（checks.ts。曜日・連絡先・入りきらない文・推論の誤字と表示の決まり）、
                  置き場（store.ts）、処理（service.ts。3 案・会話で直す・文面を直す・作り直す・書き出し・掲示の期間の見張り）、

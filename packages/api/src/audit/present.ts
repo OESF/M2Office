@@ -257,6 +257,12 @@ const ACTION_LABELS: Record<string, string> = {
   'announcement.mail': 'お知らせをメールで送り始めた',
   'announcement.closure': '休業の期間を覚えた',
   'inquiry.closure_reply': '休業中の問い合わせに返事の下書きを用意した',
+  // サイトの更新（仕様書 第45.11節。本文は記録に残さない）
+  'site_edit.propose': 'サイトの直し案を作って承認へ進めた',
+  'site_edit.apply': 'サイトのページを直した',
+  'site_edit.revert': 'サイトの直しを元に戻した',
+  'connection.wordpress_user': '自分の WordPress の利用者をつないだ',
+  'connection.wordpress_user_delete': '自分の WordPress の利用者の接続を外した',
   // 契約の管理（仕様書 第38章。相手の名前と契約の中身は記録に残さない）
   'library.import': '資料を入れた',
   'library.update': '資料の題名などを直した',
@@ -584,6 +590,7 @@ function targetOf(e: AuditEvent, names: AuditNames): string {
     case 'web_column': return id.startsWith('col-') ? `コラム ${id.slice(4, 12)}` : 'コラムの作成の設定';
     // 問い合わせはお客様の名前を出さない。ID の頭だけ
     case 'announcement': return `お知らせ ${id.slice(4, 12)}`;
+    case 'site_edit': return `サイトの直し ${id.slice(4, 12)}`;
     // 契約は相手の名前を出さない。ID の頭だけ
     case 'contract': return id === 'storage' ? '契約書の置き場' : `契約 ${id.slice(4, 12)}`;
     case 'print-design': return `販促物 ${id.slice(4, 12)}`;

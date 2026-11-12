@@ -10,7 +10,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  CONTRACTS_EXTENSION_ID, DECISIONS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, type TenantSettings,
+  CONTRACTS_EXTENSION_ID, DECISIONS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, SITE_UPDATES_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, type TenantSettings,
 } from '@m2office/shared';
 import { bundledConnection, consentSnapshot, ensureHrCompartment, type BuiltinSection, type ExtensionPackage, type Repository } from '@m2office/core';
 import type { AppDeps } from './context.js';
@@ -18,12 +18,12 @@ import type { AppDeps } from './context.js';
 /** 拡張機能を入れる・切るのに要る部品。 */
 export type ExtensionSwitchDeps = Pick<AppDeps, 'repo' | 'contracts' | 'signage'>;
 
-/** 初めて入れたときに、利用範囲を管理者だけにする内蔵の拡張（第42.9節・第39.2節・第43.2節）。 */
-const ADMIN_SCOPED_FIRST: ReadonlySet<BuiltinSection> = new Set(['salesDocs', 'subsidies', 'decisions']);
+/** 初めて入れたときに、利用範囲を管理者だけにする内蔵の拡張（第42.9節・第39.2節・第43.2節・第45.2節）。 */
+const ADMIN_SCOPED_FIRST: ReadonlySet<BuiltinSection> = new Set(['salesDocs', 'subsidies', 'decisions', 'siteUpdates']);
 
 /** 区分から、利用範囲の鍵にする拡張機能の ID を引く。 */
 const SCOPE_IDS: Partial<Record<BuiltinSection, string>> = {
-  salesDocs: SALES_DOCS_EXTENSION_ID, subsidies: SUBSIDIES_EXTENSION_ID, decisions: DECISIONS_EXTENSION_ID,
+  salesDocs: SALES_DOCS_EXTENSION_ID, subsidies: SUBSIDIES_EXTENSION_ID, decisions: DECISIONS_EXTENSION_ID, siteUpdates: SITE_UPDATES_EXTENSION_ID,
 };
 
 /**

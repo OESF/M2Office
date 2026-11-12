@@ -35,6 +35,7 @@ export * from './types/decisions.js';
 export * from './types/billing.js';
 export * from './types/print-designs.js';
 export * from './types/library.js';
+export * from './types/site-updates.js';
 export * from './types/members.js';
 export * from './types/web-review.js';
 export * from './types/effect.js';

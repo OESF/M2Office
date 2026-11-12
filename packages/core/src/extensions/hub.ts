@@ -33,11 +33,12 @@ import { DECISIONS_PACKAGE } from '../decisions/agents.js';
 import { MEMBERS_PACKAGE } from '../members/agents.js';
 import { PRINT_DESIGNS_PACKAGE } from '../print-designs/agents.js';
 import { LIBRARY_PACKAGE } from '../library/agents.js';
+import { SITE_UPDATES_PACKAGE } from '../site-updates/agents.js';
 
 /**
  * 内蔵の拡張（第12.13節）と、入り切りを持つ会社の設定の区分。導入の手順は無く、この区分の `enabled` だけで決まる。
  *
- * @remarks 名刺管理は既定で入、在庫管理と人事・給与とサイネージとコラムの作成と問い合わせの記録と競合の分析とお知らせの作成と Webの分析と契約の管理と販売の書類と受注と予約と補助金・助成金の案内と会員とポイントと資料は既定で切り（第27.2節・第29.2節・第30.2節・第31.2節・第32.18.1節・第33.2節・第34.2節・第35.2節・第36.2節）
+ * @remarks 名刺管理は既定で入、在庫管理と人事・給与とサイネージとコラムの作成と問い合わせの記録と競合の分析とお知らせの作成と Webの分析と契約の管理と販売の書類と受注と予約と補助金・助成金の案内と会員とポイントと資料とサイトの更新は既定で切り（第45.2節・第27.2節・第29.2節・第30.2節・第31.2節・第32.18.1節・第33.2節・第34.2節・第35.2節・第36.2節）
  */
 export const BUILTIN_EXTENSIONS: { pkg: ExtensionPackage; section: BuiltinSection }[] = [
   { pkg: CARDS_PACKAGE, section: 'cards' },
@@ -57,10 +58,11 @@ export const BUILTIN_EXTENSIONS: { pkg: ExtensionPackage; section: BuiltinSectio
   { pkg: MEMBERS_PACKAGE, section: 'members' },
   { pkg: PRINT_DESIGNS_PACKAGE, section: 'printDesigns' },
   { pkg: LIBRARY_PACKAGE, section: 'library' },
+  { pkg: SITE_UPDATES_PACKAGE, section: 'siteUpdates' },
 ];
 
 /** 内蔵の拡張の入り切りを持つ会社の設定の区分。 */
-export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns' | 'inquiries' | 'competitors' | 'announcements' | 'webReview' | 'contracts' | 'salesDocs' | 'reservations' | 'subsidies' | 'decisions' | 'members' | 'printDesigns' | 'library';
+export type BuiltinSection = 'cards' | 'inventory' | 'hr' | 'signage' | 'webColumns' | 'inquiries' | 'competitors' | 'announcements' | 'webReview' | 'contracts' | 'salesDocs' | 'reservations' | 'subsidies' | 'decisions' | 'members' | 'printDesigns' | 'library' | 'siteUpdates';
 
 /** 内蔵の拡張なら、入り切りを持つ会社の設定の区分を返す。 */
 export function builtinSection(extensionId: string): BuiltinSection | null {

@@ -207,7 +207,7 @@ export function connectionsRoute(deps: AppDeps) {
       credentials: new Set(creds.filter((k): k is NonNullable<typeof k> => !!k)),
       extensions: {
         webReview: settings.webReview.enabled, printDesigns: settings.printDesigns.enabled, library: settings.library.enabled, competitors: settings.competitors.enabled,
-        columns: settings.webColumns.enabled, inquiries: settings.inquiries.enabled,
+        columns: settings.webColumns.enabled, inquiries: settings.inquiries.enabled, siteUpdates: settings.siteUpdates.enabled,
       },
       canvaAvailable: !!deps.canva,
       connectors: view.connections.map((x) => ({ id: x.id, name: x.name, url: x.url })),

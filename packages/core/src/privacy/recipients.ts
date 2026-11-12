@@ -18,7 +18,7 @@ export interface DataRecipientFacts {
   /** 会社が登録した鍵・接続の種類（`google_oauth`・`google_chat_app`・`line`・`inquiry_mailbox`・`wordpress`・`places`・`web_review`）。 */
   credentials: Set<string>;
   /** 入れている内蔵の拡張。 */
-  extensions: { webReview: boolean; printDesigns: boolean; competitors: boolean; columns: boolean; inquiries: boolean; library: boolean };
+  extensions: { webReview: boolean; printDesigns: boolean; competitors: boolean; columns: boolean; inquiries: boolean; library: boolean; siteUpdates: boolean };
   /** Canva のつなぎが用意されているか（運営の設定）。 */
   canvaAvailable: boolean;
   /** 会社が登録したコネクタ（MCP）。 */
@@ -55,7 +55,7 @@ export function buildDataRecipients(f: DataRecipientFacts): DataRecipient[] {
     { id: 'google-chat-app', name: 'Google Chat（会社の Chat アプリ）', purpose: '通知を本人に届ける', data: '通知の題と本文', location: '会社の Google の契約による', contract: 'company', active: f.credentials.has('google_chat_app') },
     { id: 'line', name: 'LINE（会社の LINE 公式アカウント）', purpose: '問い合わせの受け付けと返事', data: '問い合わせのやり取り', location: 'LINE の設備', contract: 'company', active: f.extensions.inquiries && f.credentials.has('line') },
     { id: 'mailbox', name: '窓口のメール（会社の Gmail）', purpose: '問い合わせのメールの受け付けと返事', data: '問い合わせのメールのやり取り', location: '会社の Google の契約による', contract: 'company', active: f.extensions.inquiries && f.credentials.has('inquiry_mailbox') },
-    { id: 'wordpress', name: '会社の WordPress', purpose: 'コラムの公開', data: 'コラムの本文と画像', location: '会社の Web サイトの置き場', contract: 'company', active: f.extensions.columns && f.credentials.has('wordpress') },
+    { id: 'wordpress', name: '会社の WordPress', purpose: 'コラムの公開・サイトのページの直し', data: 'コラムの本文と画像・直したページの本文', location: '会社の Web サイトの置き場', contract: 'company', active: (f.extensions.columns || f.extensions.siteUpdates) && f.credentials.has('wordpress') },
     { id: 'places', name: 'Google（地図の API）', purpose: '競合の見つけと見回り', data: '会社の地域と、競合の名前（個人の情報は渡さない）', location: '国外を含む（Google の設備）', contract: 'company', active: f.extensions.competitors && f.credentials.has('places') },
     { id: 'web-review', name: 'Google（アナリティクス・Search Console・PageSpeed Insights）', purpose: 'Web の分析', data: '会社の Web サイトの URL（アクセスの数字は読むだけ）', location: '国外を含む（Google の設備）', contract: 'company', active: f.extensions.webReview && f.credentials.has('web_review') },
     ...(f.canvaAvailable ? [{ id: 'canva', name: 'Canva', purpose: '販促物を Canva で仕上げる（本人がつないだとき）', data: '販促物のデザインと画像', location: '国外を含む（Canva の設備）', contract: 'operator' as const, active: f.extensions.printDesigns }] : []),

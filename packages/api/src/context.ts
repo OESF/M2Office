@@ -19,12 +19,12 @@ import {
   defaultGeminiModels, ConnectionCredentials, type ConnectionAuthProvider,
   PostgresChatInboxStore, type ChatInboxStore,
   CardService, PostgresContactStore, cardsAccess, type ContactStore, GoogleContactsService, TerminalService, PostgresTerminalStore, BulkMailService, PostgresBulkMailStore, NoticeService, PostgresNoticeStore,
-  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, withAiUsage, MailService, MailWatch, PostgresMailStore, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, libraryAccess, libraryReaderFor, libraryContactOf, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
+  InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, withAiUsage, MailService, MailWatch, PostgresMailStore, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, libraryAccess, libraryReaderFor, libraryContactOf, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, SiteUpdateService, PostgresSiteEditStore, PostgresWordPressUserStore, siteUpdatesAccess, SITE_UPDATE_APPLY, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   PostgresDemoStore, demoSubdomain, isDemoTenantId, seedDemoCompany, BUILTIN_EXTENSIONS, type DemoStore,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
 } from '@m2office/core';
-import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, fileInputKey } from '@m2office/shared';
+import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, type SiteUpdatesSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -230,6 +230,15 @@ export interface AppDeps {
   announcements: {
     service: AnnouncementService;
     access(tenantId: string, userId: string): Promise<AnnouncementSettings | null>;
+  };
+  /**
+   * サイトの更新（内蔵の拡張。仕様書 第45章）。サイトに入れるのは承認の後だけ（付属の業務「サイトに入れる」）。
+   *
+   * @remarks `access` は、会社がサイトの更新を使っていて利用者が利用範囲の中なら、会社の設定を返す（使えなければ `null`）
+   */
+  siteUpdates: {
+    service: SiteUpdateService;
+    access(tenantId: string, userId: string): Promise<SiteUpdatesSettings | null>;
   };
   /** 契約の管理（内蔵の拡張。仕様書 第38章）。台帳と期限の見張り。契約書は会社の Google ドライブに置く。 */
   contracts: {
@@ -634,6 +643,22 @@ export function buildDeps(): AppDeps {
     }),
     access: announcementsAccess(repo),
   };
+  // サイトの更新（内蔵の拡張。仕様書 第45章）。WordPress は「接続 › WordPress」のもの（コラムの作成・お知らせの作成と同じ）
+  const siteUpdates = {
+    service: new SiteUpdateService({
+      store: new PostgresSiteEditStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      users: new PostgresWordPressUserStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+      repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+      // 承認へ進める（付属の業務「サイトに入れる」を始める）
+      submitter: async (tenantId, userId, editId) => {
+        const def = (await tenantView(tenantId)).resolve(SITE_UPDATE_APPLY.id, SITE_UPDATE_APPLY.version);
+        if (!def) throw new Error('サイトに入れる業務が見つかりません');
+        return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { editId }, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
+      },
+      runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
+    }),
+    access: siteUpdatesAccess(repo),
+  };
   // 契約の管理（内蔵の拡張。仕様書 第38章）。契約書は置き場をつないだ管理者の Google ドライブ（drive.file）に置く
   const contracts = {
     service: new ContractService({
@@ -869,7 +894,7 @@ export function buildDeps(): AppDeps {
     materials: columnMaterialsFrom({ repo, webReview: webReview.service, competitorStore: competitors.service.store, inquiries: inquiries.service }),
   });
   const engine = new RunEngine({
-    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts, salesDocs, subsidies, decisions, members, printDesigns, library, reservations,
+    repo, llm, registry, connector, files, logger: log, research, cards, notices, inventory, columns, inquiries, competitors, announcements, webReview, contracts, salesDocs, subsidies, decisions, members, printDesigns, library, reservations, siteUpdates,
     mail: { store: mailStore },
     deliveries: { service: deliveries }, slideDecks, slideThemes,
     taxTable: () => taxSide.taxRates(),
@@ -1101,6 +1126,7 @@ export function buildDeps(): AppDeps {
     inquiries,
     competitors,
     announcements,
+    siteUpdates,
     contracts,
     salesDocs,
     taxRates: () => taxSide.taxRates(),

@@ -347,6 +347,11 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET /v1/admin/extensions/web-review/candidates` ／ `PUT /v1/admin/extensions/web-review/selection` | 管理者: 担当が見られるプロパティとサイトと状態 ／ プロパティとサイトを選ぶ（`propertyId`・`siteUrl`。見られるものの中からだけ） |
 | `GET /v1/admin/extensions/announcements/screens` | 管理者: お知らせを流す画面の選び先（サイネージの画面）と、いま選んでいる画面（`selected`。`null` ならすべて。第35.17節） |
 | `GET /v1/announcements/line/status` ／ `PUT /v1/admin/extensions/announcements/settings` | LINE の友だちの数と今月の残り ／ 管理者: Web の出し方（`webPublish`: publish・draft）・カテゴリー（`webCategory`）・流す画面（`screens`） |
+| `GET /v1/site-updates/site` | サイトの更新: つないでいるサイト（タイトル・キャッチフレーズ・URL・直すときに使う WordPress の利用者 `account`（本人か会社か・表示名・役割）・足りない権限 `missing`・確かめられなかった理由 `problem`。開いたときに WordPress に問い合わせる） |
+| `GET` ／ `PUT` ／ `DELETE /v1/site-updates/wordpress-user` | 本人の WordPress の接続（第45.16節）: 見る（パスワードは返さない）／ つなぐ（`username`・`password`。会社のサイトで確かめてから暗号化して預け、表示名・役割・足りない権限 `missing` を返す）／ 外す |
+| `GET /v1/admin/extensions/site-updates/wordpress-users` | 本人の WordPress の接続をしている人（M2Office の利用者・WordPress の利用者名・表示名・役割・つないだ日時。管理者だけ） |
+| `GET /v1/site-updates` ／ `GET /v1/site-updates/:id` ／ `POST /v1/site-updates/:id/revert` | サイトの更新（仕様書 第45.15節）: 直しの記録（新しい順。90 日を過ぎたものは本文を消してある）／ 1 件 ／ 元に戻す直し案を作り、承認へ進める（`runId`。入れるのは本人の承認の後）。直し案は秘書から作る。使えない会社と利用範囲の外の人には 403 |
+| `PUT /v1/admin/extensions/site-updates/settings` | サイトの更新の会社の設定（`adminApproval`。本人の承認の後に管理者の承認も加えるか。管理者だけ） |
 | `GET` ／ `POST /v1/contracts` | 契約の管理（仕様書 第38章）: 一覧（期限の近い順。`status`・`kind`・`owner`・`q`。答えに置き場をつないでいるか）／ 手で入れる。使えない会社と利用範囲の外の人には、`/v1/contracts` のどの口も 403 |
 | `POST /v1/contracts/import` | 契約書から入れる（`fileId`: 上げたファイルか、`runId`: 契約書チェックの実行。AI が項目を取り出し、期限を計算し、ドライブの置き場に置く） |
 | `GET` ／ `PATCH` ／ `DELETE /v1/contracts/:id` ／ `GET /v1/contracts/:id/file` | 1 件 ／ 直す（日付や決まりを直すと期限を計算し直す）／ 削除（入れた人と管理者）／ 契約書を開く（置き場をつないだ管理者の許可でドライブから読む） |

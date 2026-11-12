@@ -263,6 +263,21 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     if (req) return [{ name: 'announcements.draft', args: { request: req } }];
   }
 
+  // サイトの更新（仕様書 第45章）: 直し案を作る・元に戻す・記録。承認の後に入れる
+  if (has('site_updates.apply') && instruction.includes('site_updates.apply')) {
+    const id = extractField(prompt, 'editId');
+    if (id) return [{ name: 'site_updates.apply', args: { editId: id } }];
+  }
+  if (has('site_updates.propose') && instruction.includes('site_updates.propose')) {
+    const req = extractField(prompt, 'request');
+    if (/戻して/.test(req)) return [{ name: 'site_updates.revert', args: {} }];
+    if (/(カテゴリ|タグ)/.test(req) && /(何がある|一覧)/.test(req)) return [{ name: 'site_updates.term_list', args: {} }];
+    if (/(作って|公開|下書きに|非公開|予約|ゴミ箱|前の版|アイキャッチ)/.test(req) && !/(カテゴリ|タグ)/.test(req)) return [{ name: 'site_updates.actions', args: { request: req } }];
+    if (/(カテゴリ|タグ)/.test(req)) return [{ name: 'site_updates.terms', args: { request: req } }];
+    if (/記録|何を直した/.test(req)) return [{ name: 'site_updates.list', args: {} }];
+    if (req) return [{ name: 'site_updates.propose', args: { request: req } }];
+  }
+
   // Webの分析の依頼文を送る（第34.21節）。承認の後に 1 回だけ
   if (has('web_review.request_send') && instruction.includes('web_review.request_send')) {
     const findingId = extractField(prompt, 'findingId');

@@ -23,6 +23,7 @@ import { DEFAULT_DECISION_SETTINGS, type DecisionSettings } from './decisions.js
 import { DEFAULT_MEMBER_SETTINGS, type MemberSettings } from './members.js';
 import { DEFAULT_PRINT_DESIGN_SETTINGS, type PrintDesignSettings } from './print-designs.js';
 import { DEFAULT_LIBRARY_SETTINGS, type LibrarySettings } from './library.js';
+import { DEFAULT_SITE_UPDATES_SETTINGS, type SiteUpdatesSettings } from './site-updates.js';
 import { DEFAULT_WEB_REVIEW_SETTINGS, type WebReviewSettings } from './web-review.js';
 
 /** 会社情報（仕様書 第6.6.1節）。帳票とメールの署名に使う。 */
@@ -335,6 +336,8 @@ export interface TenantSettings {
   printDesigns: PrintDesignSettings;
   /** 資料（内蔵の拡張。仕様書 第44章）。既定は切り。 */
   library: LibrarySettings;
+  /** サイトの更新（内蔵の拡張。仕様書 第45章）。既定は切り。 */
+  siteUpdates: SiteUpdatesSettings;
   /** 会社の AI の方針（第16.3.7.1節、ADR-0059）。 */
   aiPolicy: AiPolicySettings;
   /** AI の利用の上限（第6.6.2節、ADR-0079）。 */
@@ -427,6 +430,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettings = {
   members: DEFAULT_MEMBER_SETTINGS,
   printDesigns: DEFAULT_PRINT_DESIGN_SETTINGS,
   library: DEFAULT_LIBRARY_SETTINGS,
+  siteUpdates: DEFAULT_SITE_UPDATES_SETTINGS,
   aiPolicy: { mode: 'cloud' },
   aiLimits: { monthlyJpy: null, perUserShare: DEFAULT_AI_PER_USER_SHARE },
 };

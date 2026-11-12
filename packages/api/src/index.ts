@@ -41,6 +41,7 @@ import { columnsRoute } from './routes/columns.js';
 import { inquiriesRoute } from './routes/inquiries.js';
 import { competitorsRoute } from './routes/competitors.js';
 import { announcementsRoute } from './routes/announcements.js';
+import { siteUpdatesRoute } from './routes/site-updates.js';
 import { contractsRoute } from './routes/contracts.js';
 import { salesDocsRoute } from './routes/sales-docs.js';
 import { quotesRoute } from './routes/quotes.js';
@@ -295,6 +296,8 @@ app.get('/v1/me', async (c) => {
     // 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）
     printDesigns: !!(await deps.printDesigns.access(ctx.tenant.id, ctx.user.id)),
     library: !!(await deps.library.access(ctx.tenant.id, ctx.user.id)),
+    // サイトの更新を使えるか（会社の入り切りと利用範囲。仕様書 第45章）
+    siteUpdates: !!(await deps.siteUpdates.access(ctx.tenant.id, ctx.user.id)),
     // 秘書に Google ドライブのファイルを渡せるか（会社のファイル選びの API キーと本人の Google の接続。第10.10.8節）
     driveFiles: await driveFilesFor(deps).available({ tenantId: ctx.tenant.id, userId: ctx.user.id }).catch(() => false),
     // 人事・給与の担当者の画面を使えるか（会社の入り切りと人事区画。仕様書 第30.2節）
@@ -342,6 +345,7 @@ app.route('/v1/columns', columnsRoute(deps));
 app.route('/v1/inquiries', inquiriesRoute(deps));
 app.route('/v1/competitors', competitorsRoute(deps));
 app.route('/v1/announcements', announcementsRoute(deps));
+app.route('/v1/site-updates', siteUpdatesRoute(deps));
 app.route('/v1/contracts', contractsRoute(deps));
 app.route('/v1/sales', salesDocsRoute(deps));
 app.route('/v1/quotes', quotesRoute(deps));

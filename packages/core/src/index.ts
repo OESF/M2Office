@@ -201,6 +201,7 @@ export * from './decisions/index.js';
 export * from './billing/index.js';
 export * from './print-designs/index.js';
 export * from './library/index.js';
+export * from './site-updates/index.js';
 export * from './mail/index.js';
 export * from './members/index.js';
 export * from './web-review/index.js';

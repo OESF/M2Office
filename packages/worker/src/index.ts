@@ -15,7 +15,7 @@ import {
   fillApprovalCompartments, discardStaleRecordings, discardStaleLiveRecordings, PostgresSystemLogStore, SystemLogSink, attachLogSink, EvidenceBuilder, SYSTEM_LOG_KEEP_DAYS,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, SalesDocWatch, salesInventoryFrom, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, DecisionService, PostgresDecisionStore, DecisionRunner, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, MailWatch, PostgresMailStore, libraryAccess, libraryReaderFor, libraryContactOf, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, SalesDocWatch, salesInventoryFrom, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, DecisionService, PostgresDecisionStore, DecisionRunner, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, MailWatch, PostgresMailStore, libraryAccess, libraryReaderFor, libraryContactOf, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, SiteUpdateService, PostgresSiteEditStore, PostgresWordPressUserStore, siteUpdatesAccess, SITE_UPDATE_APPLY, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, PlatformAiSource, PostgresPlatformAiSettingsReader, envTenantCapJpy, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
@@ -447,6 +447,18 @@ const announcements = new AnnouncementService({
     return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { announcementId }, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
   },
 });
+// サイトの更新（内蔵の拡張。仕様書 第45章）。直し案を作って承認へ進め、承認の後に WordPress に入れる
+const siteUpdates = new SiteUpdateService({
+  store: new PostgresSiteEditStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  users: new PostgresWordPressUserStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  submitter: async (tenantId, userId, editId) => {
+    const def = await resolveDefinition(SITE_UPDATE_APPLY.id, SITE_UPDATE_APPLY.version, tenantId);
+    if (!def) throw new Error('サイトに入れる業務が見つかりません');
+    return (await enqueueJob(repo, { tenantId, requestedBy: userId, def, input: { editId }, origin: 'menu', actor: { type: 'user', id: userId } })).runId;
+  },
+  runStatus: async (tenantId, runId) => (await repo.getRun(tenantId, runId))?.status ?? null,
+});
 // コラムのテーマ案・予定表と先回り・予約から入れる（第32.18.4節）。材料はほかの拡張から（使っていなければ空）
 const columnPlanner = new ColumnPlanner({
   service: columns, store: columns.store, repo, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
@@ -475,6 +487,7 @@ const engine = new RunEngine({
   inquiries: { service: inquiries, access: inquiriesAccess(repo) },
   competitors: { service: competitors, access: competitorsAccess(repo) },
   announcements: { service: announcements, access: announcementsAccess(repo) },
+  siteUpdates: { service: siteUpdates, access: siteUpdatesAccess(repo) },
   webReview: { service: webReview, access: webReviewAccess(repo) },
   contracts: { service: contracts, access: contractsAccess(repo) },
   salesDocs: { service: salesDocs, access: salesDocsAccess(repo) },
@@ -718,6 +731,9 @@ let lastDecisionPoll = 0;
 /** ゴミ箱に入れて 30 日を過ぎた相談を消す間隔（第43.9節。1 日に 1 回で足りる）。 */
 const DECISION_PURGE_INTERVAL_MS = 86_400_000;
 let lastDecisionPurge = 0;
+/** サイトの直しの、90 日を過ぎた直す前と後の本文を消す間隔（第45.8節。1 日に 1 回で足りる）。 */
+const SITE_EDIT_PURGE_INTERVAL_MS = 86_400_000;
+let lastSiteEditPurge = 0;
 /** 会員のポイントの失効と週の見立てを見る間隔（第40.6節・第40.18節。見立ては月曜の 8 時を過ぎたら週に 1 回）。 */
 const MEMBER_EXPIRY_INTERVAL_MS = 3_600_000;
 let lastMemberExpiry = 0;
@@ -1478,6 +1494,17 @@ async function patrolOnce(): Promise<void> {
       if (n > 0) log.info('ゴミ箱の意思決定支援の相談を消しました', { purged: n });
     } catch (err) {
       log.warn('ゴミ箱の意思決定支援の相談を消せませんでした', { err });
+    }
+  }
+
+  if (Date.now() - lastSiteEditPurge >= SITE_EDIT_PURGE_INTERVAL_MS) {
+    lastSiteEditPurge = Date.now();
+    try {
+      let n = 0;
+      for (const id of await repo.listTenantIds()) n += await siteUpdates.purgeOld(id);
+      if (n > 0) log.info('90 日を過ぎたサイトの直しの本文を消しました', { purged: n });
+    } catch (err) {
+      log.warn('サイトの直しの本文を消せませんでした', { err });
     }
   }
 

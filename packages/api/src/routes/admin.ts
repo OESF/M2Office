@@ -469,6 +469,8 @@ export function adminRoute(deps: AppDeps) {
       await deps.retention.purgeUser(tenant.id, next.id, now);
       // 資料の目録も消す（第44.9節・第44.10節）。ドライブのファイルは Workspace の管理者の手順で引き継ぐ
       await deps.library.service.purgeOwner(tenant.id, next.id);
+      // 本人の WordPress の接続も消す（第45.16節、Q-338）
+      await deps.siteUpdates.service.removeWordPressUser(tenant.id, next.id);
       personalCards = await deps.cards.store.countPersonalContacts(tenant.id, next.id);
     }
     // 変える前のロールも残す（管理者が増えたことを、不正の兆しの見張りが見分けるため。第16.8.4節）

@@ -41,6 +41,7 @@ export type Route =
   | { kind: 'reservations' }
   /** 補助金・助成金の案内（仕様書 第39章）。 */
   | { kind: 'subsidies' }
+  | { kind: 'siteUpdates' }
   | { kind: 'decisions'; decisionId: string | null }
   /** 会員とポイント（仕様書 第40章）。`memberId` があれば 1 人。 */
   | { kind: 'members'; memberId: string | null }
@@ -93,6 +94,7 @@ export function parseRoute(pathname: string): Route {
     case 'sales': return second === undefined ? { kind: 'sales', itemId: null } : id(second) ? { kind: 'sales', itemId: id(second) } : { kind: 'unknown' };
     case 'reservations': return second === undefined ? { kind: 'reservations' } : { kind: 'unknown' };
     case 'subsidies': return second === undefined ? { kind: 'subsidies' } : { kind: 'unknown' };
+    case 'site-updates': return second === undefined ? { kind: 'siteUpdates' } : { kind: 'unknown' };
     case 'decisions': return second === undefined ? { kind: 'decisions', decisionId: null } : id(second) ? { kind: 'decisions', decisionId: id(second) } : { kind: 'unknown' };
     case 'members': return second === undefined ? { kind: 'members', memberId: null } : id(second) ? { kind: 'members', memberId: id(second) } : { kind: 'unknown' };
     case 'library': return second === undefined ? { kind: 'library', itemId: null } : id(second) ? { kind: 'library', itemId: id(second) } : { kind: 'unknown' };
@@ -126,6 +128,7 @@ export function routePath(route: Route): string {
     case 'sales': return route.itemId ? `/sales/${enc(route.itemId)}` : '/sales';
     case 'reservations': return '/reservations';
     case 'subsidies': return '/subsidies';
+    case 'siteUpdates': return '/site-updates';
     case 'decisions': return route.decisionId ? `/decisions/${enc(route.decisionId)}` : '/decisions';
     case 'members': return route.memberId ? `/members/${enc(route.memberId)}` : '/members';
     case 'library': return route.itemId ? `/library/${enc(route.itemId)}` : '/library';

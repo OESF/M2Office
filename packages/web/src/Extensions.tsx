@@ -307,6 +307,17 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.announcements && on && <AnnouncementFields settings={x.announcements} busy={busy} onChanged={onChanged} />}
       {/* お知らせの出し先の WordPress と LINE は「接続」でつなぐ（第35章・第6.6.2.1節） */}
       {x.announcements && on && <div className="row wrap small ext-inventory"><ConnectorLink page="wordpress">WordPress の接続</ConnectorLink><ConnectorLink page="line">LINE 公式アカウントの接続</ConnectorLink></div>}
+      {/* サイトの更新: 管理者の承認も加えるか（第45.6節）。直すサイトは「接続」の WordPress（第45.2節） */}
+      {x.siteUpdates && on && (
+        <div className="small ext-inventory">
+          <label className="check">
+            <input type="checkbox" checked={x.siteUpdates.adminApproval} disabled={busy}
+              onChange={(e) => void api.admin.setSiteUpdatesAdminApproval(e.target.checked).then(onChanged)} />
+            サイトの直しは管理者も承認する
+          </label>
+          <div className="row wrap"><ConnectorLink page="wordpress">WordPress の接続</ConnectorLink></div>
+        </div>
+      )}
       {x.webReview && on && <WebReviewFields settings={x.webReview} busy={busy} onChanged={onChanged} />}
       {x.contracts && on && <ContractStorageFields settings={x.contracts} busy={busy} onChanged={onChanged} />}
       {x.salesDocs && on && <SalesDocsFields settings={x.salesDocs} busy={busy} onChanged={onChanged} />}

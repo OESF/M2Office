@@ -94,6 +94,8 @@
 | `sheets.get` | read | `drive.file`（機密でない） | 前に作った表を読みます（直すため） |
 | `sheets.list` | read | `drive.file`（機密でない） | あなたが作った表と、会社で共有された表の一覧を読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
+| `site_updates.list` | read | — | サイトの直しの記録（いつ・どのページを・どう直したか・元に戻せるか）を読みます |
+| `site_updates.term_list` | read | — | 会社の Web サイト（WordPress）のカテゴリーとタグの一覧（名前・親・記事の数）を読みます |
 | `skill.read` | read | — | このスキルに入っている資料を読みます |
 | `slides.get` | read | `drive.file`（機密でない） | 前に作ったスライドの構成を読みます（直すため） |
 | `slides.list` | read | `drive.file`（機密でない） | あなたが作ったスライドと、会社で共有されたスライドの一覧を読みます |
@@ -176,6 +178,10 @@
 | `sales.update_order` | write-internal | — | 受注の納期・品目などを直す、または取り消します（社内の記録だけ） |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
 | `sheets.share` | write-internal | `drive.file`（機密でない） | 作った表を、会社の中で共有するか、自分だけにするかを切り替えます。社外には共有しません |
+| `site_updates.actions` | write-internal | — | 頼みに合わせて、会社の Web サイト（WordPress）に新しい記事と固定ページを作る（本文とアイキャッチも作る）・公開や下書きや予約やゴミ箱に変える・前の版に戻す直し案を作り、承認へ進めます。サイトに入れるのは承認の後です |
+| `site_updates.propose` | write-internal | — | 頼みに合わせて、会社の Web サイト（WordPress）の直すページと場所を探し、直す前と後の直し案を作って承認へ進めます。サイトに入れるのは承認の後です |
+| `site_updates.revert` | write-internal | — | 入れたサイトの直しを、直す前の文に戻す案を作って承認へ進めます（90 日の間。戻すのも承認の後です） |
+| `site_updates.terms` | write-internal | — | 頼みに合わせて、会社の Web サイト（WordPress）のカテゴリーとタグを作る・名前を変える・記事に付ける・外す直し案を作り、承認へ進めます。サイトに入れるのは承認の後です |
 | `slides.share` | write-internal | `drive.file`（機密でない） | 作ったスライドを、会社の中で共有するか、自分だけにするかを切り替えます。社外には共有しません |
 | `subsidies.mark` | write-internal | — | 補助金・助成金の候補を「気になる」か「見送り」にします |
 | `tasks.complete` | write-internal | `tasks`（機密） | ToDo を完了にします |
@@ -196,6 +202,7 @@
 | `members.send_line` | external-send | — | 承認された会員への知らせを、LINE で 1 人ずつ送ります |
 | `schedule.invite` | external-send | — | 社外の方が選んだ日時で予定を作り、参加者を招待します。必ずあなたの確認の後に行います |
 | `schedule.send_candidates` | external-send | — | 社外の方に日程の候補をメールで送り、候補の時間をあなたのカレンダーに仮押さえします。必ずあなたの確認の後に行います |
+| `site_updates.apply` | external-send | — | 承認されたサイトの直しを WordPress に入れ、公開のページに出たかを確かめます。公開中のページはすぐに変わります |
 | `web_review.request_send` | external-send | `gmail.send`（機密） | 直すべき所の依頼文を、承認の後に制作会社へ送ります |
 | `sales.issue` | financial | — | 注文書・請求書・領収書の下書きを発行します（番号を付けます）。必ずあなたの確認の後に行います |
 
@@ -273,6 +280,8 @@
 | `sheets.get` | `draftId`（必須）: 表の ID（sheets.list の id） |
 | `sheets.list` | なし |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
+| `site_updates.list` | なし |
+| `site_updates.term_list` | なし |
 | `skill.read` | `path`（必須）: ファイルの相対パス |
 | `slides.get` | `deckId`（必須）: スライドの ID（slides.list の id） |
 | `slides.list` | なし |
@@ -356,6 +365,10 @@
 | `sales.update_order` | `number`（必須）: 受注番号か相手の注文番号、`dueOn`: 納期、`orderedOn`: 注文日、`customerRef`: 相手の注文番号、`deliverTo`: 納品先、`terms`: 支払い条件、`items`: 品目（すべて置き換える）、`cancelReason`: 取り消すときの理由 |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
 | `sheets.share` | `draftId`（必須）: 表の ID（sheets.draft の draftId か sheets.list の id）、`sharing`（必須）: 「会社で共有」か「自分だけ」 |
+| `site_updates.actions` | `request`（必須）: 依頼者の頼み（そのまま） |
+| `site_updates.propose` | `request`（必須）: 依頼者の頼み（そのまま） |
+| `site_updates.revert` | `editId`: 戻す直しの ID（省くと、いちばん新しい元に戻せる直し） |
+| `site_updates.terms` | `request`（必須）: 依頼者の頼み（そのまま） |
 | `slides.share` | `deckId`（必須）: スライドの ID（slides.create の deckId か slides.list の id）、`sharing`（必須）: 「会社で共有」か「自分だけ」 |
 | `subsidies.mark` | `query`（必須）: 制度の名前の言葉、`status`（必須）: interested・skipped・new |
 | `tasks.complete` | `taskId`（必須）: ToDo の ID |
@@ -376,6 +389,7 @@
 | `members.send_line` | `messageId`（必須）: 知らせの ID |
 | `schedule.invite` | `requestId`（必須）: 日程調整の ID |
 | `schedule.send_candidates` | `title`（必須）: 打ち合わせの件名、`attendees`（必須）: 参加者全員のメールアドレス（社内と社外）、`candidates`（必須）: 候補。{ start, end } の配列（3 つ）、`subject`（必須）: メールの件名、`body`（必須）: メールの本文（候補の日時を並べ、どれがよいかを尋ねる） |
+| `site_updates.apply` | `editId`（必須）: 直しの ID |
 | `web_review.request_send` | `findingId`（必須）: 直すべき所の ID、`to`（必須）: 宛先のメールアドレス |
 | `sales.issue` | `documentId`（必須）: 発行する下書きの documentId |
 

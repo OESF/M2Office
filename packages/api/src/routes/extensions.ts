@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { bodyLimit } from 'hono/body-limit';
 import { Hono } from 'hono';
 import { maskClientId,
-  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
+  CARDS_EXTENSION_ID, HR_EXTENSION_ID, INVENTORY_EXTENSION_ID, INVENTORY_FEATURES, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, WEB_COLUMNS_EXTENSION_ID, INQUIRIES_EXTENSION_ID, COMPETITORS_EXTENSION_ID, ANNOUNCEMENTS_EXTENSION_ID, WEB_REVIEW_EXTENSION_ID, CONTRACTS_EXTENSION_ID, SALES_DOCS_EXTENSION_ID, SUBSIDIES_EXTENSION_ID, SITE_UPDATES_EXTENSION_ID, MEMBERS_EXTENSION_ID, WEB_REVIEW_SCOPES, COLUMN_INDUSTRIES, type WebColumnSettings, type HrSettings, type InventorySettings, type RiskLevel, type SignageSettings,
 } from '@m2office/shared';
 import { type BookingSourceRecord,
   builtinSection, encodeFiles, isDemoTenantId, unpackExtension, EXTENSION_FILE_MAX_BYTES,
@@ -135,6 +135,8 @@ export function extensionsRoute(deps: AppDeps) {
         ...(e.pkg.manifest.id === COMPETITORS_EXTENSION_ID ? { competitors: settings.competitors } : {}),
         // お知らせの作成: Web を公開まで行うか・カテゴリー・流す画面（第35.4節）
         ...(e.pkg.manifest.id === ANNOUNCEMENTS_EXTENSION_ID ? { announcements: settings.announcements } : {}),
+        // サイトの更新: 管理者の承認も加えるか（第45.6節）
+        ...(e.pkg.manifest.id === SITE_UPDATES_EXTENSION_ID ? { siteUpdates: settings.siteUpdates } : {}),
         // Webの分析: 担当の許可・選んだプロパティとサイト（第34.18節。トークンは返さない）
         ...(e.pkg.manifest.id === WEB_REVIEW_EXTENSION_ID ? { webReview: settings.webReview } : {}),
         // 契約の管理: 契約書の置き場（第38.7節）
@@ -181,6 +183,30 @@ export function extensionsRoute(deps: AppDeps) {
       occurredAt: new Date().toISOString(),
     });
     return c.json({ ok: true, defaultScope: next.defaultScope, mailSignature: next.mailSignature, bulkMailAdminApproval: next.bulkMailAdminApproval });
+  });
+
+  /** 一人ひとりの WordPress の接続をしている人（第45.16節、Q-337）。WordPress の利用者名と役割だけで、パスワードは返さない。 */
+  app.get(`/${SITE_UPDATES_EXTENSION_ID}/wordpress-users`, async (c) => {
+    const { tenant } = c.get('ctx');
+    const users = await deps.repo.listUsers(tenant.id);
+    const name = (id: string) => users.find((u) => u.id === id)?.displayName ?? id;
+    return c.json({ items: (await deps.siteUpdates.service.wordpressUsers(tenant.id)).map((u) => ({ ...u, name: name(u.userId) })) });
+  });
+
+  /**
+   * サイトの更新の会社の設定を変える。依頼した本人の承認のあとに、管理者の承認も加えるか（第45.6節、Q-331）。
+   */
+  app.put(`/${SITE_UPDATES_EXTENSION_ID}/settings`, async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ adminApproval?: unknown }>().catch(() => ({} as { adminApproval?: unknown }));
+    if (typeof body.adminApproval !== 'boolean') return c.json({ error: 'adminApproval は true か false です' }, 400);
+    const next = { ...(await deps.repo.getTenantSettings(tenant.id)).siteUpdates, adminApproval: body.adminApproval };
+    await deps.repo.saveTenantSettings(tenant.id, 'siteUpdates', next, user.id);
+    await deps.repo.appendAudit({
+      id: randomUUID(), tenantId: tenant.id, actorType: 'user', actorId: user.id, action: 'settings.update',
+      targetType: 'settings', targetId: 'siteUpdates', detail: { adminApproval: next.adminApproval }, occurredAt: new Date().toISOString(),
+    });
+    return c.json({ ok: true, adminApproval: next.adminApproval });
   });
 
   /** 配信を停止したアドレスの一覧（新しい順。`q` でアドレスの一部を探す。第27.9.1節「停止を外す」）。 */
@@ -405,10 +431,14 @@ export function extensionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
     const s = (v: unknown) => (typeof v === 'string' ? v : '');
+    const before = (await deps.repo.getTenantSettings(tenant.id)).webColumns.wordpress;
     const res = await deps.columns.service.saveWordPress({ tenantId: tenant.id, userId: user.id }, {
       siteUrl: s(body['siteUrl']), username: s(body['username']), password: s(body['password']),
     });
-    return 'error' in res ? c.json({ error: res.error }, 400) : c.json({ ok: true, wordpress: res.wordpress });
+    if ('error' in res) return c.json({ error: res.error }, 400);
+    // サイトを変えたら、一人ひとりの WordPress の接続は前のサイトのものなので消す（第45.16節、Q-338）
+    if (before && before.siteUrl !== res.wordpress.siteUrl) await deps.siteUpdates.service.removeAllWordPressUsers(tenant.id);
+    return c.json({ ok: true, wordpress: res.wordpress });
   });
 
   /**
@@ -599,6 +629,8 @@ export function extensionsRoute(deps: AppDeps) {
   app.delete(`/${WEB_COLUMNS_EXTENSION_ID}/wordpress`, async (c) => {
     const { tenant, user } = c.get('ctx');
     await deps.columns.service.removeWordPress({ tenantId: tenant.id, userId: user.id });
+    // 会社のサイトが無くなるので、一人ひとりの WordPress の接続も消す（第45.16節、Q-338）
+    await deps.siteUpdates.service.removeAllWordPressUsers(tenant.id);
     return c.json({ ok: true });
   });
 

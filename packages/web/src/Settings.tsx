@@ -9,7 +9,7 @@ import { AVATAR_PRESETS, TEXT_SIZES, TEXT_SIZE_STANDARD, BRIEF_SECTIONS, WEEKLY_
 import {
   api, describeError, type MyConnectionView,
   type AgentSummary, type ConversationView, type Me, type MemoryView,
-  type MyGoogle, type PromotionView, type CardsGoogle,
+  type MyGoogle, type PromotionView, type CardsGoogle, type WordPressUserView,
 } from './api.js';
 import { useTheme, type ThemeChoice } from './theme.js';
 import { useTextSize } from './text-size.js';
@@ -920,6 +920,7 @@ function AppLinkCards() {
 function ServicesSettings() {
   const [items, setItems] = useState<MyConnectionView[] | null>(null);
   const [canvaNone, setCanvaNone] = useState(false);
+  const [wordpressNone, setWordpressNone] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const load = () => api.myConnections().then((r) => setItems(r.items)).catch((e) => setMsg({ ok: false, text: describeError(e, '読み込めませんでした') }));
@@ -963,8 +964,9 @@ function ServicesSettings() {
     <>
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
       <CanvaCard onNone={() => setCanvaNone(true)} />
+      <WordPressUserCard onNone={() => setWordpressNone(true)} />
       <AppLinkCards />
-      {items.length === 0 && canvaNone && <p className="muted">接続できるサービスはありません</p>}
+      {items.length === 0 && canvaNone && wordpressNone && <p className="muted">接続できるサービスはありません</p>}
       {items.map((c) => (
         <div key={c.id} className="card">
           <h3>{c.name}</h3>
@@ -988,6 +990,67 @@ function ServicesSettings() {
         </div>
       ))}
     </>
+  );
+}
+
+/**
+ * 本人の WordPress の接続（仕様書 第45.16節）。サイトの更新を使えて、会社が WordPress をつないでいるときだけ出す。
+ * 本人の利用者名とアプリケーションパスワードを入れてつなぐと、サイトの更新は本人の利用者で直す。パスワードは画面に戻さない。
+ */
+function WordPressUserCard({ onNone }: { onNone: () => void }) {
+  const [s, setS] = useState<WordPressUserView | null>(null);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    api.siteUpdates.wordpressUser().then((r) => { setS(r); if (!r.siteUrl) onNone(); }).catch(() => onNone());
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!s?.siteUrl) return null;
+  const connect = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.siteUpdates.connectWordPressUser(username.trim(), password);
+      setS(r); setPassword('');
+      setMsg(r.missing.length
+        ? { ok: false, text: `つなぎました。ただし、この利用者では固定ページと記事を直せません（${r.missing.join('・')}）` }
+        : { ok: true, text: 'つなぎました' });
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e, 'つなげませんでした') });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const disconnect = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      await api.siteUpdates.disconnectWordPressUser();
+      setS({ ...s, connected: false, username: null, displayName: null, roles: [], connectedAt: null, missing: [] });
+      setMsg({ ok: true, text: '切断しました' });
+    } catch (e) {
+      setMsg({ ok: false, text: describeError(e, '切断できませんでした') });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card">
+      <h3>WordPress</h3>
+      <p className="muted small">{s.siteUrl}</p>
+      {s.connected ? (
+        <>
+          <p>接続しています（{s.displayName || s.username}{s.roles.length ? `・${s.roles.join('・')}` : ''}{s.connectedAt ? `・${new Date(s.connectedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : ''}）</p>
+          <div className="row"><button className="btn danger" disabled={busy} onClick={() => void disconnect()}>切断</button></div>
+        </>
+      ) : (
+        <div className="field">
+          <input value={username} placeholder="WordPress の利用者名" autoComplete="off" spellCheck={false} onChange={(e) => setUsername(e.target.value)} />
+          <input type="password" value={password} placeholder="アプリケーションパスワード" autoComplete="new-password" onChange={(e) => setPassword(e.target.value)} />
+          <div className="row"><button className="btn" disabled={busy || !username.trim() || !password.trim()} onClick={() => void connect()}>{busy ? '確かめています…' : '接続'}</button></div>
+        </div>
+      )}
+      {msg && <p className={msg.ok ? 'ok-msg small' : 'error small'}>{msg.text}</p>}
+    </div>
   );
 }
 

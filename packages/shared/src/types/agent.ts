@@ -22,6 +22,7 @@ import { SIGNAGE_EXTENSION_ID } from './signage.js';
 import { SUBSIDIES_EXTENSION_ID } from './subsidies.js';
 import { DECISIONS_EXTENSION_ID } from './decisions.js';
 import { LIBRARY_EXTENSION_ID } from './library.js';
+import { SITE_UPDATES_EXTENSION_ID } from './site-updates.js';
 import { WEB_COLUMNS_EXTENSION_ID } from './web-columns.js';
 import { WEB_REVIEW_EXTENSION_ID } from './web-review.js';
 
@@ -111,7 +112,7 @@ export interface ApprovalStep {
 }
 
 /** 管理者の承認を加えるかを決める会社の設定（{@link ApprovalStep.adminAlsoWhen}）。 */
-export type AdminApprovalSetting = 'cards.bulkMailAdminApproval';
+export type AdminApprovalSetting = 'cards.bulkMailAdminApproval' | 'siteUpdates.adminApproval';
 
 export type Step = AgentStep | ApprovalStep;
 
@@ -346,7 +347,7 @@ export const AGENT_AREAS: readonly AgentArea[] = [
   { id: 'cards', name: '名刺管理', categories: [], extensions: [CARDS_EXTENSION_ID] },
   { id: 'customers', name: '問い合わせと会員', categories: [], extensions: [INQUIRIES_EXTENSION_ID, MEMBERS_EXTENSION_ID] },
   { id: 'columns', name: 'コラムの作成', categories: [], extensions: [WEB_COLUMNS_EXTENSION_ID] },
-  { id: 'promotion', name: 'お知らせと販促', categories: [], extensions: [ANNOUNCEMENTS_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, SIGNAGE_EXTENSION_ID] },
+  { id: 'promotion', name: 'お知らせと販促', categories: [], extensions: [ANNOUNCEMENTS_EXTENSION_ID, SITE_UPDATES_EXTENSION_ID, PRINT_DESIGNS_EXTENSION_ID, SIGNAGE_EXTENSION_ID] },
   { id: 'market', name: 'Webと競合の分析', categories: [], extensions: [WEB_REVIEW_EXTENSION_ID, COMPETITORS_EXTENSION_ID] },
   {
     id: 'admin', name: '契約と総務', categories: [],

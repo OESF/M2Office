@@ -19,7 +19,7 @@ import {
   alwaysRequiresApproval, canDecide, canUseAgent, writeInternalNeedsApproval,
   type AutomationPolicy, type TenantSettings, type WritingStyle,
   type AgentDefinition, type AgentStep, type ApprovalStep, type Approval, type Job, type Run,
-  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, type ReservationSettings,
+  type RunStep, type Step, type ContactScope, type InventorySettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, type ReservationSettings, type SiteUpdatesSettings,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmMessage, LlmProvider, LlmResponse } from '../llm/provider.js';
@@ -57,6 +57,7 @@ import type { MemberService } from '../members/service.js';
 import type { DeliveryService } from '../deliveries/service.js';
 import type { PrintDesignService } from '../print-designs/service.js';
 import type { LibraryService } from '../library/service.js';
+import type { SiteUpdateService } from '../site-updates/service.js';
 import type { MailStore } from '../mail/store.js';
 import type { ReservationService } from '../reservations/service.js';
 import type { ColumnPlanner } from '../columns/planner.js';
@@ -253,6 +254,11 @@ export interface RunEngineDeps {
   library?: {
     service: LibraryService;
     access(tenantId: string, userId: string): Promise<LibrarySettings | null>;
+  };
+  /** サイトの更新（内蔵の拡張。仕様書 第45章）。ツールに渡す。 */
+  siteUpdates?: {
+    service: SiteUpdateService;
+    access(tenantId: string, userId: string): Promise<SiteUpdatesSettings | null>;
   };
   /** メールの片付け（仕様書 第9.5.1.1節）。メールの返事を送る業務と朝のブリーフのツールに渡す。 */
   mail?: { store: MailStore };
@@ -1206,6 +1212,10 @@ export class RunEngine {
       ...(this.deps.library ? {
         library: { service: this.deps.library.service, access: () => this.deps.library!.access(run.tenantId, requestedBy) },
       } : {}),
+      // サイトの更新（第45章）
+      ...(this.deps.siteUpdates ? {
+        siteUpdates: { service: this.deps.siteUpdates.service, access: () => this.deps.siteUpdates!.access(run.tenantId, requestedBy) },
+      } : {}),
       ...(this.deps.printDesigns ? {
         printDesigns: { service: this.deps.printDesigns.service, access: () => this.deps.printDesigns!.access(run.tenantId, requestedBy) },
       } : {}),
@@ -1491,8 +1501,8 @@ export function needsHuman(
   });
 }
 
-/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるもの・問い合わせの返事・サイネージの画面に流すものも人が見る（仕様書 第9.4.0節・第32.18.1節・第32.18.6節・第33.18節）。 */
-const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'deliveries.send', 'columns.place', 'inquiries.reply_send', 'announcements.publish', 'web_review.request_send', 'columns.signage_publish']);
+/** 送り先に関わらず、いつも人に判断を求めるツール。メールは宛先に関わらず人が見る。Web に載せるもの・問い合わせの返事・サイネージの画面に流すもの・サイトの直しも人が見る（仕様書 第9.4.0節・第32.18.1節・第32.18.6節・第33.18節・第45.6節）。 */
+const ALWAYS_ASK = new Set(['gmail.send', 'mail.bulk_send', 'deliveries.send', 'columns.place', 'inquiries.reply_send', 'announcements.publish', 'web_review.request_send', 'columns.signage_publish', 'site_updates.apply']);
 
 /** 承認の前の確かめで、行えないと分かった操作（記録しない。ADR-0024）。 */
 type UnableCall = {

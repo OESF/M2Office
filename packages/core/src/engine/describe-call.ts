@@ -88,6 +88,9 @@ export function describeCall(call: DescribedCall, ctx: DescribeContext = {}): st
     case 'announcements.publish':
       // 出し先ごとの見え方・送る数・出す日時は、確かめた結果の文に入っている（第35.5節 ③）
       return `**お知らせを出します**（Web サイトへの公開・LINE の一斉配信は社外への送信です）\n${call.shown ?? ''}`;
+    case 'site_updates.apply':
+      // ページごとの直す前と後は、確かめた結果の文に入っている（第45.6節）
+      return `**会社の Web サイト（WordPress）のページを直します**（公開中のページは、承認するとすぐに変わります）\n${call.shown ?? ''}`;
     case 'web_review.request_send':
       // 宛先・差出人・件名・本文は、確かめた結果の文に入っている（第34.21節）
       return `**制作会社に Web の直しの依頼文を送ります**\n${call.shown ?? ''}`;

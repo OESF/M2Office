@@ -1084,8 +1084,9 @@ export class PostgresRepository implements Repository {
       members: Partial<TenantSettings['members']> | null;
       print_designs: Partial<TenantSettings['printDesigns']> | null;
       library: Partial<TenantSettings['library']> | null;
+      site_updates: Partial<TenantSettings['siteUpdates']> | null;
       ai_limits: Partial<TenantSettings['aiLimits']> | null;
-    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory, hr, signage, ai_policy, web_columns, inquiries, competitors, announcements, web_review, contracts, sales_docs, reservations, subsidies, decisions, members, print_designs, library, ai_limits
+    }>(tenantId, `select company, writing_style, automation, agents, effect, onboarding, access, slides, knowledge, privacy, dashboard, invoice, cards, inventory, hr, signage, ai_policy, web_columns, inquiries, competitors, announcements, web_review, contracts, sales_docs, reservations, subsidies, decisions, members, print_designs, library, site_updates, ai_limits
                     from tenant_settings where tenant_id = $1`,
       [tenantId]);
     const r = rows[0];
@@ -1151,6 +1152,7 @@ export class PostgresRepository implements Repository {
       members: { ...d.members, ...(r?.members ?? {}) },
       printDesigns: { ...d.printDesigns, ...(r?.print_designs ?? {}) },
       library: { ...d.library, ...(r?.library ?? {}) },
+      siteUpdates: { ...d.siteUpdates, ...(r?.site_updates ?? {}) },
       aiLimits: { ...d.aiLimits, ...(r?.ai_limits ?? {}) },
     };
   }
@@ -1162,7 +1164,7 @@ export class PostgresRepository implements Repository {
       company: 'company', writingStyle: 'writing_style', automation: 'automation', agents: 'agents',
       effect: 'effect', onboarding: 'onboarding', access: 'access', slides: 'slides', knowledge: 'knowledge', privacy: 'privacy',
       dashboard: 'dashboard', invoice: 'invoice', cards: 'cards', inventory: 'inventory', hr: 'hr', signage: 'signage',
-      aiPolicy: 'ai_policy', webColumns: 'web_columns', inquiries: 'inquiries', competitors: 'competitors', announcements: 'announcements', webReview: 'web_review', contracts: 'contracts', salesDocs: 'sales_docs', reservations: 'reservations', subsidies: 'subsidies', decisions: 'decisions', members: 'members', printDesigns: 'print_designs', library: 'library', aiLimits: 'ai_limits',
+      aiPolicy: 'ai_policy', webColumns: 'web_columns', inquiries: 'inquiries', competitors: 'competitors', announcements: 'announcements', webReview: 'web_review', contracts: 'contracts', salesDocs: 'sales_docs', reservations: 'reservations', subsidies: 'subsidies', decisions: 'decisions', members: 'members', printDesigns: 'print_designs', library: 'library', siteUpdates: 'site_updates', aiLimits: 'ai_limits',
     } as const)[section];
     // 列名は上の固定の対応表からのみ取る。利用者の入力を SQL に埋め込まない
     await this.q(tenantId,

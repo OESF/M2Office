@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { MailOverview, MailThreadDetail } from '@m2office/shared';
+import type { MailOverview, MailThreadDetail, SiteEditView } from '@m2office/shared';
 import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, LibraryFacets, LibraryItem, LibraryGraph, LibraryItemPage, LibraryItemView, LibraryMailState, LibraryProgress, LibraryShareScope, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
@@ -443,6 +443,8 @@ export interface Me {
   /** 販促物の作成を使えるか（会社の入り切りと利用範囲。仕様書 第41章）。 */
   printDesigns?: boolean;
   library?: boolean;
+  /** サイトの更新を使えるか（第45章）。 */
+  siteUpdates?: boolean;
   /** 秘書に Google ドライブのファイルを渡せるか（第10.10.8節）。 */
   driveFiles?: boolean;
   /** 本人の「給与・勤怠」を使えるか（台帳に結び付いているか。仕様書 第30.25節）。 */
@@ -1061,6 +1063,8 @@ export interface ExtensionView {
   scope: ScopeValue;
   /** 名刺管理の会社の設定（取り込んだ名刺の既定の範囲。仕様書 第27.7節）。名刺管理のときだけある。 */
   cards?: { defaultScope: ContactScope; mailSignature: boolean; bulkMailAdminApproval: boolean; optOuts: number };
+  /** サイトの更新の会社の設定（管理者の承認も加えるか。仕様書 第45.6節）。サイトの更新のときだけある。 */
+  siteUpdates?: { enabled: boolean; adminApproval: boolean };
   /** 在庫管理の会社の設定（機能の入り切りと既定の目安。仕様書 第29.4.1節）。在庫管理のときだけある。 */
   inventory?: InventorySettings;
   /** 人事・給与の会社の設定（仕様書 第30.8.1節）。人事・給与のときだけある。 */
@@ -1884,6 +1888,26 @@ export const api = {
     cardPdfUrl: (id: string) => `/v1/members/${encodeURIComponent(id)}/card.pdf`,
     /** 来店のポイント・購入の率・有効期限・LINE の会員証を直す（管理者だけ）。 */
     saveSettings: (input: Partial<MemberSettings>) => call<{ ok: true }>('/admin/extensions/members/settings', { method: 'PUT', body: JSON.stringify(input) }),
+  },
+  /** サイトの更新（内蔵の拡張。仕様書 第45章）。直し案は秘書に頼んで作る。 */
+  siteUpdates: {
+    /** 直しの記録（新しい順）。 */
+    list: () => call<{ items: SiteEditView[] }>('/site-updates'),
+    /** つないでいるサイト（名前・URL・直すときに使う利用者・直せるか）。 */
+    site: () => call<{
+      connected: boolean; siteUrl: string | null; name: string | null; description: string | null;
+      account: { kind: 'user' | 'company'; username: string; displayName: string | null; roles: string[] } | null;
+      missing: string[] | null; problem: string | null;
+    }>('/site-updates/site'),
+    /** 本人の WordPress の接続（第45.16節）。使えない会社・人には 403。 */
+    wordpressUser: () => call<WordPressUserView>('/site-updates/wordpress-user'),
+    /** 本人の WordPress の利用者をつなぐ。会社のサイトで確かめてから預ける。 */
+    connectWordPressUser: (username: string, password: string) =>
+      call<WordPressUserView>('/site-updates/wordpress-user', { method: 'PUT', body: JSON.stringify({ username, password }) }),
+    /** 本人の WordPress の接続を外す。 */
+    disconnectWordPressUser: () => call<{ ok: true }>('/site-updates/wordpress-user', { method: 'DELETE' }),
+    /** 元に戻す案を作り、承認へ進める。 */
+    revert: (id: string) => call<{ runId: string; edit: SiteEditView }>(`/site-updates/${encodeURIComponent(id)}/revert`, { method: 'POST', body: '{}' }),
   },
   /** 補助金・助成金の案内（内蔵の拡張。仕様書 第39章）。 */
   subsidies: {
@@ -3006,6 +3030,11 @@ export const api = {
     setCardsMailSignature: (mailSignature: boolean) =>
       call<{ ok: true }>('/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ mailSignature }) }),
     /** まとめてのメールで、本人の承認のあとに管理者の承認を加えるか（仕様書 第27.9.1節）。 */
+    /** 一人ひとりの WordPress の接続をしている人（第45.16節）。パスワードは返さない。 */
+    siteUpdatesWordPressUsers: () => call<{ items: { userId: string; name: string; username: string; displayName: string; roles: string[]; connectedAt: string }[] }>('/admin/extensions/site-updates/wordpress-users'),
+    /** サイトの直しで、本人の承認のあとに管理者の承認も加えるか（第45.6節）。 */
+    setSiteUpdatesAdminApproval: (adminApproval: boolean) =>
+      call<{ ok: true }>('/admin/extensions/site-updates/settings', { method: 'PUT', body: JSON.stringify({ adminApproval }) }),
     setCardsBulkMailAdminApproval: (bulkMailAdminApproval: boolean) =>
       call<{ ok: true }>('/admin/extensions/business-cards/settings', { method: 'PUT', body: JSON.stringify({ bulkMailAdminApproval }) }),
     /** 配信を停止したアドレスの一覧（新しい順。`q` はアドレスの一部。仕様書 第27.9.1節）。 */
@@ -3389,4 +3418,16 @@ export function logQuery(q: SystemLogQuery): string {
     p.set(k, Array.isArray(v) ? v.join(',') : String(v));
   }
   return p.toString();
+}
+
+/** 本人の WordPress の接続（個人設定。仕様書 第45.16節）。パスワードは持たない。 */
+export interface WordPressUserView {
+  connected: boolean;
+  siteUrl: string | null;
+  username: string | null;
+  displayName: string | null;
+  roles: string[];
+  connectedAt: string | null;
+  /** サイトの更新に足りない権限（つないだときだけ返る）。 */
+  missing: string[];
 }

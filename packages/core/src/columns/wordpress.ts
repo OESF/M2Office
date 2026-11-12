@@ -30,6 +30,15 @@ export function normalizeSiteUrl(raw: string): string | null {
   }
 }
 
+/**
+ * WordPress の REST API を呼ぶときの見出し（アプリケーションパスワードの Basic 認証）。
+ *
+ * @remarks サイトの更新（第45章）も同じ見出しで呼ぶ
+ */
+export function wordPressHeaders(a: WordPressAuth): Record<string, string> {
+  return headers(a);
+}
+
 function headers(a: WordPressAuth): Record<string, string> {
   // アプリケーションパスワードは空白を含めて渡してよいが、空白を除いても通る
   const token = Buffer.from(`${a.username}:${a.password.replace(/\s+/g, '')}`).toString('base64');

@@ -30,7 +30,9 @@ import { memorySemanticEnabled } from '../memory/embed.js';
 import { jstDay } from '../memory/learn.js';
 import { bulkMailRequest, contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, parseMailVerdicts } from './mail.js';
-import { CORRECTION_LIMITS, countCorrection, countRequest, phraseKey, rememberRoute, routeHints } from '../memory/corrections.js';
+import { CORRECTION_LIMITS, countCorrection, countRequest, phraseKey, rememberRoute, routeHints, routingPhrase } from '../memory/corrections.js';
+import { categoryAnswer, categoryTarget } from '../site-updates/terms.js';
+import { SITE_UPDATE_EDIT } from '../site-updates/agents.js';
 import { findThread, mailCategoryText, mailCommand, mailDraftsText, mailLessonsText, mailOverviewText, mailWaitingText, type MailCommand } from '../mail/secretary.js';
 import type { MailService } from '../mail/service.js';
 import { mailPeopleFor } from '../memory/feature-learning.js';
@@ -179,6 +181,12 @@ export class Secretary {
 
   /** 本人ごとの、最後に取り次いだ業務（取り消して別の業務を頼んだら、頼み直しとして学ぶ。第11.13.7節 ④）。 */
   private readonly lastRoutes = new Map<string, { request: string; agentId: string; runId: string; at: number }>();
+  /**
+   * 「カテゴリー」がメールとサイトのどちらか分からず聞き返した頼み（仕様書 第45.17.1節）。答えが来たら、この頼みを続ける。
+   *
+   * @remarks 10 分で忘れる。プロセスごとに持つ（取り次ぎの好みとして覚えるのは答えを聞いてから）
+   */
+  private readonly categoryAsks = new Map<string, { message: string; word: 'カテゴリー' | 'タグ'; at: number }>();
 
   constructor(private readonly deps: SecretaryDeps) {}
 
@@ -607,6 +615,56 @@ export class Secretary {
     if (mailCmd?.kind === 'teach' && mailCmd.weak && !(await this.deps.mail!.store.categories({ tenantId, userId }).catch(() => [])).length) mailCmd = null;
     // 「〇〇さんのことは忘れて」は、ふつうの記憶の直しの前に見ている（合わなかったものだけがここに来る）
     if (mailCmd?.kind === 'forget') mailCmd = null;
+    // 「カテゴリー」「タグ」がどの機能のものか（仕様書 第45.17.1節、ADR-0142）。サイトの更新を使える人だけが見分けの対象
+    const siteEdit = !pastOnly ? enabled.find((a) => a.id === SITE_UPDATE_EDIT.id) : undefined;
+    if (siteEdit) {
+      const key = `${tenantId}\u0000${userId}`;
+      const asked = this.categoryAsks.get(key);
+      const answerTo = asked && Date.now() - asked.at < 10 * 60_000 ? categoryAnswer(cmd) : null;
+      if (asked && answerTo) {
+        // 聞き返しへの答え。答えを覚え（次からは聞かない）、聞き返した頼みを続ける
+        this.categoryAsks.delete(key);
+        await rememberRoute(this.deps.repo, tenantId, userId, asked.word, answerTo === 'site' ? siteEdit.id : CATEGORY_MAIL_ROUTE, answerTo === 'site' ? siteEdit.name : 'メールのカテゴリー').catch(() => false);
+        await this.audit(tenantId, userId, 'memory.learn', 'routing');
+        if (answerTo === 'site') {
+          await this.audit(tenantId, userId, 'secretary.route', siteEdit.id);
+          return this.delegate(tenantId, userId, asked.message, siteEdit, 'サイトのカテゴリー・タグの依頼', llm);
+        }
+        const original = this.deps.mail ? mailCommand(asked.message) : null;
+        if (original) {
+          const answer = await this.answerMailCommand(tenantId, userId, original);
+          await this.audit(tenantId, userId, 'secretary.mail', original.kind);
+          return { reply: { layer: 'light', ...answer }, keep: true };
+        }
+      }
+      const target = categoryTarget(cmd);
+      if (target === 'site') {
+        await this.audit(tenantId, userId, 'secretary.route', siteEdit.id);
+        return this.delegate(tenantId, userId, message, siteEdit, 'サイトのカテゴリー・タグの依頼', llm);
+      }
+      if (target === 'library' || target === 'knowledge') {
+        // メールのカテゴリーとして拾わない（それぞれの機能に任せる）
+        if (mailCmd?.kind === 'teach') mailCmd = null;
+      }
+      if (target === 'unknown' && mailCmd?.kind === 'teach') {
+        // 手がかりが無い。前に聞いた答えを覚えていればそれに従い、無ければ 1 度だけ聞き返す（Q-339。三浦さん「わからないときは聞き返して欲しい」）
+        const word = /タグ/.test(cmd) && !/カテゴリ/.test(cmd) ? 'タグ' : 'カテゴリー';
+        const learned = (await this.deps.repo.listRoutingMemories(tenantId, userId).catch(() => []))
+          .find((m) => phraseKey(routingPhrase(m.text)) === phraseKey(word));
+        if (learned?.agentId === siteEdit.id) {
+          await this.audit(tenantId, userId, 'secretary.route', siteEdit.id);
+          return this.delegate(tenantId, userId, message, siteEdit, 'サイトのカテゴリー・タグの依頼', llm);
+        }
+        if (learned?.agentId !== CATEGORY_MAIL_ROUTE) {
+          this.categoryAsks.set(key, { message, word, at: Date.now() });
+          await this.audit(tenantId, userId, 'secretary.ask', 'category');
+          return {
+            reply: { layer: 'light', text: `メールの${word}ですか、サイト（WordPress）の${word}ですか。`, evidence: [], tokensUsed: 0 },
+            keep: true,
+          };
+        }
+      }
+    }
     if (mailCmd) {
       const answer = await this.answerMailCommand(tenantId, userId, mailCmd);
       await this.audit(tenantId, userId, 'secretary.mail', mailCmd.kind);
@@ -1895,3 +1953,6 @@ export function rerouteRest(cmd: string): string | null {
   }
   return null;
 }
+
+/** 「カテゴリー」はメールのものだ、と覚えたときの取り次ぎの好みの印（業務の ID ではない。仕様書 第45.17.1節）。 */
+const CATEGORY_MAIL_ROUTE = 'mail:categories';
