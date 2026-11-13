@@ -79,6 +79,11 @@ export interface SecurityStore {
   googleState(tenantId: string): Promise<GoogleReadState>;
   /** Google のログインの記録を読んだ様子を直す（渡した項目だけ）。 */
   setGoogleState(tenantId: string, patch: Partial<GoogleReadState>): Promise<void>;
+  /**
+   * 朝のまとめをこの日に送る番を取る（移行 202）。まだその日に送っていなければ印を付けて `true`、送っていれば `false`。
+   * ワーカーが起き直しても、同じ日のまとめを 2 度送らないため。
+   */
+  claimDigest(tenantId: string, day: string): Promise<boolean>;
 }
 
 interface SignalRow { id: string; type: SecuritySignalType; severity: 'high' | 'medium'; user_id: string | null; key: string; detail: Record<string, unknown> | null; created_at: unknown }
@@ -199,6 +204,16 @@ export class PostgresSecurityStore implements SecurityStore {
          google_error_notified_on = excluded.google_error_notified_on`,
       [tenantId, next.readAt, next.errorAt, next.errorNotifiedOn]);
   }
+
+  async claimDigest(tenantId: string, day: string): Promise<boolean> {
+    // 印を付けられたときだけ行が返る（同じ日の印がすでにあれば、更新の条件に当たらず返らない）
+    const rows = await this.q(tenantId,
+      `insert into security_watch_state (tenant_id, last_scan_at, digest_sent_on) values ($1, now(), $2)
+       on conflict (tenant_id) do update set digest_sent_on = excluded.digest_sent_on
+         where security_watch_state.digest_sent_on is distinct from excluded.digest_sent_on
+       returning tenant_id`, [tenantId, day]);
+    return rows.length > 0;
+  }
 }
 
 /** メモリの見張りの置き場（試験用）。端末と監査ログの数は、渡したものを読む。 */
@@ -279,5 +294,13 @@ export class MemorySecurityStore implements SecurityStore {
 
   async setGoogleState(tenantId: string, patch: Partial<GoogleReadState>): Promise<void> {
     this.google.set(tenantId, { ...(await this.googleState(tenantId)), ...patch });
+  }
+
+  readonly digests = new Map<string, string>();
+
+  async claimDigest(tenantId: string, day: string): Promise<boolean> {
+    if (this.digests.get(tenantId) === day) return false;
+    this.digests.set(tenantId, day);
+    return true;
   }
 }

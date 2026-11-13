@@ -48,6 +48,11 @@ export interface ConnectorAuth {
   accountUrl?: string;
   /** `api_key`: 鍵を載せる見出しの名前。既定は `Authorization`（`Bearer <鍵>` の形）。 */
   header?: string;
+  /**
+   * `api_key`: 鍵の形。`bearer`（既定。`Bearer <鍵>`）か `basic`（利用者名とパスワード。`Basic <base64>`。
+   * WordPress のアプリケーションパスワードで MCP Adapter につなぐときなど。仕様書 第45.18.5節）。
+   */
+  scheme?: 'bearer' | 'basic';
 }
 
 /** コネクタが提供するツールの宣言。 */
@@ -114,6 +119,7 @@ export function checkConnector(c: ConnectorDeclaration, reserved: ReadonlySet<st
     if (c.auth.header !== undefined && !/^[A-Za-z0-9-]{1,64}$/.test(c.auth.header)) {
       p.push('auth.header は見出しの名前（英数字とハイフン）で書いてください');
     }
+    if (c.auth.scheme !== undefined && c.auth.scheme !== 'bearer' && c.auth.scheme !== 'basic') p.push('auth.scheme は bearer か basic です');
   }
   // 認証の要る接続は、登録した直後はツールが分からない（認可のあとで問い合わせる。第12.11.6.2節）
   const needsAuth = c.auth?.type === 'oauth' || c.auth?.type === 'api_key';

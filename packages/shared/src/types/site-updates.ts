@@ -89,7 +89,9 @@ export interface SiteTermChangeView {
 
 /** 段 2a の直し 1 つ（画面と秘書に見せる。第45.18.1節）。 */
 export interface SiteActionView {
-  kind: 'create' | 'status' | 'revision' | 'featured';
+  kind: 'create' | 'status' | 'revision' | 'featured' | 'image' | 'content' | 'comment' | 'reply' | 'menu' | 'menuOrder' | 'setting' | 'globalStyles';
+  /** 入れる画像のファイル（渡した画像・資料の画像・AI の挿絵。小さな見本を出す。第45.18.2節）。 */
+  images?: string[];
   /** 人が読む 1 行（「記事『秋のお知らせ』を作る（下書き）」など）。 */
   text: string;
   /** 作った・直した記事の URL（分かるとき）。 */

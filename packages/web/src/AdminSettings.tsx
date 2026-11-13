@@ -16,6 +16,7 @@ import { SLIDE_DESIGNS, TAX_CATEGORY_LABELS, type TaxRateEntry } from '@m2office
 import { api, describeError, type ConsolidationView, type KnowledgeItemView, type KnowledgeSectionView, type KnowledgeVersionView } from './api.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
+import { CompanyDesignSettings } from './CompanyDesign.js';
 import { CompartmentSettings, GroupSettings, ScopeField, useAccessOptions } from './Scope.js';
 import { SlideDesignPicker, useSlideThemes, DocTemplatePicker, DOC_STANDARD } from './slide-design-picker.js';
 
@@ -248,6 +249,7 @@ export function CompanySettings({ page }: { page: string }) {
         <SaveButton run={() => api.admin.saveSettings('writingStyle', style)} />
       </div>
       )}
+      {page === 'design' && <CompanyDesignSettings />}
       {page === 'invoice' && <InvoiceStyleSettings initial={data.invoice} onSaved={() => void reload()} />}
       {page === 'slides' && (
         <SlideTemplateSettings
@@ -262,6 +264,7 @@ export function CompanySettings({ page }: { page: string }) {
 /** 小分けの題名（第6.6.0.1節）。左のメニューと題名で同じ言葉を使う。 */
 const TITLES: Record<string, string> = {
   basic: '基本情報',
+  design: '会社の見た目',
   writing: '自社の書き方',
   invoice: '帳票の体裁',
   slides: 'スライドと文書の見本',
@@ -271,6 +274,7 @@ const TITLES: Record<string, string> = {
 /** 小分けごとの「？」の説明（仕様書 第6.10.4.4節）。開いている画面のことを書く。 */
 const COMPANY_HELP: Record<string, PageHelp> = {
   basic: { article: 'admin-setup', text: '正式な会社名・住所・会計年度など、会社の基本の値です。帳票とメールの署名に使います。' },
+  design: { article: 'admin-company-design', text: '会社の色・文字・形・写真と絵の雰囲気・文の調子です。コラムの画像・販促物・アイキャッチがこれに合わせます。DESIGN.md で取り込みと書き出しができます。' },
   writing: { article: 'admin-setup', text: '自社の呼び方・書き出し・結び・署名など、すべての業務が文面を作るときに従う書き方です。業務ごとには変えられません。' },
   invoice: { article: 'admin-setup', text: '請求書などの PDF に出すロゴ・振込先・支払期限・備考です。文面の書き方は「自社の書き方」で決めます。' },
   slides: { article: 'admin-slides', text: 'Google スライドで作った自社のファイルを、スライドを作るときの見本として使います。URL を貼るだけで登録できます。' },

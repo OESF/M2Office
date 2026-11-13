@@ -7,6 +7,7 @@
  * カバー画像（第32.7.1節・第32.18.2節）は版に含め、書き上げたときと「作り直す」で作る。
  */
 
+import type { CompanyDesignTokens } from '@m2office/shared';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   canUseAgent, WEB_COLUMNS_EXTENSION_ID,
@@ -41,6 +42,8 @@ export interface ColumnViewer {
 
 /** 使うもの。 */
 export interface ColumnServiceDeps {
+  /** 会社の見た目（第46.5節）。あれば型の色と挿絵の雰囲気に使う。無ければロゴから推し量る */
+  design?(tenantId: string): Promise<CompanyDesignTokens | null>;
   store: ColumnStore;
   repo: Repository;
   box: SecretBox;
@@ -620,7 +623,10 @@ export class ColumnService {
       else {
         const tries = Math.min(COVER_AI_TRIES, usage!.limit - usage!.used);
         // 雰囲気: 秘書への頼みを先に、無ければ「リクエスト」に書いた画像の希望（画像の希望だけを取り出し、会社やお客様の情報は渡さない）
-        const hint = (req.hint?.trim() || (a.request ? await imageWish(llm, a.request) : '')).slice(0, 200);
+        const wish = (req.hint?.trim() || (a.request ? await imageWish(llm, a.request) : '')).slice(0, 200);
+        // 会社の見た目の雰囲気と色の調子を添える（頼まれた雰囲気を先に。第46.5節）
+        const design = await this.deps.design?.(who.tenantId).catch(() => null);
+        const hint = [wish, design ? `写真と絵の雰囲気: ${design.imagery}。色の調子: ${design.colors.primary} と ${design.colors.accent} に合う色` : ''].filter(Boolean).join('。').slice(0, 300);
         for (let i = 0; i < tries; i++) {
           aiAttempts += 1;
           const img = await llm.generateImage!({
@@ -657,7 +663,9 @@ export class ColumnService {
 
     // ③ 型
     const pattern = pickPattern(await store.recentPatterns(who.tenantId, 6));
-    const color = (logo ? await this.logoColor(who.tenantId, settings.company.logoFileId!, llm, logo) : null) ?? fallbackColor(a.title);
+    // 型の色: 会社の見た目の主の色 → ロゴから推し量った色 → 題名から決める色（第46.5節）
+    const design = await this.deps.design?.(who.tenantId).catch(() => null);
+    const color = design?.colors.primary ?? (logo ? await this.logoColor(who.tenantId, settings.company.logoFileId!, llm, logo) : null) ?? fallbackColor(a.title);
     return this.saveCover(who, { ...base, background: { kind: 'template', pattern, color } },
       { kind: 'template', pattern, photoId: null, aiAttempts, note: notes.join('／'), alt: altText(a.title, 'template') });
   }

@@ -79,7 +79,10 @@ export function mcpConnectionsRoute(deps: AppDeps) {
       const secret = await deps.repo.getConnectionSecret(tenant.id, x.id);
       const preset = presetById(x.auth.preset);
       if (x.auth.type === 'api_key') {
-        return { type: 'api_key', text: AUTH_WORDS.api_key, ready: !!secret?.apiKeyEnc, keySet: !!secret?.apiKeyEnc, header: x.auth.header ?? 'Authorization' };
+        return {
+          type: 'api_key', text: x.auth.scheme === 'basic' ? '会社の利用者名とパスワード（Basic）' : AUTH_WORDS.api_key, ready: !!secret?.apiKeyEnc, keySet: !!secret?.apiKeyEnc,
+          header: x.auth.scheme === 'basic' ? 'Authorization' : x.auth.header ?? 'Authorization', scheme: x.auth.scheme ?? 'bearer',
+        };
       }
       return {
         // 会社が登録したアプリがあるか、相手がアプリの自動登録に対応していれば使える（第12.11.6.2節、Q-99）
@@ -134,8 +137,9 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     const id = String(body.id ?? '').trim() || preset?.id || idFromUrl(url);
     const existing = await deps.repo.listConnections(tenant.id);
     if (existing.some((x) => x.id === id)) return c.json({ error: `ID ${id} の接続はすでにあります。別の ID にしてください` }, 400);
-    const type = preset?.auth.type ?? (body.auth === 'oauth' || body.auth === 'api_key' ? body.auth : 'none');
-    let auth: ConnectorAuth = preset ? { ...preset.auth } : { type };
+    // 「basic」は会社の鍵の一つ（利用者名とパスワードを Basic の形で送る。第45.18.5節）
+    const type = preset?.auth.type ?? (body.auth === 'oauth' || body.auth === 'api_key' ? body.auth : body.auth === 'basic' ? 'api_key' : 'none');
+    let auth: ConnectorAuth = preset ? { ...preset.auth } : { type, ...(body.auth === 'basic' ? { scheme: 'basic' as const } : {}) };
     let tools: TenantConnection['tools'] = [];
     // URL の形と宛先を、接続を試す前に確かめる（社内のアドレスへ送らせない。2026-10-12 の点検）
     const urlProblems = checkConnector({ id, name: id, transport: 'http', url, auth, tools: [] } as unknown as Parameters<typeof checkConnector>[0], deps.hub.builtinPrefixes())
@@ -186,7 +190,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const conn = (await deps.repo.listConnections(tenant.id)).find((x) => x.id === c.req.param('id'));
     if (!conn) return c.json({ error: '接続が見つかりません' }, 404);
-    const body = await c.req.json<{ clientId?: string; clientSecret?: string; apiKey?: string }>().catch(() => ({}) as Record<string, never>);
+    const body = await c.req.json<{ clientId?: string; clientSecret?: string; apiKey?: string; username?: string; password?: string }>().catch(() => ({}) as Record<string, never>);
     const prev = await deps.repo.getConnectionSecret(tenant.id, conn.id);
     const now = new Date().toISOString();
     if (conn.auth.type === 'oauth') {
@@ -205,7 +209,15 @@ export function mcpConnectionsRoute(deps: AppDeps) {
       return c.json({ ok: true, reset });
     }
     if (conn.auth.type === 'api_key') {
-      const key = String(body.apiKey ?? '').trim();
+      let key = String(body.apiKey ?? '').trim();
+      if (conn.auth.scheme === 'basic') {
+        const username = String(body.username ?? '').trim();
+        // アプリケーションパスワードは 4 文字ごとの空白つきで表示される。空白は外して預かる
+        const password = String(body.password ?? '').replace(/\s+/g, '');
+        if (!username || !password) return c.json({ error: '利用者名とパスワードを入れてください' }, 400);
+        if (username.includes(':')) return c.json({ error: '利用者名に「:」は使えません' }, 400);
+        key = `${username}:${password}`;
+      }
       if (!key) return c.json({ error: '鍵を入れてください' }, 400);
       await deps.repo.saveConnectionSecret({
         tenantId: tenant.id, connectionId: conn.id, clientId: null, clientSecretEnc: null, apiKeyEnc: deps.box.encrypt(key),

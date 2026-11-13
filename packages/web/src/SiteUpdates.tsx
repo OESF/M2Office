@@ -75,6 +75,11 @@ function EditRow({ edit, busy, onRevert }: { edit: SiteEditView; busy: boolean; 
                   {a.link && a.result === 'applied' ? <a href={a.link} target="_blank" rel="noreferrer">{a.text || '（内容は消しました）'}</a> : (a.text || '（内容は消しました）')}
                   <span className="muted">・{SITE_EDIT_PAGE_RESULT_LABELS[a.result]}</span>
                   {a.reason && <span className="error">（{a.reason}）</span>}
+                  {a.images && a.images.length > 0 && (
+                    <span className="site-edit-images">
+                      {a.images.map((f) => <img key={f} src={api.siteUpdates.imageUrl(edit.id, f)} alt="" loading="lazy" />)}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

@@ -20,6 +20,7 @@ import type { InquiryToolContext } from '../inquiries/tools.js';
 import type { CompetitorToolContext } from '../competitors/tools.js';
 import type { AnnouncementToolContext } from '../announcements/tools.js';
 import type { SiteUpdateToolContext } from '../site-updates/tools.js';
+import type { CompanyDesignService } from '../design/service.js';
 import type { WebReviewToolContext } from '../web-review/tools.js';
 import type { ContractToolContext } from '../contracts/tools.js';
 import type { SalesDocToolContext } from '../sales-docs/tools.js';
@@ -153,6 +154,8 @@ export interface ToolContext {
   library?: LibraryToolContext;
   /** サイトの更新（内蔵の拡張。仕様書 第45章）。使えるかどうかは、ツールが呼ぶたびに確かめる。 */
   siteUpdates?: SiteUpdateToolContext;
+  /** 会社の見た目（仕様書 第46章）。変えられるのは管理者だけ（サービスが確かめる）。無ければ「使えない」と返す。 */
+  companyDesign?: CompanyDesignService;
   /** メールの片付け（仕様書 第9.5.1.1節）。メールの返事を送る業務と朝のブリーフが使う。無ければ「使えない」と返す。 */
   mail?: MailToolContext;
   /** 予約（内蔵の拡張。仕様書 第37章）。会議の予定と一緒に会議室を取る（第37.18節）。使えるかどうかは呼ぶたびに確かめる。 */

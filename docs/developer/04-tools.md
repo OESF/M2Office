@@ -36,6 +36,9 @@
 | `card.read` | read | — | 名刺の画像から、氏名・会社名・電話・メールアドレスなどを読み取ります。登録はしません |
 | `columns.preview` | read | — | コラムの題名・字数・残った指摘・入れ先を確かめます。見るだけです |
 | `columns.themes` | read | — | まだ使っていないコラムのテーマ案（なぜ今か・材料の印）と、今月と来月の予定表の回を読みます |
+| `company_design.export` | read | — | 会社の見た目を DESIGN.md（AI の道具や制作会社に渡せる形）にします |
+| `company_design.show` | read | — | 会社の見た目（色・文字・形・写真と絵の雰囲気・文の調子）と、前の版を読みます |
+| `company_design.site_css` | read | — | 会社の見た目を会社の Web サイトに反映するための、「追加 CSS」に貼る CSS と手順を作ります（貼るのは人です） |
 | `competitors.facts` | read | — | 競合と自社の Web サイトから取り出した事実（サービスと値段・キャンペーン・お知らせ・営業時間）を、出典の URL と一緒に読みます |
 | `competitors.list` | read | — | 自社の像と商圏、覚えている競合（名前・距離・見つけ方・最後に読んだ日）を読みます |
 | `competitors.report` | read | — | いちばん新しい競合のレポート（前の回からの動き・自社との違い・相手の強み・次の一手）を読みます |
@@ -94,6 +97,8 @@
 | `sheets.get` | read | `drive.file`（機密でない） | 前に作った表を読みます（直すため） |
 | `sheets.list` | read | `drive.file`（機密でない） | あなたが作った表と、会社で共有された表の一覧を読みます |
 | `sheets.read` | read | `drive.file`（機密でない） | Google スプレッドシートの表を読みます |
+| `site_updates.comment_list` | read | — | 会社の Web サイト（WordPress）の承認待ちのコメントと、最近公開したコメントを読みます |
+| `site_updates.health` | read | — | 会社の Web サイト（WordPress）のプラグイン・テーマ・本体に新しい版があるか、止めてあるプラグイン、サイトヘルスの注意を読みます（WordPress の管理者の役割が要ります。更新はしません） |
 | `site_updates.list` | read | — | サイトの直しの記録（いつ・どのページを・どう直したか・元に戻せるか）を読みます |
 | `site_updates.term_list` | read | — | 会社の Web サイト（WordPress）のカテゴリーとタグの一覧（名前・親・記事の数）を読みます |
 | `skill.read` | read | — | このスキルに入っている資料を読みます |
@@ -136,6 +141,7 @@
 | `columns.prepare` | write-internal | — | コラムのテーマ案を作ります。本数を言われたら、上から順にテーマ案で書き始めます（予定表があれば空いている回に入れます）。Web には出しません |
 | `columns.rules` | write-internal | — | コラムの校正で当てる表現の決まり（医療広告・薬機法・士業）を直します。管理者だけが直せます |
 | `columns.signage_make` | write-internal | — | 承認済みのコラムから、サイネージの画面に流す画像（1 枚か紙芝居）・動画・ナレーション付きスライドを作り始めます。できたら、コラムの画面の「素材に登録」でサイネージの素材にします |
+| `company_design.update` | write-internal | — | 会社の見た目を、AI がロゴとサイトから作る・DESIGN.md を取り込む（色は会社のロゴに合わせる）・会話で直す・前の版に戻します（会社の管理者だけ） |
 | `competitors.add` | write-internal | — | URL か店の名前で、競合を入れます。Web サイトのトップを読んで確かめてから入れます |
 | `competitors.check` | write-internal | — | 自社と競合のサイトを今すぐ読み、レポートを作る作業を始めます |
 | `competitors.discover` | write-internal | — | 自社の像をまとめ、近くの同業か同じような事業の会社を探して覚え、読んでレポートを作る作業を始めます |
@@ -179,7 +185,10 @@
 | `sales.update_order` | write-internal | — | 受注の納期・品目などを直す、または取り消します（社内の記録だけ） |
 | `sheets.append` | write-internal | `drive.file`（機密でない） | M2Office で作った表に行を足します |
 | `sheets.share` | write-internal | `drive.file`（機密でない） | 作った表を、会社の中で共有するか、自分だけにするかを切り替えます。社外には共有しません |
-| `site_updates.actions` | write-internal | — | 頼みに合わせて、会社の Web サイト（WordPress）に新しい記事と固定ページを作る（本文とアイキャッチも作る）・公開や下書きや予約やゴミ箱に変える・前の版に戻す直し案を作り、承認へ進めます。サイトに入れるのは承認の後です |
+| `site_updates.actions` | write-internal | — | 頼みに合わせて、会社の Web サイト（WordPress）に新しい記事と固定ページを作る（本文とアイキャッチも作る）・公開や下書きや予約やゴミ箱に変える・前の版に戻す・記事の中の画像を差し替える・代わりの文を直す直し案を作り、承認へ進めます。画像は、渡した画像・資料の画像・AI の挿絵・型から用意します。サイトに入れるのは承認の後です |
+| `site_updates.comments` | write-internal | — | 頼みに合わせて、会社の Web サイト（WordPress）のコメントを承認する・承認待ちに戻す・スパムにする・ゴミ箱に入れる・返事を書く直し案を作り、承認へ進めます。返事を送るのは承認の後です |
+| `site_updates.design` | write-internal | — | 会社の見た目（色・書体・ボタンの形）を、会社の Web サイト（WordPress のブロックのテーマ）の全体のスタイルに入れる直し案を作り、承認へ進めます。クラシックのテーマなら、貼る CSS を案内します |
+| `site_updates.menus` | write-internal | — | 頼みに合わせて、会社の Web サイト（WordPress）のメニューの項目を足す・名前を変える・並べ替える・外す、サイトのタイトルとキャッチフレーズを変える直し案を作り、承認へ進めます（WordPress の管理者の役割が要ります） |
 | `site_updates.propose` | write-internal | — | 頼みに合わせて、会社の Web サイト（WordPress）の直すページと場所を探し、直す前と後の直し案を作って承認へ進めます。サイトに入れるのは承認の後です |
 | `site_updates.revert` | write-internal | — | 入れたサイトの直しを、直す前の文に戻す案を作って承認へ進めます（90 日の間。戻すのも承認の後です） |
 | `site_updates.terms` | write-internal | — | 頼みに合わせて、会社の Web サイト（WordPress）のカテゴリーとタグを作る・名前を変える・記事に付ける・外す直し案を作り、承認へ進めます。サイトに入れるのは承認の後です |
@@ -223,6 +232,9 @@
 | `card.read` | `fileId`（必須）: 名刺の画像のファイル ID |
 | `columns.preview` | `columnId`（必須）: コラムの ID |
 | `columns.themes` | なし |
+| `company_design.export` | なし |
+| `company_design.show` | なし |
+| `company_design.site_css` | なし |
 | `competitors.facts` | `q`: 競合の名前か URL の言葉（無ければ全社） |
 | `competitors.list` | なし |
 | `competitors.report` | なし |
@@ -281,6 +293,8 @@
 | `sheets.get` | `draftId`（必須）: 表の ID（sheets.list の id） |
 | `sheets.list` | なし |
 | `sheets.read` | `spreadsheetId`（必須）: スプレッドシートの ID、`maxRows`: 読む行数の上限（既定 500） |
+| `site_updates.comment_list` | なし |
+| `site_updates.health` | なし |
 | `site_updates.list` | なし |
 | `site_updates.term_list` | なし |
 | `skill.read` | `path`（必須）: ファイルの相対パス |
@@ -323,6 +337,7 @@
 | `columns.prepare` | `count`: 書き始める本数（無ければテーマ案を作るだけ） |
 | `columns.rules` | `add`: 足す決まり、`remove`: 外す決まり、`auto`: AI に任せる形に戻す |
 | `columns.signage_make` | `column`: コラムの題名かテーマの言葉、`kind`: 画像（slides）・動画（video）・ナレーション付きスライド（narrated）（slides・video・narrated）、`seconds`: 動画の長さ（秒）。8（既定）か 15、`style`: 作風（言われなければ省く。既定はリアル）（real・illustration・anime・fantasy）、`voice`: ナレーションの声（言われなければ省く）（calm・bright・soft・strong） |
+| `company_design.update` | `mode`（必須）: すること（create・import・edit・restore）、`request`: 依頼者の頼み（そのまま）、`url`: 取り込む DESIGN.md の URL（https）、`text`: 取り込む DESIGN.md の文（会話に貼られたもの）、`version`: 戻す版（restore のとき。省けば 1 つ前） |
 | `competitors.add` | `text`（必須）: URL か店・会社の名前 |
 | `competitors.check` | なし |
 | `competitors.discover` | `radiusKm`: 商圏の半径（キロメートル）、`nationwide`: 全国で探す、`auto`: 商圏を AI に決め直させる |
@@ -367,7 +382,10 @@
 | `sales.update_order` | `number`（必須）: 受注番号か相手の注文番号、`dueOn`: 納期、`orderedOn`: 注文日、`customerRef`: 相手の注文番号、`deliverTo`: 納品先、`terms`: 支払い条件、`items`: 品目（すべて置き換える）、`cancelReason`: 取り消すときの理由 |
 | `sheets.append` | `spreadsheetId`（必須）: スプレッドシートの ID、`rows`（必須）: 足す行の配列（各行は値の配列） |
 | `sheets.share` | `draftId`（必須）: 表の ID（sheets.draft の draftId か sheets.list の id）、`sharing`（必須）: 「会社で共有」か「自分だけ」 |
-| `site_updates.actions` | `request`（必須）: 依頼者の頼み（そのまま） |
+| `site_updates.actions` | `request`（必須）: 依頼者の頼み（そのまま）、`fileIds`: 依頼に渡された画像のファイル ID（渡されていなければ省く） |
+| `site_updates.comments` | `request`（必須）: 依頼者の頼み（そのまま） |
+| `site_updates.design` | `request`: 依頼者の頼み（そのまま） |
+| `site_updates.menus` | `request`（必須）: 依頼者の頼み（そのまま） |
 | `site_updates.propose` | `request`（必須）: 依頼者の頼み（そのまま） |
 | `site_updates.revert` | `editId`: 戻す直しの ID（省くと、いちばん新しい元に戻せる直し） |
 | `site_updates.terms` | `request`（必須）: 依頼者の頼み（そのまま） |

@@ -15,7 +15,7 @@ import {
   fillApprovalCompartments, discardStaleRecordings, discardStaleLiveRecordings, PostgresSystemLogStore, SystemLogSink, attachLogSink, EvidenceBuilder, SYSTEM_LOG_KEEP_DAYS,
   assertDatabaseConfigured,
   PostgresRepository, ToolRegistry, BUILTIN_TOOLS,
-  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, SalesDocWatch, salesInventoryFrom, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, DecisionService, PostgresDecisionStore, DecisionRunner, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, MailWatch, PostgresMailStore, libraryAccess, libraryReaderFor, libraryContactOf, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, SiteUpdateService, PostgresSiteEditStore, PostgresWordPressUserStore, siteUpdatesAccess, SITE_UPDATE_APPLY, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
+  RunEngine, Scheduler, scheduleChecks, CardService, PostgresContactStore, GoogleContactsService, KnowledgeEmbedder, MemoryEmbedder, cardsAccess, SignatureWatcher, BulkMailService, PostgresBulkMailStore, InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, webColumnsAccess, InquiryService, PostgresInquiryStore, InquiryWatch, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, CompetitorWatch, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, SalesDocService, PostgresSalesDocStore, salesDocsAccess, SalesDocWatch, salesInventoryFrom, PostgresContractStore, contractsAccess, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, JGrantsApi, MockJGrants, subsidiesAccess, DecisionService, PostgresDecisionStore, DecisionRunner, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, MailWatch, PostgresMailStore, libraryAccess, libraryReaderFor, libraryContactOf, MEMBER_LINE_SEND, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, SiteUpdateService, CompanyDesignService, PostgresCompanyDesignStore, PostgresSiteEditStore, PostgresWordPressUserStore, siteUpdatesAccess, SITE_UPDATE_APPLY, businessDayChecker, announcementMailFrom, WebReviewService, PostgresWebReviewStore, webReviewAccess, EffectService, PostgresEffectStore, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, SignageService, SignageInterrupts, PostgresSignageStore, applyStockChanges, sweepStockNotices, AttendanceService, PostgresAttendanceStore, PostgresHrStore, PostgresPayrollStore, PostgresLaborStore, PostgresShiftStore, LaborCalendar, hrAccess, LAW_BOOK, NoticeService, PostgresNoticeStore, buildConnector, LocalFileStore, createLoggerFromEnv, ExtensionHub, HttpMcpClient, GoogleDataRetention, GoogleRevocation, agentUsesGoogle, BufferedHealthSink, PostgresHealthStore, installHealthSink, installPoolLogger, PostgresApiGapStore, installApiGapSink,
   NotificationDelivery, MockNotificationSender, RoutingNotificationSender, GoogleChatAppSender, ScheduleReplyWatcher, SCHEDULING_CONFIRM_AGENT_ID, purgeRecruitingRuns, runDemandForecasts, ConversationRotation, MemoryLearning, SecretaryConductor, PlanRunner, enqueueJob,
   loadExtensions, OFFICIAL_AGENTS, TenantAiResolver, platformAi, PlatformAiSource, PostgresPlatformAiSettingsReader, envTenantCapJpy, secretBoxFromEnv, deploymentFromEnv, localLlmFromEnv,
   InventoryMarketService, PostgresMarketStore, competitorPriceFacts, runMarketWatch,
@@ -237,8 +237,15 @@ const signage = new SignageService({
 inventoryPublisher.onStockChange(async (tenantId, changes, current) => { await applyStockChanges(signage, tenantId, changes, current); });
 // 割り込みの文を出し終えて 24 時間で消し、行を 90 日で消す（第31.13節）
 const signageInterrupts = new SignageInterrupts({ service: signage, repo });
+// 会社の見た目（仕様書 第46章）。コラムのカバー・販促物・アイキャッチの色の元。無ければ初めて要るときに AI が作る
+const companyDesign = new CompanyDesignService({
+  store: new PostgresCompanyDesignStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
+  repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log, outside: (tenantId) => !noOutside(tenantId),
+});
+const designFor = (tenantId: string) => companyDesign.ensure(tenantId);
 // Web のコラム（内蔵の拡張。仕様書 第32章）。秘書から頼まれた下書きと、承認の後に WordPress に入れるのが使う
 const columns: ColumnService = new ColumnService({
+  design: designFor,
   store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), files,
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
   // 似すぎの確かめで出典のページを読む口（見本の会社では読まない。第32.18.4節）
@@ -349,6 +356,7 @@ const libraryMail = new LibraryMailWatch({ service: library, store: libraryStore
 const libraryKeeper = new LibraryKeeper({ service: library, store: libraryStore, drive: connector.drive, repo, access: libraryAccess(repo), logger: log });
 // 販促物の作成（第41章）。ワーカーは掲示の期間の見張り（サイネージに流す・外すを含む）と、秘書の業務からの頼みを扱う
 const printDesigns = new PrintDesignService({
+  design: designFor,
   store: new PostgresPrintDesignStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, files, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
   signage: signageForAnnouncements(signage),
@@ -449,9 +457,14 @@ const announcements = new AnnouncementService({
 });
 // サイトの更新（内蔵の拡張。仕様書 第45章）。直し案を作って承認へ進め、承認の後に WordPress に入れる
 const siteUpdates = new SiteUpdateService({
+  design: designFor,
   store: new PostgresSiteEditStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   users: new PostgresWordPressUserStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+  // 画像（第45.18.2節）: 渡した画像と用意した画像はファイルに持ち、資料の画像を探し、挿絵はコラムのカバーと同じ月の上限に数える
+  files,
+  library: { findImages: (who, q) => library.findImages(who, q), imageBytes: (who, id) => library.imageBytes(who, id) },
+  aiUsage: (tenantId) => columns.aiUsage(tenantId),
   submitter: async (tenantId, userId, editId) => {
     const def = await resolveDefinition(SITE_UPDATE_APPLY.id, SITE_UPDATE_APPLY.version, tenantId);
     if (!def) throw new Error('サイトに入れる業務が見つかりません');
@@ -488,6 +501,7 @@ const engine = new RunEngine({
   competitors: { service: competitors, access: competitorsAccess(repo) },
   announcements: { service: announcements, access: announcementsAccess(repo) },
   siteUpdates: { service: siteUpdates, access: siteUpdatesAccess(repo) },
+  companyDesign,
   webReview: { service: webReview, access: webReviewAccess(repo) },
   contracts: { service: contracts, access: contractsAccess(repo) },
   salesDocs: { service: salesDocs, access: salesDocsAccess(repo) },
@@ -734,6 +748,9 @@ let lastDecisionPurge = 0;
 /** サイトの直しの、90 日を過ぎた直す前と後の本文を消す間隔（第45.8節。1 日に 1 回で足りる）。 */
 const SITE_EDIT_PURGE_INTERVAL_MS = 86_400_000;
 let lastSiteEditPurge = 0;
+/** 承認待ちのサイトのコメントの見回り（1 時間ごと。第45.18.3節）。 */
+const SITE_COMMENT_WATCH_MS = 3_600_000;
+let lastSiteCommentWatch = 0;
 /** 会員のポイントの失効と週の見立てを見る間隔（第40.6節・第40.18節。見立ては月曜の 8 時を過ぎたら週に 1 回）。 */
 const MEMBER_EXPIRY_INTERVAL_MS = 3_600_000;
 let lastMemberExpiry = 0;
@@ -1066,7 +1083,8 @@ async function patrolOnce(): Promise<void> {
     }
   }
 
-  // 不正の兆しの見張り（第16.8節）。5 分ごとに見回り、朝 7 時を過ぎたら前の日の数を 1 通にまとめる。会社ごとの失敗はほかの会社を止めない
+  // 不正の兆しの見張り（第16.8節）。5 分ごとに見回り、朝 7 時を過ぎたら前の日の数を 1 通にまとめる。会社ごとの失敗はほかの会社を止めない。
+  // まとめを 1 日 1 回にする正の印はデータベース（claimDigest）。securityDigestOn は、この起動の中で何度も問い合わせないためだけのもの
   if (Date.now() - lastSecurityCheck >= SECURITY_INTERVAL_MS) {
     lastSecurityCheck = Date.now();
     const jstNow = new Date(Date.now() + 9 * 3_600_000);
@@ -1505,6 +1523,22 @@ async function patrolOnce(): Promise<void> {
       if (n > 0) log.info('90 日を過ぎたサイトの直しの本文を消しました', { purged: n });
     } catch (err) {
       log.warn('サイトの直しの本文を消せませんでした', { err });
+    }
+  }
+
+  // 承認待ちのサイトのコメントを、会社の管理者に知らせる（第45.18.3節）。会社ごとの失敗はほかの会社を止めない
+  if (Date.now() - lastSiteCommentWatch >= SITE_COMMENT_WATCH_MS) {
+    lastSiteCommentWatch = Date.now();
+    for (const id of await repo.listTenantIds().catch(() => [] as string[])) {
+      try {
+        const n = await siteUpdates.watchComments(id);
+        if (n > 0) log.info('承認待ちのサイトのコメントを知らせました', { tenantId: id, count: n });
+        // プラグイン・テーマ・本体の状態（週に 1 回。前の見回りの時刻は置き場で数える。第45.18.5節）
+        const h = await siteUpdates.watchHealth(id);
+        if (h > 0) log.info('サイトに更新が要るものを知らせました', { tenantId: id, count: h });
+      } catch (err) {
+        log.warn('サイトのコメントを見回れませんでした', { tenantId: id, err });
+      }
     }
   }
 

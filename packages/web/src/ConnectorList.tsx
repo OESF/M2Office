@@ -22,7 +22,7 @@ export function ConnectorList() {
   const [busy, setBusy] = useState<string | null>(null);
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
-  const [authType, setAuthType] = useState<'none' | 'oauth' | 'api_key'>('none');
+  const [authType, setAuthType] = useState<'none' | 'oauth' | 'api_key' | 'basic'>('none');
   const [presets, setPresets] = useState<ConnectionPresetView[]>([]);
   // 開いているコネクタ（アコーディオン。パソコンごとに覚える）と、追加の欄を開いているか
   const [openIds, setOpen] = useRememberedSet('m2office.mcp-open');
@@ -123,6 +123,7 @@ export function ConnectorList() {
               <option value="none">認証なし</option>
               <option value="oauth">利用者ごとに許可（OAuth）</option>
               <option value="api_key">会社の鍵</option>
+              <option value="basic">会社の利用者名とパスワード（Basic）</option>
             </select></div>
         </div>
         <div className="row">
@@ -235,6 +236,7 @@ function AuthSettings({ conn, onSaved, onError }: {
   const st = conn.authState;
   const [clientId, setClientId] = useState(st.type === 'oauth' ? st.clientId : '');
   const [secret, setSecret] = useState('');
+  const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -250,7 +252,8 @@ function AuthSettings({ conn, onSaved, onError }: {
         const r = await api.admin.setMcpCredentials(conn.id, { clientId: clientId.trim(), ...(secret.trim() ? { clientSecret: secret.trim() } : {}) });
         setNote(r.reset ? `登録しました。${r.reset} 人の許可を消しました` : '登録しました');
       } else {
-        const r = await api.admin.setMcpCredentials(conn.id, { apiKey: secret.trim() });
+        const basic = st.type === 'api_key' && st.scheme === 'basic';
+        const r = await api.admin.setMcpCredentials(conn.id, basic ? { username: username.trim(), password: secret } : { apiKey: secret.trim() });
         setNote(r.warning ?? `登録しました（ツール ${r.tools ?? 0} 件）`);
       }
       setSecret('');
@@ -271,6 +274,22 @@ function AuthSettings({ conn, onSaved, onError }: {
     }
   };
 
+  if (st.type === 'api_key' && st.scheme === 'basic') {
+    return (
+      <div className="auth-settings">
+        <div className="form-grid">
+          <div className="field span-2"><label>利用者名</label>
+            <input autoComplete="off" value={username} placeholder={st.keySet ? '登録済み（変えるときだけ入れる）' : ''} onChange={(e) => setUsername(e.target.value)} /></div>
+          <div className="field span-2"><label>パスワード</label>
+            <input type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} /></div>
+        </div>
+        <div className="row small">
+          <button className="btn small" disabled={busy || !secret.trim() || !username.trim()} onClick={() => void save()}>登録</button>
+          {note && <span className="ok-inline">{note}</span>}
+        </div>
+      </div>
+    );
+  }
   if (st.type === 'api_key') {
     return (
       <div className="auth-settings">

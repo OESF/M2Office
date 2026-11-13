@@ -80,6 +80,8 @@ export class ConnectionCredentials implements ConnectionAuthProvider {
     const s = await this.deps.repo.getConnectionSecret(tenantId, c.id);
     if (!s?.apiKeyEnc) return { ok: false, error: `「${c.name}」の会社の鍵が登録されていません（管理者ページの「接続」で登録します）` };
     const key = this.deps.box.decrypt(s.apiKeyEnc);
+    // 利用者名とパスワード（`利用者名:パスワード` で預かる）は Basic の形で送る（第45.18.5節）
+    if (c.auth.scheme === 'basic') return { ok: true, headers: { Authorization: `Basic ${Buffer.from(key, 'utf8').toString('base64')}` } };
     const header = c.auth.header ?? 'Authorization';
     return { ok: true, headers: { [header]: header.toLowerCase() === 'authorization' ? `Bearer ${key}` : key } };
   }

@@ -9,15 +9,16 @@
 
 import type { WordPressAuth } from '../columns/wordpress.js';
 import {
-  createSiteTerm, deleteSiteTerm, readSitePostTerms, readSiteTerm, renameSiteTerm, setSitePostTerms,
-  type SitePostTerms, type SiteTaxonomy, type SiteTerm,
+  POST_TERM_FIELDS, createSiteTerm, deleteSiteTerm, readSitePostTerms, readSiteTerm, renameSiteTerm, setSitePostTerms,
+  type PostTermFields, type SitePostTerms, type SiteTaxonomy, type SiteTerm,
 } from './wordpress.js';
 import type { PostTermIds, StoredTermChange } from './store.js';
 
 /** 1 回の頼みで扱う上限。 */
 export const SITE_TERM_LIMITS = { creates: 10, renames: 10, posts: 10, nameChars: 100 } as const;
 
-const TAX_LABEL: Record<SiteTaxonomy, string> = { category: 'サイトのカテゴリー', tag: 'サイトのタグ' };
+/** 分類の呼び方。独自の分類は口の名前を添える（`news_category` など）。 */
+const taxLabel = (t: SiteTaxonomy) => (t === 'category' ? 'サイトのカテゴリー' : t === 'tag' ? 'サイトのタグ' : `サイトの分類（${t}）`);
 
 /** どの機能の「カテゴリー」か（第45.17.1節）。 */
 export type CategoryTarget = 'none' | 'site' | 'mail' | 'library' | 'knowledge' | 'unknown';
@@ -53,7 +54,7 @@ export interface TermPlanInput {
   assign: { post: string; add: { taxonomy: SiteTaxonomy; name: string }[]; remove: { taxonomy: SiteTaxonomy; name: string }[] }[];
 }
 
-const tax = (v: unknown): SiteTaxonomy => (v === 'tag' ? 'tag' : 'category');
+const tax = (v: unknown): 'category' | 'tag' => (v === 'tag' ? 'tag' : 'category');
 const str = (v: unknown, max = SITE_TERM_LIMITS.nameChars) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const idOf = (v: unknown) => (typeof v === 'number' || (typeof v === 'string' && /^\d+$/.test(v)) ? String(v) : '');
 
@@ -84,24 +85,36 @@ const similar = (a: string, b: string) => {
  * @returns 直しと、作らなかったもの・似た名前などの添え書き
  */
 export function buildTermChanges(
-  plan: TermPlanInput, terms: SiteTerm[], posts: SitePostTerms[],
+  plan: TermPlanInput, terms: SiteTerm[], posts: SitePostTerms[], fields: PostTermFields = POST_TERM_FIELDS,
 ): { changes: StoredTermChange[]; notes: string[] } {
+  // 推論は「カテゴリー」「タグ」で答える。記事の種類の分類（独自の分類を含む）に置き換える（第45.20.3節）
+  const real = (t: SiteTaxonomy): SiteTaxonomy | null => (t === 'tag' ? fields.tag?.taxonomy ?? null : fields.category?.taxonomy ?? null);
+  plan = {
+    create: plan.create.flatMap((c) => { const t = real(c.taxonomy); return t ? [{ ...c, taxonomy: t }] : []; }),
+    rename: plan.rename.flatMap((c) => { const t = real(c.taxonomy); return t ? [{ ...c, taxonomy: t }] : []; }),
+    assign: plan.assign.map((a) => ({
+      ...a,
+      add: a.add.flatMap((x) => { const t = real(x.taxonomy); return t ? [{ ...x, taxonomy: t }] : []; }),
+      remove: a.remove.flatMap((x) => { const t = real(x.taxonomy); return t ? [{ ...x, taxonomy: t }] : []; }),
+    })),
+  };
+  const isCat = (t: SiteTaxonomy) => t === fields.category?.taxonomy;
   const changes: StoredTermChange[] = [];
   const notes: string[] = [];
   const of = (t: SiteTaxonomy) => terms.filter((x) => x.taxonomy === t);
   const created: { taxonomy: SiteTaxonomy; name: string }[] = [];
   for (const c of plan.create.slice(0, SITE_TERM_LIMITS.creates)) {
     if (of(c.taxonomy).some((t) => same(t.name, c.name)) || created.some((x) => x.taxonomy === c.taxonomy && same(x.name, c.name))) {
-      notes.push(`${TAX_LABEL[c.taxonomy]}「${c.name}」はもうあるので、作りません`);
+      notes.push(`${taxLabel(c.taxonomy)}「${c.name}」はもうあるので、作りません`);
       continue;
     }
     const like = of(c.taxonomy).filter((t) => similar(t.name, c.name)).map((t) => `「${t.name}」`);
-    if (like.length) notes.push(`${TAX_LABEL[c.taxonomy]}「${c.name}」に似た ${like.slice(0, 3).join('')} があります`);
+    if (like.length) notes.push(`${taxLabel(c.taxonomy)}「${c.name}」に似た ${like.slice(0, 3).join('')} があります`);
     let parentId: string | null = null;
     let parentName: string | null = null;
-    if (c.taxonomy === 'category' && c.parent) {
-      const p = of('category').find((t) => t.id === c.parent || same(t.name, c.parent!));
-      if (p) { parentId = p.id; parentName = p.name; } else if (created.some((x) => x.taxonomy === 'category' && same(x.name, c.parent!))) parentName = c.parent;
+    if (isCat(c.taxonomy) && c.parent) {
+      const p = of(c.taxonomy).find((t) => t.id === c.parent || same(t.name, c.parent!));
+      if (p) { parentId = p.id; parentName = p.name; } else if (created.some((x) => x.taxonomy === c.taxonomy && same(x.name, c.parent!))) parentName = c.parent;
       else notes.push(`親にする「${c.parent}」が見つからないので、「${c.name}」は親なしで作ります`);
     }
     created.push({ taxonomy: c.taxonomy, name: c.name });
@@ -109,9 +122,9 @@ export function buildTermChanges(
   }
   for (const r of plan.rename.slice(0, SITE_TERM_LIMITS.renames)) {
     const t = of(r.taxonomy).find((x) => x.id === r.id);
-    if (!t) { notes.push(`名前を変える${TAX_LABEL[r.taxonomy]}が見つかりません`); continue; }
+    if (!t) { notes.push(`名前を変える${taxLabel(r.taxonomy)}が見つかりません`); continue; }
     if (same(t.name, r.name)) continue;
-    if (of(r.taxonomy).some((x) => x.id !== r.id && same(x.name, r.name))) { notes.push(`${TAX_LABEL[r.taxonomy]}「${r.name}」はもうあるので、「${t.name}」の名前は変えません`); continue; }
+    if (of(r.taxonomy).some((x) => x.id !== r.id && same(x.name, r.name))) { notes.push(`${taxLabel(r.taxonomy)}「${r.name}」はもうあるので、「${t.name}」の名前は変えません`); continue; }
     changes.push({ op: 'rename', taxonomy: r.taxonomy, termId: t.id, before: t.name, after: r.name, result: 'pending', reason: '' });
   }
   for (const a of plan.assign.slice(0, SITE_TERM_LIMITS.posts)) {
@@ -120,19 +133,19 @@ export function buildTermChanges(
     const add: { taxonomy: SiteTaxonomy; id: string | null; name: string }[] = [];
     for (const x of a.add) {
       const t = of(x.taxonomy).find((y) => same(y.name, x.name));
-      if (t && (x.taxonomy === 'category' ? post.categories : post.tags).includes(t.id)) continue;
+      if (t && (isCat(x.taxonomy) ? post.categories : post.tags).includes(t.id)) continue;
       if (t) add.push({ taxonomy: x.taxonomy, id: t.id, name: t.name });
       else if (created.some((y) => y.taxonomy === x.taxonomy && same(y.name, x.name))) add.push({ taxonomy: x.taxonomy, id: null, name: x.name });
-      else notes.push(`${TAX_LABEL[x.taxonomy]}「${x.name}」が無いので、「${post.title}」に付けません（作るなら、作ると頼んでください）`);
+      else notes.push(`${taxLabel(x.taxonomy)}「${x.name}」が無いので、「${post.title}」に付けません（作るなら、作ると頼んでください）`);
     }
     const remove: { taxonomy: SiteTaxonomy; id: string; name: string }[] = [];
     for (const x of a.remove) {
       const t = of(x.taxonomy).find((y) => same(y.name, x.name));
-      if (t && (x.taxonomy === 'category' ? post.categories : post.tags).includes(t.id)) remove.push({ taxonomy: x.taxonomy, id: t.id, name: t.name });
+      if (t && (isCat(x.taxonomy) ? post.categories : post.tags).includes(t.id)) remove.push({ taxonomy: x.taxonomy, id: t.id, name: t.name });
     }
     if (!add.length && !remove.length) continue;
     changes.push({
-      op: 'assign', postId: post.id, postTitle: post.title, postLink: post.link, beforeModified: post.modifiedGmt,
+      op: 'assign', postId: post.id, postTitle: post.title, postLink: post.link, beforeModified: post.modifiedGmt, ...(fields.kind !== 'post' ? { fields } : {}),
       before: { categories: post.categories, tags: post.tags }, add, remove, exact: null, after: null, result: 'pending', reason: '',
     });
   }
@@ -141,20 +154,22 @@ export function buildTermChanges(
 
 /** 直し 1 つを、人が読む 1 行にする（承認の画面・記録）。 */
 export function termLine(c: StoredTermChange, terms: SiteTerm[] = []): string {
-  if (c.op === 'create') return `${TAX_LABEL[c.taxonomy]}「${c.name}」を作る${c.parentName ? `（親: 「${c.parentName}」）` : ''}`;
-  if (c.op === 'rename') return `${TAX_LABEL[c.taxonomy]}の名前を「${c.before}」から「${c.after}」に変える（URL は変えない）`;
-  if (c.op === 'delete') return `${TAX_LABEL[c.taxonomy]}「${c.name}」を消す（作ったものを元に戻す）`;
+  if (c.op === 'create') return `${taxLabel(c.taxonomy)}「${c.name}」を作る${c.parentName ? `（親: 「${c.parentName}」）` : ''}`;
+  if (c.op === 'rename') return `${taxLabel(c.taxonomy)}の名前を「${c.before}」から「${c.after}」に変える（URL は変えない）`;
+  if (c.op === 'delete') return `${taxLabel(c.taxonomy)}「${c.name}」を消す（作ったものを元に戻す）`;
   const name = (taxonomy: SiteTaxonomy, id: string) => terms.find((t) => t.taxonomy === taxonomy && t.id === id)?.name ?? id;
   if (c.exact) {
-    const list = [...c.exact.categories.map((id) => name('category', id)), ...c.exact.tags.map((id) => `#${name('tag', id)}`)];
+    const f = c.fields ?? POST_TERM_FIELDS;
+    const list = [...c.exact.categories.map((id) => name(f.category?.taxonomy ?? 'category', id)), ...c.exact.tags.map((id) => `#${name(f.tag?.taxonomy ?? 'tag', id)}`)];
     return `記事「${c.postTitle}」のサイトのカテゴリーとタグを元に戻す（${list.join('・') || 'なし'}）`;
   }
   const parts = [
-    ...c.add.map((x) => `${TAX_LABEL[x.taxonomy]}「${x.name}」を付ける`),
-    ...c.remove.map((x) => `${TAX_LABEL[x.taxonomy]}「${x.name}」を外す`),
+    ...c.add.map((x) => `${taxLabel(x.taxonomy)}「${x.name}」を付ける`),
+    ...c.remove.map((x) => `${taxLabel(x.taxonomy)}「${x.name}」を外す`),
   ];
-  const left = c.before.categories.filter((id) => !c.remove.some((x) => x.taxonomy === 'category' && x.id === id));
-  const noCategory = left.length === 0 && !c.add.some((x) => x.taxonomy === 'category');
+  const catTax = (c.fields ?? POST_TERM_FIELDS).category?.taxonomy ?? 'category';
+  const left = c.before.categories.filter((id) => !c.remove.some((x) => x.taxonomy === catTax && x.id === id));
+  const noCategory = catTax === 'category' && left.length === 0 && !c.add.some((x) => x.taxonomy === catTax);
   return `記事「${c.postTitle}」に、${parts.join('・')}${noCategory ? '（カテゴリーが無くなるので、WordPress が「未分類」に入れます）' : ''}`;
 }
 
@@ -202,7 +217,8 @@ async function applyOne(
     const err = await deleteSiteTerm(wp, c.taxonomy, c.termId);
     return err ? { ...c, result: 'failed', reason: err } : { ...c, result: 'applied', reason: '' };
   }
-  const now = await readSitePostTerms(wp, c.postId);
+  const f = c.fields ?? POST_TERM_FIELDS;
+  const now = await readSitePostTerms(wp, c.postId, f);
   if ('error' in now) return { ...c, result: 'failed', reason: now.error };
   // 直し案の後に、人が WordPress でこの記事のカテゴリーとタグを変えていれば、上書きしない
   if (!sameTerms({ categories: now.categories, tags: now.tags }, c.before)) {
@@ -215,11 +231,11 @@ async function applyOne(
     const addIds = c.add.map((x) => ({ taxonomy: x.taxonomy, id: resolve(x) }));
     if (addIds.some((x) => !x.id)) return { ...c, result: 'failed', reason: '付けるカテゴリーかタグを作れなかったので、付けませんでした' };
     const pick = (t: SiteTaxonomy, base: string[]) => [...new Set([...base.filter((id) => !c.remove.some((x) => x.taxonomy === t && x.id === id)), ...addIds.filter((x) => x.taxonomy === t).map((x) => x.id!)])];
-    target = { categories: pick('category', c.before.categories), tags: pick('tag', c.before.tags) };
+    target = { categories: pick(f.category?.taxonomy ?? 'category', c.before.categories), tags: pick(f.tag?.taxonomy ?? 'tag', c.before.tags) };
   }
-  const r = await setSitePostTerms(wp, c.postId, target);
+  const r = await setSitePostTerms(wp, c.postId, target, f);
   if ('error' in r) return { ...c, result: 'failed', reason: r.error };
-  const after = await readSitePostTerms(wp, c.postId);
+  const after = await readSitePostTerms(wp, c.postId, f);
   return { ...c, after: 'error' in after ? target : { categories: after.categories, tags: after.tags }, result: 'applied', reason: '' };
 }
 
@@ -237,17 +253,17 @@ export async function revertTermChanges(wp: WordPressAuth, changes: StoredTermCh
       out.push({ op: 'delete', taxonomy: c.taxonomy, termId: c.createdId, name: c.name, result: 'pending', reason: '' });
     } else if (c.op === 'rename') {
       const now = await readSiteTerm(wp, c.taxonomy, c.termId);
-      if (!now || now.name !== c.after) { blocked.push(`${TAX_LABEL[c.taxonomy]}「${c.after}」（入れた後に WordPress で変えられています）`); continue; }
+      if (!now || now.name !== c.after) { blocked.push(`${taxLabel(c.taxonomy)}「${c.after}」（入れた後に WordPress で変えられています）`); continue; }
       out.push({ op: 'rename', taxonomy: c.taxonomy, termId: c.termId, before: c.after, after: c.before, result: 'pending', reason: '' });
     } else if (c.op === 'assign' && c.after) {
-      const now = await readSitePostTerms(wp, c.postId);
+      const now = await readSitePostTerms(wp, c.postId, c.fields ?? POST_TERM_FIELDS);
       if ('error' in now || !sameTerms({ categories: now.categories, tags: now.tags }, c.after)) {
         blocked.push(`記事「${c.postTitle}」（入れた後に WordPress で変えられています）`);
         continue;
       }
       out.push({
         op: 'assign', postId: c.postId, postTitle: c.postTitle, postLink: c.postLink, beforeModified: now.modifiedGmt,
-        before: c.after, add: [], remove: [], exact: c.before, after: null, result: 'pending', reason: '',
+        before: c.after, add: [], remove: [], exact: c.before, after: null, result: 'pending', reason: '', ...(c.fields ? { fields: c.fields } : {}),
       });
     }
   }

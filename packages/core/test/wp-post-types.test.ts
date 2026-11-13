@@ -163,3 +163,58 @@ test('サイトの更新: カスタム投稿タイプ（news）の記事も作�
   await service.apply({ tenantId: 't1', userId: 'u1' }, r.edit.id, p.digest);
   assert.equal(posted.at(-1)!.path, '/wp-json/wp/v2/news');
 });
+
+test('サイトの更新: カスタム投稿タイプ（news）の独自の分類（news_category）に作って付ける', async (t) => {
+  const terms = new Map<string, string>([['3', '営業']]);
+  const item = { title: '臨時休業のお知らせ', cats: [3] as number[], modified: 'm1' };
+  const sent: { path: string; body: Record<string, unknown> }[] = [];
+  t.mock.method(globalThis, 'fetch', async (input: string | URL, init?: RequestInit) => {
+    const u = new URL(String(input));
+    const method = init?.method ?? 'GET';
+    const body = init?.body && typeof init.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {};
+    if (method === 'POST') sent.push({ path: u.pathname, body });
+    if (u.pathname === '/wp-json/wp/v2/users/me') return Response.json({ name: '会社', roles: ['editor'], capabilities: { edit_pages: true, edit_published_pages: true, edit_others_pages: true, edit_posts: true, edit_published_posts: true, edit_others_posts: true, manage_categories: true } });
+    if (u.pathname === '/wp-json/wp/v2/types') return Response.json({ ...BASE_TYPES, news: { name: 'お知らせ', slug: 'news', rest_base: 'news', taxonomies: ['news_category'] } });
+    if (u.pathname === '/wp-json/wp/v2/taxonomies') return Response.json({ news_category: { name: 'お知らせの分類', rest_base: 'news_category', hierarchical: true } });
+    if (u.pathname === '/wp-json/wp/v2/news_category') {
+      if (method === 'POST') { const id = String(10 + terms.size); terms.set(id, String(body['name'])); return Response.json({ id: Number(id) }, { status: 201 }); }
+      return Response.json([...terms].map(([id, name]) => ({ id: Number(id), name, parent: 0, count: 0 })));
+    }
+    if (u.pathname === '/wp-json/wp/v2/news') return Response.json([{ id: 5, title: { raw: item.title }, link: `${SITE}/news/5`, date: '2026-11-13T00:00:00', news_category: item.cats, modified_gmt: item.modified }]);
+    if (u.pathname === '/wp-json/wp/v2/news/5') {
+      if (method === 'POST') { item.cats = body['news_category'] as number[]; item.modified = 'm2'; return Response.json({ modified_gmt: 'm2' }); }
+      return Response.json({ id: 5, title: { raw: item.title }, link: `${SITE}/news/5`, date: '2026-11-13T00:00:00', news_category: item.cats, modified_gmt: item.modified });
+    }
+    return new Response('', { status: 404 });
+  });
+  let seen = '';
+  const llm = {
+    name: 'fake',
+    async complete(req: { messages: { content: string }[] }) {
+      const text = String(req.messages[0]!.content);
+      if (text.includes('記事を探すための')) return { text: '{"words":["臨時休業"]}', tokensUsed: 1 };
+      seen = text;
+      return { text: JSON.stringify({ create: [{ taxonomy: 'category', name: '休業' }], assign: [{ post: 5, add: [{ taxonomy: 'category', name: '休業' }], remove: [] }] }), tokensUsed: 1 };
+    },
+  } as unknown as LlmProvider;
+  const settings: TenantSettings = { ...DEFAULT_TENANT_SETTINGS, siteUpdates: { enabled: true, adminApproval: false }, webColumns: { ...DEFAULT_TENANT_SETTINGS.webColumns, wordpress: { siteUrl: SITE, username: 'm2office' } } };
+  const repo = {
+    getTenantSettings: async () => settings,
+    getTenantCredential: async () => ({ tenantId: 't1', kind: 'wordpress', secretEnc: 'enc:x', meta: {}, updatedBy: 'b', updatedAt: '' }),
+    listUserGroupIds: async () => [], appendAudit: async () => undefined,
+  } as unknown as Repository;
+  const service = new SiteUpdateService({
+    store: new MemorySiteEditStore(), users: new MemoryWordPressUserStore(), repo, box: { encrypt: (v: string) => v, decrypt: (v: string) => v.slice(4) } as never,
+    llmFor: async () => llm, submitter: async () => 'run-1', sleep: async () => undefined,
+  });
+  const who = { tenantId: 't1', userId: 'u1' };
+  const r = await service.proposeTerms(who, 'お知らせの「臨時休業のお知らせ」を、分類「休業」を作って入れて');
+  assert.ok('edit' in r, JSON.stringify(r));
+  assert.ok(seen.includes('「お知らせ（news）」の記事と、その分類'), '推論に、どの種類の分類かを伝える');
+  const p = (await service.preview(who, r.edit.id))!;
+  assert.ok(p.shown.includes('サイトの分類（news_category）「休業」を作る'), p.shown);
+  await service.apply(who, r.edit.id, p.digest);
+  assert.ok(sent.some((x) => x.path === '/wp-json/wp/v2/news_category' && x.body['name'] === '休業'), '独自の分類に作る');
+  const made = [...terms].find(([, n]) => n === '休業')![0];
+  assert.deepEqual(item.cats, [3, Number(made)], 'news の記事の news_category に付ける（前のものは残す）');
+});

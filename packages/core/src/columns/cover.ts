@@ -41,7 +41,8 @@ const INK = '#1d2733';
 const PALETTE = ['#1f5f8b', '#2e6b4f', '#7a4470', '#9a5a1c', '#34508f', '#5b4a3f', '#2d6a73'];
 
 const FONT_DIR = pathToFileURL(`${appPath('assets', 'fonts')}/`);
-const FONT_FILES = [fileURLToPath(new URL('NotoSansJP-Bold.ttf', FONT_DIR)), fileURLToPath(new URL('NotoSansJP-Regular.ttf', FONT_DIR))];
+/** カバーと見本の画像を描く書体（同梱の Noto Sans JP）。 */
+export const COVER_FONT_FILES = [fileURLToPath(new URL('NotoSansJP-Bold.ttf', FONT_DIR)), fileURLToPath(new URL('NotoSansJP-Regular.ttf', FONT_DIR))];
 
 /** 直前の模様と同じにならず、最近あまり使っていない模様を選ぶ。 */
 export function pickPattern(recent: string[]): CoverPattern {
@@ -273,7 +274,7 @@ export function renderSvgPng(svg: string, width: number): Uint8Array {
   // 書体に無い字（住所のマイナス記号など）は、同じ形の字にして描く
   return new Uint8Array(new Resvg(toBundledFontChars(svg), {
     fitTo: { mode: 'width', value: width },
-    font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: 'Noto Sans JP' },
+    font: { fontFiles: COVER_FONT_FILES, loadSystemFonts: false, defaultFontFamily: 'Noto Sans JP' },
   }).render().asPng());
 }
 
@@ -281,7 +282,7 @@ export function renderSvgPng(svg: string, width: number): Uint8Array {
 export function renderCover(c: CoverInput): Uint8Array {
   const png = new Resvg(toBundledFontChars(coverSvg(c)), {
     fitTo: { mode: 'width', value: COVER_WIDTH },
-    font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: 'Noto Sans JP' },
+    font: { fontFiles: COVER_FONT_FILES, loadSystemFonts: false, defaultFontFamily: 'Noto Sans JP' },
   }).render().asPng();
   return new Uint8Array(png);
 }

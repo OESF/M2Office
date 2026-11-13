@@ -51,6 +51,7 @@ const TABS: {
     id: 'company', label: '会社情報', icon: 'company', description: '会社の情報、文面の書き方、帳票の体裁', group: '設定',
     pages: [
       { id: 'basic', label: '基本情報' },
+      { id: 'design', label: '会社の見た目' },
       { id: 'writing', label: '自社の書き方' },
       { id: 'invoice', label: '帳票の体裁' },
       { id: 'slides', label: 'スライドと文書の見本' },

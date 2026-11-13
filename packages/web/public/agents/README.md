@@ -79,8 +79,9 @@ agent01.png ～ agent60.png
 | 55 | メールの返事を送る（`mail-reply-send`） | 公式のカタログ |
 | 56 | サイトの直し案（`site-updates:edit`） | サイトの更新 |
 | 57 | サイトに入れる（`site-updates:apply`） | サイトの更新 |
+| 58 | 会社の見た目（`company-design`） | 公式のカタログ |
 
-**未使用: 58〜60**
+**未使用: 59〜60**
 
 ### 業務を足すとき
 

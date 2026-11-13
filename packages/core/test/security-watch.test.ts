@@ -191,3 +191,18 @@ test('段 2 の大量に開く: 1 時間に 200 件以上で、会社のふだ�
   await watch.scan('t1', new Date(NOON.getTime() + 8 * 86_400_000));
   assert.equal(store.views.size, 0, '7 日を過ぎた数は消す');
 });
+
+test('朝のまとめ: 1 日 1 回だけ。ワーカーが起き直しても、同じ日にまた送らない（送った日は置き場に残す）', async () => {
+  const { store, notes } = setup();
+  const repo = { listUsers: async () => users, createNotification: async (n: { userId: string; title: string; body: string }) => { notes.push(n); } } as unknown as Repository;
+  await store.addSignal('t1', { id: 's1', type: 'export', severity: 'high', userId: 'u-staff', key: 'k1', detail: {}, createdAt: '2026-11-12T03:00:00.000Z' });
+  const morning = new Date('2026-11-13T00:00:00.000Z'); // 日本時間 9 時
+  assert.equal(await new SecurityWatch({ repo, store }).dailyDigest('t1', morning), 1);
+  assert.equal(notes.length, 2, '管理者 2 人に 1 通ずつ');
+  // 起き直した後のワーカー（新しい見張り）が、同じ日にもう一度呼ぶ
+  assert.equal(await new SecurityWatch({ repo, store }).dailyDigest('t1', new Date(morning.getTime() + 2 * 60_000)), 0);
+  assert.equal(notes.length, 2, '同じ日のまとめは 2 度送らない');
+  await store.addSignal('t1', { id: 's2', type: 'export', severity: 'high', userId: 'u-staff', key: 'k2', detail: {}, createdAt: '2026-11-13T03:00:00.000Z' });
+  assert.equal(await new SecurityWatch({ repo, store }).dailyDigest('t1', new Date(morning.getTime() + 86_400_000)), 1, '次の日は送る');
+  assert.equal(notes.length, 4);
+});

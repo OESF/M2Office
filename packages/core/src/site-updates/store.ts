@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { createPool } from '../repository/pool.js';
 import type { SiteEditChange, SiteEditPageResult, SiteEditStatus } from '@m2office/shared';
-import type { SiteContentKind } from './wordpress.js';
+import type { PostTermFields, SiteContentKind } from './wordpress.js';
 import { purgedTerm } from './terms.js';
 import { purgedAction, type StoredSiteAction } from './actions.js';
 
@@ -68,21 +68,23 @@ export interface PostTermIds {
 
 /** サイトのカテゴリー・タグの直し 1 つ（置き場の形。第45.17節）。 */
 export type StoredTermChange =
-  | { op: 'create'; taxonomy: 'category' | 'tag'; name: string; parentId: string | null; parentName: string | null; createdId: string | null; result: SiteEditPageResult; reason: string }
-  | { op: 'rename'; taxonomy: 'category' | 'tag'; termId: string; before: string; after: string; result: SiteEditPageResult; reason: string }
+  | { op: 'create'; taxonomy: string; name: string; parentId: string | null; parentName: string | null; createdId: string | null; result: SiteEditPageResult; reason: string }
+  | { op: 'rename'; taxonomy: string; termId: string; before: string; after: string; result: SiteEditPageResult; reason: string }
   | {
     op: 'assign'; postId: string; postTitle: string; postLink: string; beforeModified: string;
+    /** 記事の種類と分類の欄（カスタム投稿タイプの独自の分類。第45.20.3節）。無ければ投稿。 */
+    fields?: PostTermFields;
     /** 直し案のときの記事のカテゴリーとタグ。入れる前に、これと同じかを確かめる。 */
     before: PostTermIds;
-    add: { taxonomy: 'category' | 'tag'; id: string | null; name: string }[];
-    remove: { taxonomy: 'category' | 'tag'; id: string; name: string }[];
+    add: { taxonomy: string; id: string | null; name: string }[];
+    remove: { taxonomy: string; id: string; name: string }[];
     /** 元に戻すときだけ: このとおりにそろえる。 */
     exact: PostTermIds | null;
     /** 入れた後のカテゴリーとタグ（元に戻すとき、入れた後に人が変えていないかを見る）。 */
     after: PostTermIds | null;
     result: SiteEditPageResult; reason: string;
   }
-  | { op: 'delete'; taxonomy: 'category' | 'tag'; termId: string; name: string; result: SiteEditPageResult; reason: string };
+  | { op: 'delete'; taxonomy: string; termId: string; name: string; result: SiteEditPageResult; reason: string };
 
 /** 新しく作る直し。 */
 export type NewSiteEdit = Pick<StoredSiteEdit, 'requestedBy' | 'request' | 'revertOf' | 'pages' | 'digest' | 'authKind' | 'wpUsername' | 'terms' | 'actions'>;
@@ -100,6 +102,14 @@ export interface SiteEditStore {
    * @returns 消した件数
    */
   purge(tenantId: string, before: string): Promise<number>;
+  /** 前に知らせた承認待ちのコメントの番号（まだ見回っていなければ `null`。第45.18.3節）。 */
+  commentSeen(tenantId: string): Promise<number | null>;
+  /** 知らせたコメントの番号を残す。 */
+  markCommentSeen(tenantId: string, lastId: number): Promise<void>;
+  /** 前に知らせたプラグインなどの問題の指紋と、見回った時刻（第45.18.5節）。 */
+  healthSeen(tenantId: string): Promise<{ digest: string; checkedAt: string | null }>;
+  /** 見回った時刻と、知らせた問題の指紋を残す。 */
+  markHealth(tenantId: string, digest: string, at: string): Promise<void>;
 }
 
 /** 本文を消したページ（記録だけを残す）。 */
@@ -199,6 +209,28 @@ export class PostgresSiteEditStore implements SiteEditStore {
     }
     return rows.length;
   }
+
+  async commentSeen(tenantId: string): Promise<number | null> {
+    const [r] = await this.q<{ last_comment_id: string | number }>(tenantId, 'select last_comment_id from site_comment_watch where tenant_id = $1', [tenantId]);
+    return r ? Number(r.last_comment_id) : null;
+  }
+
+  async markCommentSeen(tenantId: string, lastId: number): Promise<void> {
+    await this.q(tenantId,
+      `insert into site_comment_watch (tenant_id, last_comment_id, checked_at) values ($1, $2, now())
+       on conflict (tenant_id) do update set last_comment_id = greatest(site_comment_watch.last_comment_id, excluded.last_comment_id), checked_at = now()`, [tenantId, lastId]);
+  }
+
+  async healthSeen(tenantId: string): Promise<{ digest: string; checkedAt: string | null }> {
+    const [r] = await this.q<{ health_digest: string; health_checked_at: unknown }>(tenantId, 'select health_digest, health_checked_at from site_comment_watch where tenant_id = $1', [tenantId]);
+    return { digest: r?.health_digest ?? '', checkedAt: r?.health_checked_at ? iso(r.health_checked_at as Date | string) : null };
+  }
+
+  async markHealth(tenantId: string, digest: string, at: string): Promise<void> {
+    await this.q(tenantId,
+      `insert into site_comment_watch (tenant_id, health_digest, health_checked_at) values ($1, $2, $3)
+       on conflict (tenant_id) do update set health_digest = excluded.health_digest, health_checked_at = excluded.health_checked_at`, [tenantId, digest, at]);
+  }
 }
 
 /** 手元の置き場（テストと見本の会社）。 */
@@ -238,6 +270,26 @@ export class MemorySiteEditStore implements SiteEditStore {
       n++;
     }
     return n;
+  }
+
+  private readonly seen = new Map<string, number>();
+
+  async commentSeen(tenantId: string): Promise<number | null> {
+    return this.seen.get(tenantId) ?? null;
+  }
+
+  async markCommentSeen(tenantId: string, lastId: number): Promise<void> {
+    this.seen.set(tenantId, Math.max(this.seen.get(tenantId) ?? 0, lastId));
+  }
+
+  private readonly health = new Map<string, { digest: string; checkedAt: string | null }>();
+
+  async healthSeen(tenantId: string): Promise<{ digest: string; checkedAt: string | null }> {
+    return this.health.get(tenantId) ?? { digest: '', checkedAt: null };
+  }
+
+  async markHealth(tenantId: string, digest: string, at: string): Promise<void> {
+    this.health.set(tenantId, { digest, checkedAt: at });
   }
 
   /** テスト用: 作った時刻を変える。 */

@@ -86,8 +86,9 @@ export async function createWordPressDraft(a: WordPressAuth, post: {
       }),
     });
     if (!res.ok) return { error: `WordPress に入れられませんでした（${res.status}）` };
-    const body = await res.json() as { id?: unknown };
+    const body = await res.json() as { id?: unknown; source_url?: unknown };
     const id = String(body.id ?? '');
+    const url = typeof body.source_url === 'string' ? body.source_url : '';
     if (!id) return { error: 'WordPress の応答に記事の ID がありません' };
     return { id, editUrl: `${a.siteUrl}/wp-admin/post.php?post=${encodeURIComponent(id)}&action=edit` };
   } catch (err) {
@@ -98,9 +99,9 @@ export async function createWordPressDraft(a: WordPressAuth, post: {
 /**
  * 画像を WordPress のメディアに入れる（カバー画像。仕様書 第32.18.2節）。代わりの文も付ける。
  *
- * @returns メディアの ID。入れられなければ理由
+ * @returns メディアの ID と URL（記事の中に置くとき使う。分からなければ空）。入れられなければ理由
  */
-export async function uploadWordPressMedia(a: WordPressAuth, img: { bytes: Uint8Array; fileName: string; mimeType: string; alt: string }): Promise<{ id: string } | { error: string }> {
+export async function uploadWordPressMedia(a: WordPressAuth, img: { bytes: Uint8Array; fileName: string; mimeType: string; alt: string }): Promise<{ id: string; url: string } | { error: string }> {
   try {
     const h = headers(a);
     const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/media`, {
@@ -109,14 +110,15 @@ export async function uploadWordPressMedia(a: WordPressAuth, img: { bytes: Uint8
       body: Buffer.from(img.bytes),
     });
     if (!res.ok) return { error: `カバー画像を WordPress に入れられませんでした（${res.status}）` };
-    const body = await res.json() as { id?: unknown };
+    const body = await res.json() as { id?: unknown; source_url?: unknown };
     const id = String(body.id ?? '');
+    const url = typeof body.source_url === 'string' ? body.source_url : '';
     if (!id) return { error: 'WordPress の応答にメディアの ID がありません' };
     // 代わりの文は入れた後に付ける（入れるときの口では受け取らないため）。付けられなくても記事は作る
     await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/media/${encodeURIComponent(id)}`, {
       method: 'POST', headers: h, signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ alt_text: img.alt }),
     }).catch(() => undefined);
-    return { id };
+    return { id, url };
   } catch (err) {
     return { error: `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）` };
   }

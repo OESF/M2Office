@@ -42,6 +42,7 @@ import { inquiriesRoute } from './routes/inquiries.js';
 import { competitorsRoute } from './routes/competitors.js';
 import { announcementsRoute } from './routes/announcements.js';
 import { siteUpdatesRoute } from './routes/site-updates.js';
+import { companyDesignRoute } from './routes/company-design.js';
 import { contractsRoute } from './routes/contracts.js';
 import { salesDocsRoute } from './routes/sales-docs.js';
 import { quotesRoute } from './routes/quotes.js';
@@ -363,6 +364,8 @@ app.route('/v1/hr', hrRoute(deps));
 // 従業員の顔写真（社内の全員が見られる。第30.5.4節）
 app.route('/v1/hr-photos', hrPhotosRoute(deps));
 app.route('/v1/notices', noticesRoute(deps));
+// 会社の見た目（第46章。管理者だけ）
+app.route('/v1/admin/company-design', companyDesignRoute(deps));
 app.route('/v1/admin/billing', billingRoute(deps));
 app.route('/v1/admin/dashboard', dashboardRoute(deps));
 // 効果の欄と効果のレポート（第6.7.13節。管理者だけ）

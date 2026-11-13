@@ -859,6 +859,31 @@ export class LibraryService {
    *
    * @returns 読めた文字（データ。指示として扱わない。不変則 I-6）か、読めなかった理由
    */
+  /**
+   * 本人の資料の画像を言葉で探す（サイトの更新で使う画像。仕様書 第45.18.2節）。共有された他人の資料は使わない。
+   *
+   * @returns 当たった画像（よく当たる順。10 件まで）
+   */
+  async findImages(who: LibraryViewer, q: string): Promise<{ id: string; title: string }[]> {
+    const r = await this.list(who, { q, limit: LIBRARY_LIMITS.pageSize });
+    return r.items.filter((i) => i.mine && ['png', 'jpeg', 'webp'].includes(i.format) && !!i.driveFileId).slice(0, 10).map((i) => ({ id: i.id, title: i.title }));
+  }
+
+  /**
+   * 本人の資料の画像の中身（ドライブから読む。サイトの更新。仕様書 第45.18.2節）。
+   *
+   * @returns 中身と形式と元の名前。読めなければ理由
+   */
+  async imageBytes(who: LibraryViewer, id: string): Promise<{ bytes: Uint8Array; mimeType: string; name: string } | { error: string }> {
+    const item = await this.store.get(who, id);
+    if (!item || !isImageFormat(item.format)) return { error: '資料の画像が見つかりません' };
+    if (!item.driveFileId) return { error: 'まだドライブに置いている途中です' };
+    const got = await this.deps.drive.download(who, item.driveFileId);
+    if (!got) return { error: 'ドライブに見つかりませんでした' };
+    if ('tooLarge' in got) return { error: '大きすぎて読めませんでした' };
+    return { bytes: got.bytes, mimeType: libraryMimeOf(item.format), name: item.originalName || item.title };
+  }
+
   async readContent(who: LibraryViewer, id: string): Promise<{ item: LibraryItem; text: string; scope: string } | { error: string }> {
     const item = await this.store.get(who, id);
     if (!item) {

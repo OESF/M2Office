@@ -98,9 +98,13 @@ src/library/     ナレッジの整理（内蔵の拡張。第44章の段 1〜�
                  つながり（links.ts。同じメール・同じ資料の版・同じタグ・同じ語・同じフォルダを決まりで見つける）、
                  ツール（tools.ts。library.search・read・add・update・share・knowledge）、付属の業務「ナレッジの整理」（agents.ts）。本体は本人のドライブで、全文は持たない
 （columns/wordpress.ts は、記事の種類と分類の読み取り・お知らせらしい種類の選び方・どの分類にも入れる口も持つ。第45.20節）
-src/site-updates/ サイトの更新（内蔵の拡張。第45章の段 1）。本文の分け方と組み直し（segments.ts。印と札はプログラムが持ち、文のかたまりだけを推論に渡す）、
+src/site-updates/ サイトの更新（内蔵の拡張。第45章の段 1〜段 3）。本文の分け方と組み直し（segments.ts。印と札はプログラムが持ち、文のかたまりだけを推論に渡す）、
                  WordPress の固定ページと投稿の読み書きと権限・利用者の役割・公開のページ（wordpress.ts）、置き場（store.ts。site_edits と本人の WordPress の接続）、直し案・入れる・確かめ・元に戻す（service.ts）、
-                 新しい記事と固定ページ・公開の状態・前の版・アイキャッチ（actions.ts。段 2a）、サイトのカテゴリーとタグ（terms.ts。作る・名前を変える・付ける・外す・元に戻す、「カテゴリー」の見分け）、ツール（tools.ts。site_updates.propose・actions・terms・term_list・revert・list・apply）、付属の業務「サイトの直し案」「サイトに入れる」（agents.ts）
+                 新しい記事と固定ページ・公開の状態・前の版・アイキャッチ（actions.ts。段 2a）、サイトのカテゴリーとタグ（terms.ts。作る・名前を変える・付ける・外す・元に戻す、「カテゴリー」の見分け）、記事の中の画像の差し替えと代わりの文（images.ts。段 2a）、コメント（comments.ts。段 2b）、メニュー・ナビゲーション・サイトのタイトル（menus.ts。段 2c）、
+                 プラグイン・テーマ・本体の状態とサイトヘルス（health.ts。段 3）、会社の見た目をブロックのテーマの全体のスタイルに入れる（global-styles.ts。第46章）、
+                 ツール（tools.ts。site_updates.propose・actions・terms・term_list・comment_list・comments・menus・health・design・revert・list・apply）、付属の業務「サイトの直し案」「サイトに入れる」（agents.ts）
+src/design/      会社の見た目（第46章）。値の形と明るさの差の確かめ（tokens.ts）、DESIGN.md の読み書き（designmd.ts）、見本の画像（preview.ts）、置き場（store.ts。company_designs）、
+                 会社のサイトの見た目の手がかり（site-signals.ts）、クラシックのテーマに貼る CSS（site-css.ts）、作る・取り込む・直す・戻す・書き出す（service.ts）、ツール（tools.ts）、業務「会社の見た目」（agents.ts）
 src/print-designs/ 販促物の作成（内蔵の拡張。第41章の段 1）。型 12 種と組み版（templates.ts。mm の SVG・塗り足し・配色 3 通り・字の大きさを枠に合わせる）、
                  書き出し（render.ts。案の小さな画像・印刷の解像度の PNG・実寸と入稿用の PDF）、点検（checks.ts。曜日・連絡先・入りきらない文・推論の誤字と表示の決まり）、
                  置き場（store.ts）、処理（service.ts。3 案・会話で直す・文面を直す・作り直す・書き出し・掲示の期間の見張り）、

@@ -105,6 +105,10 @@ test('会社の鍵（api_key）を見出しに載せる。既定は Bearer、指
   const c: ConnectorDeclaration = { ...slack, id: 'crm', auth: { type: 'api_key' } };
   assert.deepEqual(await creds.headersFor('t', 'u', c), { ok: true, headers: { Authorization: 'Bearer KEY' } });
   assert.deepEqual(await creds.headersFor('t', 'u', { ...c, auth: { type: 'api_key', header: 'X-API-Key' } }), { ok: true, headers: { 'X-API-Key': 'KEY' } });
+  // 利用者名とパスワード（Basic。WordPress のアプリケーションパスワードなど。仕様書 第45.18.5節）
+  const basic = new ConnectionCredentials({ repo: repoOf({ apiKeyEnc: box.encrypt('m2office:abcdEFGH1234') }, null).repo, box });
+  assert.deepEqual(await basic.headersFor('t', 'u', { ...c, auth: { type: 'api_key', scheme: 'basic', header: 'X-Ignored' } }),
+    { ok: true, headers: { Authorization: `Basic ${Buffer.from('m2office:abcdEFGH1234').toString('base64')}` } });
   const empty = new ConnectionCredentials({ repo: repoOf({}, null).repo, box });
   const r = await empty.headersFor('t', 'u', c);
   assert.ok(!r.ok && /鍵が登録されていません/.test(r.error));

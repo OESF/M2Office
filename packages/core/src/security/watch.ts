@@ -373,13 +373,16 @@ export class SecurityWatch {
   /**
    * 前の日の兆しの数を、朝に 1 通にまとめて管理者に知らせる（無ければ送らない）。
    *
-   * @returns 数
+   * 1 日 1 回だけ。送った日はデータベースに残すので、ワーカーが起き直しても同じ日にまた送らない。
+   *
+   * @returns 数（その日にもう送っていれば 0）
    */
   async dailyDigest(tenantId: string, now: Date = new Date()): Promise<number> {
     const today = jst(now).day;
     const start = new Date(Date.parse(`${today}T00:00:00+09:00`) - 86_400_000).toISOString();
     const list = (await this.deps.store.recentSignals(tenantId, start, 500)).filter((s) => s.createdAt < new Date(Date.parse(`${today}T00:00:00+09:00`)).toISOString());
     if (list.length === 0) return 0;
+    if (!(await this.deps.store.claimDigest(tenantId, today))) return 0;
     const byType = [...groupBy(list, (s) => s.type)].map(([t, xs]) => `- ${SECURITY_SIGNAL_LABELS[t as SecuritySignalType]} ${xs.length} 件`).join('\n');
     const admins = (await this.deps.repo.listUsers(tenantId)).filter(isAdmin);
     for (const a of admins) {

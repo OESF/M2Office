@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { MailOverview, MailThreadDetail, SiteEditView } from '@m2office/shared';
+import type { CompanyDesignView, MailOverview, MailThreadDetail, SiteEditView } from '@m2office/shared';
 import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, LibraryFacets, LibraryItem, LibraryGraph, LibraryItemPage, LibraryItemView, LibraryMailState, LibraryProgress, LibraryShareScope, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
@@ -1378,7 +1378,7 @@ export interface McpConnectionView {
 /** 会社の接続の認証の状態。 */
 export type McpAuthState =
   | { type: 'none'; text: string; ready: true }
-  | { type: 'api_key'; text: string; ready: boolean; keySet: boolean; header: string }
+  | { type: 'api_key'; text: string; ready: boolean; keySet: boolean; header: string; scheme?: 'bearer' | 'basic' }
   | {
     type: 'oauth'; text: string; ready: boolean;
     /** クライアント ID（秘密ではない）。シークレットは登録したかだけ。自動で登録したものは空。 */
@@ -1893,6 +1893,8 @@ export const api = {
   siteUpdates: {
     /** 直しの記録（新しい順）。 */
     list: () => call<{ items: SiteEditView[] }>('/site-updates'),
+    /** 直しが入れる画像の URL（小さな見本。第45.18.2節）。 */
+    imageUrl: (id: string, fileId: string) => `/v1/site-updates/${encodeURIComponent(id)}/images/${encodeURIComponent(fileId)}`,
     /** つないでいるサイト（名前・URL・直すときに使う利用者・直せるか）。 */
     site: () => call<{
       connected: boolean; siteUrl: string | null; name: string | null; description: string | null;
@@ -2218,6 +2220,24 @@ export const api = {
       const blob = await fetchBlob(`/columns/${encodeURIComponent(id)}/cover?download=1`);
       if (!blob) throw new ApiError('書き出せませんでした', 404);
       saveBlob(blob, `${title.slice(0, 40) || 'column-cover'}.png`);
+    },
+  },
+  /** 会社の見た目（仕様書 第46章。管理者だけ）。 */
+  companyDesign: {
+    get: () => call<{ current: CompanyDesignView | null; history: CompanyDesignView[] }>('/admin/company-design'),
+    /** 見本の画像の URL（`compare` を渡すと並べる）。 */
+    previewUrl: (version?: number, compare?: number) => `/v1/admin/company-design/preview.png?${version ? `version=${version}&` : ''}${compare ? `compare=${compare}&` : ''}`,
+    generate: (request = '') => call<{ design: CompanyDesignView; notes: string[] }>('/admin/company-design/generate', { method: 'POST', body: JSON.stringify({ request }) }),
+    importText: (text: string, name: string, request = '') => call<{ design: CompanyDesignView; notes: string[] }>('/admin/company-design/import', { method: 'POST', body: JSON.stringify({ text, name, request }) }),
+    importUrl: (url: string, request = '') => call<{ design: CompanyDesignView; notes: string[] }>('/admin/company-design/import', { method: 'POST', body: JSON.stringify({ url, request }) }),
+    edit: (request: string) => call<{ design: CompanyDesignView; notes: string[] }>('/admin/company-design/edit', { method: 'POST', body: JSON.stringify({ request }) }),
+    restore: (version?: number) => call<{ design: CompanyDesignView; notes: string[] }>('/admin/company-design/restore', { method: 'POST', body: JSON.stringify(version ? { version } : {}) }),
+    siteCss: () => call<{ theme: string | null; kind: 'classic' | 'block' | 'unknown'; tuned: boolean; css: string; steps: string[]; notes: string[] }>('/admin/company-design/site-css'),
+    /** DESIGN.md を保存する。 */
+    download: async () => {
+      const blob = await fetchBlob('/admin/company-design/export');
+      if (!blob) throw new ApiError('書き出せませんでした', 404);
+      saveBlob(blob, 'DESIGN.md');
     },
   },
   /** サイネージ（仕様書 第31章）。 */
@@ -3157,10 +3177,10 @@ export const api = {
      * 接続を登録する。認証の要らない接続は、MCP サーバにツールの一覧を問い合わせる。
      * `preset` を渡すと型（Slack など）から登録する（仕様書 第12.11.6.7節）。
      */
-    addMcpConnection: (v: { url?: string; name?: string; id?: string; preset?: string; auth?: 'none' | 'oauth' | 'api_key'; header?: string }) =>
+    addMcpConnection: (v: { url?: string; name?: string; id?: string; preset?: string; auth?: 'none' | 'oauth' | 'api_key' | 'basic'; header?: string }) =>
       call<{ ok: true; id: string; tools: number; auth: string }>('/admin/connections/mcp', { method: 'POST', body: JSON.stringify(v) }),
     /** 認証情報を登録する（仕様書 第12.11.6.2節）。値は暗号化され、返らない。 */
-    setMcpCredentials: (id: string, v: { clientId?: string; clientSecret?: string; apiKey?: string }) =>
+    setMcpCredentials: (id: string, v: { clientId?: string; clientSecret?: string; apiKey?: string; username?: string; password?: string }) =>
       call<{ ok: true; reset?: number; tools?: number; warning?: string }>(`${mcpPath(id)}/credentials`, { method: 'PUT', body: JSON.stringify(v) }),
     /** ツールごとの危険度などを変える。 */
     updateMcpConnection: (id: string, v: { tools?: { name: string; risk: string }[]; name?: string; sendPolicy?: 'block' | 'deidentified' }) =>

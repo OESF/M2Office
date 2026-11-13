@@ -20,6 +20,7 @@ import { MORNING_BRIEF } from './morning-brief.js';
 import { BASIC_AGENTS } from './basic.js';
 import { DELIVERY_SEND } from '../deliveries/agents.js';
 import { MAIL_REPLY_SEND } from '../mail/agents.js';
+import { COMPANY_DESIGN_AGENT } from '../design/agents.js';
 
 /**
  * 公式エージェントのカタログ。
@@ -35,6 +36,8 @@ export const OFFICIAL_AGENTS: AgentDefinition[] = [
   DELIVERY_SEND,
   // メールの返事を送る（第9.5.1.1節）。メールの画面の「送る」で始める
   MAIL_REPLY_SEND,
+  // 会社の見た目（第46章）。秘書から頼む。メニューには出さない
+  COMPANY_DESIGN_AGENT,
 ];
 
 /**

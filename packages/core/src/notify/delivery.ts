@@ -53,6 +53,7 @@ export const NOTIFICATION_KIND_LABELS: Record<string, string> = {
   mail: '急ぎのメール',
   attendance: '給与・勤怠',
   library: 'ナレッジの整理',
+  site: 'サイトの更新',
   billing: 'ご利用料金',
 };
 

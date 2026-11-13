@@ -263,6 +263,19 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     if (req) return [{ name: 'announcements.draft', args: { request: req } }];
   }
 
+  // 会社の見た目（仕様書 第46章）
+  if (has('company_design.update') && instruction.includes('company_design.update')) {
+    const req = extractField(prompt, 'request');
+    if (/書き出/.test(req)) return [{ name: 'company_design.export', args: {} }];
+    if (/CSS|サイトに反映|ホームページ/.test(req)) return [{ name: 'company_design.site_css', args: {} }];
+    if (/戻して/.test(req)) return [{ name: 'company_design.update', args: { mode: 'restore', request: req } }];
+    const url = /(https:\/\/\S+)/.exec(req)?.[1];
+    if (/取り込/.test(req) || url) return [{ name: 'company_design.update', args: { mode: 'import', request: req, ...(url ? { url } : { text: req }) } }];
+    if (/作って|作り直/.test(req)) return [{ name: 'company_design.update', args: { mode: 'create', request: req } }];
+    if (/[？?]|教えて/.test(req)) return [{ name: 'company_design.show', args: {} }];
+    return [{ name: 'company_design.update', args: { mode: 'edit', request: req } }];
+  }
+
   // サイトの更新（仕様書 第45章）: 直し案を作る・元に戻す・記録。承認の後に入れる
   if (has('site_updates.apply') && instruction.includes('site_updates.apply')) {
     const id = extractField(prompt, 'editId');
@@ -272,6 +285,11 @@ function chooseTools(tools: string[], prompt: string): Call[] {
     const req = extractField(prompt, 'request');
     if (/戻して/.test(req)) return [{ name: 'site_updates.revert', args: {} }];
     if (/(カテゴリ|タグ)/.test(req) && /(何がある|一覧)/.test(req)) return [{ name: 'site_updates.term_list', args: {} }];
+    if (/会社の見た目|会社の色/.test(req)) return [{ name: 'site_updates.design', args: { request: req } }];
+    if (/(プラグイン|テーマ|サイトヘルス)/.test(req)) return [{ name: 'site_updates.health', args: {} }];
+    if (/コメント/.test(req) && /(新しい|何がある|見せて|一覧|は？)/.test(req) && !/(承認して|返事|スパム|ゴミ箱)/.test(req)) return [{ name: 'site_updates.comment_list', args: {} }];
+    if (/コメント/.test(req)) return [{ name: 'site_updates.comments', args: { request: req } }];
+    if (/(メニュー|キャッチフレーズ|サイトのタイトル)/.test(req)) return [{ name: 'site_updates.menus', args: { request: req } }];
     if (/(作って|公開|下書きに|非公開|予約|ゴミ箱|前の版|アイキャッチ)/.test(req) && !/(カテゴリ|タグ)/.test(req)) return [{ name: 'site_updates.actions', args: { request: req } }];
     if (/(カテゴリ|タグ)/.test(req)) return [{ name: 'site_updates.terms', args: { request: req } }];
     if (/記録|何を直した/.test(req)) return [{ name: 'site_updates.list', args: {} }];

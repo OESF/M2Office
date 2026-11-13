@@ -58,6 +58,7 @@ import type { DeliveryService } from '../deliveries/service.js';
 import type { PrintDesignService } from '../print-designs/service.js';
 import type { LibraryService } from '../library/service.js';
 import type { SiteUpdateService } from '../site-updates/service.js';
+import type { CompanyDesignService } from '../design/service.js';
 import type { MailStore } from '../mail/store.js';
 import type { ReservationService } from '../reservations/service.js';
 import type { ColumnPlanner } from '../columns/planner.js';
@@ -260,6 +261,8 @@ export interface RunEngineDeps {
     service: SiteUpdateService;
     access(tenantId: string, userId: string): Promise<SiteUpdatesSettings | null>;
   };
+  /** 会社の見た目（仕様書 第46章）。ツールに渡す。 */
+  companyDesign?: CompanyDesignService;
   /** メールの片付け（仕様書 第9.5.1.1節）。メールの返事を送る業務と朝のブリーフのツールに渡す。 */
   mail?: { store: MailStore };
   /** 予約（内蔵の拡張。仕様書 第37章）。日程調整で会議と一緒に会議室を取る（第37.18節）。 */
@@ -1213,6 +1216,7 @@ export class RunEngine {
         library: { service: this.deps.library.service, access: () => this.deps.library!.access(run.tenantId, requestedBy) },
       } : {}),
       // サイトの更新（第45章）
+      ...(this.deps.companyDesign ? { companyDesign: this.deps.companyDesign } : {}),
       ...(this.deps.siteUpdates ? {
         siteUpdates: { service: this.deps.siteUpdates.service, access: () => this.deps.siteUpdates!.access(run.tenantId, requestedBy) },
       } : {}),

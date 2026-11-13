@@ -3288,3 +3288,13 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .signup-terms-body h2 { font-size: calc(15px * var(--font-scale)); margin: calc(16px * var(--space-scale)) 0 calc(6px * var(--space-scale)); }
 .signup-terms-body .md-table { font-size: calc(12px * var(--font-scale)); }
 .signup-terms > .row { justify-content: flex-end; padding: calc(10px * var(--space-scale)) calc(20px * var(--space-scale)); border-top: 1px solid var(--line); }
+
+/* サイトの更新: 直しが入れる画像の小さな見本（第45.18.2節） */
+.site-edit-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.site-edit-images img { width: 120px; max-width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); }
+
+/* 会社の見た目（第46章） */
+.company-design { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+.company-design-preview { width: 100%; max-width: 760px; aspect-ratio: 1200 / 630; border-radius: 8px; border: 1px solid var(--line); }
+.company-design .row input:not([type="file"]) { flex: 1; min-width: 0; }
+.company-design-css pre { max-height: 320px; overflow: auto; white-space: pre; font-size: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; }

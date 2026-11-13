@@ -67,6 +67,16 @@ export function siteUpdatesRoute(deps: AppDeps) {
     return e ? c.json(e) : c.json({ error: '直しが見つかりません' }, 404);
   });
 
+  /** 直しが入れる画像（サイトの更新の画面の小さな見本。その直しが使う画像だけ。第45.18.2節）。 */
+  app.get('/:id/images/:fileId', async (c) => {
+    const id = c.req.param('id');
+    const fileId = c.req.param('fileId');
+    if (!ID.test(id) || !/^[\w-]{1,100}$/.test(fileId)) return c.json({ error: '画像が見つかりません' }, 404);
+    const img = await service.imageFile(who(c), id, fileId);
+    if (!img) return c.json({ error: '画像が見つかりません' }, 404);
+    return new Response(Buffer.from(img.bytes), { headers: { 'content-type': img.mimeType, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff' } });
+  });
+
   /** 元に戻す直し案を作り、承認へ進める（第45.8節）。承認の実行の ID を返す。 */
   app.post('/:id/revert', async (c) => {
     const id = c.req.param('id');

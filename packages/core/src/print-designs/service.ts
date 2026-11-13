@@ -7,6 +7,7 @@
  * 頼みと文面はデータであり、指示として扱わない（不変則 I-6）。
  */
 
+import type { CompanyDesignTokens } from '@m2office/shared';
 import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import {
@@ -38,6 +39,8 @@ export interface PrintViewer {
 
 /** 処理に要るもの。 */
 export interface PrintDesignServiceDeps {
+  /** 会社の見た目（第46.5節）。あれば主の色の既定にする */
+  design?(tenantId: string): Promise<CompanyDesignTokens | null>;
   store: PrintDesignStore;
   repo: Repository;
   files: FileStore;
@@ -274,9 +277,11 @@ export class PrintDesignService {
     return {
       company: { name: c.shortName || c.legalName, address: c.address, phone: c.phone, website: c.website },
       logo,
-      // 主の色: サイネージの帯の色 → ロゴの色（推論が読む）→ 題名から決める色
+      // 主の色: サイネージの帯の色 → 会社の見た目の主の色（第46.5節）→ ロゴの色（推論が読む）→ 題名から決める色
       color: async (llm, title) => {
         if (settings.signage.color) return settings.signage.color;
+        const design = await this.deps.design?.(tenantId).catch(() => null);
+        if (design) return design.colors.primary;
         if (logo && c.logoFileId) {
           const key = `${tenantId}:${c.logoFileId}`;
           if (!this.colors.has(key)) this.colors.set(key, await brandColor(llm, logo).catch(() => null));

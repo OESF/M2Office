@@ -44,7 +44,7 @@ export interface Schedule {
  * 通知の種類。`security`（権限区画への出入りなど）は、本人の設定にかかわらず届ける（仕様書 第16.7.5節）。
  * `inventory` は在庫の見張り（残りわずか・無くなる見込み・使用期限と発注の案。仕様書 第29.14節）。
  */
-export type NotificationKind = 'billing' | 'brief' | 'run' | 'approval' | 'failure' | 'security' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'decision' | 'member' | 'print' | 'usage' | 'usageSelf' | 'effect' | 'knowledgeGap' | 'notice' | 'machine' | 'service' | 'support' | 'library' | 'mail';
+export type NotificationKind = 'billing' | 'brief' | 'run' | 'approval' | 'failure' | 'security' | 'inventory' | 'attendance' | 'signage' | 'inquiry' | 'competitor' | 'announcement' | 'webReview' | 'column' | 'contract' | 'reservation' | 'subsidy' | 'decision' | 'member' | 'print' | 'usage' | 'usageSelf' | 'effect' | 'knowledgeGap' | 'notice' | 'machine' | 'service' | 'support' | 'library' | 'mail' | 'site';
 
 /**
  * 朝のブリーフ・週次ブリーフの 1 回分（仕様書 第9.5.5.1.2節、Q-246）。本人が受け取る成果物として、実行の記録と同じ期間残す。
