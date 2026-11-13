@@ -56,10 +56,11 @@ export interface ActionPlanInput {
   featured: { kind: SiteContentKind; id: string }[];
 }
 
-const KIND_LABEL: Record<SiteContentKind, string> = { page: '固定ページ', post: '記事' };
+/** 記事の種類の呼び方（カスタム投稿タイプは口の名前を添える）。 */
+const kindLabel = (kind: SiteContentKind) => (kind === 'page' ? '固定ページ' : kind === 'post' ? '記事' : `記事（${kind}）`);
 const STATUS_LABEL: Record<string, string> = { publish: '公開', draft: '下書き', private: '非公開', future: '予約', pending: 'レビュー待ち', trash: 'ゴミ箱' };
 const STATUSES: readonly SiteStatus[] = ['publish', 'draft', 'private', 'future', 'pending', 'trash'];
-const kindOf = (v: unknown): SiteContentKind => (v === 'page' ? 'page' : 'post');
+const kindOf = (v: unknown): SiteContentKind => (v === 'page' ? 'page' : typeof v === 'string' && v !== 'post' && /^[a-z0-9_-]{1,40}$/i.test(v) && v !== 'pages' && v !== 'posts' ? v : 'post');
 const idOf = (v: unknown) => (typeof v === 'number' || (typeof v === 'string' && /^\d+$/.test(v)) ? String(v) : '');
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const dateOf = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v.trim().slice(0, 25) : null);
@@ -115,19 +116,19 @@ export async function buildActions(plan: ActionPlanInput, request: string, ctx: 
     }
     actions.push({
       op: 'create', kind: c.kind, title: c.title, html: c.body ? columnHtml(c.body) : '', excerpt: c.excerpt, status, date: status === 'future' ? c.date : null,
-      eyecatch: c.eyecatch && c.kind === 'post' ? eyecatchFor(c.title, i) : null, createdId: null, link: '', mediaId: null, result: 'pending', reason: '',
+      eyecatch: c.eyecatch && c.kind !== 'page' ? eyecatchFor(c.title, i) : null, createdId: null, link: '', mediaId: null, result: 'pending', reason: '',
     });
   });
   for (const c of plan.status.slice(0, SITE_ACTION_LIMITS.statuses)) {
     const now = await ctx.read(c.kind, c.id);
-    if (!now) { notes.push(`公開の状態を変える${KIND_LABEL[c.kind]}が見つかりません`); continue; }
+    if (!now) { notes.push(`公開の状態を変える${kindLabel(c.kind)}が見つかりません`); continue; }
     if (now.status === c.to && c.to !== 'future') continue;
     if (c.to === 'future' && (!c.date || Date.parse(c.date) <= ctx.now.getTime())) { notes.push(`「${now.title}」の予約の日時が読めないか過ぎているので、変えません`); continue; }
     actions.push({ op: 'status', kind: c.kind, id: c.id, title: now.title, link: now.link, before: { status: now.status, date: now.date }, to: c.to, date: c.to === 'future' ? c.date : null, result: 'pending', reason: '' });
   }
   for (const c of plan.revision.slice(0, SITE_ACTION_LIMITS.revisions)) {
     const now = await ctx.read(c.kind, c.id);
-    if (!now) { notes.push(`前の版に戻す${KIND_LABEL[c.kind]}が見つかりません`); continue; }
+    if (!now) { notes.push(`前の版に戻す${kindLabel(c.kind)}が見つかりません`); continue; }
     const list = (await ctx.revisions(c.kind, c.id)).filter((r) => r.content !== now.content || r.title !== now.title);
     const pick = c.before ? list.find((r) => Date.parse(r.date) < Date.parse(c.before!)) : list[0];
     if (!pick) { notes.push(`「${now.title}」には戻せる前の版がありません（WordPress が版を残していないか、いまと同じです）`); continue; }
@@ -140,7 +141,7 @@ export async function buildActions(plan: ActionPlanInput, request: string, ctx: 
   let fi = 0;
   for (const c of plan.featured.slice(0, SITE_ACTION_LIMITS.featured)) {
     const now = await ctx.read(c.kind, c.id);
-    if (!now) { notes.push(`アイキャッチを付ける${KIND_LABEL[c.kind]}が見つかりません`); continue; }
+    if (!now) { notes.push(`アイキャッチを付ける${kindLabel(c.kind)}が見つかりません`); continue; }
     actions.push({ op: 'featured', kind: c.kind, id: c.id, title: now.title, link: now.link, before: now.featuredMedia, eyecatch: eyecatchFor(now.title, fi++), set: null, mediaId: null, result: 'pending', reason: '' });
   }
   return { actions, notes };
@@ -151,7 +152,7 @@ const statusText = (s: string, date: string | null) => (s === 'future' ? `予約
 
 /** 直し 1 つを、人が読む 1 行にする（承認の画面・記録）。 */
 export function actionLine(a: StoredSiteAction): string {
-  if (a.op === 'create') return `${KIND_LABEL[a.kind]}「${a.title}」を作る（${statusText(a.status, a.date)}）${a.eyecatch ? '。アイキャッチを作って付ける' : ''}`;
+  if (a.op === 'create') return `${kindLabel(a.kind)}「${a.title}」を作る（${statusText(a.status, a.date)}）${a.eyecatch ? '。アイキャッチを作って付ける' : ''}`;
   if (a.op === 'status') return `「${a.title}」を${statusText(a.before.status, a.before.status === 'future' ? a.before.date : null)}から${statusText(a.to, a.date)}にする${a.to === 'trash' ? '（WordPress のゴミ箱から戻せます）' : ''}`;
   if (a.op === 'revision') return a.revisionId ? `「${a.title}」を前の版（${when(a.revisionDate)}）に戻す` : `「${a.title}」を、前の版に戻す前の本文に戻す`;
   return a.set !== null ? `「${a.title}」のアイキャッチを前のものに戻す` : `「${a.title}」にアイキャッチを作って付ける`;

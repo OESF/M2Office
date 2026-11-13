@@ -130,6 +130,7 @@
 | `announcements.recipients` | write-internal | — | いちばん新しいお知らせの下書きの、メールの宛先を頼みに合わせて絞り直します（送るのは承認の後） |
 | `announcements.revise` | write-internal | — | いちばん新しいお知らせの下書きを、頼みに合わせて直します（書き方・予約の日時） |
 | `announcements.submit` | write-internal | — | いちばん新しいお知らせの下書きを、承認へ進めます。出すのは承認の後です |
+| `announcements.web_target` | write-internal | — | お知らせを入れる会社の Web サイト（WordPress）の記事の種類（投稿・お知らせ（news）など）を決めます |
 | `columns.cover` | write-internal | — | コラムのカバー画像を作り直します（型・AI の挿絵・会社の写真）。新しい版になるだけで、Web には出しません |
 | `columns.draft` | write-internal | — | テーマを Web で調べ、出典つきのコラムの下書きを書きます。下書きにするだけで、Web には出しません |
 | `columns.prepare` | write-internal | — | コラムのテーマ案を作ります。本数を言われたら、上から順にテーマ案で書き始めます（予定表があれば空いている回に入れます）。Web には出しません |
@@ -316,6 +317,7 @@
 | `announcements.recipients` | `request`（必須）: 宛先の頼み |
 | `announcements.revise` | `instruction`: 書き方の頼み、`publishAt`: 予約の日時（ISO 8601） |
 | `announcements.submit` | なし |
+| `announcements.web_target` | `restBase`（必須）: 記事の種類の口の名前か表示名 |
 | `columns.cover` | `column`: コラムの題名かテーマの言葉、`kind`: 背景の種類（template・ai・photo）、`hint`: 雰囲気の頼み（「もっと明るく」など）、`style`: 作風（real・illustration・anime・fantasy）、`previous`: 作り直す前の画像に戻す |
 | `columns.draft` | `theme`（必須）: コラムのテーマ（一言。例: 「子どもの歯みがきのコツ」）、`memo`: リクエスト（書く人の希望・経験・考え。カバー画像の希望も書ける。任意） |
 | `columns.prepare` | `count`: 書き始める本数（無ければテーマ案を作るだけ） |

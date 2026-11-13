@@ -16,7 +16,16 @@ const TIMEOUT_MS = 20_000;
 const PUBLIC_MAX_BYTES = 2_000_000;
 
 /** 直す対象の種類。 */
-export type SiteContentKind = 'page' | 'post';
+export type SiteContentKind = string;
+
+/**
+ * 記事の種類の口の名前（第45.20.3節）。`page` は固定ページ、`post` は投稿、ほかはカスタム投稿タイプの口の名前（`news` など）。
+ */
+export function siteContentPath(kind: SiteContentKind): string {
+  if (kind === 'page') return 'pages';
+  if (kind === 'post') return 'posts';
+  return /^[a-z0-9_-]{1,40}$/i.test(kind) ? kind : 'posts';
+}
 
 /** 探した結果の 1 件。 */
 export interface SiteContentHit {
@@ -36,7 +45,6 @@ export interface SiteContent extends SiteContentHit {
   modifiedGmt: string;
 }
 
-const PATH: Record<SiteContentKind, string> = { page: 'pages', post: 'posts' };
 
 function raw(v: unknown): string {
   if (typeof v === 'string') return v;
@@ -57,14 +65,15 @@ async function getJson(a: WordPressAuth, path: string): Promise<{ ok: true; body
  * @param query 探す言葉（空なら一覧）
  * @returns 見つかったもの（固定ページを先に。それぞれ 20 件まで）。届かなければ理由
  */
-export async function findSiteContent(a: WordPressAuth, query: string): Promise<{ hits: SiteContentHit[] } | { error: string }> {
+export async function findSiteContent(a: WordPressAuth, query: string, customKinds: readonly SiteContentKind[] = []): Promise<{ hits: SiteContentHit[] } | { error: string }> {
   try {
     const q = query.trim();
     const fields = '_fields=id,title,link,status,type';
-    const kinds: SiteContentKind[] = q ? ['page', 'post'] : ['page'];
+    // カスタム投稿タイプ（第45.20.3節）は、言葉で探すときに投稿と並べて探す
+    const kinds: SiteContentKind[] = q ? ['page', 'post', ...customKinds] : ['page'];
     const hits: SiteContentHit[] = [];
     for (const kind of kinds) {
-      const r = await getJson(a, `${PATH[kind]}?${q ? `search=${encodeURIComponent(q)}&` : ''}per_page=${q ? 20 : 100}&status=publish,private,draft&context=edit&${fields}`);
+      const r = await getJson(a, `${siteContentPath(kind)}?${q ? `search=${encodeURIComponent(q)}&` : ''}per_page=${q ? 20 : 100}&status=publish,private,draft&context=edit&${fields}`);
       if (!r.ok) {
         if (r.status === 401 || r.status === 403) return { error: 'WordPress の利用者に、固定ページと投稿を直す権限がありません（「編集者」の役割にしてください）' };
         return { error: `WordPress で探せませんでした（${r.status}）` };
@@ -86,7 +95,7 @@ export async function findSiteContent(a: WordPressAuth, query: string): Promise<
  */
 export async function readSiteContent(a: WordPressAuth, kind: SiteContentKind, id: string): Promise<SiteContent | { error: string }> {
   try {
-    const r = await getJson(a, `${PATH[kind]}/${encodeURIComponent(id)}?context=edit&_fields=id,title,link,status,content,excerpt,modified_gmt`);
+    const r = await getJson(a, `${siteContentPath(kind)}/${encodeURIComponent(id)}?context=edit&_fields=id,title,link,status,content,excerpt,modified_gmt`);
     if (!r.ok) {
       if (r.status === 404) return { error: 'そのページは WordPress にありません（消されたかもしれません）' };
       if (r.status === 401 || r.status === 403) return { error: 'WordPress の利用者に、このページを直す権限がありません（「編集者」の役割にしてください）' };
@@ -110,7 +119,7 @@ export async function readSiteContent(a: WordPressAuth, kind: SiteContentKind, i
  */
 export async function updateSiteContent(a: WordPressAuth, kind: SiteContentKind, id: string, v: { content: string; title?: string; excerpt?: string }): Promise<{ modifiedGmt: string; link: string } | { error: string }> {
   try {
-    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/${PATH[kind]}/${encodeURIComponent(id)}?context=edit&_fields=modified_gmt,link`, {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/${siteContentPath(kind)}/${encodeURIComponent(id)}?context=edit&_fields=modified_gmt,link`, {
       method: 'POST', headers: wordPressHeaders(a), signal: AbortSignal.timeout(TIMEOUT_MS),
       body: JSON.stringify({ content: v.content, ...(v.title !== undefined ? { title: v.title } : {}), ...(v.excerpt !== undefined ? { excerpt: v.excerpt } : {}) }),
     });
@@ -353,7 +362,7 @@ export interface SiteStatusView {
  */
 export async function readSiteStatus(a: WordPressAuth, kind: SiteContentKind, id: string): Promise<SiteStatusView | { error: string }> {
   try {
-    const r = await getJson(a, `${PATH[kind]}/${encodeURIComponent(id)}?context=edit&_fields=id,title,link,status,date,modified_gmt,featured_media,content,excerpt`);
+    const r = await getJson(a, `${siteContentPath(kind)}/${encodeURIComponent(id)}?context=edit&_fields=id,title,link,status,date,modified_gmt,featured_media,content,excerpt`);
     if (!r.ok) return { error: r.status === 404 ? 'そのページは WordPress にありません' : `WordPress からページを読めませんでした（${r.status}）` };
     const v = r.body as Record<string, unknown>;
     return {
@@ -376,7 +385,7 @@ export async function createSiteContent(a: WordPressAuth, kind: SiteContentKind,
   title: string; content: string; excerpt: string; status: 'draft' | 'publish' | 'future'; date: string | null; featuredMedia: number | null;
 }): Promise<{ id: string; link: string } | { error: string }> {
   try {
-    const r = await send(a, 'POST', `${PATH[kind]}?_fields=id,link`, {
+    const r = await send(a, 'POST', `${siteContentPath(kind)}?_fields=id,link`, {
       title: v.title, content: v.content, excerpt: v.excerpt, status: v.status,
       ...(v.status === 'future' && v.date ? { date: v.date } : {}), ...(v.featuredMedia ? { featured_media: v.featuredMedia } : {}),
     });
@@ -397,8 +406,8 @@ export async function createSiteContent(a: WordPressAuth, kind: SiteContentKind,
 export async function setSiteStatus(a: WordPressAuth, kind: SiteContentKind, id: string, status: SiteStatus, date: string | null): Promise<{ modifiedGmt: string } | { error: string }> {
   try {
     const r = status === 'trash'
-      ? await send(a, 'DELETE', `${PATH[kind]}/${encodeURIComponent(id)}`)
-      : await send(a, 'POST', `${PATH[kind]}/${encodeURIComponent(id)}?context=edit&_fields=modified_gmt`, { status, ...(date ? { date } : {}) });
+      ? await send(a, 'DELETE', `${siteContentPath(kind)}/${encodeURIComponent(id)}`)
+      : await send(a, 'POST', `${siteContentPath(kind)}/${encodeURIComponent(id)}?context=edit&_fields=modified_gmt`, { status, ...(date ? { date } : {}) });
     if (!r.ok) return { error: r.status === 401 || r.status === 403 ? 'WordPress の利用者に、公開の状態を変える権限がありません' : `WordPress で公開の状態を変えられませんでした（${r.status}）` };
     const m = (r.body as { modified_gmt?: unknown }).modified_gmt;
     return { modifiedGmt: typeof m === 'string' ? m : '' };
@@ -424,7 +433,7 @@ export interface SiteRevision {
  */
 export async function listSiteRevisions(a: WordPressAuth, kind: SiteContentKind, id: string): Promise<SiteRevision[] | { error: string }> {
   try {
-    const r = await getJson(a, `${PATH[kind]}/${encodeURIComponent(id)}/revisions?context=edit&per_page=30&_fields=id,date,title,content,excerpt`);
+    const r = await getJson(a, `${siteContentPath(kind)}/${encodeURIComponent(id)}/revisions?context=edit&per_page=30&_fields=id,date,title,content,excerpt`);
     if (!r.ok) return { error: r.status === 401 || r.status === 403 ? 'WordPress の利用者に、前の版を読む権限がありません' : `WordPress から前の版を読めませんでした（${r.status}）` };
     return (Array.isArray(r.body) ? r.body as Record<string, unknown>[] : []).map((v) => ({
       id: String(v['id'] ?? ''), date: typeof v['date'] === 'string' ? v['date'] : '', title: raw(v['title']), content: raw(v['content']), excerpt: raw(v['excerpt']),
@@ -437,7 +446,7 @@ export async function listSiteRevisions(a: WordPressAuth, kind: SiteContentKind,
 /** アイキャッチを変える（0 で外す）。 */
 export async function setSiteFeatured(a: WordPressAuth, kind: SiteContentKind, id: string, mediaId: number): Promise<{ modifiedGmt: string } | { error: string }> {
   try {
-    const r = await send(a, 'POST', `${PATH[kind]}/${encodeURIComponent(id)}?context=edit&_fields=modified_gmt`, { featured_media: mediaId });
+    const r = await send(a, 'POST', `${siteContentPath(kind)}/${encodeURIComponent(id)}?context=edit&_fields=modified_gmt`, { featured_media: mediaId });
     if (!r.ok) return { error: `WordPress でアイキャッチを変えられませんでした（${r.status}）` };
     const m = (r.body as { modified_gmt?: unknown }).modified_gmt;
     return { modifiedGmt: typeof m === 'string' ? m : '' };
@@ -450,7 +459,7 @@ export async function setSiteFeatured(a: WordPressAuth, kind: SiteContentKind, i
 export async function listSiteItems(a: WordPressAuth, kind: SiteContentKind, query: string): Promise<{ id: string; title: string; status: string; date: string; link: string }[] | { error: string }> {
   try {
     const q = query.trim();
-    const r = await getJson(a, `${PATH[kind]}?${q ? `search=${encodeURIComponent(q)}&` : ''}per_page=${kind === 'page' ? 100 : 20}&status=publish,private,draft,future,pending&context=edit&_fields=id,title,status,date,link`);
+    const r = await getJson(a, `${siteContentPath(kind)}?${q ? `search=${encodeURIComponent(q)}&` : ''}per_page=${kind === 'page' ? 100 : 20}&status=publish,private,draft,future,pending&context=edit&_fields=id,title,status,date,link`);
     if (!r.ok) return { error: `WordPress で一覧を読めませんでした（${r.status}）` };
     return (Array.isArray(r.body) ? r.body as Record<string, unknown>[] : []).map((v) => ({
       id: String(v['id'] ?? ''), title: raw(v['title']), status: typeof v['status'] === 'string' ? v['status'] : '', date: typeof v['date'] === 'string' ? v['date'] : '', link: typeof v['link'] === 'string' ? v['link'] : '',

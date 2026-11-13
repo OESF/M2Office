@@ -24,7 +24,7 @@ import type { ColumnStore, NewColumnVersion } from './store.js';
 import { aiReview, mergeReview, ruleReview } from './review.js';
 import { inferRuleSets } from './rules.js';
 import { ColumnWriteError, rewriteColumn, writeColumn } from './writer.js';
-import { checkWordPress, columnHtml, createWordPressDraft, normalizeSiteUrl, setWordPressStatus, uploadWordPressMedia, type WordPressAuth } from './wordpress.js';
+import { categoryFieldOf, checkWordPress, columnHtml, createWordPressDraft, ensureWordPressTerm, listPostTypes, listTaxonomies, normalizeSiteUrl, pickColumnTypes, setWordPressStatus, uploadWordPressMedia, wpRef, type WordPressAuth, type WordPressPostType, type WordPressTaxonomy } from './wordpress.js';
 import { similarityReview } from './plan.js';
 import type { PageFetcher } from '../competitors/fetcher.js';
 import { imageModel } from '../llm/models.js';
@@ -453,10 +453,17 @@ export class ColumnService {
       if ('error' in up) return { error: up.error };
       media = up.id;
     }
-    const res = await createWordPressDraft(auth, { title: v.title, html: columnHtml(finalMarkdown(v, settings)), excerpt: v.description, featuredMedia: media });
+    // 入れる種類と分類（第45.20.2節）。カテゴリーは既定で「コラム」、無ければ作る。空なら付けない
+    const target = await this.columnTarget(auth, settings);
+    const categoryName = (settings.wpCategory ?? 'コラム').trim();
+    const category = categoryName && target.taxonomy ? await ensureWordPressTerm(auth, target.taxonomy.restBase, categoryName) : null;
+    const res = await createWordPressDraft(auth, {
+      title: v.title, html: columnHtml(finalMarkdown(v, settings)), excerpt: v.description, featuredMedia: media,
+      restBase: target.type.restBase, ...(category && target.taxonomy ? { terms: { field: target.taxonomy.restBase, ids: [category] } } : {}),
+    });
     if ('error' in res) return { error: res.error };
-    await store.update(who.tenantId, id, { status: 'placed', submittedVersion: v.version, wpPostId: res.id, wpEditUrl: res.editUrl, runId: null });
-    await this.audit(who, 'column.place', id, { version: v.version, site: settings.wordpress.siteUrl, postId: res.id });
+    await store.update(who.tenantId, id, { status: 'placed', submittedVersion: v.version, wpPostId: wpRef(target.type.restBase, res.id), wpEditUrl: res.editUrl, runId: null });
+    await this.audit(who, 'column.place', id, { version: v.version, site: settings.wordpress.siteUrl, postId: res.id, restBase: target.type.restBase });
     return { placed: true, editUrl: res.editUrl };
   }
 
@@ -783,6 +790,30 @@ export class ColumnService {
     const settings = await repo.getTenantSettings(who.tenantId);
     await repo.saveTenantSettings(who.tenantId, 'webColumns', { ...settings.webColumns, wordpress: null }, who.userId);
     await this.audit(who, 'column.wordpress_remove', who.tenantId, {});
+  }
+
+  /**
+   * コラムを入れる記事の種類と分類（第45.20.2節）。設定にあればそれ、無ければコラムらしい種類が 1 つならそれ、無ければ投稿。
+   */
+  async columnTarget(auth: WordPressAuth, settings: WebColumnSettings): Promise<{ type: WordPressPostType; taxonomy: WordPressTaxonomy | null; candidates: WordPressPostType[]; types: WordPressPostType[] }> {
+    const posts: WordPressPostType = { slug: 'post', name: '投稿', restBase: 'posts', taxonomies: ['category', 'post_tag'] };
+    const [types, taxes] = await Promise.all([listPostTypes(auth), listTaxonomies(auth)]);
+    const list = Array.isArray(types) ? types : [];
+    const taxonomies = Array.isArray(taxes) ? taxes : [];
+    const candidates = pickColumnTypes(list);
+    const chosen = settings.wpPostType ? (settings.wpPostType === 'posts' ? list.find((t) => t.slug === 'post') ?? posts : list.find((t) => t.restBase === settings.wpPostType)) : null;
+    const type = chosen ?? (candidates.length === 1 ? candidates[0]! : list.find((t) => t.slug === 'post') ?? posts);
+    return { type, taxonomy: categoryFieldOf(type, taxonomies), candidates, types: list };
+  }
+
+  /** 管理者の設定の画面に出す、記事の種類の一覧と、いまの入れ先（第45.20節）。 */
+  async webTypes(tenantId: string): Promise<{ types: { restBase: string; name: string; column: boolean }[]; current: string; auto: boolean } | { error: string }> {
+    const settings = (await this.deps.repo.getTenantSettings(tenantId)).webColumns;
+    const auth = settings.wordpress ? await this.wordpressAuth(tenantId, settings.wordpress) : null;
+    if (!auth) return { error: 'WordPress につないでいません' };
+    const t = await this.columnTarget(auth, settings);
+    const col = new Set(t.candidates.map((x) => x.restBase));
+    return { types: t.types.filter((x) => x.slug !== 'page').map((x) => ({ restBase: x.restBase, name: x.name, column: col.has(x.restBase) })), current: t.type.restBase, auto: !settings.wpPostType };
   }
 
   // ---- 内部 --------------------------------------------------------------------

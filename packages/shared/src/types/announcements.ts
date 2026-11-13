@@ -93,7 +93,7 @@ export interface AnnouncementOutput {
   channel: AnnouncementChannel;
   status: 'waiting' | 'done' | 'failed' | 'ended';
   /** 結果（Web は記事の URL・LINE は送った数・サイネージの画面は流した画面） */
-  result: { link?: string; editUrl?: string; postId?: string; sent?: number; assetId?: string; screens?: string[]; draft?: boolean; bulkMailId?: string; queued?: number };
+  result: { link?: string; editUrl?: string; postId?: string; sent?: number; assetId?: string; screens?: string[]; draft?: boolean; bulkMailId?: string; queued?: number; restBase?: string };
   reason: string;
   doneAt: string | null;
 }
@@ -158,6 +158,11 @@ export interface AnnouncementSettings {
   webPublish: 'publish' | 'draft';
   /** お知らせを入れる WordPress のカテゴリー（無ければ初めて出すときに作る） */
   webCategory: string;
+  /**
+   * お知らせを入れる WordPress の記事の種類の口の名前（`posts`・`news` など。第45.20節）。
+   * 空なら M2Office が選ぶ（お知らせらしいカスタム投稿タイプがあればそれ、無ければ投稿）。選んだら残す
+   */
+  webPostType?: string;
   /** お知らせを流す画面の ID（`null` ならすべての画面） */
   screens: string[] | null;
 }

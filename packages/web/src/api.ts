@@ -1897,7 +1897,7 @@ export const api = {
     site: () => call<{
       connected: boolean; siteUrl: string | null; name: string | null; description: string | null;
       account: { kind: 'user' | 'company'; username: string; displayName: string | null; roles: string[] } | null;
-      missing: string[] | null; problem: string | null;
+      missing: string[] | null; problem: string | null; types: { name: string; restBase: string }[];
     }>('/site-updates/site'),
     /** 本人の WordPress の接続（第45.16節）。使えない会社・人には 403。 */
     wordpressUser: () => call<WordPressUserView>('/site-updates/wordpress-user'),
@@ -3106,7 +3106,9 @@ export const api = {
     connectContractStorage: () => call<{ ok: true; folderName: string }>('/admin/extensions/contracts/storage', { method: 'PUT', body: '{}' }),
     /** 販売の書類と受注の、メールに届いた注文書を受注に入れるか（第42.13.1節）。 */
     setSalesDocsMailIntake: (mailIntake: boolean) => call<{ ok: true }>('/admin/extensions/sales-docs/settings', { method: 'PUT', body: JSON.stringify({ mailIntake }) }),
-    setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; screens: string[] | null }>) =>
+    /** お知らせを入れられる WordPress の記事の種類と、いまの入れ先（第45.20節）。 */
+    announcementWebTypes: () => call<{ types: { restBase: string; name: string; news: boolean }[]; current: string; auto: boolean }>('/admin/extensions/announcements/web-types'),
+    setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; webPostType: string; screens: string[] | null }>) =>
       call<{ ok: true }>('/admin/extensions/announcements/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** お知らせを流す画面の選び先（サイネージの画面。`selected` が `null` ならすべて）。 */
     announcementScreens: () => call<{ screens: { id: string; name: string }[]; selected: string[] | null }>('/admin/extensions/announcements/screens'),
@@ -3119,6 +3121,8 @@ export const api = {
     /** コラムの貼るだけのページを入れる・止める（第32.18.4節）。 */
     enableColumnPage: () => call<{ ok: true; urls: { page: string; data: string; rss: string } }>('/admin/extensions/web-columns/page', { method: 'POST', body: '{}' }),
     disableColumnPage: () => call<{ ok: true }>('/admin/extensions/web-columns/page', { method: 'DELETE' }),
+    /** コラムを入れられる WordPress の記事の種類と、いまの入れ先（第45.20節）。 */
+    columnWebTypes: () => call<{ types: { restBase: string; name: string; column: boolean }[]; current: string; auto: boolean }>('/admin/extensions/web-columns/web-types'),
     setWebColumnSettings: (patch: Partial<Omit<WebColumnSettings, 'enabled' | 'wordpress'>>) =>
       call<{ ok: true; webColumns: WebColumnSettings }>('/admin/extensions/web-columns/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** WordPress の入れ先とアプリケーションパスワードを預ける。つながるかを確かめてから預ける。 */

@@ -8,7 +8,7 @@ export { PostgresColumnStore, MemoryColumnStore, type ColumnStore, type NewColum
 export { ruleReview, aiReview, mergeReview } from './review.js';
 export { inferRuleSets, guessRuleSets, type RuleClues } from './rules.js';
 export { writeColumn, rewriteColumn, parseDraft, selfReferenceRule, ColumnWriteError, type ColumnBrief, type ColumnDraft } from './writer.js';
-export { checkWordPress, createWordPressDraft, uploadWordPressMedia, columnHtml, normalizeSiteUrl, setWordPressStatus, getWordPressPost, type WordPressAuth } from './wordpress.js';
+export { checkWordPress, createWordPressDraft, createWordPressPost, uploadWordPressMedia, columnHtml, normalizeSiteUrl, setWordPressStatus, getWordPressPost, listPostTypes, listTaxonomies, pickNewsTypes, pickColumnTypes, categoryFieldOf, ensureWordPressTerm, wpRef, parseWpRef, type WordPressAuth, type WordPressPostType, type WordPressTaxonomy } from './wordpress.js';
 export {
   renderCover, coverSvg, wrapTitle, pickPattern, fallbackColor, readableColor, tint, brightness, wantsDark, imageWish, brandColor, illustrationPrompt, checkIllustration, checkBeforeAfter, STYLE_PROMPTS, describePhoto, choosePhoto,
   COVER_WIDTH, COVER_HEIGHT, COVER_AI_TRIES, COVER_AI_MONTHLY_LIMIT, COVER_MIN_BRIGHTNESS, COVER_MIN_PHOTO_BRIGHTNESS, COVER_PATTERNS, type CoverInput, type CoverPattern,

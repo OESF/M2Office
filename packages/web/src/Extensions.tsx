@@ -866,6 +866,33 @@ function SubsidyFields({ settings, busy, onChanged }: { settings: { interest: st
  * お知らせの作成の設定（仕様書 第35.4節）。Web サイト（WordPress）に公開まで行うか下書きまでか、お知らせを入れるカテゴリー。
  * WordPress・LINE・サイネージの画面は、ほかの拡張でつないだものを使う（同じ接続を 2 度預けさせない）。
  */
+/** コラムを入れる WordPress の記事の種類（第45.20.2節）。M2Office が選んだものを出し、違えば選び直す。 */
+function ColumnTypeField({ busy, onSave }: { busy: boolean; onSave: (v: string) => void }) {
+  const [types, setTypes] = useState<{ types: { restBase: string; name: string; column: boolean }[]; current: string; auto: boolean } | null>(null);
+  const load = () => { api.admin.columnWebTypes().then(setTypes).catch(() => setTypes(null)); };
+  useEffect(load, []);
+  if (!types || types.types.length < 2) return null;
+  return (
+    <label className="row">入れる種類
+      <select value={types.auto ? '' : types.current} disabled={busy} aria-label="コラムを入れる WordPress の記事の種類" onChange={(e) => { onSave(e.target.value); setTimeout(load, 500); }}>
+        <option value="">{`自動（${types.types.find((t) => t.restBase === types.current)?.name ?? types.current}）`}</option>
+        {types.types.map((t) => <option key={t.restBase} value={t.restBase}>{`${t.name}（${t.restBase}）`}</option>)}
+      </select>
+    </label>
+  );
+}
+
+/** コラムを入れる WordPress のカテゴリー（第45.20.2節）。離れたときに保存する。 */
+function ColumnCategoryField({ value, busy, onSave }: { value: string; busy: boolean; onSave: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  return (
+    <label className="row">カテゴリー
+      <input value={v} maxLength={40} disabled={busy} placeholder="付けない" aria-label="コラムの WordPress のカテゴリー" onChange={(e) => setV(e.target.value)}
+        onBlur={() => { if (v.trim() !== value) onSave(v.trim()); }} />
+    </label>
+  );
+}
+
 function AnnouncementFields({ settings, busy, onChanged }: { settings: AnnouncementSettings; busy: boolean; onChanged: () => void }) {
   const [category, setCategory] = useState(settings.webCategory);
   const [error, setError] = useState<string | null>(null);
@@ -879,9 +906,15 @@ function AnnouncementFields({ settings, busy, onChanged }: { settings: Announcem
     // すべて選んだら「すべて」（あとで足した画面にも流す）に戻す
     save({ screens: screens.every((s) => next.includes(s.id)) ? null : next });
   };
-  const save = (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; screens: string[] | null }>) => {
+  // お知らせを入れる記事の種類（第45.20節）。M2Office が選んだものを出し、違えば選び直す
+  const [types, setTypes] = useState<{ types: { restBase: string; name: string; news: boolean }[]; current: string; auto: boolean } | null>(null);
+  useEffect(() => { api.admin.announcementWebTypes().then(setTypes).catch(() => setTypes(null)); }, []);
+  const save = (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; webPostType: string; screens: string[] | null }>) => {
     setWorking(true);
-    api.admin.setAnnouncementSettings(patch).then(() => { setError(null); onChanged(); })
+    api.admin.setAnnouncementSettings(patch).then(() => {
+      setError(null); onChanged();
+      if (patch.webPostType !== undefined) api.admin.announcementWebTypes().then(setTypes).catch(() => undefined);
+    })
       .catch((e) => setError(describeError(e, '変えられませんでした'))).finally(() => setWorking(false));
   };
   return (
@@ -893,6 +926,14 @@ function AnnouncementFields({ settings, busy, onChanged }: { settings: Announcem
             <option value="draft">下書きまで</option>
           </select>
         </label>
+        {types && types.types.length > 0 && (
+          <label className="row">入れる種類
+            <select value={types.auto ? '' : types.current} disabled={busy || working} aria-label="お知らせを入れる WordPress の記事の種類" onChange={(e) => save({ webPostType: e.target.value })}>
+              <option value="">{`自動${types.current ? `（${types.types.find((t) => t.restBase === types.current)?.name ?? types.current}）` : ''}`}</option>
+              {types.types.map((t) => <option key={t.restBase} value={t.restBase}>{`${t.name}（${t.restBase}）`}</option>)}
+            </select>
+          </label>
+        )}
         <label className="row">カテゴリー
           <input value={category} maxLength={40} disabled={busy || working} aria-label="WordPress のカテゴリー" onChange={(e) => setCategory(e.target.value)}
             onBlur={() => { if (category.trim() !== settings.webCategory) save({ webCategory: category.trim() }); }} />
@@ -956,6 +997,9 @@ function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebC
         {/* 当てる表現の決まり（AI が選ぶ。違っていれば秘書に頼んで直す。第32.18.3節） */}
         <span className="muted">表現の決まり: {['景品表示法', ...settings.rules.map((r) => COLUMN_RULE_SET_LABELS[r])].join('・')}{settings.rulesBy === 'person' ? '（秘書で直した）' : ''}</span>
         <label className="check"><input type="checkbox" checked={settings.aiNotice} disabled={busy} onChange={(e) => save({ aiNotice: e.target.checked })} /> AI が書いたことを記事の末尾に入れる</label>
+        {/* コラムを入れる WordPress のカテゴリー（第45.20.2節。空なら付けない） */}
+        <ColumnTypeField busy={busy} onSave={(wpPostType) => save({ wpPostType })} />
+        <ColumnCategoryField value={settings.wpCategory ?? 'コラム'} busy={busy} onSave={(wpCategory) => save({ wpCategory })} />
         {/* カバー画像の背景を生成 AI で描く（第32.7.1節。既定は切り）。今月の枚数と上限を添える */}
         <label className="check"><input type="checkbox" checked={settings.aiIllustration} disabled={busy} onChange={(e) => save({ aiIllustration: e.target.checked })} /> AI で挿絵を描く</label>
         {settings.aiIllustration && usage && <span className="muted">今月 {usage.used} / {usage.limit} 枚</span>}

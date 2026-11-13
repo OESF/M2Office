@@ -371,6 +371,13 @@ export function extensionsRoute(deps: AppDeps) {
       if (typeof body['aiNotice'] !== 'boolean') return c.json({ error: 'aiNotice は true か false です' }, 400);
       next.aiNotice = body['aiNotice'];
     }
+    // コラムを入れる WordPress のカテゴリーと記事の種類（第45.20.2節。カテゴリーが空なら付けない。種類が空なら M2Office が選ぶ）
+    if (body['wpCategory'] !== undefined) next.wpCategory = String(body['wpCategory']).trim().slice(0, 40);
+    if (body['wpPostType'] !== undefined) {
+      const v = String(body['wpPostType'] ?? '').trim();
+      if (v && !/^[a-z0-9_-]{1,40}$/i.test(v)) return c.json({ error: '記事の種類の名前が正しくありません' }, 400);
+      next.wpPostType = v;
+    }
     // カバー画像の背景を生成 AI で描くか（第32.7.1節。既定は切り）
     if (body['aiIllustration'] !== undefined) {
       if (typeof body['aiIllustration'] !== 'boolean') return c.json({ error: 'aiIllustration は true か false です' }, 400);
@@ -522,6 +529,12 @@ export function extensionsRoute(deps: AppDeps) {
       next.webPublish = body['webPublish'];
     }
     if (body['webCategory'] !== undefined) next.webCategory = String(body['webCategory']).trim().slice(0, 40);
+    // お知らせを入れる記事の種類（第45.20.2節）。空なら M2Office が選ぶ
+    if (body['webPostType'] !== undefined) {
+      const v = String(body['webPostType'] ?? '').trim();
+      if (v && !/^[a-z0-9_-]{1,40}$/i.test(v)) return c.json({ error: '記事の種類の名前が正しくありません' }, 400);
+      next.webPostType = v;
+    }
     if (body['screens'] !== undefined) {
       if (body['screens'] === null) next.screens = null;
       else if (Array.isArray(body['screens'])) next.screens = (body['screens'] as unknown[]).map(String).slice(0, 50);
@@ -529,6 +542,21 @@ export function extensionsRoute(deps: AppDeps) {
     }
     await deps.repo.saveTenantSettings(tenant.id, 'announcements', next, user.id);
     return c.json({ ok: true, settings: next });
+  });
+
+  /** コラムを入れられる WordPress の記事の種類と、いまの入れ先（第45.20節）。 */
+  app.get(`/${WEB_COLUMNS_EXTENSION_ID}/web-types`, async (c) => {
+    const r = await deps.columns.service.webTypes(c.get('ctx').tenant.id);
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+  });
+
+  /**
+   * お知らせを入れられる WordPress の記事の種類（第45.20節）。種類の一覧・お知らせらしい候補・いまの入れ先（自動で選んだものを含む）。
+   */
+  app.get(`/${ANNOUNCEMENTS_EXTENSION_ID}/web-types`, async (c) => {
+    const { tenant } = c.get('ctx');
+    const r = await deps.announcements.service.webTypes(tenant.id);
+    return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
   });
 
   /** 競合の分析の地図の鍵を外す。 */

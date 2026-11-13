@@ -227,5 +227,25 @@ export const announcementsClosures: Tool = {
   },
 };
 
+/**
+ * お知らせを入れる WordPress の記事の種類を決める（「お知らせは news に入れて」。第45.20.2節）。
+ *
+ * @remarks 危険度 `write-internal`。会社の設定を変えるだけで、外には出さない。管理者の設定の画面でも変えられる
+ */
+export const announcementsWebTarget: Tool = {
+  name: 'announcements.web_target',
+  risk: 'write-internal',
+  activityLabel: 'お知らせを入れる種類を決めています',
+  helpText: 'お知らせを入れる会社の Web サイト（WordPress）の記事の種類（投稿・お知らせ（news）など）を決めます',
+  description: 'お知らせを入れる WordPress の記事の種類を決める。restBase は種類の口の名前か表示名（「お知らせは news に入れて」なら news、「投稿に入れて」なら posts）',
+  args: { properties: { restBase: { type: 'string', description: '記事の種類の口の名前か表示名' } }, required: ['restBase'] },
+  async invoke(args, ctx) {
+    const service = await serviceOf(ctx);
+    if (!service) return UNAVAILABLE;
+    const r = await service.setWebTarget(who(ctx), str(args['restBase']));
+    return 'error' in r ? { available: false, reason: r.error } : { available: true, done: `お知らせは「${r.name}」に入れます` };
+  },
+};
+
 /** お知らせの作成のツール。 */
-export const ANNOUNCEMENT_TOOLS: Tool[] = [announcementsDraft, announcementsRevise, announcementsRecipients, announcementsSubmit, announcementsList, announcementsPublish, announcementsClosures];
+export const ANNOUNCEMENT_TOOLS: Tool[] = [announcementsDraft, announcementsRevise, announcementsRecipients, announcementsSubmit, announcementsList, announcementsPublish, announcementsClosures, announcementsWebTarget];

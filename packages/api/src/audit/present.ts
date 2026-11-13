@@ -256,6 +256,7 @@ const ACTION_LABELS: Record<string, string> = {
   'announcement.remove': 'お知らせを削除した',
   'announcement.mail': 'お知らせをメールで送り始めた',
   'announcement.closure': '休業の期間を覚えた',
+  'announcement.web_target': 'お知らせを入れる WordPress の種類を決めた',
   'inquiry.closure_reply': '休業中の問い合わせに返事の下書きを用意した',
   // サイトの更新（仕様書 第45.11節。本文は記録に残さない）
   'site_edit.propose': 'サイトの直し案を作って承認へ進めた',

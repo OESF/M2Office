@@ -63,7 +63,8 @@ export interface SiteEditChange {
 
 /** 画面と秘書に見せる、直し 1 ページ分。 */
 export interface SiteEditPageView {
-  kind: 'page' | 'post';
+  /** `page`・`post`、またはカスタム投稿タイプの口の名前（第45.20.3節）。 */
+  kind: string;
   wpId: string;
   title: string;
   /** 公開の URL。 */

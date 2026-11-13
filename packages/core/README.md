@@ -97,6 +97,7 @@ src/library/     ナレッジの整理（内蔵の拡張。第44章の段 1〜�
                  目録（OKF）の書き出しと古い版の知らせ（okf.ts。OKF v0.2 の形・常に書き出す・変わったものだけ・関連する資料へのリンク・タグ・タグごとの一覧）、
                  つながり（links.ts。同じメール・同じ資料の版・同じタグ・同じ語・同じフォルダを決まりで見つける）、
                  ツール（tools.ts。library.search・read・add・update・share・knowledge）、付属の業務「ナレッジの整理」（agents.ts）。本体は本人のドライブで、全文は持たない
+（columns/wordpress.ts は、記事の種類と分類の読み取り・お知らせらしい種類の選び方・どの分類にも入れる口も持つ。第45.20節）
 src/site-updates/ サイトの更新（内蔵の拡張。第45章の段 1）。本文の分け方と組み直し（segments.ts。印と札はプログラムが持ち、文のかたまりだけを推論に渡す）、
                  WordPress の固定ページと投稿の読み書きと権限・利用者の役割・公開のページ（wordpress.ts）、置き場（store.ts。site_edits と本人の WordPress の接続）、直し案・入れる・確かめ・元に戻す（service.ts）、
                  新しい記事と固定ページ・公開の状態・前の版・アイキャッチ（actions.ts。段 2a）、サイトのカテゴリーとタグ（terms.ts。作る・名前を変える・付ける・外す・元に戻す、「カテゴリー」の見分け）、ツール（tools.ts。site_updates.propose・actions・terms・term_list・revert・list・apply）、付属の業務「サイトの直し案」「サイトに入れる」（agents.ts）

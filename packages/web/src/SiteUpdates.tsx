@@ -41,6 +41,7 @@ function SiteCard({ site }: { site: Site | null }) {
           {site.account.roles.length > 0 ? `・${site.account.roles.join('・')}` : ''}
         </p>
       )}
+      {site.types.length > 0 && <p className="small muted">記事の種類: {site.types.map((t) => (t.restBase === 'posts' || t.restBase === 'pages' ? t.name : `${t.name}（${t.restBase}）`)).join('・')}</p>}
       {site.missing && site.missing.length > 0 && (
         <p className="small error">固定ページと記事を直す権限がありません（{site.missing.join('・')}）。WordPress で、この利用者を「編集者」にしてください</p>
       )}
@@ -127,7 +128,7 @@ export function SiteUpdates({ changeKey }: {
   // つないでいるサイトは、開いたときに 1 度だけ確かめる（WordPress に問い合わせるため）
   useEffect(() => {
     api.siteUpdates.site().then(setSite).catch((e) => {
-      setSite({ connected: true, siteUrl: null, account: null, name: null, description: null, missing: null, problem: describeError(e, 'つないでいるサイトを確かめられませんでした') });
+      setSite({ connected: true, siteUrl: null, account: null, name: null, description: null, missing: null, types: [], problem: describeError(e, 'つないでいるサイトを確かめられませんでした') });
     });
   }, []);
 

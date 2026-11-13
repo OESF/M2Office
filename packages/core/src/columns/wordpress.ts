@@ -70,13 +70,19 @@ export function columnHtml(markdown: string): string {
  *
  * @returns 記事の ID と、WordPress の編集の画面の URL
  */
-export async function createWordPressDraft(a: WordPressAuth, post: { title: string; html: string; excerpt: string; featuredMedia?: string | null }): Promise<{ id: string; editUrl: string } | { error: string }> {
+export async function createWordPressDraft(a: WordPressAuth, post: {
+  title: string; html: string; excerpt: string; featuredMedia?: string | null; categories?: number[];
+  /** 入れる種類の口の名前（既定は `posts`。第45.20節）と、分類の口の名前と ID。 */
+  restBase?: string; terms?: { field: string; ids: number[] };
+}): Promise<{ id: string; editUrl: string } | { error: string }> {
   try {
-    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts`, {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/${post.restBase ?? 'posts'}`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS),
       body: JSON.stringify({
         title: post.title, content: post.html, excerpt: post.excerpt, status: 'draft',
         ...(post.featuredMedia ? { featured_media: Number(post.featuredMedia) } : {}),
+        ...(post.categories?.length ? { categories: post.categories } : {}),
+        ...(post.terms?.ids.length ? { [post.terms.field]: post.terms.ids } : {}),
       }),
     });
     if (!res.ok) return { error: `WordPress に入れられませんでした（${res.status}）` };
@@ -125,14 +131,19 @@ export async function uploadWordPressMedia(a: WordPressAuth, img: { bytes: Uint8
  */
 export async function createWordPressPost(a: WordPressAuth, post: {
   title: string; html: string; status: 'publish' | 'future' | 'draft'; date?: string; categories?: number[];
+  /** 入れる種類の口の名前（既定は `posts`。カスタム投稿タイプなら `news` など。第45.20節） */
+  restBase?: string;
+  /** 分類の口の名前と ID（既定は `categories` に `categories`）。 */
+  terms?: { field: string; ids: number[] };
 }): Promise<{ id: string; link: string; editUrl: string } | { error: string }> {
   try {
-    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts`, {
+    const terms = post.terms ?? (post.categories?.length ? { field: 'categories', ids: post.categories } : null);
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/${post.restBase ?? 'posts'}`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS),
       body: JSON.stringify({
         title: post.title, content: post.html, status: post.status,
         ...(post.status === 'future' && post.date ? { date_gmt: post.date.replace(/\.\d{3}Z$/, '').replace(/Z$/, '') } : {}),
-        ...(post.categories?.length ? { categories: post.categories } : {}),
+        ...(terms && terms.ids.length ? { [terms.field]: terms.ids } : {}),
       }),
     });
     if (!res.ok) return { error: `WordPress に記事を入れられませんでした（${res.status}）` };
@@ -151,14 +162,24 @@ export async function createWordPressPost(a: WordPressAuth, post: {
  * @returns カテゴリーの ID。引けず作れなければ `null`（カテゴリーなしで入れる）
  */
 export async function ensureWordPressCategory(a: WordPressAuth, name: string): Promise<number | null> {
+  return ensureWordPressTerm(a, 'categories', name);
+}
+
+/**
+ * 分類（カテゴリー・独自の分類）の ID を引く。無ければ作る（第45.20節）。
+ *
+ * @param taxonomyBase 分類の口の名前（`categories`・`news_category` など）
+ * @returns ID。引けず作れなければ `null`（分類なしで入れる）
+ */
+export async function ensureWordPressTerm(a: WordPressAuth, taxonomyBase: string, name: string): Promise<number | null> {
   try {
-    const found = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}&per_page=20`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const found = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/${taxonomyBase}?search=${encodeURIComponent(name)}&per_page=20`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (found.ok) {
       const list = await found.json() as { id?: number; name?: string }[];
       const hit = list.find((c) => c.name === name);
       if (hit?.id) return hit.id;
     }
-    const made = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/categories`, {
+    const made = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/${taxonomyBase}`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ name }),
     });
     if (!made.ok) return null;
@@ -174,9 +195,10 @@ export async function ensureWordPressCategory(a: WordPressAuth, name: string): P
  *
  * @returns 読めなければ `null`
  */
-export async function getWordPressPost(a: WordPressAuth, id: string): Promise<{ status: string; link: string } | null> {
+export async function getWordPressPost(a: WordPressAuth, ref: string): Promise<{ status: string; link: string } | null> {
+  const { restBase, id } = parseWpRef(ref);
   try {
-    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}?context=edit&_fields=status,link`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/${restBase}/${encodeURIComponent(id)}?context=edit&_fields=status,link`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) return null;
     const v = await res.json() as { status?: string; link?: string };
     return { status: v.status ?? '', link: v.link ?? '' };
@@ -190,9 +212,10 @@ export async function getWordPressPost(a: WordPressAuth, id: string): Promise<{ 
  *
  * @returns 変えられなければ理由
  */
-export async function setWordPressStatus(a: WordPressAuth, id: string, status: 'draft' | 'publish'): Promise<string | null> {
+export async function setWordPressStatus(a: WordPressAuth, ref: string, status: 'draft' | 'publish'): Promise<string | null> {
+  const { restBase, id } = parseWpRef(ref);
   try {
-    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}`, {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/${restBase}/${encodeURIComponent(id)}`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ status }),
     });
     return res.ok ? null : `WordPress の記事を下書きに戻せませんでした（${res.status}）`;
@@ -201,14 +224,116 @@ export async function setWordPressStatus(a: WordPressAuth, id: string, status: '
   }
 }
 
-/** 記事の題名を変える（お知らせの期間の後に「（終了しました）」を付ける。第35.6.1節）。 */
-export async function updateWordPressTitle(a: WordPressAuth, id: string, title: string): Promise<string | null> {
+/** 記事の題名を変える（お知らせの期間の後に「（終了しました）」を付ける。第35.6.1節）。`restBase` は入れた種類の口の名前（既定は `posts`）。 */
+export async function updateWordPressTitle(a: WordPressAuth, id: string, title: string, restBase = 'posts'): Promise<string | null> {
   try {
-    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/posts/${encodeURIComponent(id)}`, {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/${restBase}/${encodeURIComponent(id)}`, {
       method: 'POST', headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS), body: JSON.stringify({ title }),
     });
     return res.ok ? null : `WordPress の記事を直せませんでした（${res.status}）`;
   } catch (err) {
     return `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）`;
   }
+}
+
+/** 記事の種類 1 つ（第45.20節）。 */
+export interface WordPressPostType {
+  /** 種類の名前（`post`・`page`・`news` など）。 */
+  slug: string;
+  /** 表示名（「投稿」「お知らせ」など）。 */
+  name: string;
+  /** 口の名前（`posts`・`pages`・`news` など）。 */
+  restBase: string;
+  /** 持っている分類の名前（`category`・`post_tag`・`news_category` など）。 */
+  taxonomies: string[];
+}
+
+/** 記事でない種類（扱わない）。 */
+const NOT_CONTENT = new Set(['attachment', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation', 'nav_menu_item', 'wp_global_styles', 'wp_font_family', 'wp_font_face', 'wp_pattern']);
+
+/**
+ * REST API に出している記事の種類の一覧（投稿・固定ページ・カスタム投稿タイプ）。
+ *
+ * @returns 読めなければ理由
+ */
+export async function listPostTypes(a: WordPressAuth): Promise<WordPressPostType[] | { error: string }> {
+  try {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/types?context=edit`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!res.ok) return { error: `WordPress の記事の種類を読めませんでした（${res.status}）` };
+    const body = await res.json() as Record<string, Record<string, unknown>>;
+    return Object.entries(body ?? {}).filter(([slug]) => !NOT_CONTENT.has(slug)).map(([slug, v]) => ({
+      slug, name: typeof v['name'] === 'string' ? v['name'] : slug,
+      restBase: typeof v['rest_base'] === 'string' && v['rest_base'] ? v['rest_base'] : slug,
+      taxonomies: Array.isArray(v['taxonomies']) ? (v['taxonomies'] as unknown[]).filter((x): x is string => typeof x === 'string') : [],
+    }));
+  } catch (err) {
+    return { error: `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）` };
+  }
+}
+
+/** 分類 1 つ。 */
+export interface WordPressTaxonomy {
+  slug: string;
+  name: string;
+  restBase: string;
+  /** 親子があるか（カテゴリーの形か）。 */
+  hierarchical: boolean;
+}
+
+/** 分類の一覧（口の名前と親子の有無）。 */
+export async function listTaxonomies(a: WordPressAuth): Promise<WordPressTaxonomy[] | { error: string }> {
+  try {
+    const res = await outboundFetch(`${a.siteUrl}/wp-json/wp/v2/taxonomies?context=edit`, { headers: headers(a), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!res.ok) return { error: `WordPress の分類を読めませんでした（${res.status}）` };
+    const body = await res.json() as Record<string, Record<string, unknown>>;
+    return Object.entries(body ?? {}).map(([slug, v]) => ({
+      slug, name: typeof v['name'] === 'string' ? v['name'] : slug,
+      restBase: typeof v['rest_base'] === 'string' && v['rest_base'] ? v['rest_base'] : slug, hierarchical: v['hierarchical'] === true,
+    }));
+  } catch (err) {
+    return { error: `WordPress に届きませんでした（${err instanceof Error ? err.message : String(err)}）` };
+  }
+}
+
+/** お知らせらしい種類の名前と表示名（第45.20.2節）。 */
+const NEWS_SLUG = /^(news|info|information|infos|topics?|notice|notices|oshirase|whatsnew|what-s-new)$/i;
+const NEWS_LABEL = /(お知らせ|おしらせ|ニュース|新着情報|新着|インフォメーション|トピックス|NEWS|News)/;
+
+/** 種類の一覧から、お知らせらしい種類の候補を選ぶ（投稿と固定ページは除く）。 */
+export function pickNewsTypes(types: readonly WordPressPostType[]): WordPressPostType[] {
+  return types.filter((t) => t.slug !== 'post' && t.slug !== 'page' && (NEWS_SLUG.test(t.slug) || NEWS_SLUG.test(t.restBase) || NEWS_LABEL.test(t.name)));
+}
+
+/**
+ * 種類に付ける分類の口を決める（第45.20.2節）。`category` を持てば `categories`、持たずに親子のある独自の分類を持てばその口。
+ *
+ * @returns 無ければ `null`（分類を付けない）
+ */
+export function categoryFieldOf(type: WordPressPostType, taxonomies: readonly WordPressTaxonomy[]): WordPressTaxonomy | null {
+  if (type.taxonomies.includes('category')) return taxonomies.find((t) => t.slug === 'category') ?? { slug: 'category', name: 'カテゴリー', restBase: 'categories', hierarchical: true };
+  return taxonomies.find((t) => type.taxonomies.includes(t.slug) && t.hierarchical) ?? null;
+}
+
+/**
+ * 入れた記事の参照（第45.20節）。投稿なら記事の ID のまま、ほかの種類なら `口の名前:ID`（`blog:123`）。
+ *
+ * @remarks コラムの記録は記事の ID の欄だけを持つため、種類を同じ欄に入れる。前から入っている ID はそのまま投稿として読める
+ */
+export function wpRef(restBase: string, id: string): string {
+  return restBase === 'posts' ? id : `${restBase}:${id}`;
+}
+
+/** {@link wpRef} を読む。 */
+export function parseWpRef(ref: string): { restBase: string; id: string } {
+  const m = /^([a-z0-9_-]+):(\d+)$/i.exec(ref);
+  return m ? { restBase: m[1]!, id: m[2]! } : { restBase: 'posts', id: ref };
+}
+
+/** コラムらしい種類の名前と表示名（第45.20.2節）。 */
+const COLUMN_SLUG = /^(columns?|blogs?|journal|magazine|articles?|reading)$/i;
+const COLUMN_LABEL = /(コラム|ブログ|読み物|マガジン|ジャーナル)/;
+
+/** 種類の一覧から、コラムらしい種類の候補を選ぶ（投稿と固定ページは除く）。 */
+export function pickColumnTypes(types: readonly WordPressPostType[]): WordPressPostType[] {
+  return types.filter((t) => t.slug !== 'post' && t.slug !== 'page' && (COLUMN_SLUG.test(t.slug) || COLUMN_SLUG.test(t.restBase) || COLUMN_LABEL.test(t.name)));
 }

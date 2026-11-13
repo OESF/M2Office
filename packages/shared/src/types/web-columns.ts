@@ -91,6 +91,10 @@ export interface WebColumnSettings {
   wordpress: ColumnWordPress | null;
   /** カバー画像の背景を生成 AI で描くか（第32.7.1節。既定は切り）。 */
   aiIllustration: boolean;
+  /** コラムを WordPress に入れるときに付けるカテゴリー（第45.20.2節。既定は「コラム」。空なら付けない。無ければ作る）。 */
+  wpCategory?: string;
+  /** コラムを入れる WordPress の記事の種類の口の名前（第45.20.2節。空なら M2Office が選ぶ: コラムらしい種類が 1 つならそれ、無ければ投稿）。 */
+  wpPostType?: string;
   /** 予定表（月の本数と曜日。第32.11節・第32.18.4節）。無ければ予定を作らない。 */
   plan?: ColumnPlan | null;
   /** 貼るだけのページ（第32.10節・第32.18.4節）。使っていなければ `null`。 */
@@ -157,7 +161,7 @@ export const COLUMN_PREPARE_DAYS = 7;
 
 /** 既定の設定。既定は切り（第32.2節）。 */
 export const DEFAULT_WEB_COLUMN_SETTINGS: WebColumnSettings = {
-  enabled: false, topics: [], audience: '', industry: '9999', rules: [], rulesBy: 'ai', supervisor: null, aiNotice: true, wordpress: null, aiIllustration: false,
+  enabled: false, topics: [], audience: '', industry: '9999', rules: [], rulesBy: 'ai', supervisor: null, aiNotice: true, wordpress: null, aiIllustration: false, wpCategory: 'コラム',
 };
 
 /** コラムの状態。 */

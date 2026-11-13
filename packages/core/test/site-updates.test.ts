@@ -353,7 +353,7 @@ test('つないでいるサイト: 名前・URL・利用者と、直せるか（
   const { service } = setup(fakeLlm({ pages: [] }));
   assert.deepEqual(await service.site(who), {
     connected: true, siteUrl: SITE, account: { kind: 'company', username: 'm2office', displayName: '会社', roles: ['編集者'] },
-    name: '見本の医院 & 薬局', description: '駅から 5 分', missing: [], problem: null,
+    name: '見本の医院 & 薬局', description: '駅から 5 分', missing: [], problem: null, types: [],
   });
   t.mock.restoreAll();
   fakeWordPress(t, top(), { caps: { edit_posts: true, edit_pages: true } });

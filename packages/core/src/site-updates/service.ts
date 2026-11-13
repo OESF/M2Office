@@ -16,7 +16,7 @@ import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
 import type { SecretBox } from '../secrets/box.js';
 import { silentLogger, type Logger } from '../log/logger.js';
-import type { WordPressAuth } from '../columns/wordpress.js';
+import { listPostTypes, type WordPressAuth } from '../columns/wordpress.js';
 import { applySiteEdits, looksLikePageBuilder, plainText, segmentContent, type SiteEditOp } from './segments.js';
 import {
   WORDPRESS_ROLE_LABELS, findSiteContent, findSitePosts, listSiteItems, listSiteRevisions, listSiteTerms, readPublicPage, readSiteContent, readSiteName, readSiteStatus, updateSiteContent, whoAmI,
@@ -84,6 +84,8 @@ export interface SiteConnectionView {
   missing: string[] | null;
   /** 確かめられなかった理由（利用者名やパスワードが違う・届かない）。 */
   problem: string | null;
+  /** サイトの記事の種類（投稿・固定ページ・カスタム投稿タイプ。第45.20.1節）。読めなければ空。 */
+  types: { name: string; restBase: string }[];
 }
 
 /** 依頼した人。 */
@@ -210,8 +212,8 @@ export class SiteUpdateService {
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
     const wp = settings.webColumns.wordpress;
     const conn = await this.connectionFor(who);
-    if (!wp || !conn) return { connected: false, siteUrl: wp?.siteUrl ?? null, account: null, name: null, description: null, missing: null, problem: null };
-    const [name, me] = await Promise.all([readSiteName(conn.auth.siteUrl), whoAmI(conn.auth)]);
+    if (!wp || !conn) return { connected: false, siteUrl: wp?.siteUrl ?? null, account: null, name: null, description: null, missing: null, problem: null, types: [] };
+    const [name, me, types] = await Promise.all([readSiteName(conn.auth.siteUrl), whoAmI(conn.auth), listPostTypes(conn.auth)]);
     return {
       connected: true, siteUrl: conn.auth.siteUrl,
       account: {
@@ -220,6 +222,7 @@ export class SiteUpdateService {
       },
       name: name?.name || null, description: name?.description || null,
       missing: 'error' in me ? null : me.missing, problem: 'error' in me ? me.error : null,
+      types: Array.isArray(types) ? types.map((t) => ({ name: t.name, restBase: t.restBase })) : [],
     };
   }
 
@@ -320,6 +323,12 @@ export class SiteUpdateService {
     return (await this.deps.users?.removeAll(tenantId).catch(() => 0)) ?? 0;
   }
 
+  /** カスタム投稿タイプの口の名前と表示名（投稿と固定ページを除く。第45.20.3節）。 */
+  private async customKinds(wp: WordPressAuth): Promise<{ kind: string; name: string }[]> {
+    const types = await listPostTypes(wp);
+    return Array.isArray(types) ? types.filter((t) => t.slug !== 'post' && t.slug !== 'page').map((t) => ({ kind: t.restBase, name: t.name })).slice(0, 10) : [];
+  }
+
   /** 90 日を過ぎた直しの、直す前と後の本文を消す（Q-332）。 */
   async purgeOld(tenantId: string): Promise<number> {
     const before = new Date(this.now().getTime() - SITE_UPDATE_LIMITS.keepDays * 86_400_000).toISOString();
@@ -356,8 +365,9 @@ export class SiteUpdateService {
     const pick = await this.pickPages(llm, req, listed.hits);
     const found = new Map<string, SiteContentHit>();
     for (const h of listed.hits) if (pick.keys.includes(key(h.kind, h.id))) found.set(key(h.kind, h.id), h);
+    const custom = (await this.customKinds(wp)).map((c) => c.kind);
     for (const w of pick.words) {
-      const r = await findSiteContent(wp, w);
+      const r = await findSiteContent(wp, w, custom);
       if ('error' in r) continue;
       for (const h of r.hits) if (found.size < MAX_CANDIDATES && !found.has(key(h.kind, h.id))) found.set(key(h.kind, h.id), h);
     }
@@ -607,11 +617,17 @@ export class SiteUpdateService {
     }
     const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
     if (!llm || llm.name === 'stub' || llm.name === 'unconfigured') return { error: 'AI が使えないので、直し案を作れません' };
-    const [posts, pages] = await Promise.all([listSiteItems(wp, 'post', ''), listSiteItems(wp, 'page', '')]);
+    const [posts, pages, customs] = await Promise.all([listSiteItems(wp, 'post', ''), listSiteItems(wp, 'page', ''), this.customKinds(wp)]);
     if ('error' in posts) return { error: posts.error };
     if ('error' in pages) return { error: pages.error };
+    // カスタム投稿タイプの記事も並べる（第45.20.3節）
+    const customItems: { kind: string; id: string; title: string; status: string; date: string; link: string }[] = [];
+    for (const c of customs) {
+      const r = await listSiteItems(wp, c.kind, '');
+      if (Array.isArray(r)) customItems.push(...r.map((x) => ({ ...x, kind: c.kind })));
+    }
     const company = (await this.deps.repo.getTenantSettings(who.tenantId)).company;
-    const answer = await this.askActions(llm, req, [...posts.map((p) => ({ ...p, kind: 'post' as 'post' | 'page' })), ...pages.map((p) => ({ ...p, kind: 'page' as 'post' | 'page' }))], company.shortName || company.legalName || '', this.now());
+    const answer = await this.askActions(llm, req, [...posts.map((p) => ({ ...p, kind: 'post' })), ...pages.map((p) => ({ ...p, kind: 'page' })), ...customItems], customs, company.shortName || company.legalName || '', this.now());
     if (!answer) return { error: '頼みに合う直し案を作れませんでした。もう少しくわしく教えてください' };
     if (answer.question) return { ask: answer.question };
     const { actions, notes } = await buildActions(answer.plan, req, {
@@ -635,7 +651,7 @@ export class SiteUpdateService {
   }
 
   /** 推論に、段 2a の直しを決めさせ、新しく作る記事の本文も書かせる。分からなければ聞き返す文を返させる。 */
-  private async askActions(llm: LlmProvider, request: string, items: { kind: 'post' | 'page'; id: string; title: string; status: string; date: string }[], company: string, now: Date) {
+  private async askActions(llm: LlmProvider, request: string, items: { kind: string; id: string; title: string; status: string; date: string }[], customs: { kind: string; name: string }[], company: string, now: Date) {
     const data = items.map((x) => ({ kind: x.kind, id: Number(x.id), title: x.title.slice(0, 100), status: x.status, date: x.date.slice(0, 16) }));
     try {
       const res = await llm.complete({
@@ -644,7 +660,8 @@ export class SiteUpdateService {
           role: 'user',
           content: [
             `会社（${company || '名前なし'}）の Web サイト（WordPress）について、頼みに合わせた案を作ってください。今は ${now.toISOString().slice(0, 16)}（UTC）。`,
-            '- create: 新しい記事（kind "post"）か固定ページ（kind "page"）を作る。title と本文（body。Markdown。読み手に向けた丁寧な文）と抜粋（excerpt）を書く。公開すると頼まれたら publish "publish"、日時を指定して出すなら "future" と date（ISO）、そうでなければ "draft"。記事にアイキャッチを付けるなら eyecatch true。',
+            customs.length ? `- サイトには、投稿（kind "post"）と固定ページ（kind "page"）のほかに、次の記事の種類がある: ${customs.map((c) => `${c.name}（kind "${c.kind}"）`).join('・')}。お知らせ・ニュースなどの頼みは、合う種類の kind を使う。` : '',
+            '- create: 新しい記事（kind "post"。ほかの種類なら上の kind）か固定ページ（kind "page"）を作る。title と本文（body。Markdown。読み手に向けた丁寧な文）と抜粋（excerpt）を書く。公開すると頼まれたら publish "publish"、日時を指定して出すなら "future" と date（ISO）、そうでなければ "draft"。記事にアイキャッチを付けるなら eyecatch true。',
             '- status: 下のページの公開の状態を変える（to は "publish"・"draft"・"private"・"future"（date も）・"trash"（ゴミ箱））。',
             '- revision: 下のページを前の版に戻す（日付の指定があれば before にその日時。無ければ 1 つ前の版）。',
             '- featured: 下の記事にアイキャッチを作って付ける。',
@@ -653,7 +670,7 @@ export class SiteUpdateService {
             `ページ（データ）: ${JSON.stringify(data)}`,
             `頼み（データ）: 「${request}」`,
             'JSON だけを返す: {"create":[{"kind":"post","title":"","body":"","excerpt":"","publish":"draft","date":null,"eyecatch":false}],"status":[{"kind":"post","id":1,"to":"publish","date":null}],"revision":[{"kind":"page","id":1,"before":null}],"featured":[{"kind":"post","id":1}],"question":"","note":""}',
-          ].join('\n'),
+          ].filter(Boolean).join('\n'),
         }],
       });
       const v = json(res.text);
