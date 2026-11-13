@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { maskClientId,
   agentDisplayName,
-  isValidInvoiceNumber, parsePresentationId, findSlideDesign, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
+  isValidInvoiceNumber, parsePresentationId, findSlideDesign, isCompanySlideDesign, COMPANY_SLIDE_DESIGN_ID, type AutomationPolicy, type CompanyInfo, type Role, type SlideTemplate, type TenantSettings,
   type AuditEvent, type User, type WritingStyle, DEFAULT_AI_PER_USER_SHARE, DEFAULT_QUOTE_STYLE
 } from '@m2office/shared';
 import { semanticSearchEnabled,
@@ -854,7 +854,9 @@ function validateSection(
       const design = wanted ? findSlideDesign(wanted) : null;
       // 会社のテーマ（`theme:<ID>`）も既定にできる（第9.4.2節「Google スライドのテーマを使う」）。会社のテーマでなければ、使うときに会社の既定から外れる
       const theme = !design && /^theme:[A-Za-z0-9_-]{1,80}$/.test(wanted) ? wanted : null;
-      if (wanted && !design && !theme) return { error: '組み込みのデザインか会社のテーマが見つかりません' };
+      // 会社の見た目（第46.5節）も既定にできる
+      const own = !design && !theme && isCompanySlideDesign(wanted) ? COMPANY_SLIDE_DESIGN_ID : null;
+      if (wanted && !design && !theme && !own) return { error: '組み込みのデザインか会社のテーマが見つかりません' };
       // 文書の会社の既定（第9.5.5.2節「文書のテンプレート」）。会社のテンプレート（`theme:<ID>`）か、無し（標準）
       const docWanted = typeof o['defaultDocTemplate'] === 'string' ? o['defaultDocTemplate'] : '';
       if (docWanted && docWanted !== '標準' && !/^theme:[A-Za-z0-9_-]{1,80}$/.test(docWanted)) return { error: '文書の会社の既定が見つかりません' };
@@ -864,7 +866,7 @@ function validateSection(
       return {
         section: 'slides',
         value: {
-          templates, defaultDesign: design?.id ?? theme, defaultDocTemplate: docWanted && docWanted !== '標準' ? docWanted : null,
+          templates, defaultDesign: design?.id ?? theme ?? own, defaultDocTemplate: docWanted && docWanted !== '標準' ? docWanted : null,
           defaultSheetTemplate: sheetWanted && sheetWanted !== '標準' ? sheetWanted : null,
         },
       };

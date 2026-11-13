@@ -8,7 +8,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_SLIDE_DESIGN_ID, SLIDE_DECK_SHARING_LABEL, SLIDE_DESIGNS, SLIDE_THEME_PREFIX, findSlideDesign, type SlideDeckSummary, type SlideDesign } from '@m2office/shared';
+import {
+  COMPANY_SLIDE_DESIGN_NAME, DEFAULT_SLIDE_DESIGN_ID, SLIDE_DECK_SHARING_LABEL, SLIDE_DESIGNS, SLIDE_THEME_PREFIX, companySlideDesign, findSlideDesign, isCompanySlideDesign,
+  type SlideDeckSummary, type SlideDesign,
+} from '@m2office/shared';
 import type { Tool } from './registry.js';
 import { SlidePlanError, normalizeSlidePlan, planOutline, type SlidePlan } from '../slides/plan.js';
 import { pieChartPng } from '../slides/pie.js';
@@ -65,20 +68,35 @@ async function chooseLook(ctx: Parameters<Tool['invoke']>[1], wanted: string): P
     const t = key && ctx.slideThemes ? await ctx.slideThemes.find({ tenantId: ctx.tenantId, userId: ctx.userId }, key) : null;
     return t ? { id: t.id, presentationId: t.presentationId, name: t.name } : null;
   };
+  // 会社の見た目から作るデザイン（第46.5節）。初めて要るときに作る（作れなければ `null`）
+  const company = async (): Promise<SlideDesign | null> => {
+    const t = ctx.companyDesign ? await ctx.companyDesign.ensure(ctx.tenantId).catch(() => null) : null;
+    return t ? companySlideDesign(t) : null;
+  };
+  if (isCompanySlideDesign(wanted)) {
+    const own = await company();
+    if (own) return { template: null, design: own, theme: null, warning: null };
+  }
   const builtIn = wanted ? findSlideDesign(wanted) : null;
   if (builtIn) return { template: null, design: builtIn, theme: null, warning: null };
   const theme = await themeOf(wanted);
   if (theme) return { template: null, design: null, theme, warning: null };
   const named = wanted ? slides.templates.find((t) => t.name === wanted) : undefined;
   if (named) return { template: { presentationId: named.presentationId, name: named.name }, design: null, theme: null, warning: null };
-  const warning = wanted ? `デザイン「${wanted}」が見つからないため、会社の既定で作りました` : null;
+  const warning = !wanted ? null : isCompanySlideDesign(wanted)
+    ? '会社の見た目がまだ無いため、会社の既定で作りました'
+    : `デザイン「${wanted}」が見つからないため、会社の既定で作りました`;
+  const companyDefault = isCompanySlideDesign(slides.defaultDesign) && !isCompanySlideDesign(wanted) ? await company() : null;
+  if (companyDefault) return { template: null, design: companyDefault, theme: null, warning };
   const defaultDesign = slides.defaultDesign ? findSlideDesign(slides.defaultDesign) : null;
   if (defaultDesign) return { template: null, design: defaultDesign, theme: null, warning };
   const defaultTheme = slides.defaultDesign?.startsWith(SLIDE_THEME_PREFIX) ? await themeOf(slides.defaultDesign) : null;
   if (defaultTheme) return { template: null, design: null, theme: defaultTheme, warning };
   const def = slides.templates.find((t) => t.isDefault);
   if (def) return { template: { presentationId: def.presentationId, name: def.name }, design: null, theme: null, warning };
-  return { template: null, design: findSlideDesign(DEFAULT_SLIDE_DESIGN_ID), theme: null, warning };
+  // 既定を何も決めていなければ会社の見た目（第9.4.2節「会社の既定」）。それも無ければ組み込みの「ビジネス」
+  const own = isCompanySlideDesign(wanted) || isCompanySlideDesign(slides.defaultDesign) ? null : await company();
+  return { template: null, design: own ?? findSlideDesign(DEFAULT_SLIDE_DESIGN_ID), theme: null, warning };
 }
 
 /** 1 つの資料に入れる象徴的な画像の上限（表紙を含む。第9.4.2節「段 2」）。 */
@@ -156,7 +174,8 @@ async function prepareImages(
 async function lookChoices(ctx: Parameters<Tool['invoke']>[1]): Promise<string[]> {
   const { templates } = (await ctx.repo.getTenantSettings(ctx.tenantId)).slides;
   const themes = ctx.slideThemes ? await ctx.slideThemes.list({ tenantId: ctx.tenantId, userId: ctx.userId }) : [];
-  return [...SLIDE_DESIGNS.map((d) => d.name), ...themes.map((t) => t.name), ...templates.map((t) => t.name)];
+  const own = ctx.companyDesign ? await ctx.companyDesign.current(ctx.tenantId).catch(() => null) : null;
+  return [...(own ? [COMPANY_SLIDE_DESIGN_NAME] : []), ...SLIDE_DESIGNS.map((d) => d.name), ...themes.map((t) => t.name), ...templates.map((t) => t.name)];
 }
 
 /** ツールの引数から、見た目の指定（`design`。前の版の `template` も読む）を取り出す。 */

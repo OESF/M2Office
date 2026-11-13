@@ -15,6 +15,7 @@ import {
   type WebColumnSettings, type WebColumnVersion,
 } from '@m2office/shared';
 import type { LlmProvider } from '../llm/provider.js';
+import { designImageHint, designVoiceLine } from '../design/hints.js';
 import type { ResearchProvider } from '../research/provider.js';
 import type { Repository } from '../repository/types.js';
 import type { SecretBox } from '../secrets/box.js';
@@ -241,10 +242,12 @@ export class ColumnService {
         this.deps.llmFor(who.tenantId), this.deps.researchFor(who.tenantId), this.companyName(who.tenantId, settings.company.legalName),
       ]);
       const tendency = this.deps.tendencyFor ? await this.deps.tendencyFor(who.tenantId).catch(() => null) : null;
+      // 文の調子は会社の見た目から（第46.5節）。自社の書き方を先にする
+      const voice = designVoiceLine(await this.deps.design?.(who.tenantId).catch(() => null));
       const draft = await writeColumn(llm, research, {
         theme: c.theme, memo: c.memo, company, audience: settings.webColumns.audience, topics: settings.webColumns.topics,
         style: styleText({ ...settings.writingStyle, selfReference: '' }), selfReference: settings.writingStyle.selfReference,
-        ...(tendency ? { tendency } : {}),
+        ...(tendency ? { tendency } : {}), ...(voice ? { voice } : {}),
       });
       const review = [...mergeReview(
         ruleReview(draft.body, settings.webColumns.rules, draft.sources.length),
@@ -306,7 +309,7 @@ export class ColumnService {
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
     const llm = await this.deps.llmFor(who.tenantId);
     try {
-      const res = await rewriteColumn(llm, cur.version, text, styleText(settings.writingStyle));
+      const res = await rewriteColumn(llm, cur.version, text, styleText(settings.writingStyle), designVoiceLine(await this.deps.design?.(who.tenantId).catch(() => null)));
       const review = [...mergeReview(ruleReview(res.body, cur.settings.rules, cur.version.sources.length), await aiReview(llm, res.body, cur.settings.rules)),
         ...(await this.similar(who.tenantId, res.body, cur.version.sources))];
       await this.addVersion(who, id, cur.version, { ...cur.version, body: res.body, description: res.description, origin: 'rewrite' }, review);
@@ -626,7 +629,7 @@ export class ColumnService {
         const wish = (req.hint?.trim() || (a.request ? await imageWish(llm, a.request) : '')).slice(0, 200);
         // 会社の見た目の雰囲気と色の調子を添える（頼まれた雰囲気を先に。第46.5節）
         const design = await this.deps.design?.(who.tenantId).catch(() => null);
-        const hint = [wish, design ? `写真と絵の雰囲気: ${design.imagery}。色の調子: ${design.colors.primary} と ${design.colors.accent} に合う色` : ''].filter(Boolean).join('。').slice(0, 300);
+        const hint = [wish, designImageHint(design)].filter(Boolean).join('。').slice(0, 300);
         for (let i = 0; i < tries; i++) {
           aiAttempts += 1;
           const img = await llm.generateImage!({

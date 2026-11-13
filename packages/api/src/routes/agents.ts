@@ -5,7 +5,7 @@
  */
 
 import { Hono } from 'hono';
-import { findSlideDesign } from '@m2office/shared';
+import { COMPANY_SLIDE_DESIGN_ID, companySlideDesign, findSlideDesign, isCompanySlideDesign } from '@m2office/shared';
 import { isSchedulable } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
@@ -34,9 +34,14 @@ export function agentsRoute(deps: AppDeps) {
     // 会社の既定が会社のテーマ（`theme:<ID>`）のときは、そのテーマ（第9.4.2節「Google スライドのテーマを使う」）
     const theme = slides.defaultDesign?.startsWith('theme:') ? slides.defaultDesign : null;
     const template = slides.templates.find((t) => t.isDefault);
+    // 会社の見た目から作るデザイン（第46.5節）。画面を開くたびに作らないよう、あるときだけ並べる
+    const own = await deps.companyDesign.current(tenant.id).catch(() => null);
+    const company = own ? companySlideDesign(own.tokens) : null;
+    const companyDefault = isCompanySlideDesign(slides.defaultDesign) ? COMPANY_SLIDE_DESIGN_ID : null;
     return c.json({
       templates: slides.templates.map((t) => ({ name: t.name, description: t.description })),
-      defaultChoice: design?.id ?? theme ?? template?.name ?? 'business',
+      company,
+      defaultChoice: (company ? companyDefault : null) ?? design?.id ?? theme ?? template?.name ?? (company ? COMPANY_SLIDE_DESIGN_ID : 'business'),
     });
   });
 

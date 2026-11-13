@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { renderScreenCard } from '../announcements/screen-image.js';
+import { renderScreenCard, screenPaletteOf } from '../announcements/screen-image.js';
 import type { StockChange } from '../inventory/publication.js';
 import type { SignageService } from './service.js';
 import { thumbnailPng } from './thumbnail.js';
@@ -53,10 +53,13 @@ export async function applyStockChanges(service: SignageService, tenantId: strin
   // 公開から外れた品目の案内は外す
   for (const name of [...notices.keys()]) if (!current.has(name)) await drop(name);
   const screens = (await service.overview(tenantId)).screens.map((s) => s.id);
+  // 帯は背景色（決めていなければ会社の見た目の主の色）、地と文字は会社の見た目（第46.5節）
+  const color = await service.bandColor(tenantId, settings.color);
+  const palette = screenPaletteOf(service.deps.design ? await service.deps.design(tenantId).catch(() => null) : null);
   for (const c of changes.slice(0, STOCK_NOTICE_MAX)) {
     await drop(c.name);
     const text = stockCardText(c.name, c.kind);
-    const png = renderScreenCard({ ...text, color: settings.color });
+    const png = renderScreenCard({ ...text, color, palette });
     const dir = await mkdtemp(join(tmpdir(), 'm2o-stock-'));
     try {
       const path = join(dir, 'stock.png');

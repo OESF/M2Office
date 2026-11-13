@@ -230,8 +230,10 @@ const laborCalendar = new LaborCalendar({
   laborStore: new PostgresLaborStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'),
 });
 // サイネージ（第31章）。つながらない画面を知らせ、切れた登録の番号などを消す
+// 背景色を決めていないときは会社の見た目の主の色（第46.5節）。会社の見た目はこの後で作るので、呼ばれたときに引く
 const signage = new SignageService({
   store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files,
+  design: (tenantId) => designFor(tenantId),
 });
 // 在庫の公開を作り直したときの品切れ・入荷を、サイネージの案内にする（第31.6.7節。会社が入れたときだけ）
 inventoryPublisher.onStockChange(async (tenantId, changes, current) => { await applyStockChanges(signage, tenantId, changes, current); });
@@ -440,6 +442,7 @@ const effect = new EffectService({
 });
 // お知らせの作成（内蔵の拡張。仕様書 第35章）。承認の後に出し、予約の時刻と期間の後を見回る
 const announcements = new AnnouncementService({
+  design: designFor,
   store: announcementStore,
   repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
   line: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },

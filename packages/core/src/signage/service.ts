@@ -12,7 +12,7 @@ import {
   canUseAgent, SIGNAGE_EXTENSION_ID, SIGNAGE_JINGLES, SIGNAGE_LIMITS, SIGNAGE_MAX_SCREENS, SIGNAGE_STORAGE_LIMIT, SIGNAGE_DEFAULT_COLOR,
   signageBandLabel, signageBandsOverlap, signageMinutes, SIGNAGE_TRANSITIONS,
   type AuditEvent, type SignageAsset, type SignageBand, type SignageEntry, type SignageOrientation, type SignageReport, type SignageRotation,
-  type SignageScreen, type SignageSettings, type SignageTransition,
+  type CompanyDesignTokens, type SignageScreen, type SignageSettings, type SignageTransition,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -30,6 +30,8 @@ export interface SignageServiceDeps {
   now?: () => Date;
   /** 割り込みの素材に名前を付ける AI（会社の AI の方針に従うもの）。無ければ名前を付けない（第31.6.1節・第31.6.3節）。 */
   llmFor?: (tenantId: string) => Promise<LlmProvider>;
+  /** 会社の見た目（第46.5節）。背景色を決めていないときに主の色を使う。無ければ濃い青 */
+  design?: (tenantId: string) => Promise<CompanyDesignTokens | null>;
 }
 
 /**
@@ -703,6 +705,16 @@ export class SignageService {
   }
 
   /**
+   * 背景色（第31.4節）。管理者が決めた色 → 会社の見た目の主の色（第46.5節）→ 濃い青。文字の割り込み・空の流れ・字を組んだ案内の帯に使う。
+   */
+  async bandColor(tenantId: string, chosen?: string | null): Promise<string> {
+    const set = chosen !== undefined ? chosen : (await this.deps.repo.getTenantSettings(tenantId)).signage.color;
+    if (set) return set;
+    const design = this.deps.design ? await this.deps.design(tenantId).catch(() => null) : null;
+    return design?.colors.primary ?? SIGNAGE_DEFAULT_COLOR;
+  }
+
+  /**
    * 再生のページに渡す状態（設定・流れと版・素材・背景色・会社の名前・サーバーの時刻。第31.15.2節）。
    */
   async playState(tenantId: string, s: ScreenRecord): Promise<{
@@ -733,7 +745,7 @@ export class SignageService {
       sounds: sounds.map((x) => ({ id: x.id, mime: x.mime })),
       jingle: tenantSettings.signage.jingle,
       imageSeconds: tenantSettings.signage.imageSeconds,
-      color: tenantSettings.signage.color ?? SIGNAGE_DEFAULT_COLOR,
+      color: await this.bandColor(tenantId, tenantSettings.signage.color),
       company: tenantSettings.company.legalName || tenant?.name || '',
       serverTime: this.now().toISOString(),
     };

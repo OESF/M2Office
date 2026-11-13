@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   ANNOUNCEMENTS_EXTENSION_ID, ANNOUNCEMENT_BAND_COLORS, ANNOUNCEMENT_CHANNELS, announcementBandColor, ANNOUNCEMENT_CHANNEL_LABELS, ANNOUNCEMENT_LINE_MAX, ANNOUNCEMENT_SIGNAGE_DAYS, canUseAgent,
-  type Announcement, type AnnouncementChannel, type AnnouncementDetail, type AnnouncementOutput, type AnnouncementPreview, type AnnouncementRecipient, type AnnouncementRecipientsRefined, type AnnouncementSettings, type AnnouncementTexts,
+  type Announcement, type AnnouncementChannel, type CompanyDesignTokens, type AnnouncementDetail, type AnnouncementOutput, type AnnouncementPreview, type AnnouncementRecipient, type AnnouncementRecipientsRefined, type AnnouncementSettings, type AnnouncementTexts,
 } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -24,7 +24,8 @@ import { dateIn } from '../cards/service.js';
 import { categoryFieldOf, columnHtml, createWordPressPost, ensureWordPressTerm, listPostTypes, listTaxonomies, pickNewsTypes, updateWordPressTitle, type WordPressAuth, type WordPressPostType, type WordPressTaxonomy } from '../columns/wordpress.js';
 import { openLine, LineUnavailableError, type LineDeps } from '../inquiries/line.js';
 import { periodText, writeDraft } from './draft.js';
-import { renderScreenCard, type ScreenCard } from './screen-image.js';
+import { renderScreenCard, screenPaletteOf, type ScreenCard } from './screen-image.js';
+import { designVoiceLine } from '../design/hints.js';
 import type { AnnouncementPatch, AnnouncementStore, StoredAnnouncement } from './store.js';
 import type { AnnouncementMail } from './mail.js';
 import { applyCondition, describeCondition, readCondition } from './recipients.js';
@@ -59,6 +60,8 @@ export interface AnnouncementServiceDeps {
   submitter?(tenantId: string, userId: string, announcementId: string): Promise<string>;
   /** 実行の状態（承認待ちのまま却下・失敗したら下書きに戻すため） */
   runStatus?(tenantId: string, runId: string): Promise<string | null>;
+  /** 会社の見た目（第46.5節）。サイネージの 1 枚の色と、下書きの文の調子に使う */
+  design?(tenantId: string): Promise<CompanyDesignTokens | null>;
   logger?: Logger;
 }
 
@@ -73,12 +76,18 @@ export interface AnnouncementViewer {
  *
  * @param storeColor サイネージの設定の背景色（帯の色を選んでいないときに使う）
  * @param edits 保存する前の文（画面の見本）
+ * @param design 会社の見た目（第46.5節）。背景色を決めていないときの帯の色と、地と文字の色
  */
-export function screenCardOf(a: Pick<StoredAnnouncement, 'title' | 'startDate' | 'endDate' | 'texts'>, storeColor: string | null, edits: Partial<AnnouncementTexts['signage']> = {}): ScreenCard {
+export function screenCardOf(
+  a: Pick<StoredAnnouncement, 'title' | 'startDate' | 'endDate' | 'texts'>, storeColor: string | null, edits: Partial<AnnouncementTexts['signage']> = {},
+  design: CompanyDesignTokens | null = null,
+): ScreenCard {
   const t = { ...a.texts.signage, ...edits };
   return {
     headline: t.headline || a.title, period: t.period || periodText(a.startDate, a.endDate), detail: t.detail ?? '', note: t.note,
-    color: announcementBandColor(t.color, storeColor),
+    // 選んだ色 → サイネージの背景色 → 会社の見た目の主の色 → 濃い青（第35.6.4節）。地と文字は会社の見た目（第46.5節）
+    color: announcementBandColor(t.color, storeColor ?? design?.colors.primary ?? null),
+    palette: screenPaletteOf(design),
   };
 }
 
@@ -270,6 +279,7 @@ export class AnnouncementService {
       company: { name: settings.company.shortName || settings.company.legalName || tenant?.name || '', phone: settings.company.phone, hours: '' },
       selfReference: settings.writingStyle.selfReference,
       available: ANNOUNCEMENT_CHANNELS.filter((c) => avail.channels[c]),
+      voice: designVoiceLine(this.deps.design ? await this.deps.design(who.tenantId).catch(() => null) : null),
     });
     const id = await this.deps.store.create(who.tenantId, { ...d, mailContactIds: d.channels.includes('mail') ? suggested.map((r) => r.contactId) : [], createdBy: who.userId });
     await this.audit(who, 'announcement.draft', id, { channels: d.channels });
@@ -678,7 +688,8 @@ export class AnnouncementService {
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
     const screens = await this.targetScreens(who.tenantId, settings.announcements);
     if (!screens.length) return fail('流す画面がありません');
-    const png = renderScreenCard(screenCardOf(a, settings.signage.color));
+    const design = this.deps.design ? await this.deps.design(who.tenantId).catch(() => null) : null;
+    const png = renderScreenCard(screenCardOf(a, settings.signage.color, {}, design));
     const added = await this.deps.signage.addImage(who.tenantId, who.userId === SYSTEM ? a.createdBy : who.userId, png, `お知らせ: ${a.title}`.slice(0, 60));
     if ('error' in added) return fail(added.error);
     const names = await this.deps.signage.addToFlows(who.tenantId, who.userId === SYSTEM ? a.createdBy : who.userId, added.assetId, screens.map((s) => s.id));

@@ -12,7 +12,7 @@ import { inviteEffect } from '@m2office/shared';
 import type {
   AutomationPolicy, CompanyInfo, Role, SlideTemplate, TenantSettings, User, WritingStyle,
 } from '@m2office/shared';
-import { SLIDE_DESIGNS, TAX_CATEGORY_LABELS, type TaxRateEntry } from '@m2office/shared';
+import { COMPANY_SLIDE_DESIGN_ID, SLIDE_DESIGNS, TAX_CATEGORY_LABELS, type SlideDesign, type TaxRateEntry } from '@m2office/shared';
 import { api, describeError, type ConsolidationView, type KnowledgeItemView, type KnowledgeSectionView, type KnowledgeVersionView } from './api.js';
 import { PageTitle, type PageHelp } from './help.js';
 import { SaveButton } from './save.js';
@@ -497,9 +497,12 @@ function SlideTemplateSettings({ initial, initialDesign, initialDocTemplate, ini
   useEffect(() => { setSheetTemplate(initialSheetTemplate ?? DOC_STANDARD); }, [initialSheetTemplate]);
   useEffect(() => { setItems(initial.map(toDraft)); }, [initial]);
   useEffect(() => { setDesign(initialDesign); }, [initialDesign]);
-  const choice = design ?? items.find((t) => t.isDefault && t.name)?.name ?? SLIDE_DESIGNS[0]!.id;
+  // 会社の見た目から作るデザイン（第46.5節）。あれば既定の候補の先頭に並べる
+  const [companyLook, setCompanyLook] = useState<SlideDesign | null>(null);
+  useEffect(() => { void api.slideDesigns().then((r) => setCompanyLook(r.company)).catch(() => undefined); }, []);
+  const choice = design ?? items.find((t) => t.isDefault && t.name)?.name ?? (companyLook ? COMPANY_SLIDE_DESIGN_ID : SLIDE_DESIGNS[0]!.id);
   const choose = (v: string) => {
-    if (SLIDE_DESIGNS.some((d) => d.id === v) || v.startsWith('theme:')) { setDesign(v); return; }
+    if (SLIDE_DESIGNS.some((d) => d.id === v) || v === COMPANY_SLIDE_DESIGN_ID || v.startsWith('theme:')) { setDesign(v); return; }
     setDesign(null);
     setItems(items.map((x) => ({ ...x, isDefault: x.name === v })));
   };
@@ -510,7 +513,7 @@ function SlideTemplateSettings({ initial, initialDesign, initialDocTemplate, ini
     <div className="card">
       <div className="field">
         <label>会社の既定</label>
-        <SlideDesignPicker value={choice} templates={items.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), description: t.description }))} onChange={choose} themes={themes} />
+        <SlideDesignPicker value={choice} templates={items.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), description: t.description }))} onChange={choose} themes={themes} company={companyLook} />
       </div>
       <div className="field">
         <label>文書の会社の既定</label>

@@ -138,7 +138,9 @@ export function announcementsRoute(deps: AppDeps) {
     const q = (k: string, max: number) => { const v = c.req.query(k); return v === undefined ? undefined : [...v].slice(0, max).join(''); };
     const edits = Object.fromEntries(([['headline', 30], ['period', 60], ['detail', 60], ['note', 40], ['color', 20]] as const)
       .map(([k, max]) => [k, q(k, max)] as const).filter(([, v]) => v !== undefined));
-    const png = renderScreenCard(screenCardOf(d.announcement, settings.signage.color, edits));
+    // 地と文字の色・背景色を決めていないときの帯の色は会社の見た目（第46.5節）。出すときと同じ組み方にする
+    const design = await deps.companyDesign.ensure(c.get('ctx').tenant.id).catch(() => null);
+    const png = renderScreenCard(screenCardOf(d.announcement, settings.signage.color, edits, design));
     return new Response(Buffer.from(png), { headers: { 'content-type': 'image/png', 'cache-control': 'no-store' } });
   });
 

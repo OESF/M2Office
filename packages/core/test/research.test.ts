@@ -9,9 +9,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { AgentDefinition } from '@m2office/shared';
+import { COMPANY_SLIDE_DESIGN_ID, companySlideDesign, isCompanySlideDesign, type AgentDefinition } from '@m2office/shared';
 import {
-  BUILTIN_TOOLS, GeminiResearchProvider, MockResearchProvider, MockWorkspaceConnector, ToolRegistry,
+  BUILTIN_TOOLS, DEFAULT_DESIGN, GeminiResearchProvider, MockResearchProvider, MockWorkspaceConnector, ToolRegistry,
   normalizeSlidePlan, planOutline, validateDefinition, pieChartPng, pieChartSvg, type ToolContext,
 } from '../src/index.js';
 
@@ -227,6 +227,62 @@ test('組み込みのデザイン: 名前か ID で選び、指定が無けれ�
     settingsTemplates = [];
     settingsDesign = null;
   }
+});
+
+test('会社の見た目のデザイン（第46.5節）: 既定を決めていなければ会社の見た目で作り、名前でも選べる。会社の既定・テンプレートの既定が先', async () => {
+  const tool = registry.get('slides.create')!;
+  const tokens = { ...DEFAULT_DESIGN, colors: { ...DEFAULT_DESIGN.colors, primary: '#2e6b4f' }, typography: { ...DEFAULT_DESIGN.typography, headingJa: 'Noto Serif JP' } };
+  let made = 0;
+  const withDesign = (has: boolean) => {
+    const c = ctx();
+    return Object.assign(c, { companyDesign: { ensure: async () => { made += 1; return has ? tokens : null; }, current: async () => (has ? { tokens } : null) } as never });
+  };
+  const used = (c: ReturnType<typeof ctx>) => c.connector.outbox.map((o) => {
+    const b = o.body as { template: { name: string } | null; design?: { id: string; font: { heading: string }; accent: { red: number } } | null };
+    return b.template ? `t:${b.template.name}` : `d:${b.design?.id}`;
+  });
+  const c = withDesign(true);
+  const out = await tool.invoke(SAMPLE_PLAN, c) as { design: string };
+  await tool.invoke({ ...SAMPLE_PLAN, design: '会社の見た目' }, c);
+  await tool.invoke({ ...SAMPLE_PLAN, design: 'ナチュラル' }, c);
+  assert.deepEqual(used(c), ['d:company', 'd:company', 'd:natural']);
+  assert.equal(out.design, '会社の見た目');
+  const look = (c.connector.outbox[0]!.body as { design: { font: { heading: string }; accent: { red: number; green: number } } }).design;
+  assert.equal(look.font.heading, 'Noto Serif JP', '字体は会社の見た目の書体');
+  assert.ok(Math.abs(look.accent.green - 0x6b / 255) < 0.01, '強調の色は会社の主の色');
+  const tpl = await registry.get('slides.template')!.invoke({}, c) as { choices: string[] };
+  assert.equal(tpl.choices[0], '会社の見た目', '選べる名前の先頭');
+
+  // 会社の見た目が無ければビジネス。「会社の見た目で」と言われたら理由を添える
+  const none = withDesign(false);
+  const r = await tool.invoke({ ...SAMPLE_PLAN, design: '会社の見た目' }, none) as { warnings: string[] };
+  assert.deepEqual(used(none), ['d:business']);
+  assert.ok(r.warnings.some((w) => w.includes('会社の見た目がまだ無い')));
+
+  // 会社の既定のデザイン・テンプレートの既定があれば、そちらが先
+  settingsDesign = 'pop';
+  try {
+    const c2 = withDesign(true);
+    await tool.invoke(SAMPLE_PLAN, c2);
+    settingsDesign = 'company';
+    await tool.invoke(SAMPLE_PLAN, c2);
+    settingsDesign = null;
+    settingsTemplates = [{ id: 'a', name: '社内向け', presentationId: 'p-inner-0000000000000000', description: '', isDefault: true }];
+    await tool.invoke(SAMPLE_PLAN, c2);
+    assert.deepEqual(used(c2), ['d:pop', 'd:company', 't:社内向け']);
+  } finally {
+    settingsDesign = null;
+    settingsTemplates = [];
+  }
+  assert.ok(made > 0);
+});
+
+test('会社の見た目のデザイン: 主の色が背景と見分けにくければリンクの色、それも薄ければ本文に寄せる', () => {
+  const pale = { ...DEFAULT_DESIGN, colors: { ...DEFAULT_DESIGN.colors, primary: '#fff3a0', link: '#1a4f8b', background: '#ffffff' } };
+  const d = companySlideDesign(pale);
+  assert.ok(Math.abs(d.accent.blue - 0x8b / 255) < 0.01, 'リンクの色');
+  assert.equal(d.id, COMPANY_SLIDE_DESIGN_ID);
+  assert.ok(isCompanySlideDesign('company') && isCompanySlideDesign('会社の見た目') && !isCompanySlideDesign('ビジネス'));
 });
 
 test('slides.template: 登録が無ければ標準で構成するよう返す。見本の接続口では読めないことを返す', async () => {

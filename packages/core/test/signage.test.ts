@@ -199,6 +199,7 @@ test('在庫の案内: 品切れ・入荷を見分け、案内を足して入荷
   let n = 0;
   const service = {
     settings: async () => ({ enabled: true, stockNotices: on, color: null }),
+    bandColor: async (_t: string, c: string | null) => c ?? '#1f3a5f',
     overview: async () => ({ screens: [{ id: 's1' }, { id: 's2' }] }),
     addAsset: async () => ({ asset: { id: `a${++n}` }, existing: false }),
     deleteAsset: async (_t: string, _u: string, id: string) => { deleted.push(id); return { screens: [] }; },

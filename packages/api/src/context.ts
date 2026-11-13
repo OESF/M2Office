@@ -559,7 +559,11 @@ export function buildDeps(): AppDeps {
   });
   const inventory = { service: inventoryService, bookings: inventoryBookings, publisher: inventoryPublisher, sales: inventorySales, jan: inventoryJan, market: inventoryMarket, access: inventoryAccess(repo) };
   // サイネージ（第31章）。秘書が割り込みを出すため、秘書より先に作る。画面と素材は会社で共有する
-  const signageService = new SignageService({ store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files, llmFor: (tenantId) => ai.llmFor(tenantId) });
+  // 背景色を決めていないときは会社の見た目の主の色（第46.5節）。会社の見た目はこの後で作るので、呼ばれたときに引く
+  const signageService = new SignageService({
+    store: new PostgresSignageStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), repo, files, llmFor: (tenantId) => ai.llmFor(tenantId),
+    design: (tenantId) => designFor(tenantId),
+  });
   const signage = { service: signageService, interrupts: new SignageInterrupts({ service: signageService, repo }), access: signageAccess(repo) };
   // 在庫の公開を作り直したときの品切れ・入荷を、サイネージの案内にする（第31.6.7節。会社が入れたときだけ）
   inventoryPublisher.onStockChange(async (tenantId, changes, current) => { await applyStockChanges(signageService, tenantId, changes, current); });
@@ -633,6 +637,7 @@ export function buildDeps(): AppDeps {
   // お知らせの作成（内蔵の拡張。仕様書 第35章）。Web はコラムの作成の WordPress、LINE は問い合わせの記録の接続、サイネージの画面はサイネージを使う
   const announcements = {
     service: new AnnouncementService({
+      design: designFor,
       store: announcementStore,
       repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
       // メール（名刺管理のまとめてのメール。段 2。第35.18節）

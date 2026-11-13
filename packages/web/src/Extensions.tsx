@@ -478,6 +478,9 @@ function OptOuts({ count, onChanged }: { count: number; onChanged: () => void })
 function SignageFields({ settings, busy, onChanged }: { settings: SignageSettings; busy: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [sounds, setSounds] = useState<SignageSound[]>([]);
+  // 背景色を決めていないときの色は、会社の見た目の主の色（仕様書 第46.5節）
+  const [companyColor, setCompanyColor] = useState<string | null>(null);
+  useEffect(() => { api.companyDesign.get().then((r) => setCompanyColor(r.current?.tokens.colors.primary ?? null)).catch(() => undefined); }, []);
   const soundFile = useRef<HTMLInputElement>(null);
   const player = useRef<JinglePlayer | null>(null);
   const reload = () => {
@@ -531,7 +534,7 @@ function SignageFields({ settings, busy, onChanged }: { settings: SignageSetting
           {seconds('interruptSeconds', 5, 60, '割り込み表示時間')}
           <span className="signage-settings-label">背景色</span>
           <span className="ext-signage-control">
-            <input type="color" value={settings.color ?? SIGNAGE_DEFAULT_COLOR} disabled={busy} onChange={(e) => save({ color: e.target.value })} aria-label="背景色" />
+            <input type="color" value={settings.color ?? companyColor ?? SIGNAGE_DEFAULT_COLOR} disabled={busy} onChange={(e) => save({ color: e.target.value })} aria-label="背景色" />
             {settings.color && <button className="link" disabled={busy} onClick={() => save({ color: null })}>元の色に戻す</button>}
           </span>
           <span className="signage-settings-label">ジングル</span>

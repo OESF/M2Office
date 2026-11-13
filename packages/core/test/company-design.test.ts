@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS, type TenantSettings } from '@m2office/shared';
 import {
-  CompanyDesignService, MemoryCompanyDesignStore, MemoryFileStore, DEFAULT_DESIGN, contrast, normalizeDesign, parseDesignMd, tokensFromDesignMd, toDesignMd, siteCssFor,
+  CompanyDesignService, MemoryCompanyDesignStore, NO_AI_SOURCE_NAME, MemoryFileStore, DEFAULT_DESIGN, contrast, normalizeDesign, parseDesignMd, tokensFromDesignMd, toDesignMd, siteCssFor,
   type LlmProvider, type LlmRequest, type Repository,
 } from '../src/index.js';
 
@@ -105,10 +105,11 @@ test('サイトに貼る CSS: Lightning なら色の変数まで合わせ、ほ�
   assert.equal(block.kind, 'block');
 });
 
-function setup(opts: { admin?: boolean; logo?: boolean; answer?: Record<string, unknown> } = {}) {
+function setup(opts: { admin?: boolean; logo?: boolean; answer?: Record<string, unknown>; ai?: { on: boolean }; website?: string; wordpress?: string } = {}) {
   const settings: TenantSettings = {
     ...DEFAULT_TENANT_SETTINGS,
-    company: { ...DEFAULT_TENANT_SETTINGS.company, shortName: '見本の会社', logoFileId: opts.logo ? 'f-logo' : null, website: '' },
+    company: { ...DEFAULT_TENANT_SETTINGS.company, shortName: '見本の会社', logoFileId: opts.logo ? 'f-logo' : null, website: opts.website ?? '' },
+    webColumns: { ...DEFAULT_TENANT_SETTINGS.webColumns, wordpress: opts.wordpress ? { siteUrl: opts.wordpress, username: 'm2o' } as TenantSettings['webColumns']['wordpress'] : null },
   };
   const audits: string[] = [];
   const files = new MemoryFileStore();
@@ -127,7 +128,9 @@ function setup(opts: { admin?: boolean; logo?: boolean; answer?: Record<string, 
     },
     async extractFromImage() { return { text: '{"color":"#2e6b4f"}', tokensUsed: 1 }; },
   } as unknown as LlmProvider;
-  const service = new CompanyDesignService({ store: new MemoryCompanyDesignStore(), repo, files, llmFor: async () => llm });
+  const service = new CompanyDesignService({
+    store: new MemoryCompanyDesignStore(), repo, files, llmFor: async () => (!opts.ai || opts.ai.on ? llm : { name: 'unconfigured' } as LlmProvider),
+  });
   return { service, files, asked, audits };
 }
 
@@ -184,6 +187,61 @@ test('成果物に使う: まだ無ければ初めて要るときに作り（AI 
   assert.equal((await noAi.history('t1')).length, 1, '2 度目は作らない');
   const b = await service.ensure('t2');
   assert.equal(b?.colors.primary, '#2e6b4f');
+});
+
+test('成果物に使う: AI なしで作った見た目は、AI が使えるようになって初めて要るときに AI で作り直す。管理者が直した後は作り直さない', async () => {
+  const ai = { on: false };
+  const { service, asked } = setup({ ai });
+  const first = await service.ensure('t1');
+  assert.equal(first?.colors.primary, DEFAULT_DESIGN.colors.primary);
+  assert.equal((await service.current('t1'))?.sourceName, NO_AI_SOURCE_NAME);
+  await service.ensure('t1');
+  assert.equal((await service.history('t1')).length, 1, 'AI が使えないうちは同じ既定の見た目を重ねない');
+
+  ai.on = true;
+  const [a, b] = await Promise.all([service.ensure('t1'), service.ensure('t1')]);
+  assert.equal(a?.colors.primary, '#2e6b4f');
+  assert.equal(b?.colors.primary, '#2e6b4f');
+  const history = await service.history('t1');
+  assert.equal(history.length, 2, '同時に頼まれても 1 度だけ作り直し、AI なしの版は前の版として残る');
+  assert.equal(history[1]?.sourceName, NO_AI_SOURCE_NAME);
+  assert.equal(asked.length, 1);
+  await service.ensure('t1');
+  assert.equal((await service.history('t1')).length, 2, '作り直した後は作らない');
+
+  // 管理者が AI なしの版に戻した後は、作り直さない
+  ai.on = false;
+  const other = setup({ ai });
+  await other.service.ensure('t1');
+  const edited = await other.service.restore(boss, 1);
+  assert.ok(!('error' in edited));
+  ai.on = true;
+  await other.service.ensure('t1');
+  assert.equal((await other.service.history('t1')).length, 2, '戻した版は管理者が選んだもの');
+});
+
+test('サイトに貼る CSS: テーマは貼る先の WordPress のサイトで見分ける。WordPress が未接続なら会社情報の Web サイト', async (t) => {
+  const page = (theme: string) => `<html><head><link rel="stylesheet" href="/wp-content/themes/${theme}/style.css"></head><body></body></html>`;
+  const read: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (input: string | URL) => {
+    const u = new URL(String(input));
+    read.push(u.host);
+    if (u.pathname === '/') return new Response(page(u.host === 'service.example.jp' ? 'lightning' : 'lionmedia'), { headers: { 'content-type': 'text/html' } });
+    return new Response('', { status: 404 });
+  });
+  const both = setup({ website: 'https://www.example.jp', wordpress: 'https://service.example.jp' });
+  await both.service.generate(boss, '');
+  read.length = 0;
+  const css = await both.service.siteCss(boss);
+  assert.ok(!('error' in css));
+  assert.equal(css.theme, 'lightning', '貼る先の WordPress のテーマに合わせる');
+  assert.ok(read.every((h) => h === 'service.example.jp'), `会社情報のサイトは読まない: ${read.join(',')}`);
+
+  const noWp = setup({ website: 'https://www.example.jp' });
+  await noWp.service.generate(boss, '');
+  const fallback = await noWp.service.siteCss(boss);
+  assert.ok(!('error' in fallback));
+  assert.equal(fallback.theme, 'lionmedia', 'WordPress が未接続なら会社情報の Web サイト');
 });
 
 test('全体のスタイル（段 3）: ブロックのテーマなら会社の見た目を足した形を承認へ進め、入れて、元に戻す。クラシックのテーマなら貼る CSS を案内する', async (t) => {

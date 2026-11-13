@@ -1,7 +1,7 @@
 /**
  * @file スライドのデザインを見本の絵のカードから選ぶ部品（仕様書 第9.4.2節「組み込みのデザイン」）。
  *
- * 組み込みのデザイン（`SLIDE_DESIGNS`）は、表紙と本文の 2 枚を小さく描いた絵で、会社が登録したテンプレートは名前と説明のカードで並べる。
+ * 組み込みのデザイン（`SLIDE_DESIGNS`）と会社の見た目のデザイン（第46.5節）は、表紙と本文の 2 枚を小さく描いた絵で、会社が登録したテンプレートは名前と説明のカードで並べる。
  * 見本の絵はデザインの定義（色・表紙の飾り）から描く（外へ取りに行かない。デザインを足せば絵も自動で増える）。
  * 「スライドの作成」の入力（形 `slide-design`）と、管理者ページの「スライドの見本」（会社の既定）で使う。
  * Google スライドのテーマ（本人が選んだプレゼンテーション）も見本に並べ、「＋ Google スライドのテーマ」から加える（第9.4.2節「Google スライドのテーマを使う」）。
@@ -156,9 +156,10 @@ export function useSlideThemes(company: boolean, kind: SlideDeckKind = 'slides')
  * @param value 選んでいるもの（組み込みのデザインの ID、テーマの `theme:<ID>`、テンプレートの名前）
  * @param templates 会社が登録したテンプレート
  * @param themes Google スライドのテーマ（`useSlideThemes`）。無ければテーマを並べない
+ * @param company 会社の見た目から作ったデザイン（第46.5節）。あれば先頭に並べる
  */
-export function SlideDesignPicker({ value, templates, onChange, themes }: {
-  value: string; templates: SlideTemplateChoice[]; onChange: (v: string) => void; themes?: ReturnType<typeof useSlideThemes>;
+export function SlideDesignPicker({ value, templates, onChange, themes, company }: {
+  value: string; templates: SlideTemplateChoice[]; onChange: (v: string) => void; themes?: ReturnType<typeof useSlideThemes>; company?: SlideDesign | null;
 }) {
   const choose = async (v: string) => {
     onChange(v);
@@ -169,7 +170,7 @@ export function SlideDesignPicker({ value, templates, onChange, themes }: {
   return (
     <>
       <div className="slide-design-grid" role="radiogroup">
-        {SLIDE_DESIGNS.map((d) => (
+        {[...(company ? [company] : []), ...SLIDE_DESIGNS].map((d) => (
           <button type="button" key={d.id} role="radio" aria-checked={value === d.id} title={d.description}
             className={`slide-design-card${value === d.id ? ' is-selected' : ''}`} onClick={() => onChange(d.id)}>
             <DesignPreview d={d} />
@@ -230,12 +231,14 @@ export function SlideDesignPicker({ value, templates, onChange, themes }: {
  */
 export function SlideDesignField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   const [templates, setTemplates] = useState<SlideTemplateChoice[]>([]);
+  const [company, setCompany] = useState<SlideDesign | null>(null);
   const themes = useSlideThemes(false);
   useEffect(() => {
     let alive = true;
     api.slideDesigns().then((r) => {
       if (!alive) return;
       setTemplates(r.templates);
+      setCompany(r.company);
       if (!value) onChange(r.defaultChoice);
     }).catch(() => { if (alive && !value) onChange(SLIDE_DESIGNS[0]!.id); });
     return () => { alive = false; };
@@ -245,7 +248,7 @@ export function SlideDesignField({ label, value, onChange }: { label: string; va
   return (
     <div className="field">
       <label>{label}</label>
-      <SlideDesignPicker value={value} templates={templates} onChange={onChange} themes={themes} />
+      <SlideDesignPicker value={value} templates={templates} onChange={onChange} themes={themes} company={company} />
     </div>
   );
 }

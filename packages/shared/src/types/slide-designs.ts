@@ -5,7 +5,10 @@
  * M2Office が作ったファイルしか触らないため、権限は `drive.file` のまま。レイアウトと文字の量の決まりは変えない。
  * 組み立て（core の Google スライドの接続口）と、利用者の画面の見本の絵（web）が同じ定義を使う。
  * デザインを足すときは、ここに 1 つ足すだけでよい（見本の絵も同じ定義から描く）。
+ * 会社の見た目（第46章）からも 1 つ作る（`companySlideDesign`。第46.5節）。
  */
+
+import type { CompanyDesignTokens } from './company-design.js';
 
 /** 色（0〜1 の RGB。Slides API の `rgbColor` の形）。 */
 export interface SlideRgb {
@@ -107,4 +110,48 @@ export function findSlideDesign(idOrName: string): SlideDesign | null {
 /** 色を CSS の `rgb()` にする（画面の見本の絵に使う）。 */
 export function slideRgbCss(c: SlideRgb): string {
   return `rgb(${Math.round(c.red * 255)} ${Math.round(c.green * 255)} ${Math.round(c.blue * 255)})`;
+}
+
+/** 会社の見た目から作るデザインの ID（第46.5節）。会社の既定（`SlidesSettings.defaultDesign`）にも使える。 */
+export const COMPANY_SLIDE_DESIGN_ID = 'company';
+/** 会社の見た目から作るデザインの名前（画面と秘書への言葉）。 */
+export const COMPANY_SLIDE_DESIGN_NAME = '会社の見た目';
+
+/** 会社の見た目のデザインを指すか（ID か名前）。 */
+export function isCompanySlideDesign(idOrName: string | null | undefined): boolean {
+  const v = (idOrName ?? '').trim();
+  return v.toLowerCase() === COMPANY_SLIDE_DESIGN_ID || v === COMPANY_SLIDE_DESIGN_NAME;
+}
+
+const hexRgb = (hex: string): SlideRgb => {
+  const n = Number.parseInt(/^#[0-9a-f]{6}$/i.test(hex) ? hex.slice(1) : '000000', 16);
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+};
+const lum = (c: SlideRgb) => {
+  const f = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * f(c.red) + 0.7152 * f(c.green) + 0.0722 * f(c.blue);
+};
+const ratio = (a: SlideRgb, b: SlideRgb) => {
+  const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m) as [number, number];
+  return (x + 0.05) / (y + 0.05);
+};
+const blend = (a: SlideRgb, b: SlideRgb, t: number): SlideRgb => rgb(a.red + (b.red - a.red) * t, a.green + (b.green - a.green) * t, a.blue + (b.blue - a.blue) * t);
+
+/**
+ * 会社の見た目から、スライドのデザインを作る（第9.4.2節・第46.5節）。題名と数値に使う強調の色は、背景と見分けられる色にする
+ * （主の色が薄ければリンクの色、それも薄ければ本文の色に寄せる）。字体は会社の見た目の和文の書体（Google Fonts の名前）。
+ */
+export function companySlideDesign(t: CompanyDesignTokens): SlideDesign {
+  const background = hexRgb(t.colors.background);
+  const text = hexRgb(t.colors.text);
+  const primary = hexRgb(t.colors.primary);
+  const link = hexRgb(t.colors.link);
+  const accent = ratio(primary, background) >= 3 ? primary : ratio(link, background) >= 3 ? link : blend(primary, text, 0.6);
+  return {
+    id: COMPANY_SLIDE_DESIGN_ID, name: COMPANY_SLIDE_DESIGN_NAME, description: '会社の色と書体',
+    background, text, muted: hexRgb(t.colors.muted), accent, accentLight: blend(accent, background, 0.85),
+    cover: { background, title: accent, subtitle: hexRgb(t.colors.muted), style: t.shape.button === 'square' ? 'line' : 'band' },
+    font: { heading: t.typography.headingJa, body: t.typography.bodyJa }, rule: !t.shape.shadow,
+    imageStyle: `${t.imagery}。${t.colors.primary} と ${t.colors.accent} に合う色の調子の画面`.slice(0, 200),
+  };
 }

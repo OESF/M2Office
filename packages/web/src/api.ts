@@ -7,7 +7,7 @@
  * @see 仕様書 第20.7節 認証の実装方針
  */
 
-import type { CompanyDesignView, MailOverview, MailThreadDetail, SiteEditView } from '@m2office/shared';
+import type { CompanyDesignView, MailOverview, MailThreadDetail, SiteEditView, SlideDesign } from '@m2office/shared';
 import type { RuntimeEnvironment, RuntimeNetTotal, RuntimeSampleDays, RuntimeSamplePoint, NodeSecurityNotice, DeliveryView, DataRecipient, InventoryMarketCheck, InventoryUsageRow, InventoryWeeklyUsage, CardCorners, CardEnglish, LibraryFacets, LibraryItem, LibraryGraph, LibraryItemPage, LibraryItemView, LibraryMailState, LibraryProgress, LibraryShareScope, PrintDesign, PrintDesignDetailView, PrintKind, PrintSize, PrintState,
   Approval, Artifact, Brief, InventoryOrder, Notification, Run, RunStep, Schedule, ScheduleRule, Tenant,
   TenantSettings, User, UserSettings, CardFields, Contact, ContactChange, ContactScope,
@@ -3200,7 +3200,7 @@ export const api = {
   },
   agents: () => call<{ agents: AgentSummary[] }>('/agents'),
   /** スライドの作成で選べる会社のテンプレートと、会社の既定（第9.4.2節「組み込みのデザイン」）。組み込みのデザインは画面が持つ。 */
-  slideDesigns: () => call<{ templates: { name: string; description: string }[]; defaultChoice: string }>('/agents/slide-designs'),
+  slideDesigns: () => call<{ templates: { name: string; description: string }[]; company: SlideDesign | null; defaultChoice: string }>('/agents/slide-designs'),
   /** 作ったスライドの一覧（本人のものと会社で共有されたもの。仕様書 第9.4.2節「作ったスライドの扱い」）。 */
   slideDecks: (kind: SlideDeckKind = 'slides') => call<{ mine: SlideDeckSummary[]; shared: SlideDeckSummary[] }>(`/slide-decks?kind=${kind}`),
   /** 作ったスライド 1 件。 */

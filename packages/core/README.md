@@ -104,7 +104,7 @@ src/site-updates/ サイトの更新（内蔵の拡張。第45章の段 1〜段 
                  プラグイン・テーマ・本体の状態とサイトヘルス（health.ts。段 3）、会社の見た目をブロックのテーマの全体のスタイルに入れる（global-styles.ts。第46章）、
                  ツール（tools.ts。site_updates.propose・actions・terms・term_list・comment_list・comments・menus・health・design・revert・list・apply）、付属の業務「サイトの直し案」「サイトに入れる」（agents.ts）
 src/design/      会社の見た目（第46章）。値の形と明るさの差の確かめ（tokens.ts）、DESIGN.md の読み書き（designmd.ts）、見本の画像（preview.ts）、置き場（store.ts。company_designs）、
-                 会社のサイトの見た目の手がかり（site-signals.ts）、クラシックのテーマに貼る CSS（site-css.ts）、作る・取り込む・直す・戻す・書き出す（service.ts）、ツール（tools.ts）、業務「会社の見た目」（agents.ts）
+                 会社のサイトの見た目の手がかり（site-signals.ts）、クラシックのテーマに貼る CSS（site-css.ts）、挿絵の雰囲気と文の調子の頼み（hints.ts）、作る・取り込む・直す・戻す・書き出す（service.ts）、ツール（tools.ts）、業務「会社の見た目」（agents.ts）
 src/print-designs/ 販促物の作成（内蔵の拡張。第41章の段 1）。型 12 種と組み版（templates.ts。mm の SVG・塗り足し・配色 3 通り・字の大きさを枠に合わせる）、
                  書き出し（render.ts。案の小さな画像・印刷の解像度の PNG・実寸と入稿用の PDF）、点検（checks.ts。曜日・連絡先・入りきらない文・推論の誤字と表示の決まり）、
                  置き場（store.ts）、処理（service.ts。3 案・会話で直す・文面を直す・作り直す・書き出し・掲示の期間の見張り）、

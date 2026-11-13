@@ -41,6 +41,14 @@ export interface DesignViewer { tenantId: string; userId: string }
 export interface DesignChange { design: CompanyDesignView; notes: string[]; before: CompanyDesignView | null }
 
 const ADMIN_ONLY = '会社の見た目を変えられるのは、会社の管理者だけです。管理者に頼んでください';
+
+/**
+ * AI が使えないときに作った既定の見た目の、元の名前。`ensure` は、いまの版がこれで AI が使えるようになっていれば作り直す（第46.4節）。
+ */
+export const NO_AI_SOURCE_NAME = 'ロゴとサイトから（AI なし）';
+
+/** 作れなかった後、試し直さない間（推論を何度も呼ばないため）。 */
+const RETRY_AFTER_MS = 60 * 60 * 1000;
 const KEEP_COLORS = /色(も|は)?(その|元の)まま|色を変えない|配色(も|は)?そのまま/;
 
 /** 推論の答えから JSON を取り出す。 */
@@ -63,6 +71,10 @@ export class CompanyDesignService {
   private readonly now: () => Date;
   /** 会社ごとのロゴの色（同じロゴで何度も推論しない）。 */
   private readonly logoColors = new Map<string, string | null>();
+  /** 会社ごとの作っている途中（同時に頼まれても 1 度だけ作る）。 */
+  private readonly making = new Map<string, Promise<CompanyDesignTokens | null>>();
+  /** 会社ごとの、作れなかった時刻。 */
+  private readonly failedAt = new Map<string, number>();
 
   constructor(private readonly deps: CompanyDesignDeps) {
     this.log = deps.logger ?? silentLogger;
@@ -80,18 +92,37 @@ export class CompanyDesignService {
   }
 
   /**
-   * 成果物に使う見た目（第46.5節）。無ければ AI で作る（AI が使えなければ `null` で、呼ぶ側はいまのやり方のまま動く）。
+   * 成果物に使う見た目（第46.5節）。無ければ作る。AI が使えないときに作った既定の見た目（AI なし）は、AI が使えるようになっていれば
+   * AI で作り直す（第46.4節。前の版として残る）。作れなければ、あればいまの見た目、無ければ `null`（呼ぶ側はいまのやり方のまま動く）。
    *
-   * @remarks 作った人は `system`（初めて見た目が要った業務）
+   * @remarks 作った人は `system`（初めて見た目が要った業務）。同じ会社で同時に呼ばれても 1 度だけ作り、作れなかったときは 1 時間は試し直さない
    */
   async ensure(tenantId: string): Promise<CompanyDesignTokens | null> {
     const cur = await this.deps.store.current(tenantId).catch(() => null);
-    if (cur) return cur.tokens;
+    const stale = !!cur && cur.source === 'ai' && cur.sourceName === NO_AI_SOURCE_NAME;
+    if (cur && !stale) return cur.tokens;
+    if ((this.now().getTime() - (this.failedAt.get(tenantId) ?? -Infinity)) < RETRY_AFTER_MS) return cur?.tokens ?? null;
+    // AI なしの版は、AI が使えるときだけ作り直す（使えなければ同じ既定の見た目を重ねない）
+    if (stale && !(await this.llm(tenantId))) return cur.tokens;
+    const running = this.making.get(tenantId);
+    if (running) return running;
+    const job = this.make(tenantId, cur?.tokens ?? null).finally(() => this.making.delete(tenantId));
+    this.making.set(tenantId, job);
+    return job;
+  }
+
+  /** `ensure` の作る部分。作れなければ `fallback`。 */
+  private async make(tenantId: string, fallback: CompanyDesignTokens | null): Promise<CompanyDesignTokens | null> {
     const made = await this.generate({ tenantId, userId: 'system' }, '').catch((err: unknown) => {
       this.log.warn('会社の見た目を作れませんでした', { tenantId, err: String(err) });
       return null;
     });
-    return made && !('error' in made) ? made.design.tokens : null;
+    if (made && !('error' in made)) {
+      this.failedAt.delete(tenantId);
+      return made.design.tokens;
+    }
+    this.failedAt.set(tenantId, this.now().getTime());
+    return fallback;
   }
 
   /** 管理者か。 */
@@ -105,12 +136,16 @@ export class CompanyDesignService {
     return llm && llm.name !== 'stub' && llm.name !== 'unconfigured' ? llm : null;
   }
 
-  /** 会社の名前・業種・ロゴの色・サイトの URL。 */
-  private async company(tenantId: string, llm: LlmProvider | null): Promise<{ name: string; site: string | null; logoColor: string | null }> {
+  /**
+   * 会社の名前・ロゴの色・サイトの URL。`site` は見た目を作るときに読むサイト（会社情報の Web サイトを先に）、
+   * `wordpress` はサイトに貼る CSS の貼り先（接続 › WordPress のサイト）。
+   */
+  private async company(tenantId: string, llm: LlmProvider | null): Promise<{ name: string; site: string | null; wordpress: string | null; logoColor: string | null }> {
     const settings = await this.deps.repo.getTenantSettings(tenantId);
     const c = settings.company;
     const name = c.shortName || c.legalName || '会社';
-    const site = c.website || settings.webColumns.wordpress?.siteUrl || null;
+    const wordpress = settings.webColumns.wordpress?.siteUrl || null;
+    const site = c.website || wordpress;
     let logoColor: string | null = null;
     if (c.logoFileId && llm) {
       const key = `${tenantId}:${c.logoFileId}`;
@@ -121,7 +156,7 @@ export class CompanyDesignService {
       }
       logoColor = this.logoColors.get(key) ?? null;
     }
-    return { name, site, logoColor };
+    return { name, site, wordpress, logoColor };
   }
 
   /** 推論に値を作らせる。読めなければ `null`。 */
@@ -156,7 +191,7 @@ export class CompanyDesignService {
     if (!llm) {
       // AI が使えなければ、ロゴの色かサイトのいちばん使う色を主の色にした既定の見た目にする
       const primary = co.logoColor ?? signals?.colors.find((c) => !isNeutral(c.hex))?.hex ?? DEFAULT_DESIGN.colors.primary;
-      return this.save(who, { colors: { primary, link: primary } }, DEFAULT_DESIGN, 'ai', 'ロゴとサイトから（AI なし）');
+      return this.save(who, { colors: { primary, link: primary } }, DEFAULT_DESIGN, 'ai', NO_AI_SOURCE_NAME);
     }
     const v = await this.ask(llm, [
       `会社（${co.name}）の見た目の決まり（色・文字・形・写真と絵の雰囲気・文の調子）を作ってください。日本語のサイトと資料に使う。`,
@@ -290,8 +325,10 @@ export class CompanyDesignService {
   async siteCss(who: DesignViewer): Promise<SiteCss | { error: string }> {
     const d = await this.deps.store.current(who.tenantId);
     if (!d) return { error: 'まだ会社の見た目がありません。先に「会社の見た目を作って」と頼んでください' };
+    // テーマは貼る先（WordPress のサイト）で見分ける。WordPress が未接続なら会社情報の Web サイト
     const co = await this.company(who.tenantId, null);
-    const signals = co.site && this.deps.outside?.(who.tenantId) !== false ? await readSiteSignals(co.site).catch(() => null) : null;
+    const target = co.wordpress ?? co.site;
+    const signals = target && this.deps.outside?.(who.tenantId) !== false ? await readSiteSignals(target).catch(() => null) : null;
     return siteCssFor(d.tokens, signals, d.version);
   }
 

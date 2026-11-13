@@ -27,6 +27,7 @@ import { buildCommentActions, listSiteComments, readCommentPlan, type SiteCommen
 import { healthProblems, readSiteHealth, type SiteHealthView } from './health.js';
 import { globalStylesLines, sameStyles, stylesWithDesign, type StoredGlobalStylesAction } from './global-styles.js';
 import { renderDesignPreview } from '../design/preview.js';
+import { designImageHint, designVoiceLine } from '../design/hints.js';
 import { readGlobalStyles } from './wordpress.js';
 import {
   ADMIN_NEEDED, SITE_MENU_LIMITS, editNavigation, listSiteMenuItems, listSiteMenus, listSiteNavigations, navLinks, readSiteSettings,
@@ -842,7 +843,8 @@ export class SiteUpdateService {
       if (Array.isArray(r)) customItems.push(...r.map((x) => ({ ...x, kind: c.kind })));
     }
     const company = (await this.deps.repo.getTenantSettings(who.tenantId)).company;
-    const answer = await this.askActions(llm, req, [...posts.map((p) => ({ ...p, kind: 'post' })), ...pages.map((p) => ({ ...p, kind: 'page' })), ...customItems], customs, company.shortName || company.legalName || '', this.now(), attached, !!this.deps.library);
+    const answer = await this.askActions(llm, req, [...posts.map((p) => ({ ...p, kind: 'post' })), ...pages.map((p) => ({ ...p, kind: 'page' })), ...customItems], customs, company.shortName || company.legalName || '', this.now(), attached, !!this.deps.library,
+      designVoiceLine(await this.deps.design?.(who.tenantId).catch(() => null)));
     if (!answer) return { error: '頼みに合う直し案を作れませんでした。もう少しくわしく教えてください' };
     if (answer.question) return { ask: answer.question };
     const drawn = { ai: 0 };
@@ -876,7 +878,7 @@ export class SiteUpdateService {
   }
 
   /** 推論に、段 2a の直しを決めさせ、新しく作る記事の本文も書かせる。分からなければ聞き返す文を返させる。 */
-  private async askActions(llm: LlmProvider, request: string, items: { kind: string; id: string; title: string; status: string; date: string }[], customs: { kind: string; name: string }[], company: string, now: Date, attached: FileImage[] = [], library = false) {
+  private async askActions(llm: LlmProvider, request: string, items: { kind: string; id: string; title: string; status: string; date: string }[], customs: { kind: string; name: string }[], company: string, now: Date, attached: FileImage[] = [], library = false, voice = '') {
     const data = items.map((x) => ({ kind: x.kind, id: Number(x.id), title: x.title.slice(0, 100), status: x.status, date: x.date.slice(0, 16) }));
     try {
       const res = await llm.complete({
@@ -887,6 +889,7 @@ export class SiteUpdateService {
             `会社（${company || '名前なし'}）の Web サイト（WordPress）について、頼みに合わせた案を作ってください。今は ${now.toISOString().slice(0, 16)}（UTC）。`,
             customs.length ? `- サイトには、投稿（kind "post"）と固定ページ（kind "page"）のほかに、次の記事の種類がある: ${customs.map((c) => `${c.name}（kind "${c.kind}"）`).join('・')}。お知らせ・ニュースなどの頼みは、合う種類の kind を使う。` : '',
             '- create: 新しい記事（kind "post"。ほかの種類なら上の kind）か固定ページ（kind "page"）を作る。title と本文（body。Markdown。読み手に向けた丁寧な文）と抜粋（excerpt）を書く。公開すると頼まれたら publish "publish"、日時を指定して出すなら "future" と date（ISO）、そうでなければ "draft"。記事にアイキャッチを付けるなら eyecatch true。',
+            voice ? `${voice}（新しく作る記事の本文に）` : '',
             '- status: 下のページの公開の状態を変える（to は "publish"・"draft"・"private"・"future"（date も）・"trash"（ゴミ箱））。',
             '- revision: 下のページを前の版に戻す（日付の指定があれば before にその日時。無ければ 1 つ前の版）。',
             '- featured: 下の記事にアイキャッチを付ける。',
@@ -962,13 +965,15 @@ export class SiteUpdateService {
     if (usage.used + drawn.ai >= usage.limit) return { note: `今月の AI の挿絵の上限（${usage.limit} 枚）に達しました` };
     const room = Math.min(COVER_AI_TRIES - drawn.ai, usage.limit - usage.used - drawn.ai);
     if (room <= 0) return { note: `1 回の頼みで描ける挿絵（${COVER_AI_TRIES} 枚）を使い切りました` };
+    // 会社の見た目の雰囲気と色の調子を添える（第46.5節）
+    const hint = designImageHint(await this.deps.design?.(who.tenantId).catch(() => null));
     let attempts = 0;
     let reason = '描けませんでした';
     for (let i = 0; i < room; i++) {
       attempts += 1;
       drawn.ai += 1;
       const img = await llm.generateImage({
-        model: imageModel(), aspectRatio: '16:9', prompt: illustrationPrompt({ title, description: '', rules: settings.webColumns.rules, hint: '' }),
+        model: imageModel(), aspectRatio: '16:9', prompt: illustrationPrompt({ title, description: '', rules: settings.webColumns.rules, hint }),
       }).catch(() => null);
       if (!img) continue;
       const check = await checkBeforeAfter(llm, img, settings.webColumns.rules);

@@ -8,6 +8,7 @@ export * from './preview.js';
 export * from './store.js';
 export * from './site-signals.js';
 export * from './site-css.js';
+export * from './hints.js';
 export * from './service.js';
 export * from './tools.js';
 export * from './agents.js';
