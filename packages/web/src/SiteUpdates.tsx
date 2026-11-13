@@ -30,13 +30,13 @@ function SiteCard({ site }: { site: Site | null }) {
     <div className="card site-card">
       <div className="row wrap">
         <strong>{site.name ?? '（サイトの名前を読めませんでした）'}</strong>
-        <span className={ok ? 'badge' : 'badge warn'}>{ok ? '直せます' : site.missing ? '権限が足りません' : '確かめられません'}</span>
+        <span className={ok ? 'badge' : 'badge warn'}>{ok ? '更新可能' : site.missing ? '権限が足りません' : '確かめられません'}</span>
       </div>
       {site.description && <p className="small muted">{site.description}</p>}
       {site.siteUrl && <p className="small"><a href={site.siteUrl} target="_blank" rel="noreferrer">{site.siteUrl}</a></p>}
       {site.account && (
         <p className="small muted">
-          {site.account.kind === 'user' ? 'あなたの WordPress の利用者' : '会社の WordPress の利用者'}: {site.account.displayName ?? site.account.username}
+          {site.account.kind === 'user' ? 'WordPress の利用者' : '会社の WordPress の利用者'}: {site.account.displayName ?? site.account.username}
           {site.account.displayName && site.account.displayName !== site.account.username ? `（${site.account.username}）` : ''}
           {site.account.roles.length > 0 ? `・${site.account.roles.join('・')}` : ''}
         </p>

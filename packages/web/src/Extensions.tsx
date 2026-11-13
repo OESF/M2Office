@@ -238,7 +238,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
         </button>
         <span className="ext-origin"><OriginBadge item={x} /></span>
         <label className="switch-label ext-switch">
-          <span className="small">{on ? '有効' : '無効'}</span>
+          <span className="small switch-state">{on ? '有効' : '無効'}</span>
           <button
             type="button" role="switch" aria-checked={on} aria-label={`${x.name}を${on ? '無効' : '有効'}にする`}
             className={on ? 'switch on' : 'switch'} disabled={busy || x.needsReconsent}

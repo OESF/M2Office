@@ -652,6 +652,10 @@ pre.body { white-space: pre-wrap; background: var(--subtle-bg); border: 1px soli
 .field .small { display: block; margin-top: calc(4px * var(--space-scale)); }
 .row input { flex: 1; padding: calc(6px * var(--space-scale)) calc(8px * var(--space-scale)); border: 1px solid var(--line); border-radius: 4px; font: inherit; }
 .row { align-items: center; }
+/* 並びの中のボタンは縮めない（知らせの文が出たときに、ボタンの字が 1 字ずつ縦に並ばないように）。
+   「wrap」の並びは、入りきらなければ次の行へ回す */
+.row > .btn { flex-shrink: 0; }
+.row.wrap { flex-wrap: wrap; }
 .check { display: inline-flex; align-items: center; gap: calc(4px * var(--space-scale)); margin-right: calc(10px * var(--space-scale)); white-space: nowrap; }
 .ok-msg { color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line); padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); border-radius: 4px; }
 
@@ -1054,6 +1058,8 @@ tr.muted td { color: var(--muted); }
 .ext-details h4 { margin: calc(10px * var(--space-scale)) 0 calc(4px * var(--space-scale)); font-size: calc(13px * var(--font-scale)); }
 .ext-readme { font-size: calc(13px * var(--font-scale)); background: var(--bg); border-radius: 6px; padding: calc(4px * var(--space-scale)) calc(12px * var(--space-scale)); }
 .switch-label { display: flex; align-items: center; gap: calc(8px * var(--space-scale)); flex: none; }
+/* スイッチの横の「有効」「無効」は折り返さない（狭い列で 1 字ずつ縦に並ばないように） */
+.switch-state { white-space: nowrap; }
 .switch { position: relative; width: 44px; height: 24px; border-radius: 999px; border: none; background: var(--switch-off); padding: 0; transition: background .15s; }
 .switch span { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--knob); box-shadow: var(--shadow-knob); transition: left .15s; }
 .switch.on { background: var(--accent); }
@@ -2100,7 +2106,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 /* 問い合わせの記録（仕様書 第33.8節・第33.17節） */
 .inquiries-entry { display: flex; flex-wrap: wrap; gap: calc(8px * var(--space-scale)); align-items: center; margin-bottom: calc(10px * var(--space-scale)); }
 .inquiries-entry input { flex: 1 1 360px; min-width: 0; }
-.inquiries-note { font-size: calc(13px * var(--font-scale)); flex: 1 1 100%; }
+/* 知らせの文は、空きがあればボタンの横に、無ければ次の行に出す */
+.inquiries-note { font-size: calc(13px * var(--font-scale)); flex: 1 1 12em; min-width: 0; }
 .inquiries-entry .inquiries-note { flex-basis: 100%; }
 .inquiries-note.is-ok { color: var(--ok); }
 .inquiries-note.is-ok::before { content: '✓ '; }

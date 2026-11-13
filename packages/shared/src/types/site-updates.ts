@@ -34,9 +34,9 @@ export type SiteEditStatus = 'awaiting' | 'applied' | 'partial' | 'failed' | 're
 /** 直しの状態の、画面の言葉。 */
 export const SITE_EDIT_STATUS_LABELS: Record<SiteEditStatus, string> = {
   awaiting: '承認待ち',
-  applied: '入れた',
-  partial: '一部だけ入れた',
-  failed: '入れられなかった',
+  applied: '更新完了',
+  partial: '一部だけ更新',
+  failed: '更新失敗',
   rejected: '却下',
   reverted: '元に戻した',
 };

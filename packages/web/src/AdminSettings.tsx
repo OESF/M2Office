@@ -650,7 +650,7 @@ export function AgentSettings({ page }: { page: string }) {
                 <td className="num nowrap">
                   {/* 拡張機能と同じスライドのスイッチ（押すとすぐ保存する） */}
                   <label className="switch-label">
-                    <span className="small">{disabled.has(a.id) ? '無効' : '有効'}</span>
+                    <span className="small switch-state">{disabled.has(a.id) ? '無効' : '有効'}</span>
                     <button type="button" role="switch" aria-checked={!disabled.has(a.id)} aria-label={`${a.name}を${disabled.has(a.id) ? '有効' : '無効'}にする`}
                       className={disabled.has(a.id) ? 'switch' : 'switch on'} disabled={saver.busy} onClick={() => toggle(a.id)}><span /></button>
                   </label>
