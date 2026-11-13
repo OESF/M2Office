@@ -16,7 +16,9 @@ type Tree = { [k: string]: string | Tree };
 const unquote = (v: string) => {
   const s = v.trim();
   if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) return s.slice(1, -1);
-  return s.replace(/\s+#.*$/, '');
+  // 行の終わりの注（「 #」から後ろ）を外す。値の頭の「#」（色）は残す
+  const hash = s.search(/\s#/);
+  return hash < 0 ? s : s.slice(0, hash).trimEnd();
 };
 
 /** YAML のうち、入れ子の対応と値だけを読む（並び・複数行の値は読み飛ばす）。 */
@@ -24,14 +26,18 @@ export function readYamlMap(yaml: string): Tree {
   const root: Tree = {};
   const stack: { indent: number; node: Tree }[] = [{ indent: -1, node: root }];
   for (const raw of yaml.split(/\r?\n/)) {
-    if (!raw.trim() || raw.trim().startsWith('#') || raw.trim().startsWith('- ')) continue;
-    const m = /^(\s*)([^:#]+?):\s*(.*)$/.exec(raw);
-    if (!m) continue;
-    const indent = m[1]!.length;
-    const key = unquote(m[2]!);
+    const body = raw.trimStart();
+    if (!body.trimEnd() || body.startsWith('#') || body.startsWith('- ')) continue;
+    // 「名前: 値」を、正規表現を使わずに読む（長い行でも遅くならないように）
+    const colon = body.indexOf(':');
+    if (colon <= 0) continue;
+    const rawKey = body.slice(0, colon);
+    if (rawKey.includes('#')) continue;
+    const indent = raw.length - body.length;
+    const key = unquote(rawKey);
     while (stack.length > 1 && stack.at(-1)!.indent >= indent) stack.pop();
     const parent = stack.at(-1)!.node;
-    const value = m[3]!.trim();
+    const value = body.slice(colon + 1).trim();
     if (!value || value === '|' || value === '>') {
       const child: Tree = {};
       parent[key] = child;

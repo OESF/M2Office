@@ -107,8 +107,9 @@ console.log('\n■ 1. 疎通と一覧');
   const official = (body.agents ?? []).filter((a) => !a.extension);
   // 段取りの報告（第10.14節）・日程調整の招待・外部のアプリからの配信（第13.4.4節）・メールの返事を送る（第9.5.1.1節）はメニューに出ない中の業務。
   // メールの整理と返信待ちの追跡は、第 0.540.0 版でメールの画面に置き換えた（前の実行の記録のため定義は残し、メニューに出さない）
-  official.length === 20 && official.filter((a) => a.menu === false).map((a) => a.id).sort().join() === 'delivery-send,inbox-triage,mail-reply-send,reply-followup,scheduling-confirm,secretary-plan-report'
-    ? ok(`公式の業務エージェントが 20 件（うち中の業務と置き換えた業務 6。${official.map((a) => a.name).join(' / ')}）`)
+  // 会社の見た目（第46章）は秘書から頼む業務で、メニューに出ない
+  official.length === 21 && official.filter((a) => a.menu === false).map((a) => a.id).sort().join() === 'company-design,delivery-send,inbox-triage,mail-reply-send,reply-followup,scheduling-confirm,secretary-plan-report'
+    ? ok(`公式の業務エージェントが 21 件（うち中の業務と置き換えた業務 7。${official.map((a) => a.name).join(' / ')}）`)
     : ng('エージェントの一覧が取得できない', JSON.stringify(body));
 }
 

@@ -6,6 +6,7 @@
  */
 
 import { COVER_PATTERNS, type CoverPattern } from '../columns/cover.js';
+import { stripTags } from './segments.js';
 
 /** 画像の出どころ（承認の画面と記録に出す）。 */
 export type SiteImageSource =
@@ -63,7 +64,11 @@ export function withAttr(tag: string, name: string, value: string | null): strin
   if (value === null) return tag.replace(re, '');
   const next = ` ${name}="${escapeAttr(value)}"`;
   if (re.test(tag)) return tag.replace(re, next);
-  return tag.replace(/\s*(\/?)>$/, (_m, slash: string) => `${next}${slash ? ' /' : ''}>`);
+  // 閉じの前に足す（正規表現を使わず、末の空白と「/」を読む）
+  const selfClose = tag.endsWith('/>');
+  let k = tag.length - (selfClose ? 2 : 1);
+  while (k > 0 && /\s/.test(tag.charAt(k - 1))) k--;
+  return `${tag.slice(0, k)}${next}${selfClose ? ' /' : ''}>`;
 }
 
 /** ギャラリーのブロックの範囲（ブロックの印か、`wp-block-gallery` の figure）。 */
@@ -91,7 +96,7 @@ export function pageImages(html: string): PageImage[] {
       file: decodeURIComponent(src.split(/[?#]/)[0]!.split('/').pop() ?? '').slice(0, 120),
       mediaId: id ? Number(id[1]) : null,
       inGallery: galleries.some(([s, e]) => m!.index >= s && m!.index < e),
-      heading: last ? decode(last[1]!.replace(/<[^>]+>/g, '')).trim().slice(0, 80) : '',
+      heading: last ? decode(stripTags(last[1]!)).trim().slice(0, 80) : '',
     });
   }
   return out;
@@ -119,6 +124,8 @@ export function editPageImage(html: string, index: number, edit: ImageEdit): { h
   if (img.inGallery) return { error: `${index} 番目の画像はギャラリーの中にあるため、差し替えません` };
   let tag = html.slice(img.start, img.end);
   let head = html.slice(0, img.start);
+  // 直したブロックの印の位置（確かめで、そこを除いて比べる）
+  let comment: { start: number; before: number; after: number } | null = null;
   if (edit.media) {
     tag = withAttr(tag, 'src', edit.media.url);
     tag = withAttr(tag, 'srcset', null);
@@ -131,19 +138,22 @@ export function editPageImage(html: string, index: number, edit: ImageEdit): { h
       if (open >= 0 && !head.slice(open).includes('<!-- /wp:image')) {
         const close = head.indexOf('-->', open);
         if (close > 0) {
-          const comment = head.slice(open, close + 3);
-          const fixed = comment.replace(new RegExp(`"id":${img.mediaId}(?=[,}])`), `"id":${edit.media.id}`);
+          const old = head.slice(open, close + 3);
+          const fixed = old.replace(new RegExp(`"id":${img.mediaId}(?=[,}])`), `"id":${edit.media.id}`);
           head = head.slice(0, open) + fixed + head.slice(close + 3);
+          comment = { start: open, before: old.length, after: fixed.length };
         }
       }
     }
   }
   if (edit.alt !== undefined) tag = withAttr(tag, 'alt', edit.alt);
   const next = head + tag + html.slice(img.end);
-  // 確かめ: その画像の印とブロックの印の外が変わっていないこと
-  const strip = (s: string, at: number, len: number) => s.slice(0, at) + s.slice(at + len);
-  const lenDiff = head.length - img.start;
-  if (strip(next, img.start + lenDiff, tag.length).replace(/<!-- wp:image[^>]*-->/g, '') !== strip(html, img.start, img.end - img.start).replace(/<!-- wp:image[^>]*-->/g, '')) {
+  // 確かめ: その画像の印と、直したブロックの印の外が変わっていないこと（位置で切り出して比べる）
+  const outside = (s: string, tagStart: number, tagLen: number, commentLen: number) => (comment
+    ? s.slice(0, comment.start) + s.slice(comment.start + commentLen, tagStart) + s.slice(tagStart + tagLen)
+    : s.slice(0, tagStart) + s.slice(tagStart + tagLen));
+  const shift = head.length - img.start;
+  if (outside(next, img.start + shift, tag.length, comment?.after ?? 0) !== outside(html, img.start, img.end - img.start, comment?.before ?? 0)) {
     return { error: '画像の外の部分が変わってしまうため、直しませんでした' };
   }
   return { html: next };

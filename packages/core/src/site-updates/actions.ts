@@ -173,7 +173,8 @@ async function whichImages(which: string, images: PageImage[], title: string, ct
   if (/^(all|すべて|全部)/i.test(w)) return images.map((i) => i.index);
   if (/最初|先頭|一番上|いちばん上/.test(w)) return [images[0]!.index];
   if (/最後|一番下|いちばん下/.test(w)) return [images.at(-1)!.index];
-  const n = /^(\d+)$|(\d+)\s*(?:番目|枚目|つ目)/.exec(w);
+  // 数は 3 桁まで（長い数の並びで遅くならないように）
+  const n = /^(\d{1,3})$|(?:^|\D)(\d{1,3}) ?(?:番目|枚目|つ目)/.exec(w);
   const num = n ? Number(n[1] ?? n[2]) : NaN;
   if (images.some((i) => i.index === num)) return [num];
   const byFile = w ? images.filter((i) => i.file && w.includes(i.file.replace(/\.\w+$/, ''))) : [];

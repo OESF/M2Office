@@ -77,16 +77,68 @@ export function looksLikePageBuilder(raw: string): string | null {
   return null;
 }
 
-function tokenize(raw: string): Token[] {
-  const out: Token[] = [];
-  const re = /<!--[\s\S]*?-->|<\/?[A-Za-z][^<>]*>/g;
+/**
+ * HTML を、注釈・札・文に分ける（正規表現を使わず 1 文字ずつ読む。長い入力でも遅くならないように）。
+ *
+ * 注釈は `<!--` から `-->` まで、札は `<` に英字か `/` が続き、間に `<` を挟まずに `>` で閉じるもの。閉じないものは文として残す。
+ */
+export function scanHtml(raw: string): { kind: 'text' | 'comment' | 'tag'; raw: string }[] {
+  const out: { kind: 'text' | 'comment' | 'tag'; raw: string }[] = [];
   let last = 0;
-  for (let m = re.exec(raw); m; m = re.exec(raw)) {
-    if (m.index > last) out.push({ kind: 'text', raw: raw.slice(last, m.index) });
-    out.push({ kind: m[0].startsWith('<!--') ? 'comment' : 'tag', raw: m[0] });
-    last = m.index + m[0].length;
+  let i = raw.indexOf('<');
+  // 一度見つからなかった閉じは、その先にも無い（探し直さない）
+  let noCommentEnd = false;
+  let nextGt = -2;
+  let nextLt = -2;
+  while (i >= 0 && i < raw.length) {
+    let end = -1;
+    let kind: 'comment' | 'tag' = 'tag';
+    if (raw.startsWith('<!--', i)) {
+      if (!noCommentEnd) {
+        const close = raw.indexOf('-->', i + 4);
+        if (close < 0) noCommentEnd = true; else { end = close + 3; kind = 'comment'; }
+      }
+    } else {
+      const c = raw.charCodeAt(i + 1);
+      const startsTag = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c === 47 && /[A-Za-z]/.test(raw.charAt(i + 2)));
+      if (startsTag) {
+        if (nextGt !== -1 && nextGt <= i) nextGt = raw.indexOf('>', i + 1);
+        if (nextLt !== -1 && nextLt <= i) nextLt = raw.indexOf('<', i + 1);
+        if (nextGt >= 0 && (nextLt < 0 || nextGt < nextLt)) end = nextGt + 1;
+      }
+    }
+    if (end > 0) {
+      if (i > last) out.push({ kind: 'text', raw: raw.slice(last, i) });
+      out.push({ kind, raw: raw.slice(i, end) });
+      last = end;
+      i = raw.indexOf('<', end);
+    } else {
+      i = raw.indexOf('<', i + 1);
+    }
   }
   if (last < raw.length) out.push({ kind: 'text', raw: raw.slice(last) });
+  return out;
+}
+
+/** 札と注釈を外した文（`replacement` で置き換える）。 */
+export function stripTags(html: string, replacement = ''): string {
+  return scanHtml(html).map((t) => (t.kind === 'text' ? t.raw : replacement)).join('');
+}
+
+/** よく使う文字の参照を 1 回で戻す（戻した文をもう一度戻さない）。 */
+export function decodeHtmlEntities(s: string): string {
+  const NAMED: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  return s.replace(/&(#\d{1,7}|#x[0-9a-f]{1,6}|[a-z]{2,6});/gi, (m, e: string) => {
+    if (e[0] === '#') {
+      const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+      return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : m;
+    }
+    return NAMED[e.toLowerCase()] ?? m;
+  });
+}
+
+function tokenize(raw: string): Token[] {
+  const out: Token[] = scanHtml(raw);
   // 中身を読まない札は、閉じる札までを 1 つの印にまとめる
   const merged: Token[] = [];
   for (let i = 0; i < out.length; i++) {
@@ -144,7 +196,7 @@ export function segmentContent(raw: string): SegmentedContent {
     let j = i;
     while (j < tokens.length && !isBoundary(tokens[j]!)) j++;
     const html = tokens.slice(i, j).map((x) => x.raw).join('');
-    if (html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()) {
+    if (stripTags(html).replace(/&nbsp;/g, ' ').trim()) {
       // 前後の空白と改行はかたまりに入れない（組み直しで崩さないため）
       let s = i;
       let e = j;
@@ -161,7 +213,7 @@ export function segmentContent(raw: string): SegmentedContent {
 
 /** 札だけを並べる（足した札の確かめ用）。 */
 function tagsOf(html: string): string[] {
-  return html.match(/<[^>]+>/g) ?? [];
+  return scanHtml(html).filter((t) => t.kind !== 'text').map((t) => t.raw);
 }
 
 /** 推論が返した行の中の HTML が、決めた札だけでできているか。 */
@@ -205,7 +257,7 @@ export function applySiteEdits(content: SegmentedContent, ops: readonly SiteEdit
       const original = content.tokens.slice(r.start, r.end).map((x) => x.raw).join('');
       const problem = checkInline(op.html, original);
       if (problem) return { ok: false, error: problem };
-      if (!op.html.replace(/<[^>]*>/g, '').trim()) return { ok: false, error: `番号 ${op.id} を空にするときは、消す直しにしてください` };
+      if (!stripTags(op.html).trim()) return { ok: false, error: `番号 ${op.id} を空にするときは、消す直しにしてください` };
       replace.set(op.id, op.html);
     } else {
       if (!DELETABLE.has(r.container)) return { ok: false, error: `番号 ${op.id} は消せないかたまりです（表のますなど。文を直してください）` };
@@ -315,16 +367,27 @@ function blockFor(a: { html: string; kind: 'paragraph' | 'list-item' }, blocks: 
   return blocks ? `\n\n<!-- wp:paragraph -->\n<p>${a.html}</p>\n<!-- /wp:paragraph -->` : `\n<p>${a.html}</p>`;
 }
 
+/** 文の切れ目にするブロックの札。 */
+const PLAIN_BLOCK = new Set(['p', 'div', 'li', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'th', 'table', 'thead', 'tbody', 'section', 'article', 'header', 'footer', 'nav', 'aside', 'main', 'blockquote', 'figure', 'figcaption', 'dt', 'dd', 'dl', 'title', 'body', 'html', 'head']);
+
 /** HTML から、人が読む文だけを取り出す（公開のページでの確かめと、承認の画面の文に使う）。 */
 export function plainText(html: string): string {
-  return html
-    .replace(/<(script|style|noscript)\b[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    // ブロックの札は切れ目にし、行の中の札（太字・リンクなど）は跡を残さず外す
-    .replace(/<\/?(?:p|div|li|ul|ol|h[1-6]|tr|td|th|table|thead|tbody|section|article|header|footer|nav|aside|main|blockquote|figure|figcaption|dt|dd|dl|title|body|html|head)\b[^>]*>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
-    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
+  // 札は 1 文字ずつ読んで外す（読まない札の中身は捨て、ブロックの札は切れ目に、行の中の札は跡を残さず）。文字の参照は最後に 1 回だけ戻す
+  const parts: string[] = [];
+  let skip = '';
+  for (const t of scanHtml(html)) {
+    if (t.kind === 'comment') continue;
+    if (t.kind === 'tag') {
+      const name = /^<\/?([a-z][a-z0-9-]*)/i.exec(t.raw)?.[1]?.toLowerCase() ?? '';
+      const closing = t.raw.startsWith('</');
+      if (skip) { if (closing && name === skip) skip = ''; continue; }
+      if (!closing && (name === 'script' || name === 'style' || name === 'noscript')) { skip = name; parts.push(' '); continue; }
+      parts.push(name === 'br' ? '\n' : PLAIN_BLOCK.has(name) ? ' ' : '');
+      continue;
+    }
+    if (!skip) parts.push(t.raw);
+  }
+  return decodeHtmlEntities(parts.join(''))
     .replace(/[ \t　]+/g, ' ')
     .replace(/\s*\n\s*/g, '\n')
     .trim();

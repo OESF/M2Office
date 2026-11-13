@@ -98,7 +98,9 @@ async function createMenuItem(a: WordPressAuth, menuId: string, n: NewMenuItem):
 /** ナビゲーションの最上位のリンク 1 つ。 */
 export interface NavLink { index: number; start: number; end: number; label: string; url: string; attrs: Record<string, unknown> }
 
-const LINK = /<!--\s*wp:navigation-link\s+(\{[\s\S]*?\})\s*\/-->/g;
+/** リンクのブロックの印の頭と終わり。 */
+const LINK_OPEN = '<!-- wp:navigation-link ';
+const LINK_CLOSE = '/-->';
 
 /** 入れ子（サブメニュー）の範囲。 */
 function submenuRanges(content: string): [number, number][] {
@@ -117,12 +119,16 @@ function submenuRanges(content: string): [number, number][] {
 export function navLinks(content: string): NavLink[] {
   const subs = submenuRanges(content);
   const out: NavLink[] = [];
-  LINK.lastIndex = 0;
-  for (let m = LINK.exec(content); m; m = LINK.exec(content)) {
-    if (subs.some(([s, e]) => m!.index >= s && m!.index < e)) continue;
+  // 正規表現を使わずに、印の頭から終わりまでを探す（長い本文でも遅くならないように）
+  for (let at = content.indexOf(LINK_OPEN); at >= 0; at = content.indexOf(LINK_OPEN, at + 1)) {
+    const close = content.indexOf(LINK_CLOSE, at + LINK_OPEN.length);
+    if (close < 0) break;
+    if (subs.some(([s, e]) => at >= s && at < e)) continue;
+    const json = content.slice(at + LINK_OPEN.length, close).trim();
+    if (!json.startsWith('{') || !json.endsWith('}')) continue;
     let attrs: Record<string, unknown>;
-    try { attrs = JSON.parse(m[1]!) as Record<string, unknown>; } catch { continue; }
-    out.push({ index: out.length + 1, start: m.index, end: m.index + m[0].length, label: plainText(String(attrs['label'] ?? '')), url: String(attrs['url'] ?? ''), attrs });
+    try { attrs = JSON.parse(json) as Record<string, unknown>; } catch { continue; }
+    out.push({ index: out.length + 1, start: at, end: close + LINK_CLOSE.length, label: plainText(String(attrs['label'] ?? '')), url: String(attrs['url'] ?? ''), attrs });
   }
   return out;
 }
