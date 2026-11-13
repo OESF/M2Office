@@ -71,6 +71,52 @@ export const LIBRARY_MAIL_LIMITS = {
   partsPerMessage: 20,
 } as const;
 
+/** メールのやり取りを資料にする決まり（第44.18節）。 */
+export const LIBRARY_THREAD_LIMITS = {
+  /** 1 回の見回りで、AI に読ませるやり取りの数（新しいものと過去の分を合わせて） */
+  perTick: 10,
+  /** 過去のやり取りを 1 人 1 日に見る数（添付と合わせて 1 日 500。第44.18.3節） */
+  backfillPerDay: 500,
+  /** 過去のやり取りを 1 回の見回りで見る数（決まりで除くものを含む） */
+  backfillBatch: 25,
+  /** 新しいやり取りを 1 回に見る数の上限 */
+  newMax: 100,
+  /** AI に渡す本文の上限（スレッドの各メールの引用を除いた本文を合わせて） */
+  readChars: 8000,
+  /** 要約の上限 */
+  summaryChars: 800,
+  /** 持つ相手の数 */
+  people: 5,
+  /** やり取りの資料に残す入口の記録（1 通ずつ）の上限 */
+  origins: 30,
+} as const;
+
+/** やり取りの資料の種類（第44.18.2節）。細かい分け方はタグで表す。 */
+export const LIBRARY_THREAD_DOC_TYPE = 'メールのやり取り';
+
+/** やり取りの取り込みの様子（本人ごと。第44.18.3節）。 */
+export interface LibraryThreadState {
+  /** 過去のやり取りを見る範囲（初めと終わり）。まだ決めていなければ `null`。 */
+  backFrom: string | null;
+  backUntil: string | null;
+  backDone: boolean;
+  /** 過去の分の件数が多く、本人が費用の目安を確かめるのを待っている。待っていなければ `null`。 */
+  waiting: { threads: number | null; costJpy: number | null } | null;
+  /** これまでに見たやり取りの数と、資料にした数。 */
+  scanned: number;
+  kept: number;
+}
+
+/** やり取りの資料の、スレッドの様子（1 件の画面に出す。第44.18.2節）。 */
+export interface LibraryThreadInfo {
+  threadId: string;
+  messages: number;
+  firstAt: string | null;
+  lastAt: string | null;
+  /** やり取りした相手（「名前 <アドレス>」か、アドレスだけ）。 */
+  people: string[];
+}
+
 /** メールの添付の取り込みの様子（本人ごと。第44.4節）。 */
 export interface LibraryMailState {
   enabled: boolean;
@@ -86,6 +132,8 @@ export interface LibraryMailState {
   imported: number;
   /** 最後に Gmail を読めなかった理由。読めていれば空。 */
   error: string;
+  /** やり取りの取り込みの様子（第44.18節）。一度もオンにしていなければ `null`。 */
+  threads: LibraryThreadState | null;
 }
 
 /** 資料の入口（第44.3節）。 */
@@ -102,13 +150,13 @@ export type LibraryReadState = 'pending' | 'done' | 'unreadable' | 'too_large' |
 /** 資料の形式。読めない形式でも、置いて名前と種類で探せる（第44.6節）。 */
 export type LibraryFormat =
   | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'csv' | 'text' | 'png' | 'jpeg' | 'heic' | 'webp' | 'gif' | 'tiff'
-  | 'doc' | 'xls' | 'ppt' | 'zip' | 'google' | 'other';
+  | 'doc' | 'xls' | 'ppt' | 'zip' | 'google' | 'mail' | 'other';
 
 /** 形式の呼び名（一覧の印）。 */
 export const LIBRARY_FORMAT_LABELS: Record<LibraryFormat, string> = {
   pdf: 'PDF', docx: 'Word', xlsx: 'Excel', pptx: 'PowerPoint', csv: 'CSV', text: 'テキスト',
   png: '画像', jpeg: '画像', heic: '画像', webp: '画像', gif: '画像', tiff: '画像',
-  doc: 'Word', xls: 'Excel', ppt: 'PowerPoint', zip: 'Zip', google: 'Google', other: 'ファイル',
+  doc: 'Word', xls: 'Excel', ppt: 'PowerPoint', zip: 'Zip', google: 'Google', mail: 'メール', other: 'ファイル',
 };
 
 /** 資料の入口の記録（第44.14節）。 */
@@ -192,14 +240,16 @@ export interface LibraryItemPage extends LibraryItemDetail {
   sharedGroups: string[];
   /** 関連する資料（強い順。持ち主にだけ返す。第44.17.1節）。同じ資料の版もここに入る。 */
   related: LibraryRelated[];
+  /** メールのやり取りの資料なら、スレッドの様子（第44.18.2節。持ち主にだけ返す）。ほかは `null`。 */
+  thread: LibraryThreadInfo | null;
 }
 
-/** つながりの種類（第44.17.1節）。`tag` は同じタグ（第44.17.3節）。 */
-export type LibraryLinkKind = 'mail' | 'version' | 'tag' | 'words' | 'folder';
+/** つながりの種類（第44.17.1節）。`tag` は同じタグ（第44.17.3節）。`thread` はメールのやり取りとその添付（第44.18.4節）。 */
+export type LibraryLinkKind = 'mail' | 'thread' | 'version' | 'tag' | 'words' | 'folder';
 
 /** つながりの理由の言葉（画面と秘書に出す）。 */
 export const LIBRARY_LINK_LABELS: Record<LibraryLinkKind, string> = {
-  mail: '同じメールで届いた', version: '同じ資料の版', tag: '同じタグ', words: '同じ語が出てくる', folder: '同じフォルダにあった',
+  mail: '同じメールで届いた', thread: '同じやり取り', version: '同じ資料の版', tag: '同じタグ', words: '同じ語が出てくる', folder: '同じフォルダにあった',
 };
 
 /** 関連する資料 1 件。 */

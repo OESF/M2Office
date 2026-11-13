@@ -365,7 +365,7 @@ test('成果物は依頼した本人の資料に載せ、人事の区画と利�
 
 test('ツールは切っている会社では使えないと返し、削除のツールと社外へ出すツールを持たない', async () => {
   const { service } = setup({ settings: { library: { enabled: false } } });
-  assert.deepEqual(LIBRARY_TOOLS.map((t) => t.name), ['library.search', 'library.read', 'library.add', 'library.update', 'library.share', 'library.knowledge']);
+  assert.deepEqual(LIBRARY_TOOLS.map((t) => t.name), ['library.search', 'library.read', 'library.add', 'library.update', 'library.share', 'library.knowledge', 'library.forget_mail']);
   assert.ok(!LIBRARY_TOOLS.some((t) => /delete|remove|send/.test(t.name)), '削除と社外への送信のツールは持たない（共有は社内だけ。第44.8節）');
   assert.ok(LIBRARY_TOOLS.every((t) => t.risk === 'read' || t.risk === 'write-internal'));
   const search = LIBRARY_TOOLS[0]!;

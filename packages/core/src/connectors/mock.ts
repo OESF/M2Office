@@ -121,6 +121,15 @@ export class MockWorkspaceConnector implements WorkspaceConnector {
       this.attachmentMails(p).find((m) => m.list.id === id)?.list ?? null,
     attachmentBytes: async (p: ConnectorPrincipal, id: string, attachmentId: string) =>
       this.attachmentMails(p).find((m) => m.list.id === id)?.bytes[attachmentId] ?? null,
+    // やり取りの資料（第44.18節）の見本。受信箱の見本のメールのうち、プロモーションでないもののスレッド
+    threadPage: async (p: ConnectorPrincipal, q: MailAttachmentQuery) => {
+      const ids = [...new Set(this.mails(p).filter((m) => !m.labels.includes('CATEGORY_PROMOTIONS') && this.inRange(m.receivedAt, q)).map((m) => m.threadId ?? m.id))];
+      const start = Number(q.pageToken ?? 0) || 0;
+      const limit = Math.min(Math.max(q.limit ?? 25, 1), 100);
+      return { ids: ids.slice(start, start + limit), next: start + limit < ids.length ? String(start + limit) : null };
+    },
+    threadCount: async (p: ConnectorPrincipal, q: Pick<MailAttachmentQuery, 'after' | 'before'>) =>
+      new Set(this.mails(p).filter((m) => !m.labels.includes('CATEGORY_PROMOTIONS') && this.inRange(m.receivedAt, q)).map((m) => m.threadId ?? m.id)).size,
     search: async (p: ConnectorPrincipal, q: { query: string; limit?: number }) => {
       // 見本では、件名・差出人・本文の部分一致で探す（Gmail の検索の書き方のうち、言葉だけを見る）
       const words = q.query.replace(/\b(from|subject|is|in|label):\S+/g, ' ').split(/\s+/).filter(Boolean);

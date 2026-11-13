@@ -91,12 +91,13 @@ src/mail/        メールの画面（第9.5.1.1節）。置き場（store.ts。
                  推論（triage.ts。振り分け・返事待ちの見分け・下書き）、画面の処理（service.ts）、ツール（tools.ts。mail.reply_send・mail.brief）、業務「メールの返事を送る」（agents.ts）、秘書の言い回し（secretary.ts）、
                  カテゴリー（categories.ts。最初の候補・振り分けに足す決まり・似たものをまとめる・本人の直しを読む。第9.5.1.1.1節）、
                  学び（learning.ts。本人の直しとふるまいから相手ごとの傾向を覚え、振り分けと下書きに当てる・週ごとの数。表 mail_lessons・mail_learning_weeks。第9.5.1.1.2節）
-src/library/     ナレッジの整理（内蔵の拡張。第44章の段 1〜段 5）。形式の確かめ（format.ts。拡張子と中身の先頭）、読み取り（read.ts。PDF は先頭 50 ページ・pptx・読めないものの扱い）、
+src/library/     ナレッジの整理（内蔵の拡張。第44章の段 1〜段 6）。形式の確かめ（format.ts。拡張子と中身の先頭）、読み取り（read.ts。PDF は先頭 50 ページ・pptx・読めないものの扱い）、
                  目録の置き場（store.ts。持ち主で絞る）、処理（service.ts。ドライブに置く・同じ中身をまとめる・AI の整理とタグの付け直し・上限で止める・探す・成果物の自動の登録）、
                  メールの添付の取り込み（mail.ts。本人が入れる・直近 1 年と新しいメール・決まりで除く・1 日 500 通）、
+                 メールのやり取りを資料にする（threads.ts。決まりで除く・AI が 1 スレッド 1 回で選んで要約・新しいメールで書き直す・外したものは入れ直さない。thread-text.ts は引用を外す）、
                  目録（OKF）の書き出しと古い版の知らせ（okf.ts。OKF v0.2 の形・常に書き出す・変わったものだけ・関連する資料へのリンク・タグ・タグごとの一覧）、
-                 つながり（links.ts。同じメール・同じ資料の版・同じタグ・同じ語・同じフォルダを決まりで見つける）、
-                 ツール（tools.ts。library.search・read・add・update・share・knowledge）、付属の業務「ナレッジの整理」（agents.ts）。本体は本人のドライブで、全文は持たない
+                 つながり（links.ts。同じメール・同じやり取り・同じ資料の版・同じタグ・同じ語・同じフォルダを決まりで見つける）、
+                 ツール（tools.ts。library.search・read・add（mailId でやり取りも）・update・share・knowledge・forget_mail）、付属の業務「ナレッジの整理」（agents.ts）。本体は本人のドライブで、全文は持たない
 （columns/wordpress.ts は、記事の種類と分類の読み取り・お知らせらしい種類の選び方・どの分類にも入れる口も持つ。第45.20節）
 src/site-updates/ サイトの更新（内蔵の拡張。第45章の段 1〜段 3）。本文の分け方と組み直し（segments.ts。印と札はプログラムが持ち、文のかたまりだけを推論に渡す）、
                  WordPress の固定ページと投稿の読み書きと権限・利用者の役割・公開のページ（wordpress.ts）、置き場（store.ts。site_edits と本人の WordPress の接続）、直し案・入れる・確かめ・元に戻す（service.ts）、

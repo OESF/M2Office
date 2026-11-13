@@ -398,34 +398,35 @@ function LibraryList({ onOpen, changeKey }: { onOpen: (id: string) => void; chan
   );
 }
 
-/** メールの添付の取り込みの様子（画面に出す形）。 */
+/** メールの取り込みの様子（添付とやり取り。画面に出す形）。 */
 type MailView = LibraryMailState & { gmail: boolean };
 
 /** 取り込みの途中に様子を読み直す間隔。 */
 const MAIL_POLL_MS = 30_000;
 
 /**
- * メールの添付の取り込み（第44.4節）。本人が 1 度入れれば、受け取ったメールの添付を自動で集める。切ればすぐ止まる。
+ * メールの取り込み（第44.4節・第44.18節）。本人が 1 度入れれば、受け取ったメールの添付と、仕事のやり取りの要約を自動で集める。切ればすぐ止まる。
  * 件数が多いときだけ、入れる前に費用の目安を確かめる（第44.11節。お金に関わるため）。
  */
 function MailIntake({ google, onImported }: { google: boolean; onImported: () => void }) {
   const [state, setState] = useState<MailView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<{ which: 'start' | 'extend'; messages: number; jpy: number } | null>(null);
+  const [confirm, setConfirm] = useState<{ which: 'start' | 'extend'; messages: number; threads: number; jpy: number } | null>(null);
   const imported = useRef<number | null>(null);
 
   const show = useCallback((s: MailView) => {
     setState(s);
     // 新しく入ったら一覧を読み直す
-    if (imported.current !== null && s.imported > imported.current) onImported();
-    imported.current = s.imported;
+    const total = s.imported + (s.threads?.kept ?? 0);
+    if (imported.current !== null && total > imported.current) onImported();
+    imported.current = total;
   }, [onImported]);
   const load = useCallback(() => {
     api.library.mail.get().then(show).catch((e) => setError(describeError(e, 'メールの取り込みの様子を読めませんでした')));
   }, [show]);
   useEffect(load, [load]);
-  const working = !!state?.enabled && !state.backDone;
+  const working = !!state?.enabled && (!state.backDone || (!!state.threads && !state.threads.backDone && !state.threads.waiting));
   useEffect(() => {
     if (!working) return undefined;
     const t = setInterval(load, MAIL_POLL_MS);
@@ -440,35 +441,46 @@ function MailIntake({ google, onImported }: { google: boolean; onImported: () =>
   /** 入れる・広げる前に、件数が多ければ費用の目安を確かめる。 */
   const begin = async (which: 'start' | 'extend') => {
     const est = await api.library.mail.estimate(which).catch(() => null);
-    if (est?.confirm && est.messages !== null && est.costJpy !== null) { setConfirm({ which, messages: est.messages, jpy: est.costJpy }); return; }
+    if (est?.confirm && est.costJpy !== null) { setConfirm({ which, messages: est.messages ?? 0, threads: est.threads ?? 0, jpy: est.costJpy }); return; }
     await act(which === 'start' ? () => api.library.mail.set(true) : api.library.mail.extend);
   };
 
   if (!state) return error ? <p className="error" role="alert">{error}</p> : null;
   const from = state.backFrom ? dayLabel(new Date(state.backFrom).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })) : '';
   const ready = google && state.gmail;
+  const t = state.threads;
+  const kept = (state.imported + (t?.kept ?? 0)).toLocaleString('ja-JP');
+  const done = state.backDone && (!t || t.backDone);
   return (
     <div className="library-mail">
       <label className="switch-label">
-        <span>メールの添付を集める</span>
-        <button type="button" role="switch" aria-checked={state.enabled} aria-label={state.enabled ? 'メールの添付を集めるのをやめる' : 'メールの添付を集める'}
+        <span>メールを集める</span>
+        <button type="button" role="switch" aria-checked={state.enabled} aria-label={state.enabled ? 'メールを集めるのをやめる' : 'メールを集める'}
           className={state.enabled ? 'switch on' : 'switch'} disabled={busy || (!ready && !state.enabled)}
           onClick={() => void (state.enabled ? act(() => api.library.mail.set(false)) : begin('start'))}><span /></button>
       </label>
       {state.enabled && (
         <span className="small muted" role="status">
-          {state.backDone
-            ? `${from} 以降のメールを見終えました。${state.imported.toLocaleString('ja-JP')} 件を入れました`
-            : `${from} 以降のメールを見ています（${state.scanned.toLocaleString('ja-JP')} 通を見て、${state.imported.toLocaleString('ja-JP')} 件を入れました）`}
+          {done
+            ? `${from} 以降のメールを見終えました。${kept} 件を入れました`
+            : `${from} 以降のメールを見ています（${(state.scanned + (t?.scanned ?? 0)).toLocaleString('ja-JP')} 件を見て、${kept} 件を入れました）`}
         </span>
       )}
-      {state.enabled && state.backDone && <button className="btn ghost small" disabled={busy} onClick={() => void begin('extend')}>さらに 1 年さかのぼる</button>}
+      {state.enabled && done && <button className="btn ghost small" disabled={busy} onClick={() => void begin('extend')}>さらに 1 年さかのぼる</button>}
       {!ready && <p className="small error library-mail-note">Gmail とドライブを読む許可がありません。個人設定の「Google 連携」で接続し直してください。</p>}
       {state.enabled && state.error && <p className="small error library-mail-note" role="alert">Gmail を読めませんでした（{state.error}）</p>}
       {error && <p className="small error library-mail-note" role="alert">{error}</p>}
+      {state.enabled && t?.waiting && (
+        <div className="card library-confirm library-mail-note" role="alertdialog" aria-label="過去のやり取りの取り込みの確かめ">
+          <p>直近 1 年のやり取りが約 {(t.waiting.threads ?? 0).toLocaleString('ja-JP')} 件あります。AI の費用の目安は約 {(t.waiting.costJpy ?? 0).toLocaleString('ja-JP')} 円です。</p>
+          <div className="row">
+            <button className="btn" disabled={busy} onClick={() => void act(api.library.mail.startThreads)}>入れる</button>
+          </div>
+        </div>
+      )}
       {confirm && (
         <div className="card library-confirm library-mail-note" role="alertdialog" aria-label="メールの取り込みの確かめ">
-          <p>{confirm.which === 'start' ? '直近 1 年' : 'さらに 1 年前'}に、添付のあるメールが約 {confirm.messages.toLocaleString('ja-JP')} 通あります。AI の費用の目安は約 {confirm.jpy.toLocaleString('ja-JP')} 円です。</p>
+          <p>{confirm.which === 'start' ? '直近 1 年' : 'さらに 1 年前'}に、添付のあるメールが約 {confirm.messages.toLocaleString('ja-JP')} 通、やり取りが約 {confirm.threads.toLocaleString('ja-JP')} 件あります。AI の費用の目安は約 {confirm.jpy.toLocaleString('ja-JP')} 円です。</p>
           <div className="row">
             <button className="btn" disabled={busy} onClick={() => { const c = confirm; setConfirm(null); void act(c.which === 'start' ? () => api.library.mail.set(true) : api.library.mail.extend); }}>集める</button>
             <button className="btn ghost" onClick={() => setConfirm(null)}>キャンセル</button>
@@ -523,20 +535,24 @@ function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void;
   if (error && !item) return <div><BackButton label="資料の一覧へ" onClick={onBack} /><p className="error" role="alert">{error}</p></div>;
   if (!item) return <p className="muted">読み込んでいます…</p>;
   const mine = item.mine;
+  // メールのやり取りの資料（第44.18節）。本人だけのもので、共有しない。開くのは Gmail
+  const thread = item.format === 'mail';
   return (
     <div className="library-detail">
       <BackButton label="資料の一覧へ" onClick={onBack} />
       <div className="row wrap library-actions">
         {/* 本人が実際の資料を開いたら、確かめた記録にする（第44.16.1節） */}
-        {item.driveUrl && <a className="btn" href={item.driveUrl} target="_blank" rel="noreferrer" onClick={() => { if (item.mine) void api.library.opened(item.id).then(load); }}>開く</a>}
-        {mine && <button className="btn ghost" disabled={busy} onClick={() => void act(async () => { await api.library.reread(id); load(); }, 'もう一度読みます')}>もう一度読む</button>}
+        {item.driveUrl && <a className="btn" href={item.driveUrl} target="_blank" rel="noreferrer" onClick={() => { if (item.mine && !thread) void api.library.opened(item.id).then(load); }}>{thread ? 'メールを開く' : '開く'}</a>}
+        {mine && !thread && <button className="btn ghost" disabled={busy} onClick={() => void act(async () => { await api.library.reread(id); load(); }, 'もう一度読みます')}>もう一度読む</button>}
         {mine && (item.knowledgeId
           ? <span className="badge">会社の知識</span>
-          : <button className="btn ghost" disabled={busy || !item.driveFileId} onClick={() => void act(async () => { await api.library.knowledge(id); load(); }, '会社の知識にしました。全員の秘書が参照できます')}>会社の知識にする</button>)}
+          : <button className="btn ghost" disabled={busy || (!item.driveFileId && !thread)} onClick={() => void act(async () => { await api.library.knowledge(id); load(); }, '会社の知識にしました。全員の秘書が参照できます')}>会社の知識にする</button>)}
         {mine && <button className="btn ghost danger" disabled={busy} onClick={() => {
-          const text = item.placed
-            ? 'この資料を削除しますか。ドライブのファイルはごみ箱へ移ります。'
-            : 'この資料を目録から削除しますか。ドライブのファイルはそのまま残ります。';
+          const text = thread
+            ? 'このやり取りを目録から削除しますか。メールは Gmail に残り、同じやり取りはもう入れません。'
+            : item.placed
+              ? 'この資料を削除しますか。ドライブのファイルはごみ箱へ移ります。'
+              : 'この資料を目録から削除しますか。ドライブのファイルはそのまま残ります。';
           if (window.confirm(text)) void act(async () => { await api.library.remove(id); onBack(); }, '削除しました');
         }}>削除</button>}
       </div>
@@ -545,11 +561,11 @@ function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void;
       {error && <p className="error" role="alert">{error}</p>}
       {(item.readState === 'unreadable' || item.readState === 'too_large') && <p className="small" role="status"><span className="badge warn">読めなかった</span> {item.readNote}</p>}
       {(item.readState === 'pending' || item.readState === 'paused') && <p className="small muted" role="status">まだ中身を読んでいません。</p>}
-      {mine && <ShareBox item={item} onChanged={load} />}
+      {mine && !thread && <ShareBox item={item} onChanged={load} />}
       <div className="card library-form">
         <label>題名<input value={form.title} readOnly={!mine} maxLength={LIBRARY_LIMITS.titleChars} onChange={(e) => setForm({ ...form, title: e.target.value })} onBlur={save} /></label>
         <label>タグ<input value={form.tags} readOnly={!mine} maxLength={(LIBRARY_LIMITS.tagChars + 1) * LIBRARY_LIMITS.tagCount} onChange={(e) => setForm({ ...form, tags: e.target.value })} onBlur={save} /></label>
-        <label>書類の日付<input type="date" value={form.docDate} readOnly={!mine} onChange={(e) => setForm({ ...form, docDate: e.target.value })} onBlur={save} /></label>
+        {!thread && <label>書類の日付<input type="date" value={form.docDate} readOnly={!mine} onChange={(e) => setForm({ ...form, docDate: e.target.value })} onBlur={save} /></label>}
       </div>
       {item.summary && <p>{item.summary}</p>}
       {item.keywords.length > 0 && <p className="small muted">{item.keywords.join('・')}</p>}
@@ -563,12 +579,21 @@ function LibraryDetail({ id, onBack, onOpen }: { id: string; onBack: () => void;
         </div>
       )}
       <dl className="library-facts small">
-        <dt>元の名前</dt><dd>{item.originalName}</dd>
-        <dt>形式</dt><dd>{LIBRARY_FORMAT_LABELS[item.format]}{item.sizeBytes > 0 ? `（${sizeLabel(item.sizeBytes)}）` : ''}</dd>
-        <dt>{item.entry === 'mail' ? '受け取った日' : '入れた日'}</dt><dd>{dayLabel(item.receivedAt)}</dd>
+        <dt>{thread ? '件名' : '元の名前'}</dt><dd>{item.originalName}</dd>
+        {thread && item.thread ? (
+          <>
+            <dt>相手</dt><dd>{item.thread.people.join('、') || '—'}</dd>
+            <dt>期間</dt><dd>{[item.thread.firstAt, item.thread.lastAt].filter((x): x is string => !!x).map((x) => dayLabel(new Date(x).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }))).filter((x, i, a) => a.indexOf(x) === i).join(' 〜 ')}（{item.thread.messages.toLocaleString('ja-JP')} 通）</dd>
+          </>
+        ) : (
+          <>
+            <dt>形式</dt><dd>{LIBRARY_FORMAT_LABELS[item.format]}{item.sizeBytes > 0 ? `（${sizeLabel(item.sizeBytes)}）` : ''}</dd>
+            <dt>{item.entry === 'mail' ? '受け取った日' : '入れた日'}</dt><dd>{dayLabel(item.receivedAt)}</dd>
+          </>
+        )}
         {item.readScope && <><dt>読んだ範囲</dt><dd>{item.readScope}</dd></>}
         {mine && item.origins.some((o) => o.folder) && <><dt>元のフォルダ</dt><dd>{[...new Set(item.origins.map((o) => o.folder).filter(Boolean))].join('、')}</dd></>}
-        {mine && item.origins.some((o) => o.entry === 'mail') && <><dt>届いたメール</dt><dd>
+        {mine && !thread && item.origins.some((o) => o.entry === 'mail') && <><dt>届いたメール</dt><dd>
           <ul className="library-mails">
             {item.origins.filter((o) => o.entry === 'mail').map((o, i) => <li key={i}>{[o.sender, o.subject].filter(Boolean).join(' ・ ')}</li>)}
           </ul>

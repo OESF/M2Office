@@ -351,8 +351,11 @@ const library = new LibraryService({
   contactOf: libraryContactOf(contactStore, cardsAccess(repo)),
   deckFile: async (tenantId, deckId) => (await libraryDecks.get(tenantId, deckId))?.presentationId ?? null,
   compartmentOf: async (tenantId, agentId, version) => (await hub.forTenant(tenantId)).resolve(agentId, version)?.compartment ?? null,
+  // メールのやり取りの資料の中身を、聞かれたときに Gmail から読む（第44.18.2節）
+  mail: connector.mail,
 });
-// 資料のメールの添付の取り込み（段 2。第44.4節）。本人が入れた人の受信箱だけを見る。推論は使わず、読むのは上の見回り
+// 資料のメールの取り込み（段 2・段 6。第44.4節・第44.18節）。本人が入れた人の受信箱だけを見る。添付は推論を使わず（読むのは上の見回り）、
+// やり取りは軽いモデルが 1 スレッドに 1 回読んで、載せるかを決めて要約する
 const libraryMail = new LibraryMailWatch({ service: library, store: libraryStore, mail: connector.mail, repo, access: libraryAccess(repo), logger: log });
 // 資料の OKF の書き出しと古い版の知らせ（段 3・段 4。第44.8節・第44.16節）。推論は使わない
 const libraryKeeper = new LibraryKeeper({ service: library, store: libraryStore, drive: connector.drive, repo, access: libraryAccess(repo), logger: log });
@@ -1574,9 +1577,10 @@ async function patrolOnce(): Promise<void> {
         // 見本の会社は API のプロセスが扱う（見本の接続口はプロセスごとのメモリーにある）
         if (connector.sourceFor(id) !== 'mock' && (await repo.getTenantSettings(id)).library.enabled) tenants.push(id);
       }
-      return libraryMail.tick(tenants);
+      // やり取りの要約で AI を使う（第44.18節）。会社の AI の利用量に数える
+      return withAiUsage({ purpose: 'worker:library' }, () => libraryMail.tick(tenants));
     })().then((n) => {
-      if (n > 0) log.info('メールの添付を資料に入れました', { items: n });
+      if (n > 0) log.info('メールの添付とやり取りを資料に入れました', { items: n });
     }).catch((err: unknown) => {
       log.warn('メールの添付の取り込みに失敗しました', { err });
     }).finally(() => { libraryMailBusy = false; });

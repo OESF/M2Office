@@ -164,7 +164,8 @@
 | `inventory.record_order` | write-internal | — | 発注したことを記録し、届くまで入荷待ちにします（社内の記録だけで、仕入先には何も送りません） |
 | `inventory.reserve` | write-internal | — | 予約に合わせて品目を取り置き（使える数だけを減らす）、取り消し・使ったにし、メニューで使う品目を覚えます。誰にも送りません |
 | `knowledge.register` | write-internal | — | 承認された議事録などを、そのまま社内の知識に登録します。すべての承認のあとに行い、承認した人が見た内容だけを登録します |
-| `library.add` | write-internal | `drive.file`（機密でない） | 渡されたファイルを本人の資料に入れます |
+| `library.add` | write-internal | `drive.file`（機密でない） | 渡されたファイルを本人の資料に入れます。「このメールのやり取りも残して」と言われたら、そのやり取りを要約して入れます |
+| `library.forget_mail` | write-internal | — | 「このメールは残さなくていい」と言われたとき、そのやり取りの資料を外します。メールそのものは Gmail に残ります |
 | `library.knowledge` | write-internal | `drive.file`（機密でない） | 本人の資料を、会社の全員の秘書が参照できる知識にします。個人の情報に関わる資料はしません |
 | `library.share` | write-internal | `drive.file`（機密でない） | 本人の資料を、グループや会社の人と共有します。自分だけに戻すこともできます。社外の人とは共有しません |
 | `library.update` | write-internal | — | 本人の資料の題名・種類・取引先・タグを直します |
@@ -361,7 +362,8 @@
 | `inventory.record_order` | `item`: 品目（品名・自社のコード・バーコード）、`qty`: 数、`unit`: unit か pack（unit・pack）、`supplier`: 仕入先の名前、`cancel`: 取り消す発注番号 |
 | `inventory.reserve` | `action`（必須）: hold・cancel・use・teach（hold・cancel・use・teach）、`item`: 品目（品名・自社のコード・バーコード）、`qty`: 数（使う単位）、`when`: 予約の日時、`booking`: 予約番号、`menu`: 予約のメニュー（コース・施術・プラン）の名前 |
 | `knowledge.register` | `artifactId`（必須）: 登録する成果物の ID（document.create の結果） |
-| `library.add` | `fileId`（必須）: ファイルの ID |
+| `library.add` | `fileId`: ファイルの ID、`mailId`: メールの ID かスレッドの ID（メールのやり取りを残すとき） |
+| `library.forget_mail` | `id`（必須）: 資料の ID |
 | `library.knowledge` | `id`（必須）: 資料の ID |
 | `library.share` | `ids`（必須）: 共有する資料の ID、`scope`（必須）: 共有の範囲（self・group・company）、`group`: グループの名前（scope が group のとき）、`again`: 止めた後に本人がもう一度頼んだときだけ true |
 | `library.update` | `id`（必須）: 資料の ID、`title`: 題名、`docType`: 種類、`counterparty`: 取引先、`tags`: タグ |

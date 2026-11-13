@@ -49,6 +49,16 @@ const attachmentQuery = (q: Pick<MailAttachmentQuery, 'after' | 'before'>) => [
   ...(q.before !== undefined && Number.isFinite(q.before) ? [`before:${Math.floor(q.before)}`] : []),
 ].join(' ');
 
+/** 仕事のやり取りになりうるスレッド（第44.18節）。配信と自動の振り分けの先は、推論を呼ばずに Gmail の側で除く。 */
+const CONVERSATION_MAIL = '-in:drafts -in:chats -category:promotions -category:social -category:updates -category:forums';
+
+/** やり取りのスレッドを探す条件。 */
+const conversationQuery = (q: Pick<MailAttachmentQuery, 'after' | 'before'>) => [
+  CONVERSATION_MAIL,
+  ...(q.after !== undefined && Number.isFinite(q.after) ? [`after:${Math.floor(q.after)}`] : []),
+  ...(q.before !== undefined && Number.isFinite(q.before) ? [`before:${Math.floor(q.before)}`] : []),
+].join(' ');
+
 /** メールの見出しを同時に取りに行く数。多すぎると Google に断られる。 */
 const MAIL_FETCH_CONCURRENCY = 8;
 
@@ -237,6 +247,17 @@ export class GoogleWorkspaceConnector implements WorkspaceConnector {
     attachmentBytes: async (p: ConnectorPrincipal, id: string, attachmentId: string) => {
       const a = await this.gmail(p, `/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}`) as { data?: string } | null;
       return a?.data ? fromBase64Url(a.data) : null;
+    },
+    /** やり取りのスレッドの 1 ページ（第44.18節）。ごみ箱と迷惑メールは一覧の API が初めから含めない。 */
+    threadPage: async (p: ConnectorPrincipal, q: MailAttachmentQuery) => {
+      const params = new URLSearchParams({ q: conversationQuery(q), maxResults: String(Math.min(Math.max(q.limit ?? 25, 1), 100)), ...(q.pageToken ? { pageToken: q.pageToken } : {}) });
+      const res = await this.gmail(p, `/threads?${params}`);
+      return { ids: ((res?.['threads'] ?? []) as { id: string }[]).map((t) => t.id), next: res?.['nextPageToken'] ? String(res['nextPageToken']) : null };
+    },
+    threadCount: async (p: ConnectorPrincipal, q: Pick<MailAttachmentQuery, 'after' | 'before'>) => {
+      const res = await this.gmail(p, `/threads?${new URLSearchParams({ q: conversationQuery(q), maxResults: '1' })}`);
+      const n = Number(res?.['resultSizeEstimate']);
+      return Number.isFinite(n) ? n : null;
     },
     send: async (p: ConnectorPrincipal, mail: { to: string[]; cc: string[]; subject: string; body: string; replyTo: string | null; listUnsubscribe?: string; attachments?: MailAttachment[] }) => {
       const thread = mail.replyTo ? await this.threadOf(p, mail.replyTo) : null;

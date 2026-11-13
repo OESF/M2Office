@@ -202,6 +202,13 @@ export interface MailConnector {
   attachmentParts?(p: ConnectorPrincipal, id: string): Promise<MailAttachmentList | null>;
   /** 添付 1 つの中身。見つからなければ `null`。 */
   attachmentBytes?(p: ConnectorPrincipal, id: string, attachmentId: string): Promise<Uint8Array | null>;
+  /**
+   * 仕事のやり取りになりうるスレッドの ID を、新しい順に 1 ページ返す（ナレッジの整理。第44.18節）。
+   * ごみ箱・迷惑メール・下書き・チャット・プロモーション・ソーシャル・新着・フォーラムは含めない。
+   */
+  threadPage?(p: ConnectorPrincipal, q: MailAttachmentQuery): Promise<{ ids: string[]; next: string | null }>;
+  /** 範囲の中の {@link MailConnector.threadPage} のスレッドのおおよその数（費用の目安。第44.18.5節）。分からなければ `null`。 */
+  threadCount?(p: ConnectorPrincipal, q: Pick<MailAttachmentQuery, 'after' | 'before'>): Promise<number | null>;
   /** 検索の条件（Gmail の検索の書き方）で探す。本文は返さない。 */
   search(p: ConnectorPrincipal, q: { query: string; limit?: number }): Promise<MailSummary[]>;
   /**

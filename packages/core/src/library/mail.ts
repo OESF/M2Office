@@ -8,6 +8,7 @@
  * - 中身が同じファイルは 1 つにまとめ、届いたメールをすべて手がかりに残す。削除した資料は取り込み直さない
  * - メールの本文は読まない・持たない（Q-310）。メールの文は指示として扱わない（不変則 I-6）
  * - 第42.13.1節の注文書の取り込みとは別に動き、互いに影響しない
+ * - 同じスイッチで、メールのやり取りも資料にする（第44.18節。Q-359。{@link LibraryThreadIntake}）
  *
  * @see 仕様書 第44.4節・第44.9節・第44.11節
  * @see ADR-0125
@@ -20,6 +21,7 @@ import type { Logger } from '../log/logger.js';
 import type { Repository } from '../repository/types.js';
 import type { LibraryService } from './service.js';
 import type { LibraryMailWatchRow, LibraryStore, LibraryViewer } from './store.js';
+import { LibraryThreadIntake } from './threads.js';
 
 /** 取り込まない理由（第44.4節「除くもの」）。 */
 export type LibraryMailSkip = 'embedded' | 'calendar' | 'small_image' | 'refused';
@@ -46,7 +48,8 @@ export interface LibraryMailDeps {
   service: LibraryService;
   store: LibraryStore;
   mail: MailConnector;
-  repo: Pick<Repository, 'appendAudit'>;
+  /** 操作の記録と、やり取りも集め始めたことのお知らせ（第44.18節。無ければ知らせない）。 */
+  repo: Pick<Repository, 'appendAudit'> & Partial<Pick<Repository, 'createNotification' | 'findUserById' | 'getUserSettings'>>;
   /** 会社が資料を使っていて、本人が利用範囲の中か。 */
   access(tenantId: string, userId: string): Promise<unknown>;
   logger: Logger;
@@ -67,7 +70,7 @@ const yearsBefore = (iso: string, years: number) => {
 const sec = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 
 /** 一度もオンにしていない人の様子。 */
-const OFF: LibraryMailState = { enabled: false, checkedAt: null, backFrom: null, backUntil: null, backDone: false, scanned: 0, imported: 0, error: '' };
+const OFF: LibraryMailState = { enabled: false, checkedAt: null, backFrom: null, backUntil: null, backDone: false, scanned: 0, imported: 0, error: '', threads: null };
 
 /** Gmail を読めない（許可が無い・届かない）か。読めなければ止めて、理由を本人に示す。 */
 const isConnector = (err: unknown): err is ConnectorUnavailableError => err instanceof ConnectorUnavailableError;
@@ -76,7 +79,14 @@ const isConnector = (err: unknown): err is ConnectorUnavailableError => err inst
  * メールの添付の取り込み（第44.4節）。ワーカー（見本の会社は API）が {@link LibraryMailWatch.tick} を呼ぶ。
  */
 export class LibraryMailWatch {
-  constructor(private readonly deps: LibraryMailDeps) {}
+  /** メールのやり取りの取り込み（第44.18節）。 */
+  readonly threads: LibraryThreadIntake;
+
+  constructor(private readonly deps: LibraryMailDeps) {
+    this.threads = new LibraryThreadIntake({ service: deps.service, store: deps.store, mail: deps.mail, repo: deps.repo, logger: deps.logger, ...(deps.now ? { now: deps.now } : {}) });
+    // 秘書の「このやり取りも残して」に使う（第44.18.1節）
+    deps.service.threads = { keep: (who, id) => this.threads.keep(who, id) };
+  }
 
   private now() { return this.deps.now?.() ?? new Date(); }
 
@@ -91,7 +101,10 @@ export class LibraryMailWatch {
   async state(who: LibraryViewer): Promise<LibraryMailState> {
     const w = await this.deps.store.mailWatch(who);
     if (!w) return OFF;
-    return { enabled: w.enabled, checkedAt: w.checkedAt, backFrom: w.backFrom, backUntil: w.backUntil, backDone: w.backDone, scanned: w.scanned, imported: w.imported, error: w.error };
+    return {
+      enabled: w.enabled, checkedAt: w.checkedAt, backFrom: w.backFrom, backUntil: w.backUntil, backDone: w.backDone, scanned: w.scanned, imported: w.imported, error: w.error,
+      threads: await this.threads.state(who),
+    };
   }
 
   /**
@@ -110,6 +123,8 @@ export class LibraryMailWatch {
           backDay: null, backCount: 0, scanned: 0, imported: 0, error: '',
         };
       await this.deps.store.saveMailWatch(who, next);
+      // 初めて入れた人は、やり取りの過去の分も同じ範囲から見始める（費用の目安は、入れる前に画面で確かめている）
+      if (!cur) await this.threads.start(who);
       if (!cur?.enabled) await this.audit(who, 'library.mail.on');
     } else if (cur?.enabled) {
       await this.deps.store.saveMailWatch(who, { ...cur, enabled: false });
@@ -128,6 +143,7 @@ export class LibraryMailWatch {
     await this.deps.store.saveMailWatch(who, {
       ...cur, backUntil: cur.backFrom, backFrom: yearsBefore(cur.backFrom, LIBRARY_MAIL_LIMITS.backfillYears), backToken: null, backDone: false,
     });
+    await this.threads.extend(who);
     await this.audit(who, 'library.mail.extend');
     return this.state(who);
   }
@@ -138,14 +154,23 @@ export class LibraryMailWatch {
    * @param which `start` は直近 1 年、`extend` はいまの範囲のさらに 1 年前
    * @returns `confirm` が真なら、件数が多いので費用を確かめてから入れる（お金に関わるため。ADR-0028）
    */
-  async estimate(who: LibraryViewer, which: 'start' | 'extend'): Promise<{ messages: number | null; costJpy: number | null; confirm: boolean }> {
+  async estimate(who: LibraryViewer, which: 'start' | 'extend'): Promise<{ messages: number | null; threads: number | null; costJpy: number | null; confirm: boolean }> {
     const cur = await this.deps.store.mailWatch(who);
     const now = this.now().toISOString();
     const until = which === 'extend' && cur?.backFrom ? cur.backFrom : now;
     const from = yearsBefore(until, LIBRARY_MAIL_LIMITS.backfillYears);
     const messages = await this.deps.mail.attachmentCount?.(who, { after: sec(from), before: sec(until) }).catch(() => null) ?? null;
-    const costJpy = messages === null ? null : await this.deps.service.estimate(who.tenantId, messages);
-    return { messages, costJpy, confirm: messages !== null && messages > LIBRARY_LIMITS.confirmCount && costJpy !== null };
+    // やり取りの数も足す（第44.18.5節）
+    const threads = (await this.threads.estimateRange(who, from, until)).threads;
+    const total = messages === null && threads === null ? null : (messages ?? 0) + (threads ?? 0);
+    const costJpy = total === null ? null : await this.deps.service.estimate(who.tenantId, total);
+    return { messages, threads, costJpy, confirm: total !== null && total > LIBRARY_LIMITS.confirmCount && costJpy !== null };
+  }
+
+  /** 前から添付を集めていた人が、費用の目安を確かめて、やり取りの過去の分を入れ始める（第44.18.5節）。 */
+  async startThreads(who: LibraryViewer): Promise<LibraryMailState> {
+    if (await this.threads.confirm(who)) await this.audit(who, 'library.mail.threads');
+    return this.state(who);
   }
 
   /**
@@ -170,7 +195,7 @@ export class LibraryMailWatch {
   /**
    * 1 人分。新しいメール（15 分ごと）と、過去のメールの続き（1 日 500 通まで）を見る。
    *
-   * @returns 資料に入れた件数
+   * @returns 資料に入れた件数（添付とやり取りを合わせて）
    */
   async runFor(who: LibraryViewer): Promise<number> {
     const w = await this.deps.store.mailWatch(who);
@@ -179,6 +204,8 @@ export class LibraryMailWatch {
     if (!(await this.deps.access(who.tenantId, who.userId))) return 0;
     const now = this.now();
     const counts = { scanned: 0, imported: 0 };
+    // やり取りの資料にした数（添付の数とは別に数える。第44.18節）
+    let threads = 0;
     try {
       if (!w.checkedAt || now.getTime() - Date.parse(w.checkedAt) >= LIBRARY_MAIL_LIMITS.newMailMinutes * 60_000) {
         const after = w.checkedAt ? sec(w.checkedAt) - 60 : sec(now.toISOString()) - 60;
@@ -186,6 +213,8 @@ export class LibraryMailWatch {
         w.checkedAt = now.toISOString();
       }
       if (!w.backDone && w.backFrom && w.backUntil) await this.backfill(who, w, now, counts);
+      // メールのやり取り（第44.18節）
+      threads = await this.threads.run(who);
       w.error = '';
     } catch (err) {
       if (!isConnector(err)) throw err;
@@ -196,7 +225,7 @@ export class LibraryMailWatch {
     // 見ている間に本人が切っていたら、切ったままにする
     const latest = await this.deps.store.mailWatch(who);
     await this.deps.store.saveMailWatch(who, { ...w, enabled: latest?.enabled ?? w.enabled });
-    return counts.imported;
+    return counts.imported + threads;
   }
 
   /** 新しいメール。見落としが無いよう、前に見た時刻の少し前から見る（同じメールは読み直さない）。 */

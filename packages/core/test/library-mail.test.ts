@@ -32,8 +32,10 @@ function setup(opts: { mail?: MailConnector; llm?: LlmProvider; access?: boolean
     store, repo, files: new MemoryFileStore(), drive: connector.drive as never, logger: silentLogger, llmFor: async () => llm, readerState: async () => 'ok',
     costPerItemJpy: async () => 0.5, now: () => now(),
   });
+  // 添付の取り込みだけを確かめる（メールのやり取り（第44.18節）は library-threads.test.ts で確かめる）
+  const attachmentsOnly = { ...(connector.mail as unknown as MailConnector), threadPage: undefined } as MailConnector;
   const watch = new LibraryMailWatch({
-    service, store, mail: opts.mail ?? (connector.mail as unknown as MailConnector), repo, access: async () => opts.access ?? true, logger: silentLogger, now: () => now(),
+    service, store, mail: opts.mail ?? attachmentsOnly, repo, access: async () => opts.access ?? true, logger: silentLogger, now: () => now(),
   });
   return { connector, store, service, watch, audit, setNow: (f: () => Date) => { now = f; } };
 }

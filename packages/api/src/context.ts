@@ -831,6 +831,8 @@ export function buildDeps(): AppDeps {
       contactOf: libraryContactOf(contactStore, cardsAccess(repo)),
       deckFile: async (tenantId, deckId) => (await slideDecks.store.get(tenantId, deckId))?.presentationId ?? null,
       compartmentOf: async (tenantId, agentId, version) => (await tenantView(tenantId)).resolve(agentId, version)?.compartment ?? null,
+      // メールのやり取りの資料の中身を、聞かれたときに Gmail から読む（第44.18.2節）
+      mail: connector.mail,
     });
   const library = {
     service: libraryService,

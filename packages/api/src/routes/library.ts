@@ -149,6 +149,11 @@ export function libraryRoute(deps: AppDeps) {
   });
 
   /** 過去のメールを見る範囲を、さらに 1 年さかのぼる。 */
+  /** 前から添付を集めていた人が、費用の目安を確かめて、やり取りの過去の分を入れ始める（第44.18.5節）。 */
+  app.post('/mail/threads/start', async (c) => {
+    return c.json({ ...(await mail.startThreads(who(c))), gmail: true });
+  });
+
   app.post('/mail/extend', async (c) => {
     const r = await mail.extend(who(c));
     return 'refused' in r ? c.json({ error: r.refused }, 409) : c.json({ ...r, gmail: true });

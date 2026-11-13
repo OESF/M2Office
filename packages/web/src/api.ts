@@ -2038,8 +2038,10 @@ export const api = {
     mail: {
       get: () => call<LibraryMailState & { gmail: boolean }>('/library/mail'),
       set: (enabled: boolean) => call<LibraryMailState & { gmail: boolean }>('/library/mail', { method: 'PUT', body: JSON.stringify({ enabled }) }),
-      estimate: (which: 'start' | 'extend') => call<{ messages: number | null; costJpy: number | null; confirm: boolean }>(`/library/mail/estimate?which=${which}`),
+      estimate: (which: 'start' | 'extend') => call<{ messages: number | null; threads: number | null; costJpy: number | null; confirm: boolean }>(`/library/mail/estimate?which=${which}`),
       extend: () => call<LibraryMailState & { gmail: boolean }>('/library/mail/extend', { method: 'POST', body: '{}' }),
+      /** 費用の目安を確かめて、やり取りの過去の分を入れ始める（仕様書 第44.18.5節）。 */
+      startThreads: () => call<LibraryMailState & { gmail: boolean }>('/library/mail/threads/start', { method: 'POST', body: '{}' }),
     },
   },
   printDesigns: {

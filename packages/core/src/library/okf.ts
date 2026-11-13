@@ -149,7 +149,8 @@ export function libraryOkfDocument(item: LibraryItem, related: LibraryOkfRelated
     `# ${title}`,
     '',
     ...(item.summary ? [item.summary, ''] : []),
-    ...(item.driveUrl ? [`- 元の資料: [${item.originalName.replace(/[[\]]/g, '')}](${item.driveUrl})`] : [`- 元の資料: ${item.originalName}`]),
+    // メールのやり取り（第44.18.4節）は Gmail で開くリンク。メールの本文は書かない
+    ...(item.driveUrl ? [`- ${item.format === 'mail' ? '元のメール' : '元の資料'}: [${item.originalName.replace(/[[\]]/g, '')}](${item.driveUrl})`] : [`- 元の資料: ${item.originalName}`]),
     ...line('種類', item.docType),
     ...line('取引先', item.counterparty),
     ...line('タグ', (item.tags ?? []).join('・')),

@@ -107,6 +107,40 @@ export interface LibraryMailWatchRow {
   error: string;
 }
 
+/** 見たやり取り（スレッド）と決めたこと（第44.18節 `library_mail_threads`）。 */
+export interface LibraryThreadRow {
+  threadId: string;
+  /** 資料にした・載せない・AI の答えを読めなかった。 */
+  decision: 'kept' | 'skipped' | 'failed';
+  /** 載せない理由（決まりの名前か `ai`・`tombstone`）。中身は持たない。 */
+  reason: string;
+  itemId: string | null;
+  /** 最後に読んだメールの ID（変わったときだけ読み直す）。 */
+  lastMessageId: string;
+  messageCount: number;
+  firstAt: string | null;
+  lastAt: string | null;
+  people: string[];
+  checkedAt: string;
+}
+
+/** やり取りの取り込みの進み具合（持ち主ごと。第44.18.3節 `library_thread_watch`）。 */
+export interface LibraryThreadWatchRow {
+  checkedAt: string | null;
+  backFrom: string | null;
+  backUntil: string | null;
+  backToken: string | null;
+  backDone: boolean;
+  /** 過去の分の件数が多く、本人が費用の目安を確かめるのを待っている。 */
+  backWaiting: boolean;
+  backDay: string | null;
+  backCount: number;
+  scanned: number;
+  kept: number;
+  /** 前から添付を集めていた人に、やり取りも集め始めたことを知らせたか（Q-359）。 */
+  noticed: boolean;
+}
+
 /** 読み取りの結果。 */
 export interface LibraryReadResult {
   readState: LibraryReadState;
@@ -126,6 +160,8 @@ export interface LibraryReadResult {
   driveUrl?: string | null;
   sha256?: string | null;
   sizeBytes?: number;
+  /** 受け取った日時を変える（やり取りに新しいメールが届いたとき。第44.18.2節）。 */
+  receivedAt?: string;
 }
 
 /** ワーカーが受け持つ 1 件（サーバーの中のファイルの ID を含む）。 */
@@ -137,6 +173,18 @@ export interface LibraryWork extends LibraryItem {
 
 /** 人が直す項目。 */
 export type LibraryPatch = Partial<Pick<LibraryItem, 'title' | 'docType' | 'counterparty' | 'docDate' | 'tags'>>;
+
+/** `library_mail_threads` の列。 */
+const THREAD_COLS = 'thread_id, decision, reason, item_id, last_message_id, message_count, first_at, last_at, people, checked_at';
+type ThreadDbRow = {
+  thread_id: string; decision: LibraryThreadRow['decision']; reason: string; item_id: string | null; last_message_id: string; message_count: number;
+  first_at: Date | string | null; last_at: Date | string | null; people: unknown; checked_at: Date | string;
+};
+const toThread = (r: ThreadDbRow): LibraryThreadRow => ({
+  threadId: r.thread_id, decision: r.decision, reason: r.reason, itemId: r.item_id, lastMessageId: r.last_message_id, messageCount: r.message_count,
+  firstAt: r.first_at === null ? null : new Date(r.first_at).toISOString(), lastAt: r.last_at === null ? null : new Date(r.last_at).toISOString(),
+  people: Array.isArray(r.people) ? (r.people as unknown[]).filter((x): x is string => typeof x === 'string') : [], checkedAt: new Date(r.checked_at).toISOString(),
+});
 
 /** 目録の置き場。 */
 export interface LibraryStore {
@@ -190,8 +238,16 @@ export interface LibraryStore {
   saveMailWatch(who: LibraryViewer, row: LibraryMailWatchRow): Promise<void>;
   /** 取り込みをオンにしている持ち主。 */
   mailWatchers(tenantId: string): Promise<string[]>;
-  /** そのメールから、もう資料に入れたか（一度見たメールを読み直さない）。 */
+  /** そのメールの添付を、もう資料に入れたか（一度見たメールを読み直さない）。やり取りの資料（形式 `mail`）の入口の記録は数えない。 */
   seenMessage(who: LibraryViewer, messageId: string): Promise<boolean>;
+  /** 見たやり取り（第44.18節）。見ていなければ `null`。 */
+  mailThread(who: LibraryViewer, threadId: string): Promise<LibraryThreadRow | null>;
+  saveMailThread(who: LibraryViewer, row: LibraryThreadRow): Promise<void>;
+  /** やり取りの資料のスレッドの様子（1 件の画面）。 */
+  threadOfItem(who: LibraryViewer, itemId: string): Promise<LibraryThreadRow | null>;
+  /** やり取りの取り込みの進み具合。一度も始めていなければ `null`。 */
+  threadWatch(who: LibraryViewer): Promise<LibraryThreadWatchRow | null>;
+  saveThreadWatch(who: LibraryViewer, row: LibraryThreadWatchRow): Promise<void>;
 
   /**
    * 読み取りの順番が来たものを受け持つ（新しい順。第44.11節）。受け持つ間は、ほかのワーカーに渡さない。
@@ -472,6 +528,8 @@ export class PostgresLibraryStore implements LibraryStore {
     await this.q(tenantId, `delete from library_tombstones where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     await this.q(tenantId, `delete from library_folders where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     await this.q(tenantId, `delete from library_mail_watch where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
+    await this.q(tenantId, `delete from library_mail_threads where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
+    await this.q(tenantId, `delete from library_thread_watch where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     await this.q(tenantId, `delete from library_owner_state where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     await this.q(tenantId, `delete from library_okf_files where tenant_id = $1 and owner_id = $2`, [tenantId, userId]);
     return rows.length;
@@ -623,8 +681,56 @@ export class PostgresLibraryStore implements LibraryStore {
   async seenMessage(who: LibraryViewer, messageId: string): Promise<boolean> {
     const rows = await this.q(who.tenantId,
       `select 1 from library_item_origins o join library_items i on i.tenant_id = o.tenant_id and i.id = o.item_id
-       where o.tenant_id = $1 and o.message_id = $2 and i.owner_id = $3 limit 1`, [who.tenantId, messageId, who.userId]);
+       where o.tenant_id = $1 and o.message_id = $2 and i.owner_id = $3 and i.format <> 'mail' limit 1`, [who.tenantId, messageId, who.userId]);
     return rows.length > 0;
+  }
+
+  async mailThread(who: LibraryViewer, threadId: string): Promise<LibraryThreadRow | null> {
+    const rows = await this.q<ThreadDbRow>(who.tenantId,
+      `select ${THREAD_COLS} from library_mail_threads where tenant_id = $1 and owner_id = $2 and thread_id = $3`, [who.tenantId, who.userId, threadId]);
+    return rows[0] ? toThread(rows[0]) : null;
+  }
+
+  async saveMailThread(who: LibraryViewer, t: LibraryThreadRow): Promise<void> {
+    await this.q(who.tenantId,
+      `insert into library_mail_threads (tenant_id, owner_id, thread_id, decision, reason, item_id, last_message_id, message_count, first_at, last_at, people, checked_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+       on conflict (tenant_id, owner_id, thread_id) do update set decision = excluded.decision, reason = excluded.reason, item_id = excluded.item_id,
+         last_message_id = excluded.last_message_id, message_count = excluded.message_count, first_at = excluded.first_at, last_at = excluded.last_at,
+         people = excluded.people, checked_at = excluded.checked_at`,
+      [who.tenantId, who.userId, t.threadId, t.decision, t.reason.slice(0, 40), t.itemId, t.lastMessageId, t.messageCount, t.firstAt, t.lastAt, JSON.stringify(t.people), t.checkedAt]);
+  }
+
+  async threadOfItem(who: LibraryViewer, itemId: string): Promise<LibraryThreadRow | null> {
+    const rows = await this.q<ThreadDbRow>(who.tenantId,
+      `select ${THREAD_COLS} from library_mail_threads where tenant_id = $1 and owner_id = $2 and item_id = $3 limit 1`, [who.tenantId, who.userId, itemId]);
+    return rows[0] ? toThread(rows[0]) : null;
+  }
+
+  async threadWatch(who: LibraryViewer): Promise<LibraryThreadWatchRow | null> {
+    const rows = await this.q<{
+      checked_at: Date | string | null; back_from: Date | string | null; back_until: Date | string | null; back_token: string | null; back_done: boolean; back_waiting: boolean;
+      back_day: string | null; back_count: number; scanned: number; kept: number; noticed: boolean;
+    }>(who.tenantId,
+      `select checked_at, back_from, back_until, back_token, back_done, back_waiting, back_day::text as back_day, back_count, scanned, kept, noticed
+       from library_thread_watch where tenant_id = $1 and owner_id = $2`, [who.tenantId, who.userId]);
+    const r = rows[0];
+    if (!r) return null;
+    const at = (v: Date | string | null) => (v === null ? null : iso(v));
+    return {
+      checkedAt: at(r.checked_at), backFrom: at(r.back_from), backUntil: at(r.back_until), backToken: r.back_token, backDone: r.back_done, backWaiting: r.back_waiting,
+      backDay: r.back_day, backCount: r.back_count, scanned: r.scanned, kept: r.kept, noticed: r.noticed,
+    };
+  }
+
+  async saveThreadWatch(who: LibraryViewer, w: LibraryThreadWatchRow): Promise<void> {
+    await this.q(who.tenantId,
+      `insert into library_thread_watch (tenant_id, owner_id, checked_at, back_from, back_until, back_token, back_done, back_waiting, back_day, back_count, scanned, kept, noticed, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13, now())
+       on conflict (tenant_id, owner_id) do update set checked_at = excluded.checked_at, back_from = excluded.back_from, back_until = excluded.back_until, back_token = excluded.back_token,
+         back_done = excluded.back_done, back_waiting = excluded.back_waiting, back_day = excluded.back_day, back_count = excluded.back_count, scanned = excluded.scanned,
+         kept = excluded.kept, noticed = excluded.noticed, updated_at = now()`,
+      [who.tenantId, who.userId, w.checkedAt, w.backFrom, w.backUntil, w.backToken, w.backDone, w.backWaiting, w.backDay, w.backCount, w.scanned, w.kept, w.noticed]);
   }
 
   async claim(tenantId: string, limit: number, leaseMs: number, placeOnly: boolean): Promise<LibraryWork[]> {
@@ -654,11 +760,11 @@ export class PostgresLibraryStore implements LibraryStore {
     await this.q(tenantId,
       `update library_items set read_state = $3, read_note = $4, read_scope = $5, title = $6, doc_type = $7, counterparty = $8, contact_id = $9, doc_date = $10::date,
          summary = $11, keywords = $12, search_text = $13, drive_file_id = coalesce($14, drive_file_id), drive_url = coalesce($15, drive_url), sha256 = coalesce(sha256, $16), size_bytes = coalesce($17, size_bytes),
-         tags = $18, tagged = tagged or $19, attempts = 0, updated_at = now()
+         tags = $18, tagged = tagged or $19, attempts = 0, received_at = coalesce($20::timestamptz, received_at), updated_at = now()
        where tenant_id = $1 and id = $2`,
       [tenantId, id, r.readState, r.readNote, r.readScope, next.title, next.docType, next.counterparty, r.contactId === undefined ? item.contactId : r.contactId, docDate,
         next.summary, next.keywords, librarySearchText(next, origins), r.driveFileId ?? null, r.driveUrl ?? null, r.sha256 ?? null, r.sizeBytes ?? null,
-        next.tags, r.tags !== undefined]);
+        next.tags, r.tags !== undefined, r.receivedAt ?? null]);
   }
 
   async retryLater(tenantId: string, id: string, delayMs: number): Promise<void> {
@@ -724,6 +830,8 @@ export class PostgresLibraryStore implements LibraryStore {
 export class MemoryLibraryStore implements LibraryStore {
   readonly rows = new Map<string, LibraryWork & { tenantId: string; nextTryAt: number; searchText: string; tagged: boolean; origins: (LibraryOrigin & { artifactId?: string; messageId?: string })[] }>();
   readonly mailWatches = new Map<string, LibraryMailWatchRow>();
+  readonly threadRows = new Map<string, LibraryThreadRow>();
+  readonly threadWatches = new Map<string, LibraryThreadWatchRow>();
   readonly tombstones = new Set<string>();
   readonly folders = new Map<string, string>();
   private mine = (who: LibraryViewer) => [...this.rows.values()].filter((r) => r.tenantId === who.tenantId && r.ownerId === who.userId);
@@ -855,6 +963,8 @@ export class MemoryLibraryStore implements LibraryStore {
     const rows = this.mine({ tenantId, userId });
     for (const r of rows) this.rows.delete(r.id);
     this.mailWatches.delete(`${tenantId}:${userId}`);
+    this.threadWatches.delete(`${tenantId}:${userId}`);
+    for (const k of [...this.threadRows.keys()]) if (k.startsWith(`${tenantId}:${userId}:`)) this.threadRows.delete(k);
     this.ownerStates.delete(`${tenantId}:${userId}`);
     for (const k of [...this.okf.keys()]) if (k.startsWith(`${tenantId}:${userId}:`)) this.okf.delete(k);
     return rows.length;
@@ -942,7 +1052,30 @@ export class MemoryLibraryStore implements LibraryStore {
   }
 
   async seenMessage(who: LibraryViewer, messageId: string): Promise<boolean> {
-    return this.mine(who).some((r) => r.origins.some((o) => o.messageId === messageId));
+    return this.mine(who).some((r) => r.format !== 'mail' && r.origins.some((o) => o.messageId === messageId));
+  }
+
+  async mailThread(who: LibraryViewer, threadId: string): Promise<LibraryThreadRow | null> {
+    const t = this.threadRows.get(`${who.tenantId}:${who.userId}:${threadId}`);
+    return t ? { ...t, people: [...t.people] } : null;
+  }
+
+  async saveMailThread(who: LibraryViewer, row: LibraryThreadRow): Promise<void> {
+    this.threadRows.set(`${who.tenantId}:${who.userId}:${row.threadId}`, { ...row, people: [...row.people] });
+  }
+
+  async threadOfItem(who: LibraryViewer, itemId: string): Promise<LibraryThreadRow | null> {
+    const t = [...this.threadRows.entries()].find(([k, v]) => k.startsWith(`${who.tenantId}:${who.userId}:`) && v.itemId === itemId)?.[1];
+    return t ? { ...t, people: [...t.people] } : null;
+  }
+
+  async threadWatch(who: LibraryViewer): Promise<LibraryThreadWatchRow | null> {
+    const w = this.threadWatches.get(`${who.tenantId}:${who.userId}`);
+    return w ? { ...w } : null;
+  }
+
+  async saveThreadWatch(who: LibraryViewer, row: LibraryThreadWatchRow): Promise<void> {
+    this.threadWatches.set(`${who.tenantId}:${who.userId}`, { ...row });
   }
 
   async claim(tenantId: string, limit: number, leaseMs: number, placeOnly: boolean): Promise<LibraryWork[]> {
@@ -971,6 +1104,7 @@ export class MemoryLibraryStore implements LibraryStore {
     if (x.driveUrl) r.driveUrl = x.driveUrl;
     if (x.sha256 && !r.sha256) r.sha256 = x.sha256;
     if (x.sizeBytes !== undefined) r.sizeBytes = x.sizeBytes;
+    if (x.receivedAt) r.receivedAt = x.receivedAt;
     r.searchText = librarySearchText(r, r.origins);
   }
 

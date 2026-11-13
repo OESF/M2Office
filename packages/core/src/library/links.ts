@@ -2,7 +2,7 @@
  * @file 資料のつながり（仕様書 第44.17.1節。段 5）。目録の項目から決まりで見つける。推論は呼ばない（AI の費用を増やさない）。
  *
  * つながりの決まりと強さ（Q-314。使いながら直す）:
- * - 同じメールで届いた（4）・同じ資料の版（4）
+ * - 同じメールで届いた（4）・同じやり取り（4。メールのやり取りの資料と、そのやり取りで届いた添付。第44.18.4節）・同じ資料の版（4）
  * - 同じタグ（第44.17.3節）。重なるタグを、少ない資料にしか付かないタグ（10 件まで）は 2、ほかは 1 と数えて足し、2 以上でつなぐ（4 まで）。
  *   取引先・案件・種類などを区別しない。資料の半分（少なくとも 10 件）を超えて付くタグは数えない
  * - 語が 2 つ以上重なる（1。重なる語 1 つごとに 1 足す。3 まで）
@@ -92,8 +92,15 @@ export function libraryLinks(items: LibraryLinkInput[]): Map<string, LibraryLink
     return m;
   };
 
-  // 同じメール・同じ資料の版・同じフォルダ
-  for (const ids of index((i) => i.messageIds).values()) if (ids.length <= R.groupMax) within(ids, 'mail', R.mail);
+  // 同じメール（やり取りの資料が入っていれば、同じやり取り）・同じ資料の版・同じフォルダ
+  const threadItems = new Set(items.filter((i) => i.format === 'mail').map((i) => i.id));
+  for (const ids of index((i) => i.messageIds).values()) {
+    if (ids.length > R.groupMax) continue;
+    for (let x = 0; x < ids.length; x++) for (let y = x + 1; y < ids.length; y++) {
+      const thread = threadItems.has(ids[x]!) || threadItems.has(ids[y]!);
+      offer(ids[x]!, ids[y]!, thread ? 'thread' : 'mail', R.mail);
+    }
+  }
   for (const ids of index((i) => [libraryVersionKey(i) ?? '']).values()) if (ids.length <= R.groupMax) within(ids, 'version', R.version);
   for (const ids of index((i) => i.folders.map((f) => f.trim()).filter(Boolean)).values()) if (ids.length <= R.folderMax) within(ids, 'folder', R.folder);
 
