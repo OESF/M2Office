@@ -2750,7 +2750,10 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 
 /* 表の縞（2026-10-19。偶数行の背景を変えて見やすくする。M2Office の中の表すべて）。
    :where で弱く当て、行の印（小計の行・警告の色）やマウスを重ねたときの色が勝つようにする */
-.table :where(tbody > tr:nth-child(even)) > td { background: var(--row-alt); }
+.table :where(tbody > tr:nth-child(even)) > td, .dcs-table :where(tbody > tr:nth-child(even)) > td { background: var(--row-alt); }
+/* 行が続けて並ぶ一覧（表の形の一覧）にも、同じ縞を当てる（2026-11-14。メール・ナレッジの整理・作ったスライド・並べ替えの一覧など）。
+   カードを間を空けて並べる一覧には当てない。新しく作る一覧は、ここに名前を足す */
+:where(.mail-list, .library-list, .slide-deck-list, .sales-unmatched-list, .mbr-reward-list, .mbr-line-list, .opt-outs-body ul, .sortable, .debug-list) > li:nth-child(even) { background: var(--row-alt); }
 
 /* 表の列を選ぶ（TableColumns.tsx）。表にマウスを重ねたときに右上に出る */
 .tcols-btn {
@@ -3256,11 +3259,11 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 .mail-group h2, .mail-group > summary { font-size: calc(15px * var(--font-scale)); margin: 0; font-weight: 600; cursor: default; }
 .mail-group > summary { cursor: pointer; }
 .mail-count { color: var(--muted); font-weight: 400; margin-left: 4px; }
-.mail-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.mail-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: hidden; }
 .mail-list > li + li { border-top: 1px solid var(--line); }
 .mail-row { display: grid; grid-template-columns: minmax(8em, 14em) 1fr auto; grid-template-areas: "from subject when" "from summary when"; gap: 2px calc(12px * var(--space-scale));
   width: 100%; text-align: left; background: none; border: 0; padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale)); color: var(--ink); cursor: pointer; font: inherit; }
-.mail-row:hover { background: var(--row-alt); }
+.mail-row:hover { background: var(--accent-soft); }
 .mail-from { grid-area: from; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-subject { grid-area: subject; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-summary { grid-area: summary; color: var(--muted); font-size: calc(13px * var(--font-scale)); display: flex; gap: 6px; align-items: center; min-width: 0; }
