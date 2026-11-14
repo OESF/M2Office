@@ -171,3 +171,16 @@ test('未読の一覧は数と新しい順の一覧を返し、多ければ残�
   assert.equal(res.count, 50, '既定は 50 通');
   assert.match(res.remaining ?? '', /ほかに 70 通の未読があります/);
 });
+
+test('gmail.search: 見つけたメールに、本人のアカウントで開く Gmail のリンクを添える（第10.9.6節「メールを探す」）', async () => {
+  const connector = new MockWorkspaceConnector();
+  const ctx = {
+    tenantId: 't1', userId: 'u1', runId: 'r1', compartment: null, connector, files: {} as never,
+    repo: { findUserById: async () => ({ id: 'u1', email: 'miura@example.jp' }) } as never,
+  } as unknown as ToolContext;
+  const all = await connector.mail.search({ tenantId: 't1', userId: 'u1' }, { query: '', limit: 1 });
+  const out = await run('gmail.search', { query: '' , limit: 1 }, ctx);
+  assert.equal(out['count'], all.length);
+  const first = out['items'][0];
+  assert.equal(first.url, `https://mail.google.com/mail/?authuser=miura%40example.jp#all/${encodeURIComponent(all[0]!.threadId ?? all[0]!.id)}`);
+});

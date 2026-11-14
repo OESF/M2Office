@@ -8,7 +8,7 @@
  * @see 仕様書 第10.11.7節 終わったことを伝える
  */
 
-import { AG05_WEEKLY_BRIEF, LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS, PLAN_REPORT_AGENT_ID, PROACTIVE_TRIGGER, planProgress } from '@m2office/core';
+import { AG05_WEEKLY_BRIEF, LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS, PLAN_REPORT_AGENT_ID, PROACTIVE_TRIGGER, mentionsOfRun, planProgress } from '@m2office/core';
 import type { Repository } from '@m2office/core';
 import { randomUUID } from 'node:crypto';
 
@@ -193,11 +193,14 @@ export async function rememberLookup(repo: Repository, tenantId: string, userId:
   try {
     const prefs = await repo.getUserSettings(tenantId, userId);
     if (!prefs.memory.keepConversations) return;
+    // 見つけたメール・資料・作ったものを、話に出たものとして残す（「さっきのメール」をたどるため。仕様書 第10.7.4.1節）
+    const mentions = x.status === 'completed' && !x.runId.startsWith('plan:') ? await mentionsOfRun(repo, tenantId, x.runId) : [];
     await repo.appendConversation({
       id: randomUUID(), tenantId, userId,
       message: `（${x.agentName ? `「${x.agentName}」に頼んだ` : 'お調べした'}結果）${x.request}`,
       reply: x.status === 'completed' ? (x.text ?? '') : `できませんでした。${x.failureReason ?? ''}`,
       layer: 'full', agentId: null, runId: x.runId, createdAt: new Date().toISOString(),
+      ...(mentions.length ? { mentions } : {}),
     });
   } catch {
     // 残せなくても伝える

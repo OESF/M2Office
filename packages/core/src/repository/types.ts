@@ -242,6 +242,16 @@ export interface Repository {
 
   /** ある日の会話（要約と候補を作るために読む。仕様書 第11.5.2節）。 */
   listConversationsOfDay(tenantId: string, userId: string, day: { from: string; to: string }): Promise<Conversation[]>;
+  /**
+   * 本人が秘書と話した日（日本時間の `YYYY-MM-DD`。新しい順）。1 週間の記憶の「使った日の 7 日分」を決める（仕様書 第10.7.4.1節、Q-363）。
+   *
+   * @param since この時刻より後のやり取りだけを見る
+   */
+  listConversationDays?(tenantId: string, userId: string, since: string): Promise<string[]>;
+  /**
+   * 期間のやり取りを古い順に返す。依頼と答えは `chars` 字に切って返す（1 週間の記憶に使う。仕様書 第10.7.4.1節）。
+   */
+  listConversationsBetween?(tenantId: string, userId: string, from: string, to: string, chars: number): Promise<Conversation[]>;
   /** 会話ログを持つ利用者の ID（その日ぶん）。 */
   listConversationUserIds(tenantId: string, day: { from: string; to: string }): Promise<string[]>;
   /** 会話を 1 往復読む。本人が消していれば `null`。 */
@@ -862,6 +872,25 @@ export interface Conversation {
   createdAt: string;
   /** 頼まれた経路。Chat で頼まれたものは `chat`（第10.16.3節「会話の記録」）。画面と音声は無し。 */
   channel?: 'chat' | null;
+  /**
+   * このやり取りで話に出たもの（見つけたメール・資料・作ったもの・頼んだ業務・開いていた 1 件。仕様書 第10.7.4.1節、ADR-0147）。
+   * 道具の結果と画面の操作から決まりで拾う。推論の文からは作らない。無ければ空
+   */
+  mentions?: ConversationMention[];
+}
+
+/** 話に出たものの種類（仕様書 第10.7.4.1節）。 */
+export type ConversationMentionKind = 'mail' | 'library' | 'artifact' | 'run' | 'drive' | 'screen';
+
+/** 会話で話に出たもの 1 つ。「さっきのメール」を ID とリンクでたどるために持つ（仕様書 第10.7.4.1節）。 */
+export interface ConversationMention {
+  kind: ConversationMentionKind;
+  /** 題名（メールなら件名と差出人と日付）。 */
+  title: string;
+  /** そのものの ID（メールならスレッドの ID、資料・実行ならその ID）。 */
+  id?: string;
+  /** 開くリンク（Gmail・ドライブの URL か、M2Office の画面のパス）。 */
+  url?: string;
 }
 
 /** その日の会話の要約（仕様書 第11.9.6節）。逐語が消えた後も残る。 */

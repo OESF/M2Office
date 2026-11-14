@@ -18,8 +18,8 @@ import {
 import { CategoryMenuActions, ItemMenuActions } from './MenuActions.js';
 import { openDebugPanel } from './debug.js';
 import {
-  api, ApiError, describeError,
-  type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryHome, type SecretaryReply,
+  api, ApiError, describeError, setSecretaryScreen,
+  type AgentSummary, type ApprovalView, type Lookup, type Me, type RunDetail, type SecretaryHome, type SecretaryReply, type SecretaryScreen,
 } from './api.js';
 import { BriefScreen } from './Briefs.js';
 import { AgentHelpTip, HelpCenter, HelpRating, HelpTip, Markdown, PageTitle, Tour, openHelp, useOpenHelp } from './help.js';
@@ -241,6 +241,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       : connectionReturn ? { kind: 'settings', section: 'services' }
       : (viewOf(initialRoute.current) ?? { kind: 'home' })
   ));
+  // 開いている画面を、秘書に頼むときに添える（仕様書 第10.7.4.3節）
+  useEffect(() => { setSecretaryScreen(screenOf(view)); }, [view]);
   const [pendingAgent, setPendingAgent] = useState<string | null>(
     !googleReturn && !connectionReturn && initialRoute.current.kind === 'agent' ? initialRoute.current.agentId : null,
   );
@@ -1124,6 +1126,35 @@ function backTo(view: View | null, go: (v: View) => void): { label: string; go: 
   if (!view) return undefined;
   const label = VIEW_LABELS[view.kind] ?? (view.kind === 'agent' ? view.agent.name : '前の画面');
   return { label, go: () => go(view) };
+}
+
+/**
+ * 秘書に添える、開いている画面と 1 件（仕様書 第10.7.4.3節）。種類と ID だけで、中身は送らない。
+ *
+ * @remarks 人事・給与の 1 件は添えない（人事区画のもの。第16.3節）
+ */
+function screenOf(v: View): SecretaryScreen {
+  const label = VIEW_LABELS[v.kind] ?? (v.kind === 'agent' ? v.agent.name : v.kind);
+  const item = ((): { kind: string; id: string } | null => {
+    switch (v.kind) {
+      case 'library': return v.itemId ? { kind: 'library', id: v.itemId } : null;
+      case 'mail': return v.threadId ? { kind: 'mail', id: v.threadId } : null;
+      case 'run': return { kind: 'run', id: v.runId };
+      case 'cards': return v.contactId ? { kind: 'contact', id: v.contactId } : null;
+      case 'inventory': return v.itemId ? { kind: 'inventory', id: v.itemId } : null;
+      case 'columns': return v.columnId ? { kind: 'column', id: v.columnId } : null;
+      case 'inquiries': return v.inquiryId ? { kind: 'inquiry', id: v.inquiryId } : null;
+      case 'announcements': return v.announcementId ? { kind: 'announcement', id: v.announcementId } : null;
+      case 'contracts': return v.contractId ? { kind: 'contract', id: v.contractId } : null;
+      case 'sales': return v.itemId ? { kind: 'sales', id: v.itemId } : null;
+      case 'decisions': return v.decisionId ? { kind: 'decision', id: v.decisionId } : null;
+      case 'members': return v.memberId ? { kind: 'member', id: v.memberId } : null;
+      case 'printDesigns': return v.designId ? { kind: 'printDesign', id: v.designId } : null;
+      case 'help': return v.articleId ? { kind: 'help', id: v.articleId } : null;
+      default: return null;
+    }
+  })();
+  return { view: v.kind, label, ...(item ? { item } : {}) };
 }
 
 /** 画面の名前。戻る先を名前で示すために使う。 */

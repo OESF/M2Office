@@ -14,7 +14,7 @@ import {
 } from '../src/index.js';
 import { contactRequest } from '../src/secretary/contacts.js';
 import { DIRECT_QUERIES } from '../src/secretary/catalog.js';
-import { mailCheckRequest, mailCheckText, parseMailVerdicts, senderName } from '../src/secretary/mail.js';
+import { mailCheckRequest, mailCheckText, mailSearchRequest, parseMailVerdicts, senderName } from '../src/secretary/mail.js';
 
 const fields = (over: Partial<CardFields>): CardFields => ({ ...EMPTY_CARD_FIELDS, ...over });
 
@@ -221,6 +221,19 @@ test('メールの確認: 推論の振り分けを読み、返信・対応が要
   assert.match(text, /ほかに 26 件の未読は見ていません/);
   assert.deepEqual(parseMailVerdicts('読めない答え', 2).map((v) => v.group), ['read', 'read'], '読めなければ推測で返信にしない');
   assert.equal(senderName('"山田 太郎" <a@b.example>'), '山田 太郎');
+});
+
+test('「〇〇のメールを探して」は未読の件数に当てず、メールを探す依頼として見分ける（第10.9.6節）', () => {
+  const match = (m: string) => DIRECT_QUERIES.find((q) => q.patterns.some((p) => p.test(m)) && !q.excludes?.some((p) => p.test(m)))?.id;
+  for (const m of ['三浦皮膚科クリニックのメールを探して', 'A 社と決めた支払い条件のメールはどこ？', '先月の見積のメールを検索して', 'サンプル商事からのメールを出して']) {
+    assert.equal(match(m), undefined, `${m} は件数の答えにしない`);
+    assert.equal(mailSearchRequest(m), true, m);
+    assert.equal(mailCheckRequest(m), false, `${m} は未読の振り分けにしない`);
+  }
+  assert.equal(mailSearchRequest('見積のメールを探して返信の下書きを作って'), false, '書く依頼は探す依頼にしない');
+  assert.equal(mailSearchRequest('田中さんのメールアドレスを探して'), false, '連絡先の問いは名刺へ');
+  assert.equal(mailSearchRequest('資料を探して'), false, 'メールでない探しものには当てない');
+  assert.equal(match('未読のメールは何件？'), 'mail-unread', '件数の問いには今までどおり答える');
 });
 
 test('未読メールの定型の答えは、人の連絡先を尋ねる依頼に当てない', () => {

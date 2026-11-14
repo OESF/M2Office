@@ -12,7 +12,7 @@ import { withCompartments } from '../engine/run-access.js';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import { addDays, jst, ymd } from '../connectors/mock.js';
-import { MAIL_CHECK } from './mail.js';
+import { MAIL_CHECK, MAIL_SEARCH } from './mail.js';
 import {
   DO_NOT_REMEMBER, REMEMBER, WHAT_REMEMBERED, memoryTextOf, refusalMessage, refuseToRemember,
 } from './memory.js';
@@ -163,8 +163,9 @@ const unreadMail: DirectQuery = {
   id: 'mail-unread',
   label: '未読メールの確認',
   patterns: [/メール|受信/],
-  // 「チェックして」「大事なメールある？」は件数ではなく中身の確認（秘書がその場で振り分けて案内する。第10.9.6節）
-  excludes: [ACTION_WORDS, LONG_REQUEST, CONTACT_WORDS, MAIL_CHECK],
+  // 「チェックして」「大事なメールある？」は件数ではなく中身の確認（秘書がその場で振り分けて案内する。第10.9.6節）。
+  // 「〇〇のメールを探して」は探す依頼（調べものが Gmail とナレッジの整理を探す。第10.9.6節「メールを探す」）
+  excludes: [ACTION_WORDS, LONG_REQUEST, CONTACT_WORDS, MAIL_CHECK, MAIL_SEARCH],
   compartment: null,
   async answer(ctx) {
     // 受信トレイの「メイン」だけを数える。振り分けられたものと迷惑メールは数えない（仕様書 第10.9.2節）

@@ -15,6 +15,7 @@
 import type { PreparedCall, Tool, ToolContext } from './registry.js';
 import type { MailAttachment } from '../connectors/types.js';
 import { approvedArtifact, jstDate } from './approved-artifact.js';
+import { gmailThreadUrl } from '../mail/service.js';
 
 const principal = (ctx: ToolContext) => ({ tenantId: ctx.tenantId, userId: ctx.userId });
 const str = (v: unknown, fallback = '') => (typeof v === 'string' ? v.trim() : fallback);
@@ -34,14 +35,16 @@ export const gmailSearch: Tool = {
   risk: 'read',
   activityLabel: 'メールを探しています',
   helpText: '条件に合うメールを探します。本文は読みません',
-  description: '検索の条件（Gmail の検索の書き方。例: from:sato 見積）でメールを探す。本文は返さない',
+  description: '検索の条件（Gmail の検索の書き方。例: from:sato 見積）でメールを探す。本文は返さない。url は Gmail でそのメールを開くリンク（答えに添える）',
   args: { properties: { query: S('検索の条件'), limit: N('件数（既定 20）') }, required: ['query'] },
   google: { scope: 'gmail.readonly', level: 'restricted' },
   async invoke(args, ctx) {
     const items = await ctx.connector.mail.search(principal(ctx), {
       query: str(args['query']), limit: Math.min(Number(args['limit'] ?? 20) || 20, 100),
     });
-    return { source: ctx.connector.sourceFor(ctx.tenantId), count: items.length, items };
+    // 見つけたメールを本人が開けるよう、Gmail のリンクを添える（本人のアカウントで開く。第10.9.6節「メールを探す」）
+    const email = (await ctx.repo.findUserById?.(ctx.tenantId, ctx.userId)?.catch(() => null))?.email ?? null;
+    return { source: ctx.connector.sourceFor(ctx.tenantId), count: items.length, items: items.map((m) => ({ ...m, url: gmailThreadUrl(m.threadId ?? m.id, email) })) };
   },
 };
 

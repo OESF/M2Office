@@ -1,0 +1,2678 @@
+{
+ "version": 1,
+ "title": "秘書の続きの頼みの問題集（仕様書 第10.7.4.5節、ADR-0147）",
+ "description": "続きの頼み（それも・さっきの・〇曜日に頼んだ）・開いている画面・似た業務の取り違え・続きに見えて新しい頼みを含む 100 問。業種を問わない例にしている。",
+ "expectKeys": {
+  "route": "選ぶべき先。業務の ID・none（秘書が自分で答える）・direct:<照会の ID>（決め打ちの照会）",
+  "answerContains": "秘書の答え（層 3）に含まれるべき文字（話に出たもののリンクなど）",
+  "contextContains": "業務に渡す材料に含まれるべき文字（開いている 1 件の ID など）",
+  "weekday": "history のやり取りを置く曜日（今日より前の直近のその曜日）"
+ },
+ "cases": [
+  {
+   "id": "A-01",
+   "category": "A",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-a0",
+       "url": "/runs/r-a0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-a1",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a1"
+      }
+     ]
+    }
+   ],
+   "message": "試作社のも探して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-02",
+   "category": "A",
+   "history": [
+    {
+     "message": "試作工房のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「試作工房のメールを探して」",
+       "id": "r-a1",
+       "url": "/runs/r-a1"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）試作工房のメールを探して",
+     "reply": "1 通ありました。試作工房 の「納期のご相談」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "納期のご相談（試作工房）",
+       "id": "t-a2",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a2"
+      }
+     ]
+    }
+   ],
+   "message": "同じように山田商店のも",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-03",
+   "category": "A",
+   "history": [
+    {
+     "message": "さくら法律事務所のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「さくら法律事務所のメールを探して」",
+       "id": "r-a2",
+       "url": "/runs/r-a2"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）さくら法律事務所のメールを探して",
+     "reply": "1 通ありました。さくら法律事務所 の「契約書の修正案」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "契約書の修正案（さくら法律事務所）",
+       "id": "t-a3",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a3"
+      }
+     ]
+    }
+   ],
+   "message": "それも大川医院の分をお願い",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-04",
+   "category": "A",
+   "history": [
+    {
+     "message": "みどり歯科のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「みどり歯科のメールを探して」",
+       "id": "r-a3",
+       "url": "/runs/r-a3"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）みどり歯科のメールを探して",
+     "reply": "1 通ありました。みどり歯科 の「機器の保守」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "機器の保守（みどり歯科）",
+       "id": "t-a4",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a4"
+      }
+     ]
+    }
+   ],
+   "message": "丸山工業のもある？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-05",
+   "category": "A",
+   "history": [
+    {
+     "message": "青空建設のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「青空建設のメールを探して」",
+       "id": "r-a4",
+       "url": "/runs/r-a4"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）青空建設のメールを探して",
+     "reply": "1 通ありました。青空建設 の「現場の日程」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "現場の日程（青空建設）",
+       "id": "t-a5",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a5"
+      }
+     ]
+    }
+   ],
+   "message": "ほかにも花村事務所から来てない？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-06",
+   "category": "A",
+   "history": [
+    {
+     "message": "北山クリニックのメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「北山クリニックのメールを探して」",
+       "id": "r-a5",
+       "url": "/runs/r-a5"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）北山クリニックのメールを探して",
+     "reply": "1 通ありました。北山クリニック の「検査機器の見積」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "検査機器の見積（北山クリニック）",
+       "id": "t-a6",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a6"
+      }
+     ]
+    }
+   ],
+   "message": "小林製作所のも探して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-07",
+   "category": "A",
+   "history": [
+    {
+     "message": "森の木工房のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「森の木工房のメールを探して」",
+       "id": "r-a6",
+       "url": "/runs/r-a6"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）森の木工房のメールを探して",
+     "reply": "1 通ありました。森の木工房 の「展示会の出展」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "展示会の出展（森の木工房）",
+       "id": "t-a7",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a7"
+      }
+     ]
+    }
+   ],
+   "message": "同じようにひまわり保育園のも",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-08",
+   "category": "A",
+   "history": [
+    {
+     "message": "東和会計のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「東和会計のメールを探して」",
+       "id": "r-a7",
+       "url": "/runs/r-a7"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）東和会計のメールを探して",
+     "reply": "1 通ありました。東和会計 の「決算の資料」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "決算の資料（東和会計）",
+       "id": "t-a8",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a8"
+      }
+     ]
+    }
+   ],
+   "message": "それも一ツ橋書店の分をお願い",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-09",
+   "category": "A",
+   "history": [
+    {
+     "message": "港町デザインのメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「港町デザインのメールを探して」",
+       "id": "r-a8",
+       "url": "/runs/r-a8"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）港町デザインのメールを探して",
+     "reply": "1 通ありました。港町デザイン の「ロゴの修正」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "ロゴの修正（港町デザイン）",
+       "id": "t-a9",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a9"
+      }
+     ]
+    }
+   ],
+   "message": "中央設備のもある？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-10",
+   "category": "A",
+   "history": [
+    {
+     "message": "川辺印刷のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「川辺印刷のメールを探して」",
+       "id": "r-a9",
+       "url": "/runs/r-a9"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）川辺印刷のメールを探して",
+     "reply": "1 通ありました。川辺印刷 の「チラシの入稿」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "チラシの入稿（川辺印刷）",
+       "id": "t-a10",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a10"
+      }
+     ]
+    }
+   ],
+   "message": "ほかにもさくら薬局から来てない？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-11",
+   "category": "A",
+   "history": [
+    {
+     "message": "見本商事の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事の資料を探して」",
+       "id": "r-b0",
+       "url": "/runs/r-b0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事の資料を探して",
+     "reply": "資料「見本商事 見積のご確認の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "見本商事 見積のご確認の資料",
+       "id": "L-a0",
+       "url": "/library/L-a0"
+      }
+     ]
+    }
+   ],
+   "message": "試作社のも探して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-12",
+   "category": "A",
+   "history": [
+    {
+     "message": "試作工房の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「試作工房の資料を探して」",
+       "id": "r-b1",
+       "url": "/runs/r-b1"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）試作工房の資料を探して",
+     "reply": "資料「試作工房 納期のご相談の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "試作工房 納期のご相談の資料",
+       "id": "L-a1",
+       "url": "/library/L-a1"
+      }
+     ]
+    }
+   ],
+   "message": "同じように山田商店のも",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-13",
+   "category": "A",
+   "history": [
+    {
+     "message": "さくら法律事務所の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「さくら法律事務所の資料を探して」",
+       "id": "r-b2",
+       "url": "/runs/r-b2"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）さくら法律事務所の資料を探して",
+     "reply": "資料「さくら法律事務所 契約書の修正案の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "さくら法律事務所 契約書の修正案の資料",
+       "id": "L-a2",
+       "url": "/library/L-a2"
+      }
+     ]
+    }
+   ],
+   "message": "もう1件、大川医院の分も",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-14",
+   "category": "A",
+   "history": [
+    {
+     "message": "みどり歯科の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「みどり歯科の資料を探して」",
+       "id": "r-b3",
+       "url": "/runs/r-b3"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）みどり歯科の資料を探して",
+     "reply": "資料「みどり歯科 機器の保守の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "みどり歯科 機器の保守の資料",
+       "id": "L-a3",
+       "url": "/library/L-a3"
+      }
+     ]
+    }
+   ],
+   "message": "丸山工業の資料も",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-15",
+   "category": "A",
+   "history": [
+    {
+     "message": "青空建設の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「青空建設の資料を探して」",
+       "id": "r-b4",
+       "url": "/runs/r-b4"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）青空建設の資料を探して",
+     "reply": "資料「青空建設 現場の日程の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "青空建設 現場の日程の資料",
+       "id": "L-a4",
+       "url": "/library/L-a4"
+      }
+     ]
+    }
+   ],
+   "message": "ほかにも花村事務所のはある？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-16",
+   "category": "A",
+   "history": [
+    {
+     "message": "北山クリニックの資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「北山クリニックの資料を探して」",
+       "id": "r-b5",
+       "url": "/runs/r-b5"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）北山クリニックの資料を探して",
+     "reply": "資料「北山クリニック 検査機器の見積の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "北山クリニック 検査機器の見積の資料",
+       "id": "L-a5",
+       "url": "/library/L-a5"
+      }
+     ]
+    }
+   ],
+   "message": "小林製作所のも探して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-17",
+   "category": "A",
+   "history": [
+    {
+     "message": "森の木工房の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「森の木工房の資料を探して」",
+       "id": "r-b6",
+       "url": "/runs/r-b6"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）森の木工房の資料を探して",
+     "reply": "資料「森の木工房 展示会の出展の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "森の木工房 展示会の出展の資料",
+       "id": "L-a6",
+       "url": "/library/L-a6"
+      }
+     ]
+    }
+   ],
+   "message": "同じようにひまわり保育園のも",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-18",
+   "category": "A",
+   "history": [
+    {
+     "message": "東和会計の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「東和会計の資料を探して」",
+       "id": "r-b7",
+       "url": "/runs/r-b7"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）東和会計の資料を探して",
+     "reply": "資料「東和会計 決算の資料の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "東和会計 決算の資料の資料",
+       "id": "L-a7",
+       "url": "/library/L-a7"
+      }
+     ]
+    }
+   ],
+   "message": "もう1件、一ツ橋書店の分も",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-19",
+   "category": "A",
+   "history": [
+    {
+     "message": "港町デザインの資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「港町デザインの資料を探して」",
+       "id": "r-b8",
+       "url": "/runs/r-b8"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）港町デザインの資料を探して",
+     "reply": "資料「港町デザイン ロゴの修正の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "港町デザイン ロゴの修正の資料",
+       "id": "L-a8",
+       "url": "/library/L-a8"
+      }
+     ]
+    }
+   ],
+   "message": "中央設備の資料も",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "A-20",
+   "category": "A",
+   "history": [
+    {
+     "message": "川辺印刷の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「川辺印刷の資料を探して」",
+       "id": "r-b9",
+       "url": "/runs/r-b9"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）川辺印刷の資料を探して",
+     "reply": "資料「川辺印刷 チラシの入稿の資料」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "川辺印刷 チラシの入稿の資料",
+       "id": "L-a9",
+       "url": "/library/L-a9"
+      }
+     ]
+    }
+   ],
+   "message": "ほかにもさくら薬局のはある？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "B-01",
+   "category": "B",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-c0",
+       "url": "/runs/r-c0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-a1",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a1"
+      }
+     ]
+    }
+   ],
+   "message": "さっきのメールを開いて",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "https://mail.google.com/mail/u/0/#all/t-a1"
+    ]
+   }
+  },
+  {
+   "id": "B-02",
+   "category": "B",
+   "history": [
+    {
+     "message": "試作工房のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「試作工房のメールを探して」",
+       "id": "r-c1",
+       "url": "/runs/r-c1"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）試作工房のメールを探して",
+     "reply": "1 通ありました。試作工房 の「納期のご相談」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "納期のご相談（試作工房）",
+       "id": "t-a2",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a2"
+      }
+     ]
+    }
+   ],
+   "message": "さっきのメールのリンクをちょうだい",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "https://mail.google.com/mail/u/0/#all/t-a2"
+    ]
+   }
+  },
+  {
+   "id": "B-03",
+   "category": "B",
+   "history": [
+    {
+     "message": "さくら法律事務所のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「さくら法律事務所のメールを探して」",
+       "id": "r-c2",
+       "url": "/runs/r-c2"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）さくら法律事務所のメールを探して",
+     "reply": "1 通ありました。さくら法律事務所 の「契約書の修正案」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "契約書の修正案（さくら法律事務所）",
+       "id": "t-a3",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a3"
+      }
+     ]
+    }
+   ],
+   "message": "先ほどのメール、どこにある？",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "https://mail.google.com/mail/u/0/#all/t-a3"
+    ]
+   }
+  },
+  {
+   "id": "B-04",
+   "category": "B",
+   "history": [
+    {
+     "message": "みどり歯科のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「みどり歯科のメールを探して」",
+       "id": "r-c3",
+       "url": "/runs/r-c3"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）みどり歯科のメールを探して",
+     "reply": "1 通ありました。みどり歯科 の「機器の保守」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "機器の保守（みどり歯科）",
+       "id": "t-a4",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a4"
+      }
+     ]
+    }
+   ],
+   "message": "さっきの見つけたメールをもう一度見せて",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "https://mail.google.com/mail/u/0/#all/t-a4"
+    ]
+   }
+  },
+  {
+   "id": "B-05",
+   "category": "B",
+   "history": [
+    {
+     "message": "青空建設のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「青空建設のメールを探して」",
+       "id": "r-c4",
+       "url": "/runs/r-c4"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）青空建設のメールを探して",
+     "reply": "1 通ありました。青空建設 の「現場の日程」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "現場の日程（青空建設）",
+       "id": "t-a5",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a5"
+      }
+     ]
+    }
+   ],
+   "message": "そのメールを開きたい",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "https://mail.google.com/mail/u/0/#all/t-a5"
+    ]
+   }
+  },
+  {
+   "id": "B-06",
+   "category": "B",
+   "history": [
+    {
+     "message": "北山クリニックのメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「北山クリニックのメールを探して」",
+       "id": "r-c5",
+       "url": "/runs/r-c5"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）北山クリニックのメールを探して",
+     "reply": "1 通ありました。北山クリニック の「検査機器の見積」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "検査機器の見積（北山クリニック）",
+       "id": "t-a6",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a6"
+      }
+     ]
+    }
+   ],
+   "message": "さっきのメールのリンク",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "https://mail.google.com/mail/u/0/#all/t-a6"
+    ]
+   }
+  },
+  {
+   "id": "B-07",
+   "category": "B",
+   "history": [
+    {
+     "message": "森の木工房のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「森の木工房のメールを探して」",
+       "id": "r-c6",
+       "url": "/runs/r-c6"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）森の木工房のメールを探して",
+     "reply": "1 通ありました。森の木工房 の「展示会の出展」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "展示会の出展（森の木工房）",
+       "id": "t-a7",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a7"
+      }
+     ]
+    }
+   ],
+   "message": "先ほどのメールを開いて",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "https://mail.google.com/mail/u/0/#all/t-a7"
+    ]
+   }
+  },
+  {
+   "id": "B-08",
+   "category": "B",
+   "history": [
+    {
+     "message": "東和会計のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「東和会計のメールを探して」",
+       "id": "r-c7",
+       "url": "/runs/r-c7"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）東和会計のメールを探して",
+     "reply": "1 通ありました。東和会計 の「決算の資料」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "決算の資料（東和会計）",
+       "id": "t-a8",
+       "url": "https://mail.google.com/mail/u/0/#all/t-a8"
+      }
+     ]
+    }
+   ],
+   "message": "さっきのメール、開ける？",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "https://mail.google.com/mail/u/0/#all/t-a8"
+    ]
+   }
+  },
+  {
+   "id": "B-09",
+   "category": "B",
+   "history": [
+    {
+     "message": "見本商事の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事の資料を探して」",
+       "id": "r-d0",
+       "url": "/runs/r-d0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事の資料を探して",
+     "reply": "資料「見本商事の見積のご確認」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "見本商事の見積のご確認",
+       "id": "L-b0",
+       "url": "/library/L-b0"
+      }
+     ]
+    }
+   ],
+   "message": "さっきの資料を開いて",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "/library/L-b0"
+    ]
+   }
+  },
+  {
+   "id": "B-10",
+   "category": "B",
+   "history": [
+    {
+     "message": "試作工房の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「試作工房の資料を探して」",
+       "id": "r-d1",
+       "url": "/runs/r-d1"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）試作工房の資料を探して",
+     "reply": "資料「試作工房の納期のご相談」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "試作工房の納期のご相談",
+       "id": "L-b1",
+       "url": "/library/L-b1"
+      }
+     ]
+    }
+   ],
+   "message": "その資料のリンクを",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "/library/L-b1"
+    ]
+   }
+  },
+  {
+   "id": "B-11",
+   "category": "B",
+   "history": [
+    {
+     "message": "さくら法律事務所の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「さくら法律事務所の資料を探して」",
+       "id": "r-d2",
+       "url": "/runs/r-d2"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）さくら法律事務所の資料を探して",
+     "reply": "資料「さくら法律事務所の契約書の修正案」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "さくら法律事務所の契約書の修正案",
+       "id": "L-b2",
+       "url": "/library/L-b2"
+      }
+     ]
+    }
+   ],
+   "message": "先ほどの資料はどこ？",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "/library/L-b2"
+    ]
+   }
+  },
+  {
+   "id": "B-12",
+   "category": "B",
+   "history": [
+    {
+     "message": "みどり歯科の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「みどり歯科の資料を探して」",
+       "id": "r-d3",
+       "url": "/runs/r-d3"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）みどり歯科の資料を探して",
+     "reply": "資料「みどり歯科の機器の保守」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "みどり歯科の機器の保守",
+       "id": "L-b3",
+       "url": "/library/L-b3"
+      }
+     ]
+    }
+   ],
+   "message": "さっきの資料、もう一度",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "/library/L-b3"
+    ]
+   }
+  },
+  {
+   "id": "B-13",
+   "category": "B",
+   "history": [
+    {
+     "message": "青空建設の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「青空建設の資料を探して」",
+       "id": "r-d4",
+       "url": "/runs/r-d4"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）青空建設の資料を探して",
+     "reply": "資料「青空建設の現場の日程」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "青空建設の現場の日程",
+       "id": "L-b4",
+       "url": "/library/L-b4"
+      }
+     ]
+    }
+   ],
+   "message": "さっき見つけた資料を開きたい",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "/library/L-b4"
+    ]
+   }
+  },
+  {
+   "id": "B-14",
+   "category": "B",
+   "history": [
+    {
+     "message": "北山クリニックの資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「北山クリニックの資料を探して」",
+       "id": "r-d5",
+       "url": "/runs/r-d5"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）北山クリニックの資料を探して",
+     "reply": "資料「北山クリニックの検査機器の見積」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "北山クリニックの検査機器の見積",
+       "id": "L-b5",
+       "url": "/library/L-b5"
+      }
+     ]
+    }
+   ],
+   "message": "その資料を見せて",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "/library/L-b5"
+    ]
+   }
+  },
+  {
+   "id": "B-15",
+   "category": "B",
+   "history": [
+    {
+     "message": "森の木工房の資料を探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「森の木工房の資料を探して」",
+       "id": "r-d6",
+       "url": "/runs/r-d6"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）森の木工房の資料を探して",
+     "reply": "資料「森の木工房の展示会の出展」が見つかりました",
+     "mentions": [
+      {
+       "kind": "library",
+       "title": "森の木工房の展示会の出展",
+       "id": "L-b6",
+       "url": "/library/L-b6"
+      }
+     ]
+    }
+   ],
+   "message": "先ほど見つけた資料のリンク",
+   "expect": {
+    "route": "none",
+    "answerContains": [
+     "/library/L-b6"
+    ]
+   }
+  },
+  {
+   "id": "C-01",
+   "category": "C",
+   "history": [
+    {
+     "message": "就業規則の改定案を作って",
+     "reply": "担当の業務「文書の作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "文書の作成「就業規則の改定案を作って」",
+       "id": "r-e0",
+       "url": "/runs/r-e0"
+      }
+     ],
+     "weekday": "月曜日"
+    }
+   ],
+   "message": "月曜日に頼んだ仕事はどうなった？",
+   "expect": {
+    "route": "none",
+    "weekday": "月曜日",
+    "answerContains": [
+     "就業規則の改"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-02",
+   "category": "C",
+   "history": [
+    {
+     "message": "新サービスの説明のスライドを作って",
+     "reply": "担当の業務「スライドの作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "スライドの作成「新サービスの説明のスライドを作って」",
+       "id": "r-e1",
+       "url": "/runs/r-e1"
+      }
+     ],
+     "weekday": "火曜日"
+    }
+   ],
+   "message": "火曜日にお願いした件、終わってる？",
+   "expect": {
+    "route": "none",
+    "weekday": "火曜日",
+    "answerContains": [
+     "新サービスの"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-03",
+   "category": "C",
+   "history": [
+    {
+     "message": "見本商事向けの見積書を作って",
+     "reply": "担当の業務「見積書の作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "見積書の作成「見本商事向けの見積書を作って」",
+       "id": "r-e2",
+       "url": "/runs/r-e2"
+      }
+     ],
+     "weekday": "水曜日"
+    }
+   ],
+   "message": "水曜日に頼んだ資料はできた？",
+   "expect": {
+    "route": "none",
+    "weekday": "水曜日",
+    "answerContains": [
+     "見本商事向け"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-04",
+   "category": "C",
+   "history": [
+    {
+     "message": "青空建設と打ち合わせの日程を調整して",
+     "reply": "担当の業務「日程調整」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "日程調整「青空建設と打ち合わせの日程を調整して」",
+       "id": "r-e3",
+       "url": "/runs/r-e3"
+      }
+     ],
+     "weekday": "木曜日"
+    }
+   ],
+   "message": "木曜日の依頼の結果を教えて",
+   "expect": {
+    "route": "none",
+    "weekday": "木曜日",
+    "answerContains": [
+     "青空建設と打"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-05",
+   "category": "C",
+   "history": [
+    {
+     "message": "補助金の締め切りを調べて",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「補助金の締め切りを調べて」",
+       "id": "r-e4",
+       "url": "/runs/r-e4"
+      }
+     ],
+     "weekday": "金曜日"
+    }
+   ],
+   "message": "金曜日に頼んだもの、どうなりました？",
+   "expect": {
+    "route": "none",
+    "weekday": "金曜日",
+    "answerContains": [
+     "補助金の締め"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-06",
+   "category": "C",
+   "history": [
+    {
+     "message": "来月のシフト表を作って",
+     "reply": "担当の業務「表の作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "表の作成「来月のシフト表を作って」",
+       "id": "r-e5",
+       "url": "/runs/r-e5"
+      }
+     ],
+     "weekday": "月曜日"
+    }
+   ],
+   "message": "月曜日に頼んだ仕事はどうなった？",
+   "expect": {
+    "route": "none",
+    "weekday": "月曜日",
+    "answerContains": [
+     "来月のシフト"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-07",
+   "category": "C",
+   "history": [
+    {
+     "message": "定例会の議事録を作って",
+     "reply": "担当の業務「議事録の作成・共有」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "議事録の作成・共有「定例会の議事録を作って」",
+       "id": "r-e6",
+       "url": "/runs/r-e6"
+      }
+     ],
+     "weekday": "火曜日"
+    }
+   ],
+   "message": "火曜日にお願いした件、終わってる？",
+   "expect": {
+    "route": "none",
+    "weekday": "火曜日",
+    "answerContains": [
+     "定例会の議事"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-08",
+   "category": "C",
+   "history": [
+    {
+     "message": "お客様へのお詫び文を作って",
+     "reply": "担当の業務「文書の作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "文書の作成「お客様へのお詫び文を作って」",
+       "id": "r-e7",
+       "url": "/runs/r-e7"
+      }
+     ],
+     "weekday": "水曜日"
+    }
+   ],
+   "message": "水曜日に頼んだ資料はできた？",
+   "expect": {
+    "route": "none",
+    "weekday": "水曜日",
+    "answerContains": [
+     "お客様へのお"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-09",
+   "category": "C",
+   "history": [
+    {
+     "message": "展示会の会場の行き方を調べて",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「展示会の会場の行き方を調べて」",
+       "id": "r-e8",
+       "url": "/runs/r-e8"
+      }
+     ],
+     "weekday": "木曜日"
+    }
+   ],
+   "message": "木曜日の依頼の結果を教えて",
+   "expect": {
+    "route": "none",
+    "weekday": "木曜日",
+    "answerContains": [
+     "展示会の会場"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-10",
+   "category": "C",
+   "history": [
+    {
+     "message": "採用説明会のスライドを作って",
+     "reply": "担当の業務「スライドの作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "スライドの作成「採用説明会のスライドを作って」",
+       "id": "r-e9",
+       "url": "/runs/r-e9"
+      }
+     ],
+     "weekday": "金曜日"
+    }
+   ],
+   "message": "金曜日に頼んだもの、どうなりました？",
+   "expect": {
+    "route": "none",
+    "weekday": "金曜日",
+    "answerContains": [
+     "採用説明会の"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-11",
+   "category": "C",
+   "history": [
+    {
+     "message": "契約更新のご案内を作って",
+     "reply": "担当の業務「文書の作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "文書の作成「契約更新のご案内を作って」",
+       "id": "r-e10",
+       "url": "/runs/r-e10"
+      }
+     ],
+     "weekday": "月曜日"
+    }
+   ],
+   "message": "月曜日に頼んだ仕事はどうなった？",
+   "expect": {
+    "route": "none",
+    "weekday": "月曜日",
+    "answerContains": [
+     "契約更新のご"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-12",
+   "category": "C",
+   "history": [
+    {
+     "message": "機器の保守会社の連絡先を調べて",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「機器の保守会社の連絡先を調べて」",
+       "id": "r-e11",
+       "url": "/runs/r-e11"
+      }
+     ],
+     "weekday": "火曜日"
+    }
+   ],
+   "message": "火曜日にお願いした件、終わってる？",
+   "expect": {
+    "route": "none",
+    "weekday": "火曜日",
+    "answerContains": [
+     "機器の保守会"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-13",
+   "category": "C",
+   "history": [
+    {
+     "message": "試作工房向けの見積書を作って",
+     "reply": "担当の業務「見積書の作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "見積書の作成「試作工房向けの見積書を作って」",
+       "id": "r-e12",
+       "url": "/runs/r-e12"
+      }
+     ],
+     "weekday": "水曜日"
+    }
+   ],
+   "message": "水曜日に頼んだ資料はできた？",
+   "expect": {
+    "route": "none",
+    "weekday": "水曜日",
+    "answerContains": [
+     "試作工房向け"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-14",
+   "category": "C",
+   "history": [
+    {
+     "message": "在庫の棚卸し表を作って",
+     "reply": "担当の業務「表の作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "表の作成「在庫の棚卸し表を作って」",
+       "id": "r-e13",
+       "url": "/runs/r-e13"
+      }
+     ],
+     "weekday": "木曜日"
+    }
+   ],
+   "message": "木曜日の依頼の結果を教えて",
+   "expect": {
+    "route": "none",
+    "weekday": "木曜日",
+    "answerContains": [
+     "在庫の棚卸し"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "C-15",
+   "category": "C",
+   "history": [
+    {
+     "message": "院内の掲示文を作って",
+     "reply": "担当の業務「文書の作成」に頼みました。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "文書の作成「院内の掲示文を作って」",
+       "id": "r-e14",
+       "url": "/runs/r-e14"
+      }
+     ],
+     "weekday": "金曜日"
+    }
+   ],
+   "message": "金曜日に頼んだもの、どうなりました？",
+   "expect": {
+    "route": "none",
+    "weekday": "金曜日",
+    "answerContains": [
+     "院内の掲示文"
+    ]
+   },
+   "note": "history の weekday は、その曜日のやり取りとして置く"
+  },
+  {
+   "id": "D-01",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "library",
+    "label": "ナレッジの整理",
+    "item": {
+     "kind": "資料",
+     "id": "L-s1",
+     "title": "保守契約書（青空建設）"
+    }
+   },
+   "message": "この資料の要点は？",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "L-s1"
+    ]
+   }
+  },
+  {
+   "id": "D-02",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "library",
+    "label": "ナレッジの整理",
+    "item": {
+     "kind": "資料",
+     "id": "L-s2",
+     "title": "就業規則 2026 年版"
+    }
+   },
+   "message": "これの期限はいつ？",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "L-s2"
+    ]
+   }
+  },
+  {
+   "id": "D-03",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "library",
+    "label": "ナレッジの整理",
+    "item": {
+     "kind": "資料",
+     "id": "L-s3",
+     "title": "見積書（見本商事）"
+    }
+   },
+   "message": "この契約の解約の条件は？",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "L-s3"
+    ]
+   }
+  },
+  {
+   "id": "D-04",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "library",
+    "label": "ナレッジの整理",
+    "item": {
+     "kind": "資料",
+     "id": "L-s4",
+     "title": "院内感染対策マニュアル"
+    }
+   },
+   "message": "これを短くまとめて",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "L-s4"
+    ]
+   }
+  },
+  {
+   "id": "D-05",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "library",
+    "label": "ナレッジの整理",
+    "item": {
+     "kind": "資料",
+     "id": "L-s5",
+     "title": "展示会の出展規約"
+    }
+   },
+   "message": "この資料に似たものを探して",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "L-s5"
+    ]
+   }
+  },
+  {
+   "id": "D-06",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "library",
+    "label": "ナレッジの整理",
+    "item": {
+     "kind": "資料",
+     "id": "L-s6",
+     "title": "顧問契約書"
+    }
+   },
+   "message": "この資料の相手は誰？",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "L-s6"
+    ]
+   }
+  },
+  {
+   "id": "D-07",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "library",
+    "label": "ナレッジの整理",
+    "item": {
+     "kind": "資料",
+     "id": "L-s7",
+     "title": "製品カタログ"
+    }
+   },
+   "message": "これの更新日は？",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "L-s7"
+    ]
+   }
+  },
+  {
+   "id": "D-08",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "library",
+    "label": "ナレッジの整理",
+    "item": {
+     "kind": "資料",
+     "id": "L-s8",
+     "title": "業務委託契約書"
+    }
+   },
+   "message": "この資料の金額を教えて",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "L-s8"
+    ]
+   }
+  },
+  {
+   "id": "D-09",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "mail",
+    "label": "メール",
+    "item": {
+     "kind": "mail",
+     "id": "t-s1",
+     "title": "ご注文の確認"
+    }
+   },
+   "message": "このメールに関係する資料を探して",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "t-s1"
+    ]
+   }
+  },
+  {
+   "id": "D-10",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "mail",
+    "label": "メール",
+    "item": {
+     "kind": "mail",
+     "id": "t-s2",
+     "title": "打ち合わせの候補日"
+    }
+   },
+   "message": "この相手との前のやり取りを探して",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "t-s2"
+    ]
+   }
+  },
+  {
+   "id": "D-11",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "mail",
+    "label": "メール",
+    "item": {
+     "kind": "mail",
+     "id": "t-s3",
+     "title": "請求書の再発行のお願い"
+    }
+   },
+   "message": "このメールの添付の資料はある？",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "t-s3"
+    ]
+   }
+  },
+  {
+   "id": "D-12",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "mail",
+    "label": "メール",
+    "item": {
+     "kind": "mail",
+     "id": "t-s4",
+     "title": "採用面接の日程"
+    }
+   },
+   "message": "このメールの件、前にも話した？",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "t-s4"
+    ]
+   }
+  },
+  {
+   "id": "D-13",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "mail",
+    "label": "メール",
+    "item": {
+     "kind": "mail",
+     "id": "t-s5",
+     "title": "施工の写真"
+    }
+   },
+   "message": "この相手の名刺はある？",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "t-s5"
+    ]
+   }
+  },
+  {
+   "id": "D-14",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "mail",
+    "label": "メール",
+    "item": {
+     "kind": "mail",
+     "id": "t-s6",
+     "title": "予約の変更のお願い"
+    }
+   },
+   "message": "このメールに似たものを探して",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "t-s6"
+    ]
+   }
+  },
+  {
+   "id": "D-15",
+   "category": "D",
+   "history": [],
+   "screen": {
+    "view": "mail",
+    "label": "メール",
+    "item": {
+     "kind": "mail",
+     "id": "t-s7",
+     "title": "見積の再提出"
+    }
+   },
+   "message": "この件の前のメールを探して",
+   "expect": {
+    "route": "secretary-lookup",
+    "contextContains": [
+     "t-s7"
+    ]
+   }
+  },
+  {
+   "id": "E-01",
+   "category": "E",
+   "history": [],
+   "message": "有給休暇は何日前までに申請すればいい？",
+   "expect": {
+    "route": "none"
+   },
+   "note": "会社の規程の質問。秘書が規程から答える"
+  },
+  {
+   "id": "E-02",
+   "category": "E",
+   "history": [],
+   "message": "出張の日当はいくら？",
+   "expect": {
+    "route": "none"
+   },
+   "note": "会社の規程の質問。秘書が規程から答える"
+  },
+  {
+   "id": "E-03",
+   "category": "E",
+   "history": [],
+   "message": "経費の精算の締め日は？",
+   "expect": {
+    "route": "none"
+   },
+   "note": "会社の規程の質問。秘書が規程から答える"
+  },
+  {
+   "id": "E-04",
+   "category": "E",
+   "history": [],
+   "message": "慶弔休暇の日数は？",
+   "expect": {
+    "route": "none"
+   },
+   "note": "会社の規程の質問。秘書が規程から答える"
+  },
+  {
+   "id": "E-05",
+   "category": "E",
+   "history": [],
+   "message": "在宅勤務のルールを教えて",
+   "expect": {
+    "route": "none"
+   },
+   "note": "会社の規程の質問。秘書が規程から答える"
+  },
+  {
+   "id": "E-06",
+   "category": "E",
+   "history": [],
+   "message": "去年の保守契約書を出して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-07",
+   "category": "E",
+   "history": [],
+   "message": "見本商事との見積のメールを探して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-08",
+   "category": "E",
+   "history": [],
+   "message": "青空建設とのやり取りで決まった納期は？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-09",
+   "category": "E",
+   "history": [],
+   "message": "先月もらった請求書の資料はどこ？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-10",
+   "category": "E",
+   "history": [],
+   "message": "試作工房から来た図面を探して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-11",
+   "category": "E",
+   "history": [],
+   "message": "明日の大阪の天気は？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-12",
+   "category": "E",
+   "history": [],
+   "message": "新幹線の東京から新大阪の最終は何時？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-13",
+   "category": "E",
+   "history": [],
+   "message": "今年の最低賃金の改定はいつから？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-14",
+   "category": "E",
+   "history": [],
+   "message": "IT 導入補助金の今年の締め切りは？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-15",
+   "category": "E",
+   "history": [],
+   "message": "近くの郵便局の営業時間は？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "E-16",
+   "category": "E",
+   "history": [],
+   "message": "取引先へのお礼状を作って",
+   "expect": {
+    "route": "document-draft"
+   }
+  },
+  {
+   "id": "E-17",
+   "category": "E",
+   "history": [],
+   "message": "新サービスの説明のスライドを作って",
+   "expect": {
+    "route": "slides"
+   }
+  },
+  {
+   "id": "E-18",
+   "category": "E",
+   "history": [],
+   "message": "見本商事向けに見積書を作って",
+   "expect": {
+    "route": "quote"
+   }
+  },
+  {
+   "id": "E-19",
+   "category": "E",
+   "history": [],
+   "message": "来週の打ち合わせの日程を山田さんと調整して",
+   "expect": {
+    "route": "scheduling"
+   }
+  },
+  {
+   "id": "E-20",
+   "category": "E",
+   "history": [],
+   "message": "来月の勤務表を表で作って",
+   "expect": {
+    "route": "sheet-builder"
+   }
+  },
+  {
+   "id": "F-01",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "今日の予定は？",
+   "expect": {
+    "route": "direct:calendar-range"
+   }
+  },
+  {
+   "id": "F-02",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "承認待ちはある？",
+   "expect": {
+    "route": "direct:pending-approvals"
+   }
+  },
+  {
+   "id": "F-03",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "文字を大きくして",
+   "expect": {
+    "route": "direct:text-size"
+   }
+  },
+  {
+   "id": "F-04",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "就業規則の有給の条文を教えて",
+   "expect": {
+    "route": "none"
+   }
+  },
+  {
+   "id": "F-05",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "お礼状を作って",
+   "expect": {
+    "route": "document-draft"
+   }
+  },
+  {
+   "id": "F-06",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "明日の天気は？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "F-07",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "来週の会議の日程を佐藤さんと調整して",
+   "expect": {
+    "route": "scheduling"
+   }
+  },
+  {
+   "id": "F-08",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "やることの一覧は？",
+   "expect": {
+    "route": "direct:tasks-today"
+   }
+  },
+  {
+   "id": "F-09",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "新しい案内のスライドを作って",
+   "expect": {
+    "route": "slides"
+   }
+  },
+  {
+   "id": "F-10",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "経費の締め日は？",
+   "expect": {
+    "route": "none"
+   }
+  },
+  {
+   "id": "F-11",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "今週の予定を見せて",
+   "expect": {
+    "route": "direct:calendar-range"
+   }
+  },
+  {
+   "id": "F-12",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "取引先への年末のご挨拶を作って",
+   "expect": {
+    "route": "document-draft"
+   }
+  },
+  {
+   "id": "F-13",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "見積書を作って、相手は試作工房",
+   "expect": {
+    "route": "quote"
+   }
+  },
+  {
+   "id": "F-14",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "在宅勤務の規程は？",
+   "expect": {
+    "route": "none"
+   }
+  },
+  {
+   "id": "F-15",
+   "category": "F",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-f0",
+       "url": "/runs/r-f0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-f0",
+       "url": "https://mail.google.com/mail/u/0/#all/t-f0"
+      }
+     ]
+    }
+   ],
+   "message": "ToDo は何がある？",
+   "expect": {
+    "route": "direct:tasks-today"
+   }
+  }
+ ]
+}

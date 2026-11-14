@@ -1358,10 +1358,10 @@ export class PostgresRepository implements Repository {
   async appendConversation(c: Conversation): Promise<void> {
     await this.q(c.tenantId,
       `insert into conversations
-         (id, tenant_id, user_id, message, reply, layer, agent_id, run_id, search_text, created_at, channel)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+         (id, tenant_id, user_id, message, reply, layer, agent_id, run_id, search_text, created_at, channel, mentions)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
       [c.id, c.tenantId, c.userId, c.message, c.reply, c.layer, c.agentId, c.runId,
-        normalizeForSearch(`${c.message} ${c.reply}`), c.createdAt, c.channel ?? null]);
+        normalizeForSearch(`${c.message} ${c.reply}`), c.createdAt, c.channel ?? null, JSON.stringify(c.mentions ?? [])]);
   }
 
   async listConversations(
@@ -1371,7 +1371,7 @@ export class PostgresRepository implements Repository {
     const like = `%${escapeLike(normalizeForSearch(query))}%`;
     return this.q<Conversation>(tenantId,
       `select id, tenant_id as "tenantId", user_id as "userId", message, reply, layer,
-              agent_id as "agentId", run_id as "runId", created_at as "createdAt"
+              agent_id as "agentId", run_id as "runId", created_at as "createdAt", mentions
          from conversations
         where tenant_id = $1 and user_id = $2 and ($3 = '' or search_text like $4 escape '\\')
         order by created_at desc limit $5`,
@@ -1417,11 +1417,33 @@ export class PostgresRepository implements Repository {
   ): Promise<Conversation[]> {
     return this.q<Conversation>(tenantId,
       `select id, tenant_id as "tenantId", user_id as "userId", message, reply, layer,
-              agent_id as "agentId", run_id as "runId", created_at as "createdAt"
+              agent_id as "agentId", run_id as "runId", created_at as "createdAt", mentions
          from conversations
         where tenant_id = $1 and user_id = $2 and created_at >= $3 and created_at < $4
         order by created_at`,
       [tenantId, userId, day.from, day.to]);
+  }
+
+  async listConversationDays(tenantId: string, userId: string, since: string): Promise<string[]> {
+    const rows = await this.q<{ day: string }>(tenantId,
+      `select distinct to_char(created_at at time zone 'Asia/Tokyo', 'YYYY-MM-DD') as day
+         from conversations
+        where tenant_id = $1 and user_id = $2 and created_at >= $3
+        order by day desc`,
+      [tenantId, userId, since]);
+    return rows.map((r) => r.day);
+  }
+
+  async listConversationsBetween(
+    tenantId: string, userId: string, from: string, to: string, chars: number,
+  ): Promise<Conversation[]> {
+    return this.q<Conversation>(tenantId,
+      `select id, tenant_id as "tenantId", user_id as "userId", left(message, $5) as message, left(reply, $5) as reply, layer,
+              agent_id as "agentId", run_id as "runId", created_at as "createdAt", mentions
+         from conversations
+        where tenant_id = $1 and user_id = $2 and created_at >= $3 and created_at < $4
+        order by created_at`,
+      [tenantId, userId, from, to, chars]);
   }
 
   async getConversation(tenantId: string, id: string): Promise<Conversation | null> {

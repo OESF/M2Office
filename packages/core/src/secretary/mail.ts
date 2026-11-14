@@ -15,6 +15,18 @@ const WRITES = /下書き|返信して|送って|送信|転送|作って|起案|
 const OTHER_WORK = /返信待ち|催促|送ったメール/;
 /** 人の連絡先を尋ねる言葉（名刺を探す問い。第27.9節）。 */
 const CONTACT = /メールアドレス|メアド|アドレス|連絡先/;
+/** 探す言い回し（「〇〇のメールを探して」「あのメールどこ？」。第10.9.6節「メールを探す」）。未読の件数の問いではない。 */
+export const MAIL_SEARCH = /探して|探す|探し|検索|見つけ|どこ(に|だ|で|か|\?|？|$)|出して|あったはず/;
+
+/**
+ * メールを探す依頼か（第10.9.6節「メールを探す」）。秘書の調べものが、Gmail とナレッジの整理（メールのやり取りの要約）の両方を探す。
+ *
+ * @returns 探す依頼なら `true`。書く依頼・連絡先の問い・返信待ちは `false`
+ */
+export function mailSearchRequest(message: string): boolean {
+  const m = message.trim();
+  return MAIL.test(m) && MAIL_SEARCH.test(m) && !WRITES.test(m) && !CONTACT.test(m) && !OTHER_WORK.test(m);
+}
 
 /**
  * メールの確認の依頼か。

@@ -525,6 +525,8 @@ function ConversationSettings({ settings, onChange, onSave }: {
           onChange={(e) => onChange({ ...settings.memory, keepConversations: e.target.checked })} />
         会話を残す
       </label>
+      {/* 切っているときだけ示す（仕様書 第10.7.4.1節、Q-366）。1 週間の記憶を作らない */}
+      {!settings.memory.keepConversations && <p className="muted small">切っている間、秘書はその日のことしか覚えていられません</p>}
       <div className="row">
         <SaveButton run={onSave} />
       </div>
@@ -552,6 +554,17 @@ function ConversationSettings({ settings, onChange, onSave }: {
                 <td>
                   <div>{c.message}</div>
                   <div className="muted small">{c.reply.slice(0, 120)}{c.reply.length > 120 ? '…' : ''}</div>
+                  {/* 話に出たもの（第10.7.4.1節）。秘書が「さっきの」をたどるのに使う。このやり取りを削除すれば一緒に消える */}
+                  {(c.mentions?.length ?? 0) > 0 && (
+                    <div className="muted small conversation-mentions">
+                      話に出たもの: {c.mentions!.slice(0, 5).map((m, i) => (
+                        <span key={`${m.kind}:${m.id ?? i}`}>
+                          {i > 0 && '、'}
+                          {m.url ? <a href={m.url} target={m.url.startsWith('/') ? undefined : '_blank'} rel="noreferrer">{m.title}</a> : m.title}
+                        </span>
+                      ))}{c.mentions!.length > 5 ? ` ほか ${c.mentions!.length - 5} 件` : ''}
+                    </div>
+                  )}
                   <div className="muted small">{new Date(c.createdAt).toLocaleString('ja-JP')}</div>
                 </td>
                 <td className="num">

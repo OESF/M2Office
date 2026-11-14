@@ -966,6 +966,8 @@ export interface PromotionView {
 export interface ConversationView {
   id: string; message: string; reply: string; layer: 'direct' | 'light' | 'full';
   agentId: string | null; runId: string | null; createdAt: string;
+  /** このやり取りで話に出たもの（見つけたメール・資料・頼んだ業務など。仕様書 第10.7.4.1節）。会話と一緒に消える。 */
+  mentions?: { kind: string; title: string; id?: string; url?: string }[];
 }
 
 /** 個人記憶の 1 件（仕様書 第11.5.1節）。 */
@@ -3307,13 +3309,33 @@ export const api = {
   claimLookups: () => call<{ items: Lookup[] }>('/secretary/lookups/claim', { method: 'POST' }),
   /** 最初の画面で秘書が話しかける一言（仕様書 第6.1.5節）。 */
   secretaryHome: () => call<SecretaryHome>('/secretary/home'),
-  /** 秘書に聞く。手元のファイルを 5 つまで添えられる（仕様書 第10.10節）。 */
+  /**
+   * 秘書に聞く。手元のファイルを 5 つまで添えられる（仕様書 第10.10節）。
+   * 開いている画面と 1 件（{@link setSecretaryScreen}）を添える（第10.7.4.3節。種類と ID だけ）。
+   */
   ask: (message: string, fileIds: string[] = []) =>
     call<SecretaryReply>('/secretary', {
       method: 'POST',
-      body: JSON.stringify({ message, ...(fileIds.length ? { fileIds } : {}) }),
+      body: JSON.stringify({ message, ...(fileIds.length ? { fileIds } : {}), ...(secretaryScreen ? { screen: secretaryScreen } : {}) }),
     }),
 };
+
+/** 秘書に添える、開いている画面と 1 件（仕様書 第10.7.4.3節）。中身は送らず、種類と ID だけ。 */
+export interface SecretaryScreen {
+  /** 画面の種類（`library`・`mail` など）。 */
+  view: string;
+  /** 画面の名前。 */
+  label?: string;
+  /** 開いている 1 件。 */
+  item?: { kind: string; id: string };
+}
+
+let secretaryScreen: SecretaryScreen | null = null;
+
+/** 開いている画面を覚える。画面が変わるたびに呼ぶ。秘書に頼むときに添える（第10.7.4.3節）。 */
+export function setSecretaryScreen(screen: SecretaryScreen | null): void {
+  secretaryScreen = screen;
+}
 
 /** 今月の AI の利用と上限（管理者ページの利用状況。仕様書 第6.6.2節）。 */
 export interface AiUsageView {

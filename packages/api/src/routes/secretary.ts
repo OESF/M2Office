@@ -9,8 +9,8 @@
  */
 
 import { Hono } from 'hono';
-import { SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, SECRETARY_MESSAGE_TOO_LONG, type RequestContext } from '@m2office/shared';
-import { homeBriefPrompt, parseHomeBrief, pickSome, secretaryExamples, HOME_SUGGESTIONS_MAX, type HomeBrief } from '@m2office/core';
+import { SECRETARY_FILES_MAX, SECRETARY_MESSAGE_MAX, SECRETARY_MESSAGE_TOO_LONG, libraryTitleOf, type RequestContext } from '@m2office/shared';
+import { homeBriefPrompt, parseHomeBrief, pickSome, secretaryExamples, HOME_SUGGESTIONS_MAX, type HomeBrief, type ScreenContext } from '@m2office/core';
 import { claimUntold, listLookups } from '../secretary/lookups.js';
 import { homeFacts } from '../secretary/facts.js';
 import { personaLines } from '../voice/persona.js';
@@ -37,7 +37,7 @@ export function secretaryRoute(deps: AppDeps) {
 
   app.post('/', async (c) => {
     const ctx = c.get('ctx');
-    const { message, fileId, fileIds } = await c.req.json<{ message: string; fileId?: string; fileIds?: unknown }>();
+    const { message, fileId, fileIds, screen: rawScreen } = await c.req.json<{ message: string; fileId?: string; fileIds?: unknown; screen?: unknown }>();
     // いくつものファイル（第10.10.7節）。文字の ID だけを受け取り、多すぎれば断る
     const files = [...(Array.isArray(fileIds) ? fileIds.filter((f): f is string => typeof f === 'string' && !!f.trim()) : []), ...(fileId?.trim() ? [fileId.trim()] : [])];
     if (files.length > SECRETARY_FILES_MAX) return c.json({ error: `一度に渡せるファイルは ${SECRETARY_FILES_MAX} つまでです` }, 400);
@@ -50,7 +50,9 @@ export function secretaryRoute(deps: AppDeps) {
     // デバッグモードでは、依頼と答えを記録に残す（仕様書 第20.4.1節「デバッグモード」）。振り分けの経過はその間に秘書が足す
     deps.debug?.add(ctx.tenant.id, ctx.user.id, 'secretary', `文字の依頼: ${message}`, { message, fileIds: files });
     // ファイルは本人が上げたものだけを読む。他人の ID を書いても読まない（仕様書 第10.10.2節）
-    const reply = await deps.secretary.respond(ctx.tenant.id, ctx.user.id, message, files.length > 1 ? files : files[0]);
+    // 開いている画面と 1 件（第10.7.4.3節）。種類と ID だけを受け取り、題名は本人に見えるものだけをここで引く
+    const screen = await screenOf(deps, ctx.tenant.id, ctx.user.id, rawScreen);
+    const reply = await deps.secretary.respond(ctx.tenant.id, ctx.user.id, message, files.length > 1 ? files : files[0], screen ? { screen } : {});
     deps.debug?.add(ctx.tenant.id, ctx.user.id, 'secretary', `秘書の答え（${reply.layer}・${Date.now() - started} ms）: ${reply.text}`, reply);
     return c.json({ ...reply, elapsedMs: Date.now() - started });
   });
@@ -150,4 +152,34 @@ export function secretaryRoute(deps: AppDeps) {
 async function agentNames(deps: AppDeps, tenantId: string): Promise<(agentId: string) => string | undefined> {
   const view = await deps.tenantView(tenantId);
   return (agentId) => view.agents.find((a) => a.id === agentId)?.name;
+}
+
+/** 画面の種類・1 件の ID として受け取る文字（URL の中の ID と同じ範囲）。 */
+const SCREEN_TOKEN = /^[A-Za-z0-9._:-]{1,120}$/;
+
+/**
+ * 画面が添えた「開いている画面」を確かめる（仕様書 第10.7.4.3節）。
+ *
+ * @returns 形の正しいものだけ。資料は本人の資料なら題名を引く。それ以外の 1 件は種類と ID だけ
+ * @remarks 中身（本文）は受け取らない。題名は画面の言うことを信じず、ここで引く
+ */
+async function screenOf(deps: AppDeps, tenantId: string, userId: string, raw: unknown): Promise<ScreenContext | null> {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as { view?: unknown; label?: unknown; item?: { kind?: unknown; id?: unknown } | null };
+  const view = typeof r.view === 'string' && SCREEN_TOKEN.test(r.view) ? r.view : null;
+  if (!view) return null;
+  const label = typeof r.label === 'string' ? r.label.replace(/[\r\n]/g, ' ').slice(0, 40) : undefined;
+  const kind = typeof r.item?.kind === 'string' && SCREEN_TOKEN.test(r.item.kind) ? r.item.kind : null;
+  const id = typeof r.item?.id === 'string' && SCREEN_TOKEN.test(r.item.id) ? r.item.id : null;
+  let item: ScreenContext['item'];
+  if (kind && id) {
+    if (kind === 'library') {
+      const found = await Promise.resolve().then(() => deps.library.service.get({ tenantId, userId }, id)).catch(() => null);
+      // 本人の資料なら題名を添える。共有された資料は種類と ID だけ（調べものが資料を読むときに本人に見えるかを確かめる）
+      item = found ? { kind: '資料', id, title: libraryTitleOf(found) } : { kind: '資料', id };
+    } else {
+      item = { kind, id };
+    }
+  }
+  return { view, ...(label ? { label } : {}), ...(item ? { item } : {}) };
 }

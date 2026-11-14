@@ -26,8 +26,8 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
   version: 1,
   name: '秘書の調べもの',
   category: 'knowledge',
-  description: '時刻表・道順・天気など、時間のかかる調べものを引き受けます',
-  routeHint: '秘書が、時間のかかる調べものを引き受けます。Web の最新の情報（時刻表・道順・天気など）と本人の予定も調べます。読むだけで、送信も登録もしません',
+  description: '時刻表・道順・天気・過去のメールなど、時間のかかる調べものを引き受けます',
+  routeHint: '秘書が、時間のかかる調べものを引き受けます。Web の最新の情報（時刻表・道順・天気など）・本人の予定・過去のメール（Gmail とナレッジの整理）も調べます。読むだけで、送信も登録もしません',
   locale: 'ja-JP',
   compartment: null,
   // 秘書が自分で起こす業務であり、提案するものではない（第10.11.4節）
@@ -50,7 +50,8 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
   },
   // 読むだけのツールに限る（第10.11.4節）。送信・登録・作成のツールは持たせない。
   // Web の調べものと本人の予定・ToDo は、出張の行程のような依頼に答えるため（第 0.124.0 版、ADR-0033）
-  tools: ['file.read_text', 'file.compare', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read', 'quote.search', 'inventory.market', 'inventory.check_market', 'inventory.orders', 'sales.documents', 'sales.orders'],
+  // メールを探す依頼（第10.9.6節「メールを探す」）は、Gmail の検索と、ナレッジの整理（メールのやり取りの要約・資料）を読む
+  tools: ['file.read_text', 'file.compare', 'sheet.read', 'pdf.extract', 'knowledge.search', 'web.research', 'calendar.list', 'calendar.freebusy', 'tasks.list', 'profile.read', 'quote.search', 'inventory.market', 'inventory.check_market', 'inventory.orders', 'sales.documents', 'sales.orders', 'gmail.search', 'library.search', 'library.read'],
   knowledge: { collections: ['internal-rules', 'minutes'] },
   steps: [
     {
@@ -62,6 +63,10 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
         '書類（fileId）が渡されていれば file.read_text で読む。表として扱いたいときは sheet.read を使う。',
         'ほかに渡された書類（moreFileIds。「,」で区切ったファイルの ID）があれば、それぞれを file.read_text で読む（同時に呼んでよい）。2 つの版を比べる依頼なら file.compare を使ってよい。',
         '社内の規程や議事録が要るときは knowledge.search を使う。',
+        'メールを探す依頼（「〇〇のメールを探して」「〇〇社と決めた条件のメールは？」）では、gmail.search と library.search を同時に呼ぶ。'
+          + 'gmail.search の query は、相手の名前・会社の名前・件名の言葉を、そのまま空白で区切って入れる（例: 「三浦皮膚科クリニック」。言葉は引用符で囲まずに入れ、分かれば from: や newer_than:1y も足す）。'
+          + 'library.search は、query に同じ言葉を、words に言い換え（会社の名前の略・「クリニック」と「医院」など）を入れる。メールのやり取りの要約（docType が「メールのやり取り」）と、メールで届いた資料が当たる。'
+          + 'どちらも 0 件なら、言葉を減らすか言い換えて、もう 1 回だけ探す。中身を聞かれたら、当たった資料を library.read で読む（使えるときだけ）。',
         '取引先の人の電話番号・メールアドレス・住所・役職や、名刺を交換した人を尋ねられたら、contacts.search で名刺を探す（使えるときだけ）。'
           + '交換した日で尋ねられたら from・to に日付を入れる。見つからなければ、推測せずに「名刺が見つかりませんでした」と答える。'
           + '「最近異動した人は？」のように、名刺の会社・役職が新しくなった人を尋ねられたら contacts.changes を使う（メールの署名から分かったもの）。',
@@ -94,6 +99,9 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
         '数値は読み取ったものだけを書く。自分で計算した数値を、読み取った値のように書かない。',
         'いくつもの書類を読んだときは、どの書類の話かをファイルの名前で示す。比べるときは表にしてよい。',
         '移動の行程は、行き・用件・帰りを時刻の順に Markdown の表で示す（出発・到着の駅や場所、列車名、所要時間）。',
+        'メールを探したときは、見つかったメールを新しい順に、日付・差出人・件名を 1 行ずつ示し、件名を [件名](url) の Gmail のリンクにする（gmail.search の url。10 件まで。ほかに何件あるかを添える）。'
+          + 'ナレッジの整理に、そのやり取りの要約（docType が「メールのやり取り」）があれば、要約の要点と [資料で開く](path) を添える。メールの本文を長く写さない。'
+          + '見つからなければ、探した言葉を添えて「見つかりませんでした」と答える（無いとは断定しない）。',
         'Web で調べた時刻・運賃は「目安」と書き、購入の前に予約のサイト（スマート EX・えきねっとなど）で確かめるよう一言添える。',
         'Web で調べたときは、最後に「出典」として、調べた結果の sources の題名とリンクを箇条書きで必ず添える（3 件まで）。',
         '本人の予定と重なるものがあれば知らせる。',
@@ -121,11 +129,13 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
     examples: [
       { title: '渡した書類について聞く', input: { request: 'この見積書の合計はいくらですか' } },
       { title: '規程と照らす', input: { request: 'この申請は経費規程に合っていますか' } },
+      { title: 'メールを探す', input: { request: '三浦皮膚科クリニックのメールを探して' } },
       { title: '出張の行程を組む', input: { request: '10 月 1 日の 10 時から 15 時まで大阪の道頓堀の近くで会議。東京から日帰りで、新幹線の時刻も含めた行程を教えて' } },
     ],
     notes: [
       '読むだけの業務です。メールの送信や、予定・ToDo の登録は行いません',
       '時刻表・道順・天気など外の最新の情報は Google 検索で調べます。調べる言葉は Google に送られます',
+      '「〇〇のメールを探して」は、Gmail と、ナレッジの整理に残したメールのやり取りの要約の両方から探します',
       '時刻は目安です。切符を買う前に、予約のサイトで確かめてください',
       '秘書が時間のかかる依頼を受けたとき、自動で始まります',
       '進み具合は秘書バーに出ます。終わると秘書が伝えます',

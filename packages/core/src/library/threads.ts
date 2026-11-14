@@ -366,7 +366,7 @@ export class LibraryThreadIntake {
     let id = itemId && (await store.get(who, itemId)) ? itemId : null;
     if (!id) {
       const { item } = await store.insert(who, {
-        driveFileId: null, driveUrl: gmailThreadUrl(threadId), placed: false, fileId: null, originalName: (heads[0]!.subject || '（件名なし）').slice(0, 240),
+        driveFileId: null, driveUrl: gmailThreadUrl(threadId, await this.emailOf(who)), placed: false, fileId: null, originalName: (heads[0]!.subject || '（件名なし）').slice(0, 240),
         format: 'mail', mime: 'message/rfc822', sizeBytes: 0, sha256: libraryThreadHash(threadId), entry: 'mail', readState: 'done', receivedAt: lastAt,
       });
       id = item.id;
@@ -383,6 +383,11 @@ export class LibraryThreadIntake {
       receivedAt: lastAt,
     });
     return id;
+  }
+
+  /** 本人のメールアドレス（Gmail のリンクを本人のアカウントで開くため）。分からなければ `null`。 */
+  private async emailOf(who: LibraryViewer): Promise<string | null> {
+    return (await this.deps.repo.findUserById?.(who.tenantId, who.userId).catch(() => null))?.email ?? null;
   }
 
   /**

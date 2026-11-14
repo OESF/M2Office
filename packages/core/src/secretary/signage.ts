@@ -199,8 +199,9 @@ export function signageRequest(message: string): SignageRequest | null {
   const said = /^(.+?)って(?:サイネージに|画面に)?(?:出して|表示して)/.exec(raw.replace(/^(?:サイネージ|画面)に/, ''));
   if (said) return { kind: 'show', text: said[1]!.trim(), screens, seconds, chime };
   // 「焼き上がりの案内を出して」は、割り込みの素材の名前で選ぶ（合うものが無ければ、ふつうの会話に回す）
+  // 「去年の保守契約書を出して」のような、資料を探す頼みは取らない（サイネージ・画面・案内・表示の言葉があるときだけ。仕様書 第10.7.4.6節）
   const hint = /^(?:サイネージに)?(.+?)(?:の案内)?を(?:サイネージに)?(?:出して|表示して)/.exec(m);
-  if (hint) return { kind: 'show', assetHint: hint[1]!, screens, seconds, chime };
+  if (hint && /サイネージ|画面|案内|表示して/.test(m)) return { kind: 'show', assetHint: hint[1]!, screens, seconds, chime };
   return null;
 }
 

@@ -34,7 +34,8 @@ function deps(conversations: { message: string; reply: string }[] = []) {
   const lookups: { request: string; context?: string }[] = [];
   const repo = {
     getTenantSettings: async () => ({ agents: { disabled: [] }, access: { scopes: {} }, company: { legalName: '', shortName: '' } }),
-    getUserSettings: async () => ({ secretary: { name: '', callMe: '', style: 'polite' }, memory: { keepConversations: false } }),
+    // 会話を渡したテストは、会話を残している人として扱う（残していない人の会話はログに無い。仕様書 第10.7.4.1節）
+    getUserSettings: async () => ({ secretary: { name: '', callMe: '', style: 'polite' }, memory: { keepConversations: conversations.length > 0 } }),
     findUserById: async () => ({ id: 'u1', displayName: '三浦' }),
     listMemories: async () => [],
     listUserCompartments: async () => [],
@@ -184,6 +185,21 @@ test('会社の接続（Slack）の名前が出る「探す・読む」依頼は
   assert.deepEqual(reply.lookup, { runId: 'run-lookup', request: SLACK_ASK });
   assert.match(reply.text, /お調べします。終わりましたらお伝えします/);
   assert.ok(!llm.systems.some((x) => x.startsWith('依頼に最も合う業務')), '推論に選ばせない');
+});
+
+test('「〇〇のメールを探して」は、推論に選ばせずに秘書の調べものへ回す。調べものは Gmail とナレッジの整理を探せる（第10.9.6節）', async () => {
+  const d = deps();
+  const llm = llmWith({ route: 'none' });
+  const s = new Secretary({ repo: d.repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
+  const ask = '三浦皮膚科クリニックのメールを探して';
+  const reply = await s.respond('t', 'u1', ask);
+  assert.equal(d.lookups.length, 1, '調べものを起こす');
+  assert.equal(d.lookups[0]!.request, ask);
+  assert.ok(!/未読/.test(reply.text), '未読の件数を答えない');
+  assert.ok(!llm.seen.some((x) => x.startsWith('依頼に最も合う業務')), '推論に選ばせない');
+  const tools = agent('secretary-lookup').tools;
+  assert.ok(tools.includes('gmail.search') && tools.includes('library.search') && tools.includes('library.read'));
+  assert.ok(!tools.some((t) => /send|create|draft|update|share|forget/.test(t)), '調べものは読むだけ');
 });
 
 test('送る依頼（「Slack に投稿して」）は調べものに回さない。取次の説明には会社の接続の名前を入れる', async () => {

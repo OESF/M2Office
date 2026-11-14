@@ -43,8 +43,14 @@ export interface MailServiceDeps {
 // ドメインの区切りの点があいまいにならない形にし、長さを区切る（`[^…]+\.[^…]+` は、点が長く続くと遅くなる）
 const ADDRESS = /^[^\s@<>,]{1,64}@[^\s@<>,.]{1,63}(?:\.[^\s@<>,.]{1,63}){1,10}$/;
 
-/** Gmail でスレッドを開く URL。 */
-export const gmailThreadUrl = (threadId: string) => `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(threadId)}`;
+/**
+ * Gmail でスレッド（またはメール）を開く URL。
+ *
+ * @param email 本人のメールアドレス。渡すと、Google のアカウントをいくつも使っている人でも本人のアカウントで開く（`authuser`）。無ければ最初のアカウント
+ */
+export const gmailThreadUrl = (threadId: string, email?: string | null): string => (email
+  ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(email)}#all/${encodeURIComponent(threadId)}`
+  : `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(threadId)}`);
 
 /** メールの画面の処理。 */
 export class MailService {
@@ -174,7 +180,7 @@ export class MailService {
     }
     return {
       item: this.itemOf(t, new Map((await store.categories(o)).map((c) => [c.id, c.name]))), done: t.state === 'done', messages, readError, draft: t.draft, recipients: t.recipients, replySubject: replySubject(t.subject),
-      gmailUrl: gmailThreadUrl(threadId), sending,
+      gmailUrl: gmailThreadUrl(threadId, user?.email), sending,
     };
   }
 
