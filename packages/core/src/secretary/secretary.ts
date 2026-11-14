@@ -54,7 +54,7 @@ import { answerStock, bareStockQuestion, inventoryRequest } from './inventory.js
 import type { InventoryService } from '../inventory/service.js';
 import { INVENTORY_ORDER, INVENTORY_RECORD } from '../inventory/agents.js';
 import { normalizeGroupName } from '../chat/group-share.js';
-import { FOLLOW_UP_SKIPS, delegateContext, followsUp, hasContext, loadWorkingMemory, routeSituation, screenMention, type ScreenContext, type WorkingMemory } from './working-memory.js';
+import { FOLLOW_UP_SKIPS, PAST_WORK, delegateContext, followsUp, hasContext, loadWorkingMemory, mentionsToOpen, openItemRequest, routeSituation, screenMention, type ScreenContext, type WorkingMemory } from './working-memory.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -600,6 +600,15 @@ export class Secretary {
     // 続きの頼み（「それも」「さっきの」「月曜日に頼んだ」）は、話の流れがあれば決め打ちの照会に当てない（第10.7.4.2節）
     // 本人の指図（「さっきの会話は残さないで」「覚えて」など）は、続きの頼みでも当てる
     const followUp = followsUp(cmd) && hasContext(await this.workingMemory(tenantId, userId, message));
+    // 「さっきのメールを開いて」は、話に出たもののリンクをそのまま出す（推論を使わない。探し直さない。第10.7.4.2節）
+    const toOpen = followUp ? mentionsToOpen(await this.workingMemory(tenantId, userId, message), cmd) : null;
+    if (toOpen) {
+      await this.audit(tenantId, userId, 'secretary.open_mention', toOpen[0]!.kind);
+      const text = toOpen.length === 1
+        ? `「${toOpen[0]!.title}」です。[開く](${toOpen[0]!.url})`
+        : ['さっき出たのは次のものです。', ...toOpen.map((x) => `- [${x.title}](${x.url})`)].join('\n');
+      return { reply: { layer: 'direct', text, evidence: [], tokensUsed: 0 }, keep: true };
+    }
     const direct = direct0?.id === 'recent-runs' && REFERS_TO_PAST.test(cmd) ? undefined
       : followUp && direct0 && FOLLOW_UP_SKIPS.has(direct0.id) ? undefined : direct0;
     if (direct0 && !direct && followUp) this.trace(tenantId, userId, 'secretary.follow_up', direct0.id, { message: cmd });
@@ -624,7 +633,8 @@ export class Secretary {
     // 「あれ、どうなった」のような過去を指す問いは、業務へ取り次がず、記憶を使って答える（第10.7.3節）。
     // ただし「さっきの行程をカレンダーに入れて」のような作業の依頼は取り次ぐ（第10.9.6節）
     // 「さっきの会社のメールも探して」のように、過去を指しながら探す・調べる依頼も取り次ぐ（いまの状況を添える。第10.7.4.2節）
-    const pastOnly = REFERS_TO_PAST.test(cmd) && !DOING.test(cmd) && !SEARCHING.test(cmd);
+    // 「金曜日に頼んだもの、どうなりました？」「月曜日の依頼の結果を教えて」は、業務の記録から答える振り返りの問い（第10.7.4.1節）
+    const pastOnly = (REFERS_TO_PAST.test(cmd) || PAST_WORK.test(cmd)) && !DOING.test(cmd) && !SEARCHING.test(cmd);
     // 会社の接続（Slack など）の名前（第10.11.5.1節）。調べものの説明に入れ、名前が出る「探す・読む」依頼は推論に選ばせずに回す
     const connections = lookup ? await this.connectionNames(tenantId) : [];
     if (lookup && !pastOnly && asksConnectionData(cmd, connections)) {
@@ -633,6 +643,12 @@ export class Secretary {
     }
     // 「〇〇のメールを探して」は、調べものが Gmail とナレッジの整理（メールのやり取りの要約）の両方を探す（第10.9.6節「メールを探す」）。
     // 推論に選ばせない（未読の件数や、メールの確認と取り違えないため）。「先月の〇〇のメール」も探す依頼なので、過去の話より先に見る
+    // 開いている資料・メールを指す頼み（「この資料の要点は？」）は、調べものに本物を読ませる。秘書が中身を作らない（第10.7.4.3節）
+    const openItem = lookup ? openItemRequest(await this.workingMemory(tenantId, userId, message), cmd) : null;
+    if (lookup && openItem) {
+      await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
+      return this.delegate(tenantId, userId, message, lookup, `開いている${openItem.kind === 'mail' ? 'メール' : '資料'}についての頼み`, llm);
+    }
     if (lookup && mailSearchRequest(cmd)) {
       await this.audit(tenantId, userId, 'secretary.route', LOOKUP_AGENT_ID);
       return this.delegate(tenantId, userId, message, lookup, 'メールを探す依頼（Gmail とナレッジの整理）', llm);
@@ -1772,6 +1788,7 @@ const ROUTE_DIFFERENCES = [
   '取り違えやすいもの:',
   '- 会社の規程・決まり・手続きの質問 → none（秘書が社内の規程から答える）。M2Office の使い方の質問も none',
   `- 本人のメール・資料（ナレッジの整理）・予定・会社の接続のデータを「探す・見せる・読む」依頼 → ${LOOKUP_AGENT_ID}（調べもの）。作る・送る依頼ではない`,
+  `- 「〇〇から来てない？」「〇〇のもある？」のように、本人のメール・資料があるかを尋ねる問いも → ${LOOKUP_AGENT_ID}（探さないと答えられない）`,
   '- 文書・スライド・下書き・返信を「作る」依頼 → それを作る業務。探すだけの依頼には選ばない',
   '- 外の最新の情報（Web・ニュース・時刻表・天気）を調べる依頼 → 調べもの（Web を調べる業務があればそちら）',
 ];

@@ -110,6 +110,53 @@ export function followsUp(message: string): boolean {
   return FOLLOW_UP.test(message);
 }
 
+/**
+ * 前に頼んだ仕事の様子を尋ねる問い（「金曜日に頼んだもの、どうなりました？」「月曜日の依頼の結果を教えて」。第10.7.4.1節）。
+ *
+ * @remarks 業務に頼み直さず、1 週間の記憶（頼んだ業務の記録）から答える
+ */
+export const PAST_WORK = /(?:頼んだ|お願いした|依頼した|の依頼)(?:仕事|もの|件|資料|の)?.{0,8}(?:どう|終わ|結果|でき|進み|済ん)/;
+
+/** 開く・見せる・リンクを求める言い方（「さっきのメールを開いて」「その資料のリンク」）。 */
+const OPEN_WORDS = /開いて|開きたい|開ける|見せて|リンク|どこ(?:に|だ|で|\?|？|$)|もう一度|もう1度/;
+/** 話に出たものを指す言い方。 */
+const POINT_BACK = /さっき|先ほど|さきほど|その|それ|あの|前の|見つけた/;
+/** 開く頼みの言葉と、話に出たものの種類。 */
+const OPEN_KINDS: [RegExp, ConversationMention['kind'][]][] = [
+  [/作った(?:もの|資料|文書|スライド)|成果物/, ['artifact']],
+  [/メール/, ['mail']],
+  [/資料|書類|ファイル|契約書|文書/, ['library', 'drive', 'artifact']],
+];
+
+/**
+ * 「さっきのメールを開いて」「その資料のリンク」に、話に出たもののどれを出すか（第10.7.4.2節「入口の前」）。推論を使わない。
+ *
+ * @returns いちばん新しく話に出たその種類のもの（同じやり取りで出たものはすべて。リンクのあるものだけ）。当たらなければ `null`
+ * @remarks 探す・作る・送る頼みは当てない（業務に頼む）
+ */
+export function mentionsToOpen(m: WorkingMemory, message: string): DatedMention[] | null {
+  if (!OPEN_WORDS.test(message) || !POINT_BACK.test(message) || /探して|調べて|作って|送って|返信/.test(message)) return null;
+  const kinds = OPEN_KINDS.find(([re]) => re.test(message))?.[1];
+  if (!kinds) return null;
+  const hits = m.mentions.filter((x) => kinds.includes(x.kind) && x.url);
+  if (!hits.length) return null;
+  return hits.filter((x) => x.at === hits[0]!.at);
+}
+
+/** 開いている 1 件を指す言い方（「この資料の要点は？」「これの期限は？」）。 */
+const POINTS_TO_OPEN = /^(?:この|これ)|この(?:資料|メール|件|契約|相手|ファイル|書類|文書)|これ(?:の|を|は|に|で|と|って)/;
+
+/**
+ * 開いている資料・メールを指す頼みか（第10.7.4.3節）。中身を読まないと答えられないので、調べものに回す（推論が中身を作らないように）。
+ *
+ * @returns 指していれば開いている 1 件
+ */
+export function openItemRequest(m: WorkingMemory, message: string): NonNullable<ScreenContext['item']> | null {
+  const item = m.screen?.item;
+  if (!item || !['資料', 'library', 'mail'].includes(item.kind)) return null;
+  return POINTS_TO_OPEN.test(message.trim()) ? item : null;
+}
+
 /** 作業の記憶に、続きを読む材料があるか（今日か前の日のやり取り・話に出たもの・開いている画面）。 */
 export function hasContext(m: WorkingMemory): boolean {
   return m.turns.length > 0 || m.mentions.length > 0 || !!m.screen?.item;

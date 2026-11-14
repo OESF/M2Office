@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  DAY_RECORD_MAX, MEMORY_BUDGET, OFFICIAL_AGENTS, Secretary, delegateContext, followsUp, loadWorkingMemory, mentionsFromTools,
+  DAY_RECORD_MAX, MEMORY_BUDGET, OFFICIAL_AGENTS, PAST_WORK, Secretary, delegateContext, followsUp, loadWorkingMemory, mentionsFromTools, mentionsToOpen, openItemRequest,
   referredDays, routeSituation, situationText, weekText, type Conversation, type LlmProvider, type Repository,
 } from '../src/index.js';
 
@@ -254,4 +254,28 @@ test('問題集（docs/evals/secretary-follow-up）: 続きの頼みは続きと
     if (c.category === 'F') assert.equal(followsUp(c.message), false, `${c.id}: ${c.message}`);
     if (c.category === 'C') assert.equal(referredDays(c.message, WEDNESDAY).length, 1, `${c.id}: ${c.message}`);
   }
+});
+
+test('問題集の B・C・D（2026-11-14 の評価で外れた型）: 話に出たものを開く・前の仕事を振り返る・開いている 1 件を指す、を見分ける', async () => {
+  type Case = { id: string; category: string; message: string; history: { message: string; reply: string; mentions?: Conversation['mentions'] }[]; screen?: { view: string; label: string; item: { kind: string; id: string; title: string } }; expect: { answerContains?: string[]; contextContains?: string[] } };
+  const doc = JSON.parse(readFileSync(new URL('../../../docs/evals/secretary-follow-up/cases.json', import.meta.url), 'utf8')) as { cases: Case[] };
+  for (const c of doc.cases.filter((x) => ['B', 'C', 'D'].includes(x.category))) {
+    const rows = c.history.map((h, i) => turn(`2026-11-18T0${i}:00:00.000Z`, h.message, h.reply, h.mentions));
+    const m = await loadWorkingMemory(memoryRepo(rows), 't', 'u', c.message, [], { now: WEDNESDAY, keep: true, screen: c.screen ?? null });
+    if (c.category === 'B') {
+      const open = mentionsToOpen(m, c.message);
+      assert.ok(open?.some((x) => c.expect.answerContains!.includes(x.url!)), `${c.id}: ${c.message}`);
+    }
+    if (c.category === 'C') assert.match(c.message, PAST_WORK, c.id);
+    if (c.category === 'D') assert.equal(openItemRequest(m, c.message)?.id, c.expect.contextContains![0], `${c.id}: ${c.message}`);
+  }
+});
+
+test('開く頼みでも、探す・作る頼みと、話に出ていない種類は当てない', async () => {
+  const rows = [turn('2026-11-18T01:00:00.000Z', '（お調べした結果）見本商事のメールを探して', '1 通', [{ kind: 'mail', title: '見積', id: 't1', url: 'https://mail.example/t1' }])];
+  const m = await loadWorkingMemory(memoryRepo(rows), 't', 'u', '', [], { now: WEDNESDAY, keep: true });
+  assert.equal(mentionsToOpen(m, 'さっきのメールに似たものを探して'), null);
+  assert.equal(mentionsToOpen(m, 'さっきの資料を開いて'), null, '資料は話に出ていない');
+  assert.equal(mentionsToOpen(m, 'メールを開いて'), null, '前を指していない');
+  assert.equal(openItemRequest(m, 'この資料の要点は？'), null, '開いている画面が無い');
 });

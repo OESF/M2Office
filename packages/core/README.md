@@ -423,7 +423,7 @@ AG-02 議事録の作成・共有は、承認②のあとに `knowledge.register
 - 長さは段ごとに収めます: 層 2 は `routeSituation()` で 2,000 字、業務への依頼は `delegateContext()` で 6,000 字、層 3 は `recall()` が合わせて 24,000 字（`MEMORY_BUDGET`）。超えたら古いものから畳みます
 - `FOLLOW_UP` に当たる続きの頼みは、話の流れがあれば、件数や予定の決め打ちの照会（`FOLLOW_UP_SKIPS`）に当てません
 - 決め打ちの決まりは `FIXED_RULES` に応答の本体と同じ順番で並べ、頼みの例が前の決まりに奪われないことをテストで守ります
-- 続きの頼みの問題集（`docs/evals/secretary-follow-up/cases.json`。100 問）を `npm run eval:secretary-follow-up` で本物の推論に通し、作業の記憶を切ったとき（直す前）と比べます
+- 続きの頼みの問題集（`docs/evals/secretary-follow-up/cases.json`。100 問）を `npm run eval:secretary-follow-up` で本物の推論に通し、作業の記憶を切ったとき（直す前）と比べます。`--tenant <サブドメイン>` を付けると、その会社が管理者ページで入れた鍵で回します（利用はその会社の AI の利用として数える）
 
 ### 声の答えを画面にも出すか（`secretary/canvas.ts`）
 

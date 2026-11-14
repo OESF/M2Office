@@ -177,7 +177,7 @@ export { ProactiveWatcher, PROACTIVE_TRIGGER, TRAVEL_PREFIX, PREP_WINDOW_MIN, TR
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
 export { REFERS_TO_PAST, caseMailLine, closeness, recall, type CaseMailCounts, type Recall } from './secretary/recall.js';
 export {
-  DAY_RECORD_MAX, FOLLOW_UP, FOLLOW_UP_SKIPS, MEMORY_BUDGET, MENTIONS_MAX, WEEK_DAYS, delegateContext, followsUp, hasContext, loadWorkingMemory, mentionsFromTools, mentionsOfRun,
+  DAY_RECORD_MAX, FOLLOW_UP, FOLLOW_UP_SKIPS, MEMORY_BUDGET, PAST_WORK, MENTIONS_MAX, WEEK_DAYS, delegateContext, followsUp, hasContext, loadWorkingMemory, mentionsFromTools, mentionsOfRun, mentionsToOpen, openItemRequest,
   referredDays, routeSituation, screenMention, situationText, weekText, type DayRecord, type ScreenContext, type WorkingMemory,
 } from './secretary/working-memory.js';
 export { LIST_MIN, SPOKEN_MAX, needsCanvas } from './secretary/canvas.js';
