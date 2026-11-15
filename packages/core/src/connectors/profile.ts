@@ -57,7 +57,7 @@ export interface ToolRoleProfile {
 export interface ConnectionProfile {
   /** この接続で何ができるか（秘書の振り分けの候補に出す。1〜2 文）。 */
   summary: string;
-  /** 会社の Web サイトを扱う接続か（「接続 › サイト」に並べ、サイトの更新の付属の業務にする。第47.3節・第47.7節）。 */
+  /** 会社の Web サイトを扱う接続か（「接続 › 更新サイト」に並べ、サイトの更新の付属の業務にする。第47.3節・第47.7節）。 */
   site: boolean;
   /** サイトの名前と URL（サイトの情報を返す読む道具があれば、役割を見たときに読む）。読めなければ無い。 */
   siteName?: string;

@@ -376,7 +376,11 @@ export class RunEngine {
     }
 
     // 操作の確認（第9.4節）と、承認の前に組み立てた操作（第9.3.3節）で、承認されたものが残っていれば先に実行する
-    let current = await this.executeConfirmedCalls(run, def, job.requestedBy, registry, ai.research);
+    const confirmed = await this.executeConfirmedCalls(run, def, job.requestedBy, registry, ai.research);
+    let current = confirmed.run;
+    // 承認した操作が行えなかったら、業務を失敗にして理由を知らせる（「終わりました」と知らせない。2026-11-15 に、
+    // コラムを WordPress に入れるのが認証で失敗したのに「業務が終わりました」と知らせていた）
+    if (confirmed.failed) return this.fail(current, confirmed.failed);
     while (current.cursor < def.steps.length) {
       const step = def.steps[current.cursor];
       if (!step) break;
@@ -419,7 +423,10 @@ export class RunEngine {
         // 社外に出るものもお金の確定も無ければ、人を待たずに通る（仕様書 第9.3.3節・第9.4.0節、ADR-0028）。
         // 行えない操作があるときは、進めるかを人が決める（黙って欠けたまま終わらせない）
         if (!needsHuman(plan?.calls ?? [], registry, settings.automation, def.id) && (plan?.unable.length ?? 0) === 0) {
-          current = await this.passAutomatically(current, def, step, plan, job.requestedBy, registry, ai.research);
+          const passed = await this.passAutomatically(current, def, step, plan, job.requestedBy, registry, ai.research);
+          // 自動で通した操作が行えなかったときも、業務を失敗にして理由を知らせる
+          if (passed.failed) return this.fail(passed.run, passed.failed);
+          current = passed.run;
           continue;
         }
         const approvalId = await this.suspendForApproval(current, def, step, job.requestedBy, plan, registry);
@@ -617,7 +624,7 @@ export class RunEngine {
     requestedBy: string,
     registry: ToolRegistry,
     research?: ResearchProvider,
-  ): Promise<Run> {
+  ): Promise<{ run: Run; failed: string | null }> {
     const { repo } = this.deps;
     const now = new Date().toISOString();
     const artifacts = await repo.listArtifacts(run.tenantId, run.id);
@@ -888,6 +895,8 @@ export class RunEngine {
       let spent = selection.response ? costOf(selection.response) : 0;
       // 必ず呼ぶツールを促したか（一度だけ）
       let nudged = false;
+      // どれか 1 つは呼ぶはずのツールを促したか（一度だけ。第47.7節）
+      let nudgedOne = false;
 
       for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
         // 最後の往復ではツールを使わせない。ここまでに分かったことで答えさせる
@@ -917,6 +926,18 @@ export class RunEngine {
           nudged = true;
           history.push({ role: 'assistant', content: res.text });
           history.push({ role: 'user', content: `この段で必ず呼ぶツールを、まだ呼んでいません: ${missing.join('、')}。指示に従って呼んでください。` });
+          continue;
+        }
+        // どれか 1 つは呼ぶはずのツールを、どれも呼ばずに終えようとしたら、一度だけ促す（読むだけで済む頼みなら、そのまま答えさせる）
+        const oneOf = (step.requireOneOf ?? []).filter((n) => stepTools.includes(n) && (!selection.selected || allowedNames.has(n)));
+        if (calls.length === 0 && oneOf.length > 0 && !oneOf.some((n) => called.has(n)) && !nudgedOne && round < MAX_TOOL_ROUNDS - 1) {
+          nudgedOne = true;
+          history.push({ role: 'assistant', content: res.text });
+          history.push({
+            role: 'user',
+            content: `依頼が、作る・入れる・直す・公開するものなら、まだ道具で行っていません。次のどれかを呼んで進めてください: ${oneOf.join('、')}。`
+              + '文で答えて終えたり、道具を呼ばずに「行いました」「控えます」と書いたりしないでください。読むだけで済む依頼なら、そのまま答えてください。',
+          });
           continue;
         }
         if (calls.length === 0) {
@@ -1345,12 +1366,13 @@ export class RunEngine {
    */
   private async executeConfirmedCalls(
     run: Run, def: AgentDefinition, requestedBy: string, registry: ToolRegistry, research?: ResearchProvider,
-  ): Promise<Run> {
+  ): Promise<{ run: Run; failed: string | null }> {
     const { repo } = this.deps;
     const steps = await repo.listRunSteps(run.tenantId, run.id);
     // ツールの文脈（名刺管理など）は推論を持つときだけ組み立てるため、記録した操作の実行にも推論を渡す（第27.9.1節）
     const llm = this.deps.llmFor ? await this.deps.llmFor(run.tenantId) : this.deps.llm;
     let current = run;
+    const failures: string[] = [];
     for (const s of steps) {
       const input = s.input as { toolCalls?: ToolCall[]; plannedStep?: number } | null;
       const output = s.output as { executed?: boolean } | null;
@@ -1359,7 +1381,10 @@ export class RunEngine {
       const stepIndex = input.plannedStep ?? current.cursor - 1;
       const results: unknown[] = [];
       for (const call of input.toolCalls) {
-        results.push(await this.invokeTool(current, def, stepIndex, call, requestedBy, registry, research, llm));
+        const r = await this.invokeTool(current, def, stepIndex, call, requestedBy, registry, research, llm);
+        results.push(r);
+        const why = recordedCallFailure(r);
+        if (why) failures.push(`${registry.get(call.name)?.activityLabel?.replace(/しています$/, 'る') ?? call.name}: ${why}`);
       }
       await repo.updateRunStep(current.tenantId, {
         ...s, output: { ...(s.output as object), executed: true, tools: results },
@@ -1385,7 +1410,7 @@ export class RunEngine {
         }
       }
     }
-    return current;
+    return { run: current, failed: failures.length > 0 ? `承認したことを行えませんでした（${failures.join('／')}）` : null };
   }
 
   /**
@@ -1490,6 +1515,20 @@ type ToolCall = {
   /** 送り先が社内だけと確かめられた（仕様書 第9.4.0節）。送るツールでも、人の判断を要しない。 */
   internal?: boolean;
 };
+
+/**
+ * 承認の後に実行した操作の結果が、失敗か（失敗なら理由）。
+ *
+ * @remarks ツールは失敗を `{ available: false, reason }` か `{ error }` で返す（例外にしない）。読めない形は失敗とみなさない
+ */
+export function recordedCallFailure(r: unknown): string | null {
+  const x = r as { error?: unknown; result?: { available?: unknown; reason?: unknown; error?: unknown } } | null;
+  if (!x) return null;
+  if (typeof x.error === 'string') return x.error;
+  if (x.result && typeof x.result.error === 'string') return x.result.error;
+  if (x.result && x.result.available === false) return typeof x.result.reason === 'string' ? x.result.reason : '行えませんでした';
+  return null;
+}
 
 /** 承認の段を自動で通したときに、記録に残す理由（実行の詳細に出す）。 */
 export const AUTO_PASS_REASON = '社外への送信とお金の確定が無いため、自動で通過しました';

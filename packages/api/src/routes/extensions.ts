@@ -344,8 +344,8 @@ export function extensionsRoute(deps: AppDeps) {
   });
 
   /**
-   * コラムとお知らせを入れられるサイト（仕様書 第47.6節）。REST API の WordPress（`rest`）と、MCP でつないだサイト（`mcp:<接続の ID>`）。
-   * 2 つ以上のときだけ、設定の画面で入れるサイトを選ぶ
+   * 会社がつないでいるサイト（仕様書 第47.3節）。REST API の WordPress（`rest`）と、MCP でつないだサイト（`mcp:<接続の ID>`）。
+   * 「接続 › 更新サイト」でサイトの名前を出すのに使う
    */
   app.get('/sites', async (c) => {
     const { tenant } = c.get('ctx');
@@ -381,12 +381,6 @@ export function extensionsRoute(deps: AppDeps) {
     if (body['aiNotice'] !== undefined) {
       if (typeof body['aiNotice'] !== 'boolean') return c.json({ error: 'aiNotice は true か false です' }, 400);
       next.aiNotice = body['aiNotice'];
-    }
-    // 入れるサイト（第47.6節）。`rest` か `mcp:<接続の ID>`
-    if (body['site'] !== undefined) {
-      const site = await checkSite(deps, tenant.id, body['site']);
-      if ('error' in site) return c.json({ error: site.error }, 400);
-      next.site = site.key;
     }
     // コラムを入れる WordPress のカテゴリーと記事の種類（第45.20.2節。カテゴリーが空なら付けない。種類が空なら M2Office が選ぶ）
     if (body['wpCategory'] !== undefined) next.wpCategory = String(body['wpCategory']).trim().slice(0, 40);
@@ -546,12 +540,6 @@ export function extensionsRoute(deps: AppDeps) {
       next.webPublish = body['webPublish'];
     }
     if (body['webCategory'] !== undefined) next.webCategory = String(body['webCategory']).trim().slice(0, 40);
-    // 入れるサイト（第47.6節）。`rest` か `mcp:<接続の ID>`
-    if (body['site'] !== undefined) {
-      const site = await checkSite(deps, tenant.id, body['site']);
-      if ('error' in site) return c.json({ error: site.error }, 400);
-      next.site = site.key;
-    }
     // お知らせを入れる記事の種類（第45.20.2節）。空なら M2Office が選ぶ
     if (body['webPostType'] !== undefined) {
       const v = String(body['webPostType'] ?? '').trim();
@@ -1175,10 +1163,3 @@ export function extensionsRoute(deps: AppDeps) {
   return app;
 }
 
-/** 入れるサイトの値を確かめる（会社がつないでいるサイトのどれか。第47.6節）。 */
-async function checkSite(deps: AppDeps, tenantId: string, value: unknown): Promise<{ key: string } | { error: string }> {
-  if (typeof value !== 'string') return { error: '入れるサイトの形が違います' };
-  const [view, settings] = await Promise.all([deps.tenantView(tenantId), deps.repo.getTenantSettings(tenantId)]);
-  const sites = await siteOptions(view, settings.webColumns.wordpress?.siteUrl ?? null, { anyRest: true });
-  return sites.some((s) => s.key === value) ? { key: value } : { error: 'そのサイトはつないでいません' };
-}

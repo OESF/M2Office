@@ -35,3 +35,12 @@ test('業務を起こすとき、起こした人（本人かシステムか）�
   await enqueueJob(repo, { tenantId: 't', requestedBy: 'u1', def, input: {}, origin: 'secretary', actor: { type: 'system', id: 'secretary-plan' }, startedBy: 'user' });
   assert.deepEqual(jobs.map((j) => j.startedBy), ['user', 'system', 'user']);
 });
+
+test('承認の後に実行した操作が失敗したかを、ツールの答えの形から読む（失敗なら業務を失敗にする）', async () => {
+  const { recordedCallFailure } = await import('../src/index.js');
+  assert.equal(recordedCallFailure({ name: 'columns.place', result: { available: false, reason: 'カバー画像を WordPress に入れられませんでした（401）' } }), 'カバー画像を WordPress に入れられませんでした（401）');
+  assert.equal(recordedCallFailure({ name: 'x', error: '許可されていないツールです' }), '許可されていないツールです');
+  assert.equal(recordedCallFailure({ name: 'x', result: { error: '取得できませんでした: 401' } }), '取得できませんでした: 401');
+  assert.equal(recordedCallFailure({ name: 'columns.place', result: { available: true, placed: true } }), null);
+  assert.equal(recordedCallFailure(null), null);
+});

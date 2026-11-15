@@ -146,3 +146,25 @@ test('サイトの利用範囲の対象は「:」を含まない名前にする�
   assert.equal(siteScopeTarget('mcp:clinic'), 'site-mcp-clinic');
   assert.equal(scopeTargetOf(siteScopeTarget('mcp:clinic')), 'site-mcp-clinic');
 });
+
+test('コラムやお知らせを入れるサイトは本人ごと: 使えるサイトが 1 つならそれ、2 つ以上なら既定のサイト、決まらなければ聞く', async () => {
+  const { outputSiteOf, OUTPUT_SITE_ASK } = await import('../src/index.js');
+  const mcpConn = {
+    tenantId: 't', id: 'clinic', name: '医院のサイトの接続', description: '', transport: 'http', url: 'https://mcp.site.example/mcp', auth: { type: 'none' }, tools: [],
+    profile: { summary: '', site: true, siteName: 'みどり皮膚科クリニック', generatedAt: '', reviewedAt: 'x' }, origin: 'manual', createdBy: 'u', createdAt: '', updatedAt: '',
+  };
+  const make = (opts: { scopes?: Record<string, { users: string[]; groups: string[] }>; site?: string | null }) => ({
+    repo: {
+      getTenantSettings: async () => ({ webColumns: { wordpress: { siteUrl: 'https://blog.example', username: 'x' } }, access: { scopes: opts.scopes ?? {} } }),
+      getUserSettings: async () => ({ secretary: { site: opts.site ?? null } }),
+      listUserGroupIds: async () => [],
+    } as unknown as Repository,
+    tenantView: async () => ({ agents: [mcpEdit], connections: [mcpConn as never] }),
+  });
+  // 名前を読みに行かないよう、REST のサイトの名前は URL の名前になる（読めないとき）
+  const two = await outputSiteOf(make({}), 't', 'u1');
+  assert.deepEqual(two, { ask: OUTPUT_SITE_ASK }, '2 つ使えて既定が無ければ聞く（決まらないまま入れない）');
+  assert.deepEqual(await outputSiteOf(make({ site: 'mcp:clinic' }), 't', 'u1'), { key: 'mcp:clinic', name: 'みどり皮膚科クリニック' });
+  const onlyMcp = await outputSiteOf(make({ scopes: { 'site-rest': { users: ['someone'], groups: [] } } }), 't', 'u1');
+  assert.deepEqual(onlyMcp, { key: 'mcp:clinic', name: 'みどり皮膚科クリニック' }, '使えるサイトが 1 つならそれ');
+});

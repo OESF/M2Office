@@ -318,7 +318,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
 
   /**
    * その接続を自分のアカウントで許可している人（`oauth`。仕様書 第12.11.6.3節・第47.3節）。M2Office の利用者・相手のアカウント・許可した日時。
-   * 認可の中身は返さない。「接続 › サイト」で、REST API の WordPress の利用者の表と同じ形で並べる
+   * 認可の中身は返さない。「接続 › 更新サイト」で、REST API の WordPress の利用者の表と同じ形で並べる
    */
   app.get('/:id/users', async (c) => {
     const { tenant } = c.get('ctx');

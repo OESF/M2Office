@@ -44,7 +44,7 @@ function SiteCard({ site, others }: { site: Site | null; others: number }) {
   if (!site.connected) {
     return (
       <div className="card site-card">
-        <p className="error small">WordPress がつながっていません。管理者ページの「接続 › サイト」でつなぎます</p>
+        <p className="error small">WordPress がつながっていません。管理者ページの「接続 › 更新サイト」でつなぎます</p>
       </div>
     );
   }
@@ -153,7 +153,7 @@ export function SiteUpdates({ changeKey }: {
   const [busy, setBusy] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
   const [mcpSites, setMcpSites] = useState<McpSite[]>([]);
-  // REST API のサイトを本人が使えるか（使える人は管理者が「接続 › サイト」で決める。第47.6節）
+  // REST API のサイトを本人が使えるか（使える人は管理者が「接続 › 更新サイト」で決める。第47.6節）
   const [restAllowed, setRestAllowed] = useState(true);
 
   // つないでいるサイトは、開いたときに 1 度だけ確かめる（WordPress に問い合わせるため）

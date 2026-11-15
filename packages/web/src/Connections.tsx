@@ -692,7 +692,7 @@ const TITLES: Record<string, string> = {
   retention: 'Google のデータを残す日数',
   permissions: 'Google に求める許可',
   people: 'Google の従業員の接続',
-  wordpress: 'サイト',
+  wordpress: '更新サイト',
   line: 'LINE 公式アカウント',
   mailbox: '窓口のメール',
   mcp: 'コネクタ（MCP）',

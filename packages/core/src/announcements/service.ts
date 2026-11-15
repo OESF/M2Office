@@ -7,6 +7,7 @@
  */
 
 import { mcpSiteOf, type SiteHandOff } from '../connectors/site-handoff.js';
+import type { OutputSite } from '../connectors/sites.js';
 import { thumbnailPng } from '../signage/thumbnail.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -52,6 +53,11 @@ export interface AnnouncementServiceDeps {
    * 無ければ MCP のサイトには入れられない
    */
   handOffToSite?: SiteHandOff;
+  /**
+   * 本人が入れるサイト（仕様書 第47.6節）。使えるサイトが 1 つならそれ、2 つ以上なら個人設定の既定のサイト。決まらなければ `ask`。
+   * 無ければ、会社の REST API の WordPress に入れる（いままでどおり）
+   */
+  siteOf?(tenantId: string, userId: string): Promise<OutputSite>;
   store: AnnouncementStore;
   repo: Repository;
   box: SecretBox;
@@ -452,8 +458,10 @@ export class AnnouncementService {
     const wp = await this.deps.repo.getTenantSettings(who.tenantId).then((s) => s.webColumns.wordpress);
     // 入れる記事の種類と分類（第45.20.2節）。決められなければ聞き返す
     let where = '';
-    // 入れるサイトが MCP でつないだサイトなら、その業務に頼む（第47.6節）。REST API の WordPress の種類は確かめない
-    const mcp = mcpSiteOf(settings.site);
+    // 入れるサイト（本人ごと。第47.6節）。MCP のサイトなら、その業務に頼む。REST API の WordPress の種類は確かめない
+    const site = this.deps.siteOf ? await this.deps.siteOf(who.tenantId, who.userId).catch(() => null) : null;
+    if (a.channels.includes('web') && site && 'ask' in site) problems.push(site.ask);
+    const mcp = site && 'key' in site ? mcpSiteOf(site.key) : null;
     if (a.channels.includes('web') && avail.wordpress && !mcp) {
       const auth = await this.wordpress(who.tenantId);
       const target = auth ? await this.webTarget(who.tenantId, auth, settings).catch(() => null) : null;
@@ -556,7 +564,12 @@ export class AnnouncementService {
     const settings = (await this.deps.repo.getTenantSettings(who.tenantId)).announcements;
     // 入れるサイトが MCP でつないだサイトなら、そのサイトの業務に頼む（第47.6節）。公開まで行う設定なら、
     // その業務が相手の見直しの結果を見せて、もう一度承認を求める（案 A。会話の中で承認する）
-    const mcp = mcpSiteOf(settings.site);
+    const site = this.deps.siteOf ? await this.deps.siteOf(who.tenantId, who.userId).catch(() => null) : null;
+    if (site && 'ask' in site) {
+      await this.deps.store.setOutput(who.tenantId, a.id, 'web', { status: 'failed', result: {}, reason: site.ask, doneAt: new Date().toISOString() });
+      return site.ask;
+    }
+    const mcp = site ? mcpSiteOf(site.key) : null;
     if (mcp) {
       const at = new Date().toISOString();
       if (!this.deps.handOffToSite) {
@@ -565,7 +578,7 @@ export class AnnouncementService {
       }
       const publish = settings.webPublish !== 'draft';
       const r = await this.deps.handOffToSite(who, mcp, [
-        publish ? '次のお知らせを、サイトのお知らせとして公開してください。' : '次のお知らせを、サイトのお知らせの**下書き**として入れてください。公開はしません。',
+        publish ? '次のお知らせを、道具でサイトのお知らせとして公開してください（本文は書き直さず、このまま使う）。' : '次のお知らせを、道具でサイトのお知らせの**下書き**として入れてください（本文は書き直さず、このまま使う）。公開はしません。',
         `題名: ${a.texts.web.title}`,
         a.startDate || a.endDate ? `お知らせの対象の期間: ${a.startDate ?? ''}〜${a.endDate ?? ''}` : '',
         scheduled && a.publishAt ? `公開の日時（予約）: ${a.publishAt}` : '',

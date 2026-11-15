@@ -1326,6 +1326,28 @@ test('段が必ず呼ぶツールを呼ばずに終えようとしたら、一�
   assert.deepEqual(((gate.input as { toolCalls: { name: string }[] }).toolCalls).map((c) => c.name), ['chat.post', 'knowledge.register']);
 });
 
+test('どれか 1 つは呼ぶはずのツールを、どれも呼ばずに終えようとしたら、一度だけ促す（第47.7節。2026-11-15 に MCP のサイトに下書きを入れずに終えた）', async () => {
+  const def: AgentDefinition = {
+    ...SHARE_DEF, id: 'share-one-of', tools: ['chat.post', 'knowledge.register'],
+    steps: SHARE_DEF.steps.map((s) => (s.id === 'share' ? { ...s, requireOneOf: ['chat.post', 'knowledge.register'] } : s)),
+  };
+  const { repo, run, engine, llm } = scriptedShare(def, [
+    [],
+    [], // 文で答えて終えようとする
+    [{ name: 'chat.post', args: { space: '営業部', text: '共有します' } }],
+    [],
+  ]);
+  await engine.advance(run);
+  assert.ok(llm.prompts.some((p) => p.includes('まだ道具で行っていません') && p.includes('chat.post')), '呼ぶよう促す');
+  assert.equal(llm.prompts.filter((p) => p.includes('まだ道具で行っていません')).length, 1, '促すのは一度だけ');
+  const gate = repo.steps.find((s) => s.stepId === 'gate')!;
+  assert.deepEqual(((gate.input as { toolCalls: { name: string }[] }).toolCalls).map((c) => c.name), ['chat.post']);
+  const registry = new ToolRegistry();
+  for (const t of BUILTIN_TOOLS) registry.register(t);
+  const bad: AgentDefinition = { ...SHARE_DEF, steps: SHARE_DEF.steps.map((s) => (s.id === 'share' ? { ...s, requireOneOf: ['gmail.send'] } : s)) };
+  assert.throws(() => validateDefinition(bad, registry), /どれか 1 つ呼ぶはずのツール/);
+});
+
 test('段が必ず呼ぶツールは、その段で使えるツールでなければ定義を拒む', () => {
   const registry = new ToolRegistry();
   for (const t of BUILTIN_TOOLS) registry.register(t);

@@ -3148,9 +3148,9 @@ export const api = {
     setSalesDocsMailIntake: (mailIntake: boolean) => call<{ ok: true }>('/admin/extensions/sales-docs/settings', { method: 'PUT', body: JSON.stringify({ mailIntake }) }),
     /** お知らせを入れられる WordPress の記事の種類と、いまの入れ先（第45.20節）。 */
     announcementWebTypes: () => call<{ types: { restBase: string; name: string; news: boolean }[]; current: string; auto: boolean }>('/admin/extensions/announcements/web-types'),
-    /** コラムとお知らせを入れられるサイト（`rest` か `mcp:<接続の ID>`。仕様書 第47.6節）。 */
+    /** 会社がつないでいるサイト（`rest` か `mcp:<接続の ID>`。仕様書 第47.3節）。 */
     contentSites: () => call<{ sites: { key: string; name: string }[] }>('/admin/extensions/sites'),
-    setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; webPostType: string; screens: string[] | null; site: string }>) =>
+    setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; webPostType: string; screens: string[] | null }>) =>
       call<{ ok: true }>('/admin/extensions/announcements/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** お知らせを流す画面の選び先（サイネージの画面。`selected` が `null` ならすべて）。 */
     announcementScreens: () => call<{ screens: { id: string; name: string }[]; selected: string[] | null }>('/admin/extensions/announcements/screens'),

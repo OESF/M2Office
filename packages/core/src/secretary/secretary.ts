@@ -1755,7 +1755,7 @@ export class Secretary {
     if (named && !sites.some((s) => s.key === named.key)) {
       return { reply: { layer: 'direct', text: `「${named.name}」のサイトは、あなたは使えません（使える人は管理者が決めています）。`, evidence: [], tokensUsed: 0 } };
     }
-    if (sites.length === 0) return { reply: { layer: 'direct', text: '使えるサイトがありません（使える人は管理者が「接続 › サイト」で決めています）。', evidence: [], tokensUsed: 0 } };
+    if (sites.length === 0) return { reply: { layer: 'direct', text: '使えるサイトがありません（使える人は管理者が「接続 › 更新サイト」で決めています）。', evidence: [], tokensUsed: 0 } };
     const today = jstDate(new Date());
     const choice = this.siteChoices.get(`${tenantId}:${userId}`);
     const key = named?.key

@@ -50,7 +50,7 @@ export function siteUpdatesRoute(deps: AppDeps) {
   app.get('/mcp-sites', async (c) => {
     const { tenant, user } = c.get('ctx');
     const [view, mine] = await Promise.all([deps.tenantView(tenant.id), userSites(deps, tenant.id, user.id)]);
-    // 本人が使えるサイトだけを並べる（使える人は管理者が「接続 › サイト」で決める。第47.6節）
+    // 本人が使えるサイトだけを並べる（使える人は管理者が「接続 › 更新サイト」で決める。第47.6節）
     const allowed = new Set(mine.sites.map((s) => s.key));
     const known = new Set([...mine.sites, ...mine.denied].map((s) => s.key));
     const items = view.connections.filter((x) => x.profile?.site && (allowed.has(`mcp:${x.id}`) || !known.has(`mcp:${x.id}`))).map((x) => ({

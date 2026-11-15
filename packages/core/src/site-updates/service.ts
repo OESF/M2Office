@@ -108,7 +108,7 @@ export interface WordPressUserView {
 
 /** つないでいるサイト（画面に出す）。 */
 export interface SiteConnectionView {
-  /** 「接続 › サイト」でつないでいるか。 */
+  /** 「接続 › 更新サイト」でつないでいるか。 */
   connected: boolean;
   siteUrl: string | null;
   /** 直すときに使う WordPress の利用者（本人がつないでいれば本人、いなければ会社）。 */
@@ -387,7 +387,7 @@ export class SiteUpdateService {
     });
   }
 
-  /** WordPress の口（「接続 › サイト」でつないだもの）。つないでいなければ `null`。 */
+  /** WordPress の口（「接続 › 更新サイト」でつないだもの）。つないでいなければ `null`。 */
   private async wordpress(tenantId: string): Promise<WordPressAuth | null> {
     const settings = await this.deps.repo.getTenantSettings(tenantId);
     const wp = settings.webColumns.wordpress;
@@ -450,7 +450,7 @@ export class SiteUpdateService {
   /** 直し案を作ったときと同じ接続（承認の後に入れるため）。変わっていれば理由。 */
   private async sameConnection(tenantId: string, e: StoredSiteEdit): Promise<WordPressAuth | { error: string }> {
     const company = await this.wordpress(tenantId);
-    if (!company) return { error: 'WordPress がつながっていません（管理者ページの「接続 › サイト」）' };
+    if (!company) return { error: 'WordPress がつながっていません（管理者ページの「接続 › 更新サイト」）' };
     const auth = e.authKind === 'user' ? await this.userAuth(tenantId, e.requestedBy, company.siteUrl) : company;
     if (!auth || auth.username !== e.wpUsername) {
       return { error: e.authKind === 'user'
@@ -481,7 +481,7 @@ export class SiteUpdateService {
   async connectWordPressUser(who: SiteUpdateViewer, input: { username: string; password: string }): Promise<WordPressUserView | { error: string }> {
     if (!this.deps.users) return { error: 'この環境では、本人の WordPress の接続を使えません' };
     const company = await this.wordpress(who.tenantId);
-    if (!company) return { error: '会社の WordPress がつながっていません（管理者に「接続 › サイト」でつないでもらってください）' };
+    if (!company) return { error: '会社の WordPress がつながっていません（管理者に「接続 › 更新サイト」でつないでもらってください）' };
     const username = input.username.trim();
     const password = input.password.trim();
     if (!username || !password) return { error: 'WordPress の利用者名とアプリケーションパスワードを入れてください' };
@@ -502,7 +502,7 @@ export class SiteUpdateService {
   }
 
   /**
-   * 本人の WordPress の接続をしている人の一覧（管理者が「接続 › サイト」で見る。パスワードは返さない。Q-337）。
+   * 本人の WordPress の接続をしている人の一覧（管理者が「接続 › 更新サイト」で見る。パスワードは返さない。Q-337）。
    */
   async wordpressUsers(tenantId: string): Promise<{ userId: string; username: string; displayName: string; roles: string[]; connectedAt: string }[]> {
     const company = (await this.deps.repo.getTenantSettings(tenantId)).webColumns.wordpress;
@@ -543,7 +543,7 @@ export class SiteUpdateService {
     const req = request.trim().slice(0, SITE_UPDATE_LIMITS.requestChars);
     if (!req) return { error: '何を直すかを教えてください' };
     const conn = await this.connectionFor(who);
-    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › サイト」でつなぎます）' };
+    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › 更新サイト」でつなぎます）' };
     const wp = conn.auth;
     const me = await whoAmI(wp);
     if ('error' in me) return { error: conn.kind === 'user' ? `あなたの WordPress の接続が通りません（${me.error}）。個人設定の「サービスとの接続」でつなぎ直してください` : me.error };
@@ -757,7 +757,7 @@ export class SiteUpdateService {
     const req = request.trim().slice(0, SITE_UPDATE_LIMITS.requestChars);
     if (!req) return { error: '何をするかを教えてください' };
     const conn = await this.connectionFor(who);
-    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › サイト」でつなぎます）' };
+    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › 更新サイト」でつなぎます）' };
     const wp = conn.auth;
     const me = await whoAmI(wp);
     if ('error' in me) return { error: conn.kind === 'user' ? `あなたの WordPress の接続が通りません（${me.error}）` : me.error };
@@ -824,7 +824,7 @@ export class SiteUpdateService {
       attached.push({ from: 'file', fileId: f.meta.id, name: f.meta.name, mimeType });
     }
     const conn = await this.connectionFor(who);
-    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › サイト」でつなぎます）' };
+    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › 更新サイト」でつなぎます）' };
     const wp = conn.auth;
     const me = await whoAmI(wp);
     if ('error' in me) return { error: conn.kind === 'user' ? `あなたの WordPress の接続が通りません（${me.error}）` : me.error };
@@ -1048,7 +1048,7 @@ export class SiteUpdateService {
     const req = request.trim().slice(0, SITE_UPDATE_LIMITS.requestChars);
     if (!req) return { error: '何をするかを教えてください' };
     const conn = await this.connectionFor(who);
-    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › サイト」でつなぎます）' };
+    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › 更新サイト」でつなぎます）' };
     const me = await whoAmI(conn.auth);
     if ('error' in me) return { error: conn.kind === 'user' ? `あなたの WordPress の接続が通りません（${me.error}）` : me.error };
     const llm = await this.deps.llmFor(who.tenantId).catch(() => null);
@@ -1071,7 +1071,7 @@ export class SiteUpdateService {
    */
   async comments(who: SiteUpdateViewer): Promise<{ pending: CommentView[]; recent: CommentView[] } | { error: string }> {
     const conn = await this.connectionFor(who);
-    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › サイト」でつなぎます）' };
+    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › 更新サイト」でつなぎます）' };
     const [hold, recent] = await Promise.all([listSiteComments(conn.auth, 'hold', 20), listSiteComments(conn.auth, 'approve', 10)]);
     if ('error' in hold) return { error: hold.error };
     if ('error' in recent) return { error: recent.error };
@@ -1234,7 +1234,7 @@ export class SiteUpdateService {
    */
   async siteHealth(who: SiteUpdateViewer): Promise<SiteHealthView | { error: string }> {
     const conn = await this.connectionFor(who);
-    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › サイト」でつなぎます）' };
+    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › 更新サイト」でつなぎます）' };
     return readSiteHealth(conn.auth);
   }
 
@@ -1274,7 +1274,7 @@ export class SiteUpdateService {
   /** サイトのカテゴリーとタグの一覧（「サイトのカテゴリーは何がある？」。第45.17.2節）。 */
   async siteTerms(who: SiteUpdateViewer): Promise<{ categories: { name: string; parent: string | null; count: number }[]; tags: { name: string; count: number }[] } | { error: string }> {
     const conn = await this.connectionFor(who);
-    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › サイト」でつなぎます）' };
+    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › 更新サイト」でつなぎます）' };
     const [cats, tags] = await Promise.all([listSiteTerms(conn.auth, 'category'), listSiteTerms(conn.auth, 'tag')]);
     if ('error' in cats) return { error: cats.error };
     if ('error' in tags) return { error: tags.error };
@@ -1494,7 +1494,7 @@ export class SiteUpdateService {
     if (!this.view(e).revertible) return { error: e.purgedAt ? `${SITE_UPDATE_LIMITS.keepDays} 日を過ぎたため、元に戻せません` : 'この直しは元に戻せません' };
     // 戻す直し案を作る人の接続で行う（第45.16節）
     const conn = await this.connectionFor(who);
-    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › サイト」）' };
+    if (!conn) return { error: 'WordPress がつながっていません（管理者ページの「接続 › 更新サイト」）' };
     const wp = conn.auth;
     const pages: StoredSiteEditPage[] = [];
     const blocked: string[] = [];

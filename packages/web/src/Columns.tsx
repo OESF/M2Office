@@ -503,7 +503,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
             {column.status === 'awaiting'
               ? <button className="btn ghost" onClick={onApprovals}>承認の中身を見る</button>
               : <button className="btn" disabled={busy || dirty || (column.status === 'placed' && column.submittedVersion === column.currentVersion) || column.status === 'approved' && column.submittedVersion === column.currentVersion}
-                onClick={() => void submit()}>{detail.wordpress ? '承認へ進む（WordPress の下書きに入れる）' : '承認へ進む'}</button>}
+                onClick={() => void submit()}>{detail.wordpress ? '承認へ進む（サイトの下書きに入れる）' : '承認へ進む'}</button>}
             {note('submit')}
           </div>
 

@@ -83,7 +83,9 @@ export {
 } from './connectors/connection-agent.js';
 export { selectConnectionTools, TOOL_SELECT_THRESHOLD, TOOL_SELECT_MAX } from './engine/tool-select.js';
 export { mcpSiteOf, siteHandOff, type SiteHandOff } from './connectors/site-handoff.js';
+export { siteOptions, userSites, outputSiteOf, OUTPUT_SITE_ASK, type OutputSite, type UserSitesDeps } from './connectors/sites.js';
 export { IN_FLOW_HOURS, isInFlowApproval } from './engine/in-flow.js';
+export { recordedCallFailure } from './engine/run-engine.js';
 export { APPROVAL_STOP, APPROVAL_MODIFY, APPROVAL_TALK_HOURS, isApprovalCorrection, correctedRequest, type ApprovalTalkDeps, type PendingTalkApproval } from './secretary/approval-talk.js';
 export { answeredSite, isRestSiteAgent, isSiteAgent, namedSite, siteAliases, siteAskText, siteKeyOfAgent, type SiteOption } from './secretary/site-choice.js';
 export {

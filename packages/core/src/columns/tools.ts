@@ -133,6 +133,8 @@ export const columnsPlace: Tool = {
     const res = await service.place(viewer(ctx), str(args['columnId']), str(args['digest']));
     if ('error' in res) return { available: false, reason: res.error };
     if (res.scheduledAt) return { available: true, placed: false, scheduledAt: res.scheduledAt, note: '予約にしました。公開の日時に入れます' };
+    // MCP でつないだサイトは、そのサイトの業務に下書きを頼んだ（できたら秘書が伝える。第47.6節）
+    if (res.handedTo) return { available: true, placed: false, handedTo: res.handedTo, note: `「${res.handedTo}」に下書きを頼みました。できたら秘書がお伝えします` };
     return res.placed
       ? { available: true, placed: true, editUrl: res.editUrl, note: 'WordPress に下書きとして入れました。公開は WordPress の編集の画面で行ってください' }
       : { available: true, placed: false, note: '承認済みにしました。貼るだけのページを使っていれば、そこに出ます。コラムの画面から本文を写しても使えます' };

@@ -73,11 +73,6 @@ export interface ColumnWordPress {
 export interface WebColumnSettings {
   /** 使うか（既定は切り）。 */
   enabled: boolean;
-  /**
-   * 入れるサイト（`rest` は REST API の WordPress、`mcp:<接続の ID>` はサイトの運営会社の MCP でつないだサイト。仕様書 第47.6節）。
-   * 無ければ REST API の WordPress。会社の設定で決め、頼むたびには選ばない（2026-11-15 に三浦さんが決めた）
-   */
-  site?: string;
   /** 書きたい分野。 */
   topics: string[];
   /** 読み手（例: 「市内の子育て世帯」）。 */

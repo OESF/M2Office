@@ -73,6 +73,16 @@ export function validateDefinition(def: AgentDefinition, registry: ToolRegistry)
     }
   }
 
+  // 2e. どれか 1 つは呼ぶはずのツールも、その段で使えるツールの一部でなければならない（第47.7節）
+  for (const step of def.steps) {
+    if (step.type !== 'agent' || !step.requireOneOf) continue;
+    const usable = step.tools ?? def.tools;
+    const outside = step.requireOneOf.filter((t) => !usable.includes(t));
+    if (outside.length > 0) {
+      throw new DefinitionInvalidError(`段「${step.id}」がどれか 1 つ呼ぶはずのツールが、その段で使えません: ${outside.join(', ')}`);
+    }
+  }
+
   // 3. ステップ ID の重複と、restartFrom の参照先
   const ids = new Set<string>();
   for (const step of def.steps) {

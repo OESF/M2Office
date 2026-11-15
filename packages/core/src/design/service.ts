@@ -138,7 +138,7 @@ export class CompanyDesignService {
 
   /**
    * 会社の名前・ロゴの色・サイトの URL。`site` は見た目を作るときに読むサイト（会社情報の Web サイトを先に）、
-   * `wordpress` はサイトに貼る CSS の貼り先（接続 › サイト のサイト）。
+   * `wordpress` はサイトに貼る CSS の貼り先（接続 › 更新サイト のサイト）。
    */
   private async company(tenantId: string, llm: LlmProvider | null): Promise<{ name: string; site: string | null; wordpress: string | null; logoColor: string | null }> {
     const settings = await this.deps.repo.getTenantSettings(tenantId);

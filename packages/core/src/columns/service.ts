@@ -8,6 +8,7 @@
  */
 
 import { mcpSiteOf, type SiteHandOff } from '../connectors/site-handoff.js';
+import type { OutputSite } from '../connectors/sites.js';
 import type { CompanyDesignTokens } from '@m2office/shared';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -49,6 +50,11 @@ export interface ColumnServiceDeps {
    * 無ければ MCP のサイトには入れられない
    */
   handOffToSite?: SiteHandOff;
+  /**
+   * 本人が入れるサイト（仕様書 第47.6節）。使えるサイトが 1 つならそれ、2 つ以上なら個人設定の既定のサイト。決まらなければ `ask`。
+   * 無ければ、会社の REST API の WordPress に入れる（いままでどおり）
+   */
+  siteOf?(tenantId: string, userId: string): Promise<OutputSite>;
   /** 会社の見た目（第46.5節）。あれば型の色と挿絵の雰囲気に使う。無ければロゴから推し量る */
   design?(tenantId: string): Promise<CompanyDesignTokens | null>;
   store: ColumnStore;
@@ -366,22 +372,26 @@ export class ColumnService {
     if (!c) return null;
     const v = (await this.deps.store.versions(who.tenantId, id)).find((x) => x.version === c.currentVersion);
     const settings = await this.deps.repo.getTenantSettings(who.tenantId);
-    const wp = settings.webColumns.wordpress;
+    // 入れるサイト（本人ごと。第47.6節）。MCP のサイトなら、そのサイトの業務に頼む
+    const site = this.deps.siteOf ? await this.deps.siteOf(who.tenantId, who.userId).catch(() => null) : null;
+    const mcpSite = site && 'key' in site && site.key.startsWith('mcp:') ? site : null;
+    const wp = mcpSite ? null : settings.webColumns.wordpress;
     const hasKey = wp ? !!(await this.deps.repo.getTenantCredential(who.tenantId, WP_KIND)) : false;
     const problems: string[] = [];
+    if (site && 'ask' in site) problems.push(site.ask);
     if (!v) problems.push('まだ書き上がっていません');
     if (c.status === 'writing') problems.push('書いている途中です');
     if (c.status === 'failed') problems.push('書けなかったコラムです。書き直してください');
     if (c.status === 'placed' && c.submittedVersion === c.currentVersion) problems.push('この版は WordPress に入れてあります');
     if (wp && !hasKey) problems.push('WordPress のアプリケーションパスワードが預けられていません。管理者に頼んでください');
-    if (v && !v.cover) problems.push('カバー画像がありません。「画像を作成」で作ってください');
+    if (v && !v.cover && !mcpSite) problems.push('カバー画像がありません。「画像を作成」で作ってください');
     const publishAt = c.publishAt ?? null;
     if (publishAt && c.status !== 'scheduled' && Date.parse(publishAt) < Date.now()) problems.push('公開の日時が過ぎています。日時を直すか、外してください');
     const at = publishAt ? new Date(publishAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
     const page = settings.webColumns.pastePage ? '貼るだけのページに出す' : '承認済みにするだけ（本文をコピーして使う）';
     return {
       id, version: c.currentVersion, title: v?.title ?? '', chars: v ? charCount(v.body) : 0, reviewCount: v?.review.length ?? 0,
-      destination: `${wp ? `WordPress（${wp.siteUrl}）の下書き` : `WordPress につないでいないため、${page}`}${at ? `（${at} に入れる。予約）` : ''}`,
+      destination: `${mcpSite ? `${mcpSite.name}（MCP）の下書き` : wp ? `WordPress（${wp.siteUrl}）の下書き` : `WordPress につないでいないため、${page}`}${at ? `（${at} に入れる。予約）` : ''}`,
       cover: v?.cover ?? null, problems, digest: v ? versionDigest(id, v, publishAt) : '', publishAt,
     };
   }
@@ -408,7 +418,7 @@ export class ColumnService {
    * @param digest 承認したときの版の指紋。今の版と違えば入れない
    * @returns 入れた先（編集の画面の URL）。入れられなければ理由
    */
-  async place(who: ColumnViewer, id: string, digest: string): Promise<{ placed: boolean; editUrl: string | null; scheduledAt?: string } | { error: string }> {
+  async place(who: ColumnViewer, id: string, digest: string): Promise<{ placed: boolean; editUrl: string | null; scheduledAt?: string; handedTo?: string } | { error: string }> {
     const { store, repo } = this.deps;
     const c = await store.get(who.tenantId, id);
     if (!c) return { error: 'コラムが見つかりません' };
@@ -423,7 +433,13 @@ export class ColumnService {
       await this.audit(who, 'column.schedule', id, { version: p.version, publishAt: p.publishAt });
       return { placed: false, editUrl: null, scheduledAt: p.publishAt };
     }
-    return this.placeVersion(who, id, p.version);
+    const placed = await this.placeVersion(who, id, p.version);
+    // 入れられなければ、承認待ちのまま残さず下書きに戻す（直してから、もう一度承認へ進められるように）
+    if ('error' in placed) {
+      await store.update(who.tenantId, id, { status: 'draft', runId: null });
+      await this.audit(who, 'column.place_failed', id, { version: p.version, reason: placed.error });
+    }
+    return placed;
   }
 
   /**
@@ -445,25 +461,28 @@ export class ColumnService {
   }
 
   /** 承認した版を入れる（WordPress の下書き。無ければ承認済みにする）。 */
-  private async placeVersion(who: ColumnViewer, id: string, version: number): Promise<{ placed: boolean; editUrl: string | null } | { error: string }> {
+  private async placeVersion(who: ColumnViewer, id: string, version: number): Promise<{ placed: boolean; editUrl: string | null; handedTo?: string } | { error: string }> {
     const { store, repo } = this.deps;
     const v = (await store.versions(who.tenantId, id)).find((x) => x.version === version)!;
     const settings = (await repo.getTenantSettings(who.tenantId)).webColumns;
     // 入れるサイトが MCP でつないだサイトなら、そのサイトの業務に下書きを頼む（公開はしない。第47.6節）
-    const mcp = mcpSiteOf(settings.site);
+    const site = this.deps.siteOf ? await this.deps.siteOf(who.tenantId, who.userId).catch(() => null) : null;
+    if (site && 'ask' in site) return { error: site.ask };
+    const mcp = site ? mcpSiteOf(site.key) : null;
     if (mcp) {
       if (!this.deps.handOffToSite) return { error: 'MCP でつないだサイトに入れる準備がありません' };
       const r = await this.deps.handOffToSite(who, mcp, [
-        '次のコラムを、サイトの読み物の記事（ブログ・コラムなど）の**下書き**として入れてください。公開はしません（公開するときは、あとで人が頼みます）。',
+        '次のコラムを、サイトの読み物の記事（ブログ・コラムなど）の**下書き**として、道具で入れてください。本文は書き直さず、このまま使ってください。公開はしません（公開するときは、あとで人が頼みます）。',
         `題名: ${v.title}`,
         v.description ? `抜粋: ${v.description}` : '',
         '本文（HTML）:',
         columnHtml(finalMarkdown(v, settings)),
       ].filter(Boolean).join('\n'));
       if ('error' in r) return { error: r.error };
-      await store.update(who.tenantId, id, { status: 'placed', submittedVersion: v.version, wpPostId: null, wpEditUrl: null, runId: null });
+      // 下書きを作るのは相手の道具（頼んだ業務が後で行う）。ここでは「入れた」にせず承認済みにとどめ、入らなかったときに入れ直せるようにする
+      await store.update(who.tenantId, id, { status: 'approved', submittedVersion: v.version, wpPostId: null, wpEditUrl: null, runId: null });
       await this.audit(who, 'column.place', id, { version: v.version, site: `mcp:${mcp}`, handedRun: r.runId });
-      return { placed: true, editUrl: null };
+      return { placed: false, editUrl: null, handedTo: r.siteName };
     }
     if (!settings.wordpress) {
       await store.update(who.tenantId, id, { status: 'approved', submittedVersion: v.version, runId: null });

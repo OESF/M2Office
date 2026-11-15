@@ -306,7 +306,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
       {x.competitors && on && <CompetitorMapKeyFields settings={x.competitors} busy={busy} onChanged={onChanged} />}
       {x.announcements && on && <AnnouncementFields settings={x.announcements} busy={busy} onChanged={onChanged} />}
       {/* お知らせの出し先の WordPress と LINE は「接続」でつなぐ（第35章・第6.6.2.1節） */}
-      {x.announcements && on && <div className="row wrap small ext-inventory"><ConnectorLink page="wordpress">WordPress の接続</ConnectorLink><ConnectorLink page="line">LINE 公式アカウントの接続</ConnectorLink></div>}
+      {x.announcements && on && <div className="row wrap small ext-inventory"><ConnectorLink page="wordpress">更新サイトの接続</ConnectorLink><ConnectorLink page="line">LINE 公式アカウントの接続</ConnectorLink></div>}
       {/* サイトの更新: 管理者の承認も加えるか（第45.6節）。直すサイトは「接続」の WordPress（第45.2節） */}
       {x.siteUpdates && on && (
         <div className="small ext-inventory">
@@ -315,7 +315,7 @@ function InstalledCard({ item: x, busy, focused = false, options, onChanged, onT
               onChange={(e) => void api.admin.setSiteUpdatesAdminApproval(e.target.checked).then(onChanged)} />
             サイトの直しは管理者も承認する
           </label>
-          <div className="row wrap"><ConnectorLink page="wordpress">WordPress の接続</ConnectorLink></div>
+          <div className="row wrap"><ConnectorLink page="wordpress">更新サイトの接続</ConnectorLink></div>
         </div>
       )}
       {x.webReview && on && <WebReviewFields settings={x.webReview} busy={busy} onChanged={onChanged} />}
@@ -912,7 +912,7 @@ function AnnouncementFields({ settings, busy, onChanged }: { settings: Announcem
   // お知らせを入れる記事の種類（第45.20節）。M2Office が選んだものを出し、違えば選び直す
   const [types, setTypes] = useState<{ types: { restBase: string; name: string; news: boolean }[]; current: string; auto: boolean } | null>(null);
   useEffect(() => { api.admin.announcementWebTypes().then(setTypes).catch(() => setTypes(null)); }, []);
-  const save = (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; webPostType: string; screens: string[] | null; site: string }>) => {
+  const save = (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; webPostType: string; screens: string[] | null }>) => {
     setWorking(true);
     api.admin.setAnnouncementSettings(patch).then(() => {
       setError(null); onChanged();
@@ -923,7 +923,6 @@ function AnnouncementFields({ settings, busy, onChanged }: { settings: Announcem
   return (
     <div className="small ext-inventory">
       <div className="row wrap">
-        <SiteField value={settings.site} busy={busy || working} label="お知らせを入れるサイト" onSave={(site) => save({ site })} />
         <label className="row">Web サイト
           <select value={settings.webPublish} disabled={busy || working} aria-label="Web サイトの出し方" onChange={(e) => save({ webPublish: e.target.value as 'publish' | 'draft' })}>
             <option value="publish">承認の後に公開まで</option>
@@ -986,23 +985,6 @@ function ColumnPageFields({ settings, busy, onChanged }: { settings: WebColumnSe
   );
 }
 
-/**
- * 入れるサイト（仕様書 第47.6節）。REST API の WordPress と、MCP でつないだサイトが 2 つ以上あるときだけ出す。
- * 会社の設定で決め、頼むたびには選ばない（2026-11-15 に三浦さんが決めた）
- */
-function SiteField({ value, busy, label, onSave }: { value: string | undefined; busy: boolean; label: string; onSave: (site: string) => void }) {
-  const [sites, setSites] = useState<{ key: string; name: string }[]>([]);
-  useEffect(() => { api.admin.contentSites().then((r) => setSites(r.sites)).catch(() => setSites([])); }, []);
-  if (sites.length < 2) return null;
-  return (
-    <label className="row">入れるサイト
-      <select value={value ?? 'rest'} disabled={busy} aria-label={label} onChange={(e) => onSave(e.target.value)}>
-        {sites.map((s) => <option key={s.key} value={s.key}>{s.key === 'rest' ? s.name : `${s.name}（MCP）`}</option>)}
-      </select>
-    </label>
-  );
-}
-
 function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebColumnSettings; usage: { used: number; limit: number } | null; busy: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const fail = (e: unknown, text: string) => setError(describeError(e, text));
@@ -1018,7 +1000,6 @@ function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebC
         {/* 当てる表現の決まり（AI が選ぶ。違っていれば秘書に頼んで直す。第32.18.3節） */}
         <span className="muted">表現の決まり: {['景品表示法', ...settings.rules.map((r) => COLUMN_RULE_SET_LABELS[r])].join('・')}{settings.rulesBy === 'person' ? '（秘書で直した）' : ''}</span>
         <label className="check"><input type="checkbox" checked={settings.aiNotice} disabled={busy} onChange={(e) => save({ aiNotice: e.target.checked })} /> AI が書いたことを記事の末尾に入れる</label>
-        <SiteField value={settings.site} busy={busy} label="コラムを入れるサイト" onSave={(site) => save({ site })} />
         {/* コラムを入れる WordPress のカテゴリー（第45.20.2節。空なら付けない） */}
         <ColumnTypeField busy={busy} onSave={(wpPostType) => save({ wpPostType })} />
         <ColumnCategoryField value={settings.wpCategory ?? 'コラム'} busy={busy} onSave={(wpCategory) => save({ wpCategory })} />
@@ -1050,7 +1031,8 @@ function WebColumnsFields({ settings, usage, busy, onChanged }: { settings: WebC
         )}
       </div>
       {!settings.wordpress && <ColumnPageFields settings={settings} busy={busy} onChanged={onChanged} />}
-      <ConnectorStatus label="WordPress" page="wordpress" connected={settings.wordpress?.siteUrl ?? null} />
+      {/* 入れるサイトは使う人ごと（個人設定の既定のサイト。仕様書 第47.6節）。特定のサイトを出さず、接続の場所だけを示す */}
+      <div className="row wrap"><span>更新サイト</span><ConnectorLink page="wordpress">接続で設定</ConnectorLink></div>
       <ColumnBgmFields onError={(m) => setError(m)} />
       {error && <p className="error">{error}</p>}
     </div>
