@@ -12,7 +12,7 @@ Node.js 22 以上。PostgreSQL への接続が必要です（`DATABASE_URL`）�
 ## 構成
 
 ```
-src/engine/      実行エンジン。承認による中断と再開、ジョブの投入。道具の多い会社の接続から段で使う道具を先に選ぶ（tool-select.ts。仕様書 第47.4.3節）。承認の画面に相手の見直しの結果と注意を出す（approval-present.ts）。実行を見られる人と承認を判断できる人（run-access.ts。権限区画に属する業務は区画に入っている人だけ。approval-compartments.ts で古い承認に区画を埋める。ADR-0096）
+src/engine/      実行エンジン。承認による中断と再開、ジョブの投入（起こしたのが本人かシステムかを記録する）。一連の流れの中の承認の見分け（in-flow.ts。仕様書 第47.5節）。道具の多い会社の接続から段で使う道具を先に選ぶ（tool-select.ts。仕様書 第47.4.3節）。承認の画面に相手の見直しの結果と注意を出す（approval-present.ts）。実行を見られる人と承認を判断できる人（run-access.ts。権限区画に属する業務は区画に入っている人だけ。approval-compartments.ts で古い承認に区画を埋める。ADR-0096）
 src/tools/       ツールの登録簿と内蔵ツール（quote.ts は見積書。金額は quoteTotals の決まった計算。recruit.ts は採用の文の点検）
 src/connectors/  メール・予定・タスク・チャット・本人の Google の連絡先（google/people.ts。第27.15節）への接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れとアプリの自動登録（oauth.ts。動的クライアント登録）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）。ツールの役割と接続の説明を推論で決める（profile.ts）・接続ごとの汎用の業務（connection-agent.ts。仕様書 第47.4.1節・第47.7節、ADR-0148）・コラムとお知らせを MCP のサイトの業務に頼む（site-handoff.ts。第47.6節）
 src/chat/        グループの名前で共有する（group-share.ts。グループに合う Chat のスペースを探す・承認の画面に届く先とグループとの違いを出す。仕様書 第16.7.12.1節、ADR-0076）と、Chat で秘書に頼む受け口の部品（inbound.ts。出来事の読み取り・Google の署名の確かめ・置き場。第10.16節、ADR-0138）

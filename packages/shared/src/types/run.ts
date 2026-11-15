@@ -33,6 +33,11 @@ export interface Job {
   planStepId?: string | null;
   /** 依頼のときの業務の名前（業務を削除した後も画面に出すため。移行 078 より前の依頼には無い）。 */
   agentName?: string | null;
+  /**
+   * 本人が操作して起こしたか（`user`）、システムが起こしたか（`system`。定時実行・会議の後の自動の議事録・先回りの準備・相手からの返事など）。
+   * 本人が起こした業務の承認は、一連の流れの中の承認として承認トレイに出さない（仕様書 第47.5節）。移行 209 より前の依頼には無い
+   */
+  startedBy?: 'user' | 'system' | null;
 }
 
 export interface Run {

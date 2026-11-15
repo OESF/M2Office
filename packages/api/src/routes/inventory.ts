@@ -505,7 +505,7 @@ export function inventoryRoute(deps: AppDeps) {
     // 同じ仕入先の発注のメールが承認待ちなら、重ねて作らない（同じ発注を二度送らないため）
     if (supplier.method === 'mail') {
       const waiting = (await service.orders(tenant.id, { open: true })).find((o) => o.status === 'pending' && o.supplierId === supplier.id && o.runId);
-      if (waiting) return c.json({ error: `${supplier.name}への発注のメール（${waiting.number}）が承認待ちです。承認トレイで確かめてください`, orderId: waiting.id }, 409);
+      if (waiting) return c.json({ error: `${supplier.name}への発注のメール（${waiting.number}）が承認待ちです。秘書のキャンバス（時間がたったものは承認トレイ）で確かめてください`, orderId: waiting.id }, 409);
     }
     // 発注を記録し（メールは承認待ち・Web と電話は発注待ち。発注待ちがあれば出し直す）、発注書を作る（第29.14.4節・第29.14.5節）
     const order = await service.createOrder(tenant.id, user.id, { supplierId: supplier.id, lines: picked.map((p) => ({ itemId: p.item.id, qty: p.qty })), status: 'pending' });

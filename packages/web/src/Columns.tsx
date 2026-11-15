@@ -55,7 +55,7 @@ const toLocalInput = (iso: string) => { const d = new Date(iso); return new Date
  *
  * @param columnId 開いているコラム（無ければ一覧）
  * @param onOpen コラムを開く・一覧に戻る（`null`）
- * @param onApprovals 承認へ進めた後（承認トレイへ移る）
+ * @param onApprovals 承認へ進めた後（画面を移らずに、秘書のキャンバスで承認する。仕様書 第47.5節）
  */
 export function Columns({ columnId, onOpen, onApprovals }: {
   columnId: string | null;
@@ -501,7 +501,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
 
           <div className="row">
             {column.status === 'awaiting'
-              ? <button className="btn ghost" onClick={onApprovals}>承認トレイを開く</button>
+              ? <button className="btn ghost" onClick={onApprovals}>承認の中身を見る</button>
               : <button className="btn" disabled={busy || dirty || (column.status === 'placed' && column.submittedVersion === column.currentVersion) || column.status === 'approved' && column.submittedVersion === column.currentVersion}
                 onClick={() => void submit()}>{detail.wordpress ? '承認へ進む（WordPress の下書きに入れる）' : '承認へ進む'}</button>}
             {note('submit')}

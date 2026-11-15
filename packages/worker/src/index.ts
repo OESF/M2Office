@@ -612,6 +612,8 @@ const plans = new PlanRunner({
     const { runId } = await enqueueJob(repo, {
       tenantId, requestedBy: userId, def, input, origin: 'secretary',
       actor: { type: 'system', id: 'secretary-plan' }, ...(planStepId ? { planStepId } : {}),
+      // 段取りの段は、本人が秘書に頼んだ流れの一部（承認は流れの中で判断する。仕様書 第47.5節）
+      startedBy: 'user',
     });
     return runId;
   },

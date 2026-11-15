@@ -44,6 +44,11 @@ export async function enqueueJob(
     actor: { type: 'user' | 'system'; id: string };
     /** 秘書の段取りの段として起こすなら、その段の ID（仕様書 第10.14節）。 */
     planStepId?: string;
+    /**
+     * 本人が操作して起こした流れの業務か（仕様書 第47.5節）。省略すると起動者（`actor.type`）で決める。
+     * 段取りの段の業務は、起動者はシステムだが本人の頼みの流れなので `user` を渡す
+     */
+    startedBy?: 'user' | 'system';
   },
 ): Promise<{ jobId: string; runId: string }> {
   // AI の利用の上限に当たっていれば、新しい依頼を受け付けない（定時実行は始める前に失敗にする）
@@ -53,6 +58,8 @@ export async function enqueueJob(
     id: randomUUID(), tenantId: p.tenantId, agentId: p.def.id, agentVersion: p.def.version,
     requestedBy: p.requestedBy, origin: p.origin, input: p.input, createdAt: now, agentName: p.def.name,
     ...(p.planStepId ? { planStepId: p.planStepId } : {}),
+    // 本人が操作して起こしたか（一連の流れの中の承認を見分ける。仕様書 第47.5節）
+    startedBy: p.startedBy ?? p.actor.type,
   };
   const run: Run = {
     id: randomUUID(), jobId: job.id, tenantId: p.tenantId, status: 'queued', cursor: 0,

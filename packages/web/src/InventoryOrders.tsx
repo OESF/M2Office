@@ -97,7 +97,7 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
               </tbody>
             </table>
             {supplierId && waitingFor(supplierId) && (
-              <p className="small muted">発注待ち {waitingFor(supplierId)!.number} があります{p?.method === 'mail' ? '（承認トレイで確かめてください）' : '。押すと、その発注を出し直します'}</p>
+              <p className="small muted">発注待ち {waitingFor(supplierId)!.number} があります{p?.method === 'mail' ? '（秘書のキャンバスで確かめてください）' : '。押すと、その発注を出し直します'}</p>
             )}
             {supplierId
               ? <button className="btn small" disabled={p?.method === 'mail' && !!waitingFor(supplierId)} onClick={() => void start(supplierId, list)}>
@@ -107,7 +107,7 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
             {typeof res === 'string' && <p className="error small">{res}</p>}
             {res && typeof res !== 'string' && res.method === 'mail' && (
               <p className="small">
-                {res.number} の発注のメールと発注書を作っています。送る前に承認トレイで宛先と本文を確かめてください。
+                {res.number} の発注のメールと発注書を作っています。送る前に、右の秘書のキャンバスで宛先と本文を確かめて承認してください。
                 {res.fileId && <> <a href={api.inventory.orderSheetUrl(res.orderId)} target="_blank" rel="noreferrer">発注書を開く</a></>}
               </p>
             )}

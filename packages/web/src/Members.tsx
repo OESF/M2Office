@@ -249,7 +249,7 @@ function LineMessages() {
     setBusy(true);
     try {
       const r = await api.members.prepareMessage({ audience, text });
-      setNote({ kind: 'ok', text: `${r.message.count} 人への知らせを承認待ちにしました。承認トレイで確かめてください。` });
+      setNote({ kind: 'ok', text: `${r.message.count} 人への知らせを承認待ちにしました。右の秘書のキャンバスで確かめて承認してください。` });
       void load();
     } catch (e) {
       setNote({ kind: 'error', text: describeError(e, '用意できませんでした') });

@@ -592,8 +592,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuAgents]));
   /*
-    秘書に頼んだ業務の承認のうち、本人が判断するもの（仕様書 第47.5節）。秘書のキャンバスの中で判断できる。
-    承認トレイにも同じものが出て、どちらで判断してもよい
+    一連の流れの中の承認（本人が操作して起こした業務の承認で、12 時間の内のもの。仕様書 第47.5節）。秘書のキャンバスで判断し、
+    承認トレイには出さない
   */
   const inlineApprovals = approvals.filter((a) => a.inFlow === true);
   // 承認トレイに出すのは、流れの外の承認だけ（ほかの人の依頼・定時実行・時間がたったもの。第47.5節）
@@ -867,7 +867,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
               <ViewTitle>名刺管理 <HelpTip article="start-cards">撮るかファイルを選ぶと、AI が読み取って登録します。秘書に「〇〇さんの電話番号は？」と聞けます。</HelpTip></ViewTitle>
               <Cards contactId={view.contactId} onOpen={(contactId) => setView({ kind: 'cards', contactId })}
                 mailer={{ email: me.user.email, google: me.workspaceSource === 'google' }} admin={me.user.roles.includes('admin')}
-                onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }}
+                // 承認へ進めたら、画面を移らずに秘書のキャンバスで判断する（流れの中の承認。仕様書 第47.5節）
+                onApprovals={() => { void refresh(); setTalkOpen(true); }}
                 {...(me.inquiries ? { onInquiry: (inquiryId: string) => setView({ kind: 'inquiries', inquiryId }) } : {})}
                 {...(me.contracts ? { onContract: (contractId: string) => setView({ kind: 'contracts', contractId }) } : {})} />
             </>
@@ -882,7 +883,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <>
               <ViewTitle>コラムの作成 <HelpTip article="start-web-columns">テーマを入れると、AI が調べて出典つきのコラムを書き、表現の決まりに照らして校正します。</HelpTip></ViewTitle>
               <Columns columnId={view.columnId} onOpen={(columnId) => setView({ kind: 'columns', columnId })}
-                onApprovals={() => { void refresh(); setView({ kind: 'approvals' }); }} />
+                // 承認へ進めたら、画面を移らずに秘書のキャンバスで判断する（流れの中の承認。仕様書 第47.5節）
+                onApprovals={() => { void refresh(); setTalkOpen(true); }} />
             </>
           )}
           {view.kind === 'inquiries' && (

@@ -181,10 +181,10 @@ export class PostgresRepository implements Repository {
   async createJob(job: Job): Promise<void> {
     await this.q(job.tenantId, 
       `insert into jobs (id, tenant_id, agent_id, agent_version, requested_by,
-                         origin, input, created_at, plan_step_id, agent_name)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+                         origin, input, created_at, plan_step_id, agent_name, started_by)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [job.id, job.tenantId, job.agentId, job.agentVersion, job.requestedBy,
-       job.origin, JSON.stringify(job.input), job.createdAt, job.planStepId ?? null, job.agentName ?? null],
+       job.origin, JSON.stringify(job.input), job.createdAt, job.planStepId ?? null, job.agentName ?? null, job.startedBy ?? null],
     );
   }
 
@@ -192,7 +192,7 @@ export class PostgresRepository implements Repository {
     const rows = await this.q<Job>(tenantId, 
       `select id, tenant_id as "tenantId", agent_id as "agentId",
               agent_version as "agentVersion", requested_by as "requestedBy",
-              origin, input, created_at as "createdAt", plan_step_id as "planStepId", agent_name as "agentName"
+              origin, input, created_at as "createdAt", plan_step_id as "planStepId", agent_name as "agentName", started_by as "startedBy"
          from jobs where tenant_id = $1 and id = $2`,
       [tenantId, jobId],
     );
