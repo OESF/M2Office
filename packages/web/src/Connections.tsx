@@ -692,7 +692,7 @@ const TITLES: Record<string, string> = {
   retention: 'Google のデータを残す日数',
   permissions: 'Google に求める許可',
   people: 'Google の従業員の接続',
-  wordpress: 'WordPress',
+  wordpress: 'サイト',
   line: 'LINE 公式アカウント',
   mailbox: '窓口のメール',
   mcp: 'コネクタ（MCP）',
@@ -709,7 +709,7 @@ const CONNECTION_HELP: Record<string, PageHelp> = {
   retention: { article: 'admin-connectors', text: '業務が Google から読んだメールや文書の中身と、そこから作った文を、業務が終わってから何日残すかです。過ぎると中身を消し、使ったツールの名前と件数だけを残します。' },
   permissions: { article: 'admin-connectors', text: '従業員が接続するときに Google に求める許可と、その権限の段階です。' },
   people: { article: 'admin-connectors', text: '従業員ごとの、Google との接続の状況です。' },
-  wordpress: { article: 'admin-connectors', text: 'コラムとお知らせを入れる会社の WordPress です。アプリケーションパスワードは、WordPress の「ユーザー → プロフィール」で作ります。' },
+  wordpress: { article: 'admin-connectors', text: 'コラム・お知らせ・サイトの更新が使う会社のサイトです。WordPress は REST API とアプリケーションパスワード（WordPress の「ユーザー → プロフィール」で作ります）でつなぎます。サイトの運営会社が出す MCP でつなぐサイトは「コネクタ（MCP）」で登録すると、ここにも並びます。' },
   line: { article: 'admin-connectors', text: '問い合わせ・お知らせの配信・会員証に使う LINE 公式アカウントです。接続したときに出る受け口の URL を、LINE の管理画面の Webhook に入れます。' },
   mailbox: { article: 'admin-connectors', text: '問い合わせを受け、まとめてのメールを送る、窓口の Google のアカウント（info@ など）です。' },
 };

@@ -228,7 +228,15 @@ export interface Tool {
    *
    * @remarks 承認の画面で「Slack へ送ります（slack_send_message）」のように出すのに使う。内蔵のツールは持たない
    */
-  connection?: { id: string; name: string; tool: string; labels?: Record<string, string> };
+  connection?: {
+    id: string; name: string; tool: string; labels?: Record<string, string>;
+    /** 役割（仕様書 第47.4.1節）。承認の画面で見直しの結果を出すのに使う。 */
+    role?: 'read' | 'prepare' | 'review' | 'commit' | 'undo';
+    /** 結果のうち、承認の画面に相手の言葉のまま出す注意の項目（第47.4節 ③）。 */
+    warnings?: string[];
+    /** 結果のうち、終わった後に伝える知らせの項目（第47.4節 ④）。 */
+    notes?: string[];
+  };
   /** 必要な Google の権限。Google を使わないツールは持たない（仕様書 第14.3.2節）。 */
   google?: GoogleScope;
   /**

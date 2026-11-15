@@ -9,12 +9,13 @@
  * @see 仕様書 第12.10節 持ち運べる拡張機能
  */
 
-import { RISK_ORDER, type AgentDefinition, type RiskLevel } from '@m2office/shared';
+import { RISK_ORDER, SITE_UPDATES_EXTENSION_ID, type AgentDefinition, type RiskLevel } from '@m2office/shared';
 import type { InstalledExtension, Repository, TenantConnection } from '../repository/types.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { McpClient } from '../connectors/mcp.js';
 import { silentLogger, type Logger } from '../log/logger.js';
 import { connectorToolName, connectorTools, type ConnectionAuthProvider, type ConnectorDeclaration } from './connectors.js';
+import { SITE_CONNECTION_AGENT_PREFIX, connectionAgent, siteConnectionAgentId } from '../connectors/connection-agent.js';
 import { loadExtensionFiles, type ExtensionFiles, type ExtensionPackage } from './loader.js';
 import { CARDS_PACKAGE } from '../cards/agents.js';
 import { INVENTORY_PACKAGE } from '../inventory/agents.js';
@@ -106,6 +107,22 @@ export interface TenantExtensions {
    * @remarks 1 つでもあれば、その業務は使えない（「接続が要ります」）
    */
   missingToolsOf(def: AgentDefinition): string[];
+}
+
+/**
+ * 会社のサイト（REST API の WordPress）を直す業務の ID の頭（第47.6節）。
+ *
+ * @remarks コラムの作成とお知らせの作成は入れるサイトを設定で決めるので、ここには入れない（第 0.589.0 版）
+ */
+const SITE_AGENT_PREFIXES = ['site-updates:'];
+
+/** サイトの URL の名前の部分（読めなければそのまま）。 */
+function siteHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 /**
@@ -225,16 +242,35 @@ export class ExtensionHub {
     );
     const missingToolsOf = (def: AgentDefinition) => def.tools.filter((name) => !tenantRegistry.get(name));
     // 秘書の調べものは、会社の接続の読むだけのツールを使える（第12.11.0節）
-    const readTools = connections.flatMap((c) => connectorTools(c)).filter((t) => t.risk === 'read' && tenantRegistry.get(t.name)).map((t) => t.name);
+    // 見直しの道具（予定の中身を返す。第47.4.1節）は、準備と組で使うものなので渡さない
+    const readTools = connections.flatMap((c) => connectorTools(c)).filter((t) => t.risk === 'read' && t.connection?.role !== 'review' && tenantRegistry.get(t.name)).map((t) => t.name);
     // 名刺管理を使う会社では、秘書の調べものが名刺を探せる（第27.9節）。利用範囲はツールを呼ぶときに確かめる
     if (settings.cards.enabled) readTools.push('contacts.search', 'contacts.get', 'contacts.changes');
     // 在庫管理を使う会社では、秘書の調べものが在庫と入出庫の記録を探せる（第29.15節）
     if (settings.inventory.enabled) readTools.push('inventory.search', 'inventory.history');
     const withReaders = (a: AgentDefinition) => (CONNECTION_READER_IDS.has(a.id) && readTools.length > 0
       ? { ...a, tools: [...new Set([...a.tools, ...readTools])] } : a);
-    const allAgents = [...official, ...entries.flatMap((e) => e.pkg.agents)].map(withReaders);
+    // 会社の接続ごとに、その接続の道具を使う汎用の業務（第47.7節）。説明と役割を管理者が見た接続だけ
+    const enabledConnectionTools = new Set(connections.flatMap((c) => c.tools.map((t) => connectorToolName(c.id, t.name))).filter((n) => tenantRegistry.get(n)));
+    // 会社のサイトを扱う接続は、サイトの更新の付属の業務にする（サイトの更新を入れている会社だけ。第47.7節）。ほかの接続は汎用の業務
+    const siteUpdatesOn = active.some((e) => e.pkg.manifest.id === SITE_UPDATES_EXTENSION_ID);
+    const connectionAgents = connections
+      .filter((c) => !c.profile?.site || siteUpdatesOn)
+      .map((c) => connectionAgent(c, enabledConnectionTools, { site: c.profile?.site === true }))
+      .filter((a): a is AgentDefinition => a !== null);
+    // サイトが 2 つ以上あれば（REST API の WordPress と MCP のサイト）、サイトを使う業務の説明にどのサイトかを添える。
+    // 秘書が頼みと話の流れから対象のサイトを選べるように（第47.6節）
+    const restSite = settings.webColumns.wordpress?.siteUrl ?? null;
+    const hasMcpSite = connections.some((c) => c.profile?.site && connectionAgents.some((a) => a.id === siteConnectionAgentId(c.id)));
+    const withSite = (a: AgentDefinition) => (restSite && hasMcpSite && SITE_AGENT_PREFIXES.some((p) => a.id.startsWith(p)) && !a.id.startsWith(SITE_CONNECTION_AGENT_PREFIX)
+      ? {
+        ...a, routeHint: `${a.routeHint ?? a.description} 入れ先・直す先は、REST API でつないだ会社のサイト（${siteHost(restSite)}）。`,
+        // 承認の画面の 1 行目に、どのサイトかを出す（取り違えに気づけるように）。お知らせの作成は LINE やメールも承認するので、サイトの更新だけ
+        ...(a.id.startsWith('site-updates:') ? { steps: a.steps.map((s) => (s.type === 'approval' ? { ...s, present: `「${siteHost(restSite)}」のサイト: ${s.present}` } : s)) } : {}),
+      } : a);
+    const allAgents = [...official, ...entries.flatMap((e) => e.pkg.agents), ...connectionAgents].map(withReaders).map(withSite);
     // 止めたツール・会社に無い接続のツールを使う業務は、メニュー・秘書・定時実行・API から消す（第6.6.3.1節・第12.11.0節）
-    const activeIds = new Set([...official.map((a) => a.id), ...active.flatMap((e) => e.pkg.agents.map((a) => a.id))]);
+    const activeIds = new Set([...official.map((a) => a.id), ...active.flatMap((e) => e.pkg.agents.map((a) => a.id)), ...connectionAgents.map((a) => a.id)]);
     const agents = allAgents.filter((a) => activeIds.has(a.id) && !blockedByDisabledTool(a, disabledTools) && missingToolsOf(a).length === 0);
     const entryOf = (agentId: string) => {
       if (!agentId.includes(':')) return null;
@@ -271,6 +307,16 @@ export class ExtensionHub {
   async listMcpTools(url: string, headers?: Record<string, string>): ReturnType<McpClient['listTools']> {
     if (!this.deps.mcp) return { ok: false, error: 'コネクタへの接続口が用意されていません' };
     return this.deps.mcp.listTools(url, headers);
+  }
+
+  /**
+   * MCP サーバのツールを 1 つ呼ぶ（読む道具だけに使う。サイトの情報を読むときなど。仕様書 第47.3節）。
+   *
+   * @remarks 危険度: read（呼ぶ側が読む道具だけを渡す）
+   */
+  async callMcpTool(url: string, name: string, args: Record<string, unknown>, headers?: Record<string, string>): ReturnType<McpClient['callTool']> {
+    if (!this.deps.mcp) return { ok: false, error: 'コネクタへの接続口が用意されていません' };
+    return this.deps.mcp.callTool(url, name, args, headers);
   }
 
   /** 内蔵のツールの名前の頭の部分（`gmail` など）。会社の接続の ID に使えない。 */

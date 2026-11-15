@@ -159,7 +159,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/mail/threads/:id/gmail-draft` | Gmail の下書きに入れる（本人が「Gmail で直したい」を押したとき） |
 | `GET /v1/runs/:id` | 実行の詳細。依頼者本人と、その実行に自分が判断できる承認がある人だけが見られる（仕様書 第6.2.1節）。ほかの人には 404。誰がいつ判断したか（`decisions`。第6.2.5節） |
 | `POST /v1/runs/:id/cancel` | 実行の中止（仕様書 第9.3.1節）。**依頼した本人だけ**。承認する人は 403、終わった実行は 409。作りかけの文書のリンクを返す |
-| `GET /v1/approvals` | 本人のロールで判断できる承認待ち |
+| `GET /v1/approvals` | 本人のロールで判断できる承認待ち。`runId` と `inFlow`（本人が秘書に頼んで起こした業務で本人が判断する 12 時間の内の承認。承認トレイには出さず、秘書のキャンバスで判断する。仕様書 第47.5節）を添える |
 | `GET /v1/approvals/decided` | 本人が判断した承認と却下（新しい順に 100 件）。判断したときの承認の画面・承認か却下か・日時・コメント・依頼した人・承認のあとに実際に行ったことと結果のリンク（仕様書 第6.2.5節） |
 | `POST /v1/approvals/:id` | 承認または却下。ロールが無ければ 403 |
 | `POST /v1/secretary` | 秘書への依頼。どの層で答えたかを返す。依頼の文は 20,000 字まで（超えれば 400。決まった言い回しで見分ける部分は頭の 2,000 字だけを見る。仕様書 第10.9.9節）。`fileId` で手元のファイルを 1 つ、`fileIds` でいくつも（5 つまで。超えれば 400）渡せる（仕様書 第10.10節・第10.10.7節）。**ファイルが付いていれば、この応答の中では読まず、調べものとして後ろへ回す**（第10.11節）。返る `lookup` は受け付けであって結果ではない |
@@ -502,11 +502,14 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `GET` ／ `POST` ／ `DELETE /v1/admin/extensions/web-columns/bgm` | 管理者: 会社の曲（ナレーション付きスライドの BGM）の一覧 ／ 入れる（本文は MP3・WAV そのもの。`x-track-name`・`x-duration-ms`。5 MB・5 分・10 曲まで）／ 消す（`/:id`） |
 | `PUT /v1/admin/extensions/web-columns/settings` | 管理者: Web のコラムの分野（`topics`）・読み手（`audience`）・業種（`industry`。東証の 33 業種のコード。業種・分野・読み手・監修者が変われば、当てる表現の決まり `rules` を AI が選び直して返す）・監修者（`supervisor`）・AI の表示（`aiNotice`）・AI で挿絵を描くか（`aiIllustration`）。送った項目だけを変える（第32.18.1節） |
 | `PUT` ／ `DELETE /v1/admin/extensions/web-columns/wordpress` | 管理者: WordPress の入れ先（`siteUrl`・`username`）とアプリケーションパスワード（`password`）を、つながるかを確かめてから暗号化して預ける（つながらなければ 400。パスワードは返さない）／ 外す |
-| `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。ツールごとの危険度・有効かどうか・使っている業務、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節、ADR-0037・ADR-0044） |
-| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、ツールの一覧を取って会社の接続として登録する（読むだけの印が付いたツールは「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。`oauth` は相手の認可サーバの情報を読み、アプリの自動登録の口（`registration_endpoint`）があればバックアップる（仕様書 第12.11.6.2節、Q-99）。認証の要る接続のツールは、認証情報のあとで取る |
+| `GET /v1/admin/connections/mcp` | 管理者: 会社の接続（MCP）の一覧。ツールごとの危険度・役割（`role`・`roleReviewed`）・有効かどうか・使っている業務、接続の説明（`profile`。振り分けの候補に出すもの・会社のサイトか・役割を見たか・汎用の業務の ID）、認証の状態（`authState`。秘密の値は返さない）、よく使うサービスの型（`presets`）（仕様書 第12.11節・第47章、ADR-0037・ADR-0044・ADR-0148） |
+| `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、ツールの一覧を取って会社の接続として登録する（読むだけの印が付いたツールは「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。`oauth` は相手の認可サーバの情報を読み、アプリの自動登録の口（`registration_endpoint`）があれば記録する（仕様書 第12.11.6.2節、Q-99）。認証の要る接続のツールは、認証情報のあとで取る。ツールを取ったら、推論がツールの役割と接続の説明を作る（第47.4.1節。危険度は軽くしない） |
 | `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す。自動で登録したアプリより先に使う）、`api_key` は会社の鍵（その鍵でツールを問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |
-| `PUT /v1/admin/connections/mcp/:id` | 管理者: 接続の名前と、ツールごとの危険度を変える |
-| `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: ツールの一覧を取り直す（決めた危険度は保つ）。認証の要る接続は管理者自身の認可（会社の鍵）で問い合わせる |
+| `PUT /v1/admin/connections/mcp/:id` | 管理者: 接続の名前と、ツールごとの危険度・役割（役割を直したら、役割から危険度を決め直す）、接続の説明（`summary`。直したら取り直しで上書きしない）を変える |
+| `GET /v1/admin/extensions/sites` | 管理者: コラムの作成とお知らせの作成で「入れるサイト」に選べるサイト（`rest` か `mcp:<接続の ID>`。仕様書 第47.6節）。設定の口（`PUT …/web-columns/settings`・`PUT …/announcements/settings`）は `site` を受ける |
+| `GET /v1/site-updates/mcp-sites` | サイトの更新: MCP でつないだサイト（名前・URL・説明・秘書から使えるか。仕様書 第47.3節） |
+| `POST /v1/admin/connections/mcp/:id/roles/review` | 管理者: 推論が決めたツールの役割を見て「この役割で使う」とする。役割から危険度を決め直し（読む・見直しは読むだけ、準備は下書き、確定と戻すは社外へ送る）、その接続の道具を使う汎用の業務（`connection-<ID>`）が秘書の振り分けに出る。利用範囲が無ければ管理者だけにする（仕様書 第47.4.1節・第47.7節、Q-368） |
+| `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: ツールの一覧を取り直す（決めた危険度は保つ。説明が変わったツールで役割を見ていたものは、危険度を初期値に戻して役割を決め直す）。認証の要る接続は管理者自身の認可（会社の鍵）で問い合わせる。一覧を分けて返すサーバは続き（`nextCursor`）まで読む |
 | `POST /v1/admin/connections/mcp/:id/check` | 管理者: 接続の確認（宣言したツールが提供されているか） |
 | `GET /v1/admin/connections/mcp/:id/impact` | 管理者: 接続を消すと使えなくなる業務 |
 | `GET /v1/admin/connections/mcp/:id/tools/:tool/impact` | 管理者: そのツールを止めると使えなくなる業務の名前と、飛ばす定時実行の数（仕様書 第6.6.3.1節） |

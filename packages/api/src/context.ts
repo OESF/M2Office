@@ -22,7 +22,8 @@ import {
   InventoryService, InventoryWatch, InventoryBookings, InventoryPublisher, InventorySales, PostgresSalesStore, ExternalApps, PostgresAppStore, AppLinks, AppKnowledgeSearch, SecurityWatch, PostgresSecurityStore, googleLoginAccessFrom, PostgresRuntimeBeatStore, DeliveryService, PostgresDeliveryStore, DELIVERY_SEND, PostgresSlideImageHost, PostgresSlideDeckStore, SlideDeckService, PostgresSlideThemeStore, SlideThemeService, openMailbox, JanLookupService, PostgresInventoryStore, inventoryAccess, ColumnService, PostgresColumnStore, InquiryService, PostgresInquiryStore, inquiriesAccess, contactBookFrom, CompetitorService, PostgresCompetitorStore, competitorsAccess, crawlerUserAgent, isLocalPolicy, AnnouncementService, PostgresAnnouncementStore, announcementsAccess, ContractService, PostgresContractStore, contractsAccess, SalesDocService, PostgresSalesDocStore, salesDocsAccess, salesInventoryFrom, CONTRACT_REVIEW_AGENT_ID, ReservationService, PostgresReservationStore, reservationsAccess, SubsidyService, PostgresSubsidyStore, MockResearchProvider, subsidiesAccess, DecisionService, PostgresDecisionStore, decisionsAccess, MemberService, PostgresMemberStore, membersAccess, PrintDesignService, PostgresPrintDesignStore, printDesignsAccess, withAiUsage, MailService, MailWatch, PostgresMailStore, LibraryService, LibraryMailWatch, LibraryKeeper, PostgresLibraryStore, libraryAccess, libraryReaderFor, libraryContactOf, CanvaService, HttpCanvaApi, MockCanvaApi, PostgresCanvaConnectionStore, MEMBER_LINE_SEND, LineApiVerifier, MockLineVerifier, JGrantsApi, MockJGrants, signageForAnnouncements, ANNOUNCEMENT_PUBLISH, announcementMailFrom, SiteUpdateService, CompanyDesignService, PostgresCompanyDesignStore, PostgresSiteEditStore, PostgresWordPressUserStore, siteUpdatesAccess, SITE_UPDATE_APPLY, WebReviewService, PostgresWebReviewStore, webReviewAccess, WEB_REVIEW_REQUEST, EffectService, PostgresEffectStore, KnowledgeGaps, PostgresKnowledgeGapStore, PostgresSystemLogStore, SystemLogSink, attachLogSink, webReviewColumnsFrom, inquiryCountsFrom, competitorLinksFrom, ColumnPlanner, columnMaterialsFrom, HttpPageFetcher, webColumnsAccess, ColumnSignageService, PostgresColumnSignageStore, signageForColumns, HrService, PostgresHrStore, hrAccess, SignageService, SignageInterrupts, PostgresSignageStore, signageAccess, applyStockChanges, AttendanceService, PostgresAttendanceStore, PayrollService, PostgresPayrollStore, LAW_BOOK, LaborCalendar, YearEndService, PostgresYeaStore, SocialInsuranceService, PostgresSocialStore, LaborInsuranceService, PostgresLaborStore, ShiftService, PostgresShiftStore, HrBooksExport,
   type SecretBox, type GeminiModels,
   PostgresDemoStore, demoSubdomain, isDemoTenantId, seedDemoCompany, BUILTIN_EXTENSIONS, type DemoStore,
-  type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath
+  type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath,
+  readSiteName, siteAliases, siteConnectionAgentId, siteHandOff, siteLabelOf, type SiteOption, type TenantConnection,
 } from '@m2office/core';
 import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, type SiteUpdatesSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -595,6 +596,8 @@ export function buildDeps(): AppDeps {
       design: designFor,
       store: new PostgresColumnStore(process.env['DATABASE_URL'] ?? 'postgres://m2office_app:m2office_app@localhost:3105/m2office'), files,
       repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), researchFor: (tenantId) => ai.researchFor(tenantId), logger: log,
+      // MCP でつないだサイトに入れるときは、そのサイトの業務に頼む（仕様書 第47.6節）
+      handOffToSite: siteHandOff(repo, async (tenantId) => (await tenantView(tenantId)).agents),
       // 似すぎの確かめで出典のページを読む口（見本の会社では読まない。第32.18.4節）
       pagesFor: (tenantId) => (noOutside(tenantId) ? null : new HttpPageFetcher(crawlerUserAgent(appVersion(), process.env['CRAWLER_CONTACT_URL']), 1_000)),
       // 読まれたコラムの書き方の傾向（Webの分析。第32.18.5節）。Webの分析は後で作るので、呼ぶときに引く
@@ -640,6 +643,8 @@ export function buildDeps(): AppDeps {
       design: designFor,
       store: announcementStore,
       repo, box, llmFor: (tenantId) => ai.llmFor(tenantId), logger: log,
+      // MCP でつないだサイトに入れるときは、そのサイトの業務に頼む（仕様書 第47.6節）
+      handOffToSite: siteHandOff(repo, async (tenantId) => (await tenantView(tenantId)).agents),
       // メール（名刺管理のまとめてのメール。段 2。第35.18節）
       mail: announcementMailFrom({
         bulk: cards.bulk, contacts: contactStore, cardsAccess: cardsAccess(repo), mailbox: { repo, box, sourceFor: (tenantId) => connector.sourceFor(tenantId) },
@@ -657,7 +662,7 @@ export function buildDeps(): AppDeps {
     }),
     access: announcementsAccess(repo),
   };
-  // サイトの更新（内蔵の拡張。仕様書 第45章）。WordPress は「接続 › WordPress」のもの（コラムの作成・お知らせの作成と同じ）
+  // サイトの更新（内蔵の拡張。仕様書 第45章）。WordPress は「接続 › サイト」のもの（コラムの作成・お知らせの作成と同じ）
   const siteUpdates = {
     service: new SiteUpdateService({
       design: designFor,
@@ -1056,6 +1061,34 @@ export function buildDeps(): AppDeps {
       });
       return { runId, already: false };
     },
+    // 会社がつないでいるサイト（仕様書 第47.6節）。秘書がサイトの更新の対象のサイトを決めるのに使う
+    sites: async (tenantId) => {
+      const [view, settings] = await Promise.all([tenantView(tenantId), repo.getTenantSettings(tenantId)]);
+      return { sites: await siteOptions(view, settings.webColumns.wordpress?.siteUrl ?? null) };
+    },
+    // 承認を待っている業務への、言葉での取りやめと直し（仕様書 第47.5節）。本人が判断する承認（approver: requester）だけ
+    approvals: {
+      pending: async (tenantId, userId) => {
+        const mine = (await repo.listPendingApprovals(tenantId)).filter((a) => a.approverUserId === userId)
+          .sort((x, y) => y.createdAt.localeCompare(x.createdAt)).slice(0, 5);
+        const out = [];
+        for (const a of mine) {
+          const step = await repo.getRunStepById(tenantId, a.runStepId);
+          const run = step ? await repo.getRun(tenantId, step.runId) : null;
+          const job = run ? await repo.getJob(tenantId, run.jobId) : null;
+          if (!run || !job || job.requestedBy !== userId) continue;
+          out.push({
+            approvalId: a.id, runId: run.id, agentId: job.agentId, agentVersion: job.agentVersion, agentName: job.agentName ?? job.agentId,
+            input: job.input, summary: a.present.split('\n').find((l) => l.trim()) ?? '', createdAt: a.createdAt,
+          });
+        }
+        return out;
+      },
+      reject: async (tenantId, userId, approvalId, comment) => {
+        const me = await repo.findUserById(tenantId, userId);
+        await engine.decideApproval(tenantId, approvalId, 'rejected', { id: userId, roles: me?.roles ?? [] }, comment);
+      },
+    },
   });
   // Google のデータを扱うツールは、内蔵のツールのうち権限（google）を宣言しているもの（第9.4.4節）
   const retention = retentionRef;
@@ -1327,5 +1360,47 @@ function appVersion(): string {
     return (JSON.parse(readFileSync(appPath('package.json'), 'utf8')) as { version?: string }).version ?? '0';
   } catch {
     return '0';
+  }
+}
+
+/** REST API の WordPress のサイトの名前（公開のページから読む）。1 時間覚える（頼むたびに問い合わせない）。 */
+const restSiteNames = new Map<string, { name: string | null; at: number }>();
+
+/**
+ * 会社がつないでいるサイト（仕様書 第47.3節・第47.6節）。REST API の WordPress（サイトの更新・お知らせの作成・コラムの作成のどれかを使えるとき）と、
+ * サイトの更新の付属の業務になった MCP のサイト。
+ *
+ * @remarks 危険度: read（REST API のサイトの公開のページの題名を読むだけ）
+ */
+export async function siteOptions(
+  view: { agents: AgentDefinition[]; connections: TenantConnection[] },
+  restUrl: string | null,
+  /** `anyRest`: REST API の WordPress は、使う業務が無くても並べる（コラム・お知らせの設定で選ぶとき） */
+  opts: { anyRest?: boolean } = {},
+): Promise<SiteOption[]> {
+  const out: SiteOption[] = [];
+  if (restUrl && (opts.anyRest || view.agents.some((a) => a.id.startsWith('site-updates:') && !a.id.startsWith('site-updates:site-')))) {
+    let cached = restSiteNames.get(restUrl);
+    if (!cached || Date.now() - cached.at > 3_600_000) {
+      cached = { name: (await readSiteName(restUrl).catch(() => null))?.name ?? null, at: Date.now() };
+      restSiteNames.set(restUrl, cached);
+    }
+    const host = hostOf(restUrl);
+    out.push({ key: 'rest', name: cached.name || host, aliases: siteAliases(cached.name, host) });
+  }
+  for (const c of view.connections) {
+    if (!c.profile?.site || !view.agents.some((a) => a.id === siteConnectionAgentId(c.id))) continue;
+    const label = siteLabelOf(c);
+    out.push({ key: `mcp:${c.id}`, name: label, aliases: siteAliases(label, c.name, c.profile.siteUrl ? hostOf(c.profile.siteUrl) : null) });
+  }
+  return out;
+}
+
+/** URL の名前の部分（読めなければそのまま）。 */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
   }
 }

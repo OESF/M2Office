@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import type { InquirySettings, WebColumnSettings } from '@m2office/shared';
-import { api, describeError } from './api.js';
+import { api, describeError, type McpConnectionView } from './api.js';
 import { copyText } from './clipboard.js';
 
 /** 接続の小分けの ID。 */
@@ -73,6 +73,31 @@ function WordPressCard({ settings, onChanged }: { settings: WebColumnSettings; o
       )}
       {error && <p className="error">{error}</p>}
       {settings.wordpress && <WordPressUsers />}
+      <McpSites />
+    </div>
+  );
+}
+
+/**
+ * MCP でつないだサイト（仕様書 第47.3節）。「接続 › コネクタ（MCP）」で登録した接続のうち、推論が会社のサイトを扱うとしたもの。
+ * 秘書が、頼みと話の流れから対象のサイトを選ぶ（第47.6節）。
+ */
+function McpSites() {
+  const [items, setItems] = useState<McpConnectionView[] | null>(null);
+  useEffect(() => {
+    api.admin.mcpConnections().then((r) => setItems(r.items.filter((c) => c.profile?.site))).catch(() => setItems([]));
+  }, []);
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="mcp-sites">
+      <h4>MCP でつないだサイト</h4>
+      {items.map((c) => (
+        <div key={c.id} className="row wrap small">
+          <strong>{c.name}</strong>
+          {c.profile?.agentId ? <span className="badge ok">秘書から使えます</span> : <span className="badge warn">役割はまだ見ていません</span>}
+          <span className="muted">{c.profile?.summary}</span>
+        </div>
+      ))}
     </div>
   );
 }

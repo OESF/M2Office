@@ -19,7 +19,7 @@ import { type BookingSourceRecord,
   builtinSection, encodeFiles, isDemoTenantId, unpackExtension, EXTENSION_FILE_MAX_BYTES,
   detectKind, MAX_FILE_BYTES, LAW_BOOK, itemRule, createPkce, buildGoogleAuthUrl, revokeGoogleToken, MAILBOX_SCOPES, type ExtensionEntry, type ExtensionPackage, type TenantExtensions,
 } from '@m2office/core';
-import type { AppDeps } from '../context.js';
+import { siteOptions, type AppDeps } from '../context.js';
 import { tenantOrigin } from '../tenant-origin.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 import { parseScope, saveScope } from './access.js';
@@ -344,6 +344,17 @@ export function extensionsRoute(deps: AppDeps) {
   });
 
   /**
+   * コラムとお知らせを入れられるサイト（仕様書 第47.6節）。REST API の WordPress（`rest`）と、MCP でつないだサイト（`mcp:<接続の ID>`）。
+   * 2 つ以上のときだけ、設定の画面で入れるサイトを選ぶ
+   */
+  app.get('/sites', async (c) => {
+    const { tenant } = c.get('ctx');
+    const [view, settings] = await Promise.all([deps.tenantView(tenant.id), deps.repo.getTenantSettings(tenant.id)]);
+    const sites = await siteOptions(view, settings.webColumns.wordpress?.siteUrl ?? null, { anyRest: true });
+    return c.json({ sites: sites.map((s) => ({ key: s.key, name: s.name })) });
+  });
+
+  /**
    * Web のコラムの会社の設定を変える（第32.18.1節）。分野・読み手・業種・監修者・AI が書いたことの表示。
    * 渡した項目だけを変え、すぐに反映する。WordPress の入れ先は下の口で、つながるかを確かめてから預ける。
    */
@@ -370,6 +381,12 @@ export function extensionsRoute(deps: AppDeps) {
     if (body['aiNotice'] !== undefined) {
       if (typeof body['aiNotice'] !== 'boolean') return c.json({ error: 'aiNotice は true か false です' }, 400);
       next.aiNotice = body['aiNotice'];
+    }
+    // 入れるサイト（第47.6節）。`rest` か `mcp:<接続の ID>`
+    if (body['site'] !== undefined) {
+      const site = await checkSite(deps, tenant.id, body['site']);
+      if ('error' in site) return c.json({ error: site.error }, 400);
+      next.site = site.key;
     }
     // コラムを入れる WordPress のカテゴリーと記事の種類（第45.20.2節。カテゴリーが空なら付けない。種類が空なら M2Office が選ぶ）
     if (body['wpCategory'] !== undefined) next.wpCategory = String(body['wpCategory']).trim().slice(0, 40);
@@ -529,6 +546,12 @@ export function extensionsRoute(deps: AppDeps) {
       next.webPublish = body['webPublish'];
     }
     if (body['webCategory'] !== undefined) next.webCategory = String(body['webCategory']).trim().slice(0, 40);
+    // 入れるサイト（第47.6節）。`rest` か `mcp:<接続の ID>`
+    if (body['site'] !== undefined) {
+      const site = await checkSite(deps, tenant.id, body['site']);
+      if ('error' in site) return c.json({ error: site.error }, 400);
+      next.site = site.key;
+    }
     // お知らせを入れる記事の種類（第45.20.2節）。空なら M2Office が選ぶ
     if (body['webPostType'] !== undefined) {
       const v = String(body['webPostType'] ?? '').trim();
@@ -1150,4 +1173,12 @@ export function extensionsRoute(deps: AppDeps) {
   });
 
   return app;
+}
+
+/** 入れるサイトの値を確かめる（会社がつないでいるサイトのどれか。第47.6節）。 */
+async function checkSite(deps: AppDeps, tenantId: string, value: unknown): Promise<{ key: string } | { error: string }> {
+  if (typeof value !== 'string') return { error: '入れるサイトの形が違います' };
+  const [view, settings] = await Promise.all([deps.tenantView(tenantId), deps.repo.getTenantSettings(tenantId)]);
+  const sites = await siteOptions(view, settings.webColumns.wordpress?.siteUrl ?? null, { anyRest: true });
+  return sites.some((s) => s.key === value) ? { key: value } : { error: 'そのサイトはつないでいません' };
 }

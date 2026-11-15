@@ -24,6 +24,9 @@ import type { AppEnv } from '../middleware/tenant.js';
 /** 「判断したもの」に出す件数（仕様書 第6.2.5節）。 */
 const DECIDED_LIMIT = 100;
 
+/** 一連の流れの中の承認として、承認トレイに出さずに秘書のキャンバスで判断する時間（第47.5節）。過ぎたら承認トレイに出す。 */
+const IN_FLOW_HOURS = 12;
+
 export function approvalsRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
 
@@ -48,7 +51,14 @@ export function approvalsRoute(deps: AppDeps) {
       const agentName = job
         ? agentDisplayName(view.allAgents.find((x) => x.id === job.agentId)?.name, job.agentId, job.agentName)
         : null;
-      items.push({ ...a, agentName });
+      /*
+        一連の流れの中の承認（仕様書 第47.5節）: 本人が秘書に頼んで起こした業務で、本人が判断し、頼んでから 12 時間の内のもの。
+        秘書のキャンバスの中で判断し、承認トレイには出さない（2026-11-15 に三浦さんが、流れの中でそのたびに承認トレイへ移るのは使いにくいと決めた）。
+        時間がたったもの・ほかの人の依頼・定時実行の承認は、承認トレイに出す
+      */
+      const inFlow = !!job && job.origin === 'secretary' && job.requestedBy === ctx.user.id && a.approverUserId === ctx.user.id
+        && Date.now() - Date.parse(a.createdAt) < IN_FLOW_HOURS * 3_600_000;
+      items.push({ ...a, agentName, runId: run?.id ?? null, inFlow });
     }
     return c.json({ items });
   });

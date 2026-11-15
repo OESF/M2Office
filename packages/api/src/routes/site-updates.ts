@@ -8,7 +8,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import type { SiteUpdateViewer } from '@m2office/core';
+import { siteConnectionAgentId, siteLabelOf, type SiteUpdateViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
@@ -41,6 +41,19 @@ export function siteUpdatesRoute(deps: AppDeps) {
 
   /** つないでいるサイト（名前・URL・利用者・直せるか）。開いたときに WordPress に問い合わせる。 */
   app.get('/site', async (c) => c.json(await service.site(who(c))));
+
+  /**
+   * MCP でつないだサイト（仕様書 第47.3節・第47.7節）。会社の接続のうち、会社のサイトを扱い、役割を管理者が見たもの。
+   * 秘書が頼みと話の流れから、REST API のサイトとこれらの中から対象のサイトを選ぶ（第47.6節）
+   */
+  app.get('/mcp-sites', async (c) => {
+    const view = await deps.tenantView(c.get('ctx').tenant.id);
+    const items = view.connections.filter((x) => x.profile?.site).map((x) => ({
+      id: x.id, name: siteLabelOf(x), url: x.profile?.siteUrl ?? null, summary: x.profile?.summary ?? '',
+      ready: view.agents.some((a) => a.id === siteConnectionAgentId(x.id)),
+    }));
+    return c.json({ items });
+  });
 
   /** 本人の WordPress の接続（個人設定の「サービスとの接続」。第45.16節）。パスワードは返さない。 */
   app.get('/wordpress-user', async (c) => c.json(await service.wordpressUser(who(c))));

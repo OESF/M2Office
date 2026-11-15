@@ -12,6 +12,7 @@ import type { Tool, ToolArgsSchema } from '../tools/registry.js';
 import type { McpClient } from '../connectors/mcp.js';
 import { presetById, resolveArgNames } from '../connectors/presets.js';
 import { recordHealth } from '../health/recorder.js';
+import type { ConnectorToolRole } from '../connectors/profile.js';
 import { outboundPolicy } from '../net/outbound.js';
 
 /**
@@ -69,6 +70,16 @@ export interface ConnectorToolDeclaration {
    * @remarks 無ければ推論は引数を知らずに呼ぶ。登録と「ツールを取り直す」のときに入る
    */
   args?: ToolArgsSchema;
+  /** 役割（読む・準備・見直し・確定・戻す）。登録と取り直しのときに推論が決める（仕様書 第47.4.1節）。 */
+  role?: ConnectorToolRole;
+  /** 管理者が役割を見て「この役割で使う」としたか（Q-368）。説明が変われば外す。 */
+  roleReviewed?: boolean;
+  /** 確定の合図の引数。推論には見せず、承認の後に M2Office が真にする（第47.4.2節）。 */
+  confirmArg?: string;
+  /** 結果のうち、承認の画面に相手の言葉のまま出す注意の項目（第47.4節 ③）。 */
+  warnings?: string[];
+  /** 結果のうち、終わった後に伝える知らせの項目（第47.4節 ④）。 */
+  notes?: string[];
 }
 
 /** コネクタの宣言（`connectors/*.json`）。 */
@@ -227,6 +238,21 @@ function isAuthRejected(error: string): boolean {
   return /401|認証が必要/.test(error);
 }
 
+/**
+ * 確定の合図の引数（第47.4.2節）。承認を通すツール（確定・戻すで、危険度が読む・下書きでないもの）だけが持つ。
+ *
+ * @remarks 管理者が危険度を「読むだけ」に下げたツールでは使わない（承認を通らずに合図を真にしてしまうため）
+ */
+function confirmArgOf(t: ConnectorToolDeclaration): string | undefined {
+  return t.confirmArg && (t.role === 'commit' || t.role === 'undo') && t.risk !== 'read' && t.risk !== 'draft' ? t.confirmArg : undefined;
+}
+
+/** 引数の定義から 1 つを外す。 */
+function withoutArg(args: ToolArgsSchema, name: string): ToolArgsSchema {
+  const { [name]: _drop, ...properties } = args.properties;
+  return { properties, ...(args.required ? { required: args.required.filter((r) => r !== name) } : {}) };
+}
+
 export function connectorTools(c: ConnectorDeclaration, client?: McpClient, auth?: ConnectionAuthProvider): Tool[] {
   const preset = presetById(c.auth.preset);
   return c.tools.map((t) => ({
@@ -236,8 +262,12 @@ export function connectorTools(c: ConnectorDeclaration, client?: McpClient, auth
     activityLabel: `${c.name}に問い合わせています`,
     // 相手の説明は英語で長いことがある（Slack）。推論には `description` で渡し、人に見せる文は短くする
     helpText: `外部のサービス「${c.name}」のツール「${t.name}」を使います`,
-    connection: { id: c.id, name: c.name, tool: t.name, ...(preset?.argLabels ? { labels: preset.argLabels } : {}) },
-    ...(t.args ? { args: t.args } : {}),
+    connection: {
+      id: c.id, name: c.name, tool: t.name, ...(preset?.argLabels ? { labels: preset.argLabels } : {}),
+      ...(t.role ? { role: t.role } : {}), ...(t.warnings?.length ? { warnings: t.warnings } : {}), ...(t.notes?.length ? { notes: t.notes } : {}),
+    },
+    // 確定の合図の引数は推論に見せない（推論が自分で真にできないように。第47.4.2節）
+    ...(t.args ? { args: confirmArgOf(t) ? withoutArg(t.args, confirmArgOf(t)!) : t.args } : {}),
     // 型が ID を名前に直す問い合わせを持てば、承認の前に送り先の名前を確かめる（読むだけ。第12.11.3節）
     ...(preset?.resolvers?.length && t.risk !== 'read' ? {
       async prepare(args: Record<string, unknown>, ctx) {
@@ -256,6 +286,9 @@ export function connectorTools(c: ConnectorDeclaration, client?: McpClient, auth
         headers = h.headers;
       }
       const started = Date.now();
+      // 確定の合図の引数は、承認の後に M2Office が真にする。確定のツールは承認の直後の段でしか呼べない（エンジンが守る。第47.4.2節）
+      const flag = confirmArgOf(t);
+      if (flag) args = { ...args, [flag]: true };
       let res = await client.callTool(c.url, t.name, args, headers);
       // 断られたら、認可を更新して 1 回だけ呼び直す（第12.11.6.4節）
       if (!res.ok && c.auth.type !== 'none' && auth && isAuthRejected(res.error)) {

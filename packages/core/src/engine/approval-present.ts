@@ -133,6 +133,10 @@ export function composeApprovalPresent(p: {
   out.push('## 判断するもの', '');
   out.push(...(material.length > 0 ? material : ['（この承認までに作られた文や成果物はありません）', '']));
 
+  // 会社の接続の見直しの結果（いまと後）と、相手が必ず見せるよう求める注意（仕様書 第47.4.2節）
+  const review = connectionReview(steps.filter((s) => s.kind === 'agent' && s.seq > since && s.seq < gateSeq), plan?.done ?? [], registry);
+  if (review.length > 0) out.push(...review);
+
   // 承認の前の組み立てで済ませたこと。承認する人が、作られた文書を開いて確かめられるようにする（ADR-0025）
   const doneLines = (plan?.done ?? []).map((d) => describeDone(d, d.result)).filter((x): x is string => !!x);
   if (doneLines.length > 0) {
@@ -174,6 +178,92 @@ export function composeApprovalPresent(p: {
   }
   out.push('却下すると、ここで止まり、上のことは行いません。');
   return out.join('\n').trim();
+}
+
+/** 見直しの結果の値を、承認の画面に出す長さ。 */
+const REVIEW_VALUE_MAX = 1500;
+
+/** 見直しの結果の値を、人が読める文にする。HTML はタグを落とす。 */
+function reviewValue(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '（なし）';
+  const text = typeof v === 'string' ? v : JSON.stringify(v, null, 1);
+  const plain = /<[a-z][\s\S]*>/i.test(text) ? text.replace(/<(br|\/p|\/h\d|\/li)\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim() : text;
+  return cut(hideInternalIds(plain), REVIEW_VALUE_MAX);
+}
+
+/** 引用の形にする（複数行を保つ）。 */
+const quote = (text: string) => text.split('\n').map((l) => `> ${l}`).join('\n');
+
+/** 結果の JSON から、名前の合う項目を探す（いちばん上と、1 段下まで）。 */
+function findField(o: Record<string, unknown>, name: string): unknown {
+  if (name in o) return o[name];
+  for (const v of Object.values(o)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && name in (v as Record<string, unknown>)) return (v as Record<string, unknown>)[name];
+  }
+  return undefined;
+}
+
+/**
+ * 会社の接続の、見直しの結果と注意を承認の画面の文にする（仕様書 第47.4.2節）。
+ *
+ * @remarks
+ * 見直しの道具（役割 `review`）の結果が JSON で `current` と `proposed` を持てば、変わる項目（`changedFields` があればそれだけ）を直す前と後で並べる。
+ * 注意（道具の `warnings` に挙げた項目）は、**相手の言葉のまま**出す。推論の言い換えにしない
+ */
+function connectionReview(steps: RunStep[], done: { name: string; result: unknown }[], registry: ToolRegistry): string[] {
+  const results: { name: string; text: string }[] = [];
+  for (const s of steps) {
+    for (const t of ((s.output ?? {}) as { tools?: { name?: string; result?: unknown }[] }).tools ?? []) {
+      const r = t.result as { source?: string; text?: unknown } | undefined;
+      if (t.name && r?.source === 'external' && typeof r.text === 'string') results.push({ name: t.name, text: r.text });
+    }
+  }
+  for (const d of done) {
+    const r = d.result as { source?: string; text?: unknown } | undefined;
+    if (r?.source === 'external' && typeof r.text === 'string') results.push({ name: d.name, text: r.text });
+  }
+  const out: string[] = [];
+  const warnings: string[] = [];
+  let reviewed: { name: string; o: Record<string, unknown> | null; text: string } | null = null;
+  for (const r of results) {
+    const tool = registry.get(r.name);
+    if (!tool?.connection) continue;
+    let o: Record<string, unknown> | null = null;
+    try {
+      const v = JSON.parse(r.text) as unknown;
+      o = v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
+    } catch { /* 文で返す相手もある */ }
+    if (tool.connection.role === 'review') reviewed = { name: r.name, o, text: r.text };
+    for (const w of tool.connection.warnings ?? []) {
+      const v = o ? findField(o, w) : undefined;
+      if (v === undefined || v === null || v === false || v === '') continue;
+      const line = typeof v === 'string' ? v : typeof v === 'object' && v && typeof (v as { message?: unknown }).message === 'string' ? (v as { message: string }).message : `${w}: ${JSON.stringify(v)}`;
+      if (!warnings.includes(line)) warnings.push(line);
+    }
+  }
+  if (reviewed) {
+    const conn = registry.get(reviewed.name)?.connection;
+    out.push(`### ${conn?.name ?? '相手'}の見直しの結果`, '');
+    const current = reviewed.o?.['current'];
+    const proposed = reviewed.o?.['proposed'];
+    if (current && proposed && typeof current === 'object' && typeof proposed === 'object') {
+      const c = current as Record<string, unknown>;
+      const n = proposed as Record<string, unknown>;
+      const listed = Array.isArray(reviewed.o?.['changedFields']) ? (reviewed.o!['changedFields'] as unknown[]).filter((x): x is string => typeof x === 'string') : null;
+      const fields = listed ?? [...new Set([...Object.keys(c), ...Object.keys(n)])].filter((k) => JSON.stringify(c[k]) !== JSON.stringify(n[k]));
+      if (fields.length === 0) out.push('変わる項目はありません。', '');
+      for (const f of fields) {
+        out.push(`**${f}**`, '', '直す前:', '', quote(reviewValue(c[f])), '', '直した後:', '', quote(reviewValue(n[f])), '');
+      }
+      if (listed) out.push(`ここに挙げた項目のほかは変わりません（相手の見直しの結果による）。`, '');
+    } else {
+      out.push(quote(reviewValue(reviewed.text)), '');
+    }
+  }
+  if (warnings.length > 0) {
+    out.push('### 注意（相手の言葉のまま）', '', ...warnings.map((w) => `- ${cut(w, 600)}`), '');
+  }
+  return out;
 }
 
 /** 承認のあとに実際に行った操作 1 件（仕様書 第6.2.5節）。 */

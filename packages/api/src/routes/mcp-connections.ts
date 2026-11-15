@@ -11,12 +11,14 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { RISK_LEVELS, type RiskLevel } from '@m2office/shared';
 import {
-  CONNECTION_PRESETS, checkConnector, checkOutboundUrl, discoverOAuthEndpoints, isLocalPolicy, presetById, presetRisk,
-  type ConnectorAuth, type ConnectionPreset, type TenantConnection,
+  CONNECTION_PRESETS, CONNECTOR_ROLE_WORDS, CONNECTOR_TOOL_ROLES, applyReviewedRoles, checkConnector, checkOutboundUrl, connectionAgentId,
+  discoverOAuthEndpoints, isLocalPolicy, parseSiteInfo, presetById, siteConnectionAgentId, siteInfoTool,
+  type ConnectorAuth, type ConnectorToolRole, type TenantConnection,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 import { requestedScopes } from './connection-auth.js';
+import { profiledTools } from '../connection-profile.js';
 
 /** 危険度を、管理者に見せる言葉にする。 */
 const RISK_WORDS: Record<RiskLevel, string> = {
@@ -26,28 +28,6 @@ const RISK_WORDS: Record<RiskLevel, string> = {
   'external-send': '社外や他の人へ送る',
   financial: 'お金に関わる',
 };
-
-/**
- * MCP のツールの一覧を、会社の接続のツールにする（仕様書 第12.11.2節）。
- *
- * @param keep 前に決めた危険度（取り直しのとき）。残す
- * @remarks 危険度の初期値は、読むだけの目印があれば read、無ければ external-send（承認が入る安全側）
- */
-function toTools(
-  listed: { name: string; description: string; readOnly?: boolean; args?: TenantConnection['tools'][number]['args'] }[],
-  keep: TenantConnection['tools'] = [],
-  preset?: ConnectionPreset,
-): TenantConnection['tools'] {
-  return listed.map((t) => ({
-    name: t.name,
-    description: t.description.trim() || `${t.name}（説明がありません）`,
-    // 引数の定義は、取り直すたびに相手の最新のものにする（推論が引数を知って呼べるように）
-    ...(t.args ? { args: t.args } : {}),
-    // 目印が無ければ、型の読むだけの名前で決める。型も無ければ external-send（第12.11.6.7節）
-    risk: keep.find((k) => k.name === t.name)?.risk
-      ?? (t.readOnly === true ? 'read' : t.readOnly === undefined && preset ? presetRisk(preset, t.name) : 'external-send'),
-  }));
-}
 
 /** 認証の方式を、管理者に見せる言葉にする。 */
 const AUTH_WORDS: Record<ConnectorAuth['type'], string> = {
@@ -104,7 +84,16 @@ export function mcpConnectionsRoute(deps: AppDeps) {
         tools: x.tools.map((t) => ({
           name: t.name, description: t.description, risk: t.risk, riskText: RISK_WORDS[t.risk],
           enabled: !view.disabledTools.has(`${x.id}.${t.name}`),
+          // 役割（第47.4.1節）。管理者が見たか
+          ...(t.role ? { role: t.role, roleText: CONNECTOR_ROLE_WORDS[t.role], roleReviewed: t.roleReviewed === true } : {}),
         })),
+        // 接続の説明（振り分けの候補に出すもの）と、役割を管理者が見たか（第47.7節）
+        profile: x.profile ? {
+          summary: x.profile.summary, site: x.profile.site, reviewedAt: x.profile.reviewedAt,
+          unreviewed: x.tools.filter((t) => t.role && !t.roleReviewed).length,
+          siteName: x.profile.siteName ?? null, siteUrl: x.profile.siteUrl ?? null,
+          agentId: view.agents.find((a) => a.id === connectionAgentId(x.id) || a.id === siteConnectionAgentId(x.id))?.id ?? null,
+        } : null,
         // いま使える業務のうち、この接続のツールを使うもの（導入していない拡張機能の業務は数えない）
         usedBy: view.agents.filter((a) => a.tools.some((n) => n.startsWith(`${x.id}.`))).map((a) => ({ id: a.id, name: a.name })),
         // ローカルの方針のときに、この接続（社外）に送ってよいもの（第16.3.7.1節）
@@ -116,6 +105,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
       // ローカルの方針か（ローカルの方針の会社だけ、接続ごとに送ってよいものを決める。第16.3.7.1節）
       localPolicy: isLocalPolicy(await deps.ai.policyFor(tenant.id)),
       risks: RISK_LEVELS.map((r) => ({ value: r, text: RISK_WORDS[r] })),
+      roles: CONNECTOR_TOOL_ROLES.map((r) => ({ value: r, text: CONNECTOR_ROLE_WORDS[r] })),
       // よく使うサービスの型（第12.11.6.7節）。すでに登録したものも出す（同じ型を 2 つ登録するには ID を変える）
       presets: CONNECTION_PRESETS.map((p) => ({ id: p.id, name: p.name, description: p.description, url: p.url })),
     });
@@ -141,6 +131,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     const type = preset?.auth.type ?? (body.auth === 'oauth' || body.auth === 'api_key' ? body.auth : body.auth === 'basic' ? 'api_key' : 'none');
     let auth: ConnectorAuth = preset ? { ...preset.auth } : { type, ...(body.auth === 'basic' ? { scheme: 'basic' as const } : {}) };
     let tools: TenantConnection['tools'] = [];
+    let profile: TenantConnection['profile'];
     // URL の形と宛先を、接続を試す前に確かめる（社内のアドレスへ送らせない。2026-10-12 の点検）
     const urlProblems = checkConnector({ id, name: id, transport: 'http', url, auth, tools: [] } as unknown as Parameters<typeof checkConnector>[0], deps.hub.builtinPrefixes())
       .filter((p) => p.startsWith('url '));
@@ -150,7 +141,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     if (type === 'none') {
       const listed = await deps.hub.listMcpTools(url);
       if (!listed.ok) return c.json({ error: `MCP サーバに接続できませんでした: ${listed.error}` }, 400);
-      tools = toTools(listed.tools);
+      ({ tools, profile } = await profiledTools(deps, tenant.id, String(body.name ?? '').trim() || preset?.name || id, listed.tools, null, preset));
     } else if (type === 'oauth' && !preset) {
       // 認可の口は相手のサーバの案内から見つける。見つからなければ、あとで管理者が入れる（第12.11.6.2節）
       const found = await discoverOAuthEndpoints(url);
@@ -169,7 +160,7 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     const conn: TenantConnection = {
       tenantId: tenant.id, id, name: String(body.name ?? '').trim() || preset?.name || id,
       description: String(body.description ?? '').trim() || preset?.description || '',
-      transport: 'http', url, auth, tools,
+      transport: 'http', url, auth, tools, ...(profile ? { profile } : {}),
       origin: 'manual', createdBy: user.id, createdAt: now, updatedAt: now,
     };
     const problems = checkConnector(conn, deps.hub.builtinPrefixes());
@@ -228,8 +219,8 @@ export function mcpConnectionsRoute(deps: AppDeps) {
       const h = await deps.connections.headersFor(tenant.id, user.id, conn);
       const listed = h.ok ? await deps.hub.listMcpTools(conn.url, h.headers) : { ok: false as const, error: h.error };
       if (!listed.ok) return c.json({ ok: true, tools: conn.tools.length, warning: `鍵は登録しました。ツールを問い合わせられませんでした: ${listed.error}` });
-      const tools = toTools(listed.tools, conn.tools, presetById(conn.auth.preset));
-      await deps.repo.saveConnection({ ...conn, tools, updatedAt: now });
+      const { tools, profile } = await profiledTools(deps, tenant.id, conn.name, listed.tools, conn, presetById(conn.auth.preset));
+      await deps.repo.saveConnection({ ...conn, tools, profile, updatedAt: now });
       return c.json({ ok: true, tools: tools.length });
     }
     return c.json({ error: 'この接続は認証が要りません' }, 400);
@@ -240,10 +231,12 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     const { tenant, user } = c.get('ctx');
     const conn = (await deps.repo.listConnections(tenant.id)).find((x) => x.id === c.req.param('id'));
     if (!conn) return c.json({ error: '接続が見つかりません' }, 404);
-    const body = await c.req.json<{ name?: string; description?: string; tools?: { name: string; risk: string }[]; sendPolicy?: string }>().catch(() => ({}) as Record<string, never>);
+    const body = await c.req.json<{ name?: string; description?: string; tools?: { name: string; risk?: string; role?: string }[]; sendPolicy?: string; summary?: string }>().catch(() => ({}) as Record<string, never>);
     for (const t of body.tools ?? []) {
-      if (!RISK_LEVELS.includes(t.risk as RiskLevel)) return c.json({ error: `危険度は ${RISK_LEVELS.join('・')} のどれかです` }, 400);
+      if (t.risk !== undefined && !RISK_LEVELS.includes(t.risk as RiskLevel)) return c.json({ error: `危険度は ${RISK_LEVELS.join('・')} のどれかです` }, 400);
+      if (t.role !== undefined && !CONNECTOR_TOOL_ROLES.includes(t.role as ConnectorToolRole)) return c.json({ error: `役割は ${CONNECTOR_TOOL_ROLES.join('・')} のどれかです` }, 400);
     }
+    const summary = typeof body.summary === 'string' ? body.summary.replace(/\s+/g, ' ').trim().slice(0, 200) : null;
     // ローカルの方針のときに、この接続（社外）に送ってよいもの（第16.3.7.1節）
     if (body.sendPolicy !== undefined && body.sendPolicy !== 'block' && body.sendPolicy !== 'deidentified') {
       return c.json({ error: 'sendPolicy は block か deidentified です' }, 400);
@@ -254,9 +247,15 @@ export function mcpConnectionsRoute(deps: AppDeps) {
       description: typeof body.description === 'string' ? body.description.trim() : conn.description,
       tools: conn.tools.map((t) => {
         const want = body.tools?.find((x) => x.name === t.name);
-        return want ? { ...t, risk: want.risk as RiskLevel } : t;
+        if (!want) return t;
+        // 役割を直したら、管理者が見たものとして、役割から危険度を決め直す（第47.4.1節）。危険度を直したら、それを使う
+        const role = (want.role as ConnectorToolRole | undefined) ?? t.role;
+        const next = want.role ? applyReviewedRoles([{ ...t, ...(role ? { role } : {}) }])[0]! : t;
+        return want.risk ? { ...next, risk: want.risk as RiskLevel } : next;
       }),
       ...(body.sendPolicy ? { sendPolicy: body.sendPolicy as 'block' | 'deidentified' } : {}),
+      // 振り分けの説明を管理者が直したら、取り直しで推論が上書きしない（第47.7節）
+      ...(summary && conn.profile ? { profile: { ...conn.profile, summary, summaryEdited: true } } : {}),
       updatedAt: new Date().toISOString(),
     };
     await deps.repo.saveConnection(next);
@@ -277,12 +276,44 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     if (!h.ok) return c.json({ error: h.error }, 400);
     const listed = await deps.hub.listMcpTools(conn.url, h.headers);
     if (!listed.ok) return c.json({ error: `MCP サーバに接続できませんでした: ${listed.error}` }, 400);
-    const tools = toTools(listed.tools, conn.tools, presetById(conn.auth.preset));
-    await deps.repo.saveConnection({ ...conn, tools, updatedAt: new Date().toISOString() });
+    const { tools, profile } = await profiledTools(deps, tenant.id, conn.name, listed.tools, conn, presetById(conn.auth.preset));
+    // 会社のサイトを扱う接続なら、サイトの名前と URL を読み直す（第47.3節）
+    const site = profile.site ? await readSiteInfo(deps, tenant.id, user.id, conn, tools) : {};
+    await deps.repo.saveConnection({ ...conn, tools, profile: { ...profile, ...site }, updatedAt: new Date().toISOString() });
     const added = tools.filter((t) => !conn.tools.some((k) => k.name === t.name)).map((t) => t.name);
     const removed = conn.tools.filter((k) => !tools.some((t) => t.name === k.name)).map((t) => t.name);
     await audit(deps, tenant.id, user.id, 'connection.mcp.refresh', conn.id, { added, removed });
     return c.json({ ok: true, added, removed });
+  });
+
+  /**
+   * 推論が決めたツールの役割を、管理者が見て「この役割で使う」とする（仕様書 第47.4.1節、Q-368）。
+   *
+   * @remarks
+   * 役割から危険度を決め直す（読む・見直しは読むだけ、準備は下書き、確定と戻すは社外へ送る）。
+   * これで、その接続の道具を使う汎用の業務が秘書の振り分けに出る（第47.7節）。
+   * その業務の利用範囲が決まっていなければ、管理者だけにする（社外に出る道具を持つため）。危険度: write-internal（会社の設定を変える）
+   */
+  app.post('/:id/roles/review', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const conn = (await deps.repo.listConnections(tenant.id)).find((x) => x.id === c.req.param('id'));
+    if (!conn) return c.json({ error: '接続が見つかりません' }, 404);
+    if (!conn.profile) return c.json({ error: 'まだ役割が決まっていません。ツールを取り直してください' }, 400);
+    const now = new Date().toISOString();
+    const tools = applyReviewedRoles(conn.tools);
+    const site = conn.profile.site ? await readSiteInfo(deps, tenant.id, user.id, conn, tools) : {};
+    await deps.repo.saveConnection({ ...conn, tools, profile: { ...conn.profile, ...site, reviewedAt: now, reviewedBy: user.id }, updatedAt: now });
+    const settings = await deps.repo.getTenantSettings(tenant.id);
+    // サイトの接続はサイトの更新の付属の業務で、利用範囲はサイトの更新と同じ（第47.7節）。ほかの接続の業務は管理者だけから始める
+    const scopeId = conn.profile.site ? siteConnectionAgentId(conn.id) : connectionAgentId(conn.id);
+    if (!conn.profile.site && !settings.access.scopes[scopeId]) {
+      const admins = (await deps.repo.listUsers(tenant.id)).filter((u) => u.status === 'active' && u.roles.includes('admin')).map((u) => u.id);
+      await deps.repo.saveTenantSettings(tenant.id, 'access', { ...settings.access, scopes: { ...settings.access.scopes, [scopeId]: { users: admins, groups: [] } } }, user.id);
+    }
+    await audit(deps, tenant.id, user.id, 'connection.mcp.roles_review', conn.id, {
+      roles: tools.filter((t) => t.role).map((t) => ({ tool: t.name, role: t.role, risk: t.risk })),
+    });
+    return c.json({ ok: true, agentId: scopeId });
   });
 
   /** 接続を確かめる（第12.11.3節）。登録したツールを MCP サーバが提供しているかを返す。状態は変えない。 */
@@ -346,6 +377,20 @@ export function mcpConnectionsRoute(deps: AppDeps) {
   });
 
   return app;
+}
+
+/**
+ * 会社のサイトを扱う接続の、サイトの名前と URL を読む（仕様書 第47.3節）。サイトの情報を返す読む道具があるときだけ。
+ *
+ * @returns 読めなければ空（接続の名前を使う）
+ * @remarks 危険度: read（必ず渡す引数の無い読む道具を、管理者の認可で 1 回呼ぶ）
+ */
+async function readSiteInfo(deps: AppDeps, tenantId: string, userId: string, conn: TenantConnection, tools: TenantConnection['tools']): Promise<{ siteName?: string; siteUrl?: string }> {
+  const info = siteInfoTool(tools);
+  if (!info) return {};
+  const h = await deps.connections.headersFor(tenantId, userId, conn);
+  const res = h.ok ? await deps.hub.callMcpTool(conn.url, info.name, {}, h.headers) : null;
+  return res?.ok ? parseSiteInfo(res.text) : {};
 }
 
 async function audit(deps: AppDeps, tenantId: string, userId: string, action: string, targetId: string, detail: Record<string, unknown>) {

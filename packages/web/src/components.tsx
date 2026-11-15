@@ -798,12 +798,14 @@ function when(at: string | null): string {
  * 承認が形だけのものになる（不変則 I-11 と同じ考え方）。
  * 1 件目は開いた状態で出す。ほとんどの場合、判断するのはその 1 件だからである。
  */
-function ApprovalRow({ approval, busy, onDecide }: {
+export function ApprovalRow({ approval, busy, onDecide, defaultOpen = false }: {
   approval: ApprovalView;
   busy: boolean;
   onDecide: (id: string, decision: 'approved' | 'rejected') => void;
+  /** 開いた形で出す（秘書の会話の中では、いま判断するものなので開いておく。仕様書 第47.5節）。 */
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const first = firstLine(approval.present);
   return (
     <div className={`card fold-row${open ? ' open' : ''}`}>

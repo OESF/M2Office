@@ -9,6 +9,7 @@ import type {
   StoredFile, Tenant, TenantSettings, User, UserGroup, GroupChatSpace, UserSettings, TaxCategory,
 } from '@m2office/shared';
 import type { ConnectorDeclaration } from '../extensions/connectors.js';
+import type { ConnectionProfile } from '../connectors/profile.js';
 
 /**
  * 永続化層のインターフェース。
@@ -1246,6 +1247,11 @@ export interface TenantConnection extends ConnectorDeclaration {
    * `deidentified`: 個人を特定する情報を除いてから送ってよい。`block`（既定）: 送らない。クラウドの方針では使わない
    */
   sendPolicy?: 'block' | 'deidentified';
+  /**
+   * 接続の説明とツールの役割を管理者が見たか（仕様書 第47.4.1節・第47.7節）。
+   * 推論が作った説明は、秘書の振り分けの候補に出す。無ければ汎用の業務を作らない
+   */
+  profile?: ConnectionProfile;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

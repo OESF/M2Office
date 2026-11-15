@@ -813,7 +813,12 @@ export interface PresencePairView extends PresenceView {
 }
 
 /** 承認待ち 1 件。どの業務かを添える（仕様書 第6.2.4節）。定義が見つからなければ `null`。 */
-export type ApprovalView = Approval & { agentName: string | null };
+/** 承認の依頼 1 件。`runId` は秘書の会話の中に、頼んだ業務の承認を出すのに使う（仕様書 第47.5節）。 */
+export type ApprovalView = Approval & {
+  agentName: string | null; runId?: string | null;
+  /** 一連の流れの中の承認（秘書に頼んで起こした業務で、本人が判断する、12 時間の内のもの）。承認トレイには出さず、秘書のキャンバスで判断する（仕様書 第47.5節） */
+  inFlow?: boolean;
+};
 
 export interface DashboardLive {
   generatedAt: string;
@@ -1368,7 +1373,16 @@ export interface McpConnectionView {
   auth: string;
   origin: string;
   originText: string;
-  tools: { name: string; description: string; risk: string; riskText: string; enabled: boolean }[];
+  tools: {
+    name: string; description: string; risk: string; riskText: string; enabled: boolean;
+    /** 役割（読む・準備・見直し・確定・戻す。仕様書 第47.4.1節）と、管理者が見たか。 */
+    role?: string; roleText?: string; roleReviewed?: boolean;
+  }[];
+  /**
+   * 接続の説明（秘書の振り分けの候補に出すもの）と、役割を管理者が見たか（仕様書 第47.7節）。
+   * `agentId` は、その接続の道具を使う汎用の業務（使えるとき）
+   */
+  profile: { summary: string; site: boolean; siteName?: string | null; siteUrl?: string | null; reviewedAt: string | null; unreviewed: number; agentId: string | null } | null;
   /** その接続のツールを使う業務。 */
   usedBy: { id: string; name: string }[];
   /** 認証の状態（仕様書 第12.11.6節）。秘密の値は返らない。 */
@@ -1903,6 +1917,8 @@ export const api = {
       account: { kind: 'user' | 'company'; username: string; displayName: string | null; roles: string[] } | null;
       missing: string[] | null; problem: string | null; types: { name: string; restBase: string }[];
     }>('/site-updates/site'),
+    /** MCP でつないだサイト（仕様書 第47.3節）。`ready` は秘書から使えるか（管理者が役割を見たか）。 */
+    mcpSites: () => call<{ items: { id: string; name: string; url: string | null; summary: string; ready: boolean }[] }>('/site-updates/mcp-sites'),
     /** 本人の WordPress の接続（第45.16節）。使えない会社・人には 403。 */
     wordpressUser: () => call<WordPressUserView>('/site-updates/wordpress-user'),
     /** 本人の WordPress の利用者をつなぐ。会社のサイトで確かめてから預ける。 */
@@ -3132,7 +3148,9 @@ export const api = {
     setSalesDocsMailIntake: (mailIntake: boolean) => call<{ ok: true }>('/admin/extensions/sales-docs/settings', { method: 'PUT', body: JSON.stringify({ mailIntake }) }),
     /** お知らせを入れられる WordPress の記事の種類と、いまの入れ先（第45.20節）。 */
     announcementWebTypes: () => call<{ types: { restBase: string; name: string; news: boolean }[]; current: string; auto: boolean }>('/admin/extensions/announcements/web-types'),
-    setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; webPostType: string; screens: string[] | null }>) =>
+    /** コラムとお知らせを入れられるサイト（`rest` か `mcp:<接続の ID>`。仕様書 第47.6節）。 */
+    contentSites: () => call<{ sites: { key: string; name: string }[] }>('/admin/extensions/sites'),
+    setAnnouncementSettings: (patch: Partial<{ webPublish: 'publish' | 'draft'; webCategory: string; webPostType: string; screens: string[] | null; site: string }>) =>
       call<{ ok: true }>('/admin/extensions/announcements/settings', { method: 'PUT', body: JSON.stringify(patch) }),
     /** お知らせを流す画面の選び先（サイネージの画面。`selected` が `null` ならすべて）。 */
     announcementScreens: () => call<{ screens: { id: string; name: string }[]; selected: string[] | null }>('/admin/extensions/announcements/screens'),
@@ -3176,7 +3194,7 @@ export const api = {
     setExtensionEnabled: (id: string, enabled: boolean) =>
       call(`/admin/extensions/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
     /** 会社の接続（コネクタ。仕様書 第12.11.0節）。 */
-    mcpConnections: () => call<{ items: McpConnectionView[]; risks: { value: string; text: string }[]; presets: ConnectionPresetView[]; localPolicy: boolean }>('/admin/connections/mcp'),
+    mcpConnections: () => call<{ items: McpConnectionView[]; risks: { value: string; text: string }[]; roles?: { value: string; text: string }[]; presets: ConnectionPresetView[]; localPolicy: boolean }>('/admin/connections/mcp'),
     /**
      * 接続を登録する。認証の要らない接続は、MCP サーバにツールの一覧を問い合わせる。
      * `preset` を渡すと型（Slack など）から登録する（仕様書 第12.11.6.7節）。
@@ -3187,8 +3205,10 @@ export const api = {
     setMcpCredentials: (id: string, v: { clientId?: string; clientSecret?: string; apiKey?: string; username?: string; password?: string }) =>
       call<{ ok: true; reset?: number; tools?: number; warning?: string }>(`${mcpPath(id)}/credentials`, { method: 'PUT', body: JSON.stringify(v) }),
     /** ツールごとの危険度などを変える。 */
-    updateMcpConnection: (id: string, v: { tools?: { name: string; risk: string }[]; name?: string; sendPolicy?: 'block' | 'deidentified' }) =>
+    updateMcpConnection: (id: string, v: { tools?: { name: string; risk?: string; role?: string }[]; name?: string; sendPolicy?: 'block' | 'deidentified'; summary?: string }) =>
       call(mcpPath(id), { method: 'PUT', body: JSON.stringify(v) }),
+    /** 推論が決めたツールの役割を、管理者が見て「この役割で使う」とする（仕様書 第47.4.1節）。 */
+    reviewMcpRoles: (id: string) => call<{ ok: true; agentId: string }>(`${mcpPath(id)}/roles/review`, { method: 'POST' }),
     refreshMcpConnection: (id: string) =>
       call<{ ok: true; added: string[]; removed: string[] }>(`${mcpPath(id)}/refresh`, { method: 'POST' }),
     checkMcpConnection: (id: string) => call<ConnectorCheck>(`${mcpPath(id)}/check`, { method: 'POST' }),

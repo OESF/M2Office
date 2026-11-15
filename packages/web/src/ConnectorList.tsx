@@ -15,6 +15,7 @@ import { Icon, useRememberedSet } from './nav.js';
 export function ConnectorList() {
   const [items, setItems] = useState<McpConnectionView[] | null>(null);
   const [risks, setRisks] = useState<{ value: string; text: string }[]>([]);
+  const [roles, setRoles] = useState<{ value: string; text: string }[]>([]);
   // ローカルの方針の会社か（接続ごとに、社外に送ってよいものを決める。仕様書 第16.3.7.1節）
   const [localPolicy, setLocalPolicy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +30,7 @@ export function ConnectorList() {
   const [adding, setAdding] = useState(false);
   const load = useCallback(() => {
     api.admin.mcpConnections()
-      .then((r) => { setItems(r.items); setRisks(r.risks); setPresets(r.presets ?? []); setLocalPolicy(!!r.localPolicy); })
+      .then((r) => { setItems(r.items); setRisks(r.risks); setRoles(r.roles ?? []); setPresets(r.presets ?? []); setLocalPolicy(!!r.localPolicy); })
       .catch((e) => setError(describeError(e, '読み込めませんでした')));
   }, []);
   useEffect(load, [load]);
@@ -164,13 +165,19 @@ export function ConnectorList() {
               </div>
             )}
             {c.authState.type !== 'none' && <AuthSettings conn={c} onSaved={load} onError={setError} />}
+            {/* この接続で何ができるか（秘書の振り分けに出す説明）と、役割を見たか（仕様書 第47.4.1節・第47.7節） */}
+            {c.profile && (
+              <ConnectionProfileRow conn={c} busy={busy}
+                onSave={(summary) => void run(`${c.id}/summary`, () => api.admin.updateMcpConnection(c.id, { summary }), '直せませんでした')}
+                onReview={() => void run(`${c.id}/review`, () => api.admin.reviewMcpRoles(c.id), '決められませんでした')} />
+            )}
             {c.tools.length === 0 && <p className="muted small">ツールはまだありません</p>}
             {c.tools.length > 0 && (
             // ツールが多い接続（Slack など）でも画面が埋まらないよう、ツールの一覧は畳んでおく（仕様書 第6.6.3.0節）
             <details className="tool-list">
               <summary>ツール {c.tools.length} 件（{toolSummary(c.tools, risks)}）</summary>
             <table className="table small tool-table">
-              <thead><tr><th>ツール</th><th className="nowrap">危険度</th><th className="nowrap">利用</th></tr></thead>
+              <thead><tr><th>ツール</th>{roles.length > 0 && c.profile && <th className="nowrap">役割</th>}<th className="nowrap">危険度</th><th className="nowrap">利用</th></tr></thead>
               <tbody>
                 {c.tools.map((t) => {
                   const provided = st && st !== 'busy' && st.ok ? st.tools.find((x) => x.name === t.name)?.provided : undefined;
@@ -182,6 +189,16 @@ export function ConnectorList() {
                         {/* 説明は 2 行まで（長い英語の説明でも表が埋まらないように）。全文は指し示すと出る */}
                         <div className="muted small tool-desc">{t.description}</div>
                       </td>
+                      {roles.length > 0 && c.profile && (
+                        <td>
+                          <select value={t.role ?? ''} disabled={busy === `${c.id}/role`} className={t.role && !t.roleReviewed ? 'unreviewed' : ''}
+                            aria-label={`${t.name}の役割`}
+                            onChange={(e) => void run(`${c.id}/role`, () => api.admin.updateMcpConnection(c.id, { tools: [{ name: t.name, role: e.target.value }] }), '変えられませんでした')}>
+                            {!t.role && <option value="">—</option>}
+                            {roles.map((r) => <option key={r.value} value={r.value}>{r.text}</option>)}
+                          </select>
+                        </td>
+                      )}
                       <td>
                         <select value={t.risk} disabled={busy === `${c.id}/risk`}
                           onChange={(e) => void run(`${c.id}/risk`, () => api.admin.updateMcpConnection(c.id, { tools: [{ name: t.name, risk: e.target.value }] }), '変えられませんでした')}>
@@ -219,6 +236,47 @@ export function ConnectorList() {
         );
       })}
     </>
+  );
+}
+
+/**
+ * 接続の説明と、役割を見たか（仕様書 第47.4.1節・第47.7節）。
+ *
+ * @remarks
+ * 説明は推論がツールから作ったもので、秘書の振り分けの候補に出る。管理者は直せる。
+ * 推論が決めた役割を管理者が 1 度見て「この役割で使う」とするまで、承認の要らない側の役割でも承認を通す（Q-368）
+ */
+function ConnectionProfileRow({ conn, busy, onSave, onReview }: {
+  conn: McpConnectionView; busy: string | null; onSave: (summary: string) => void; onReview: () => void;
+}) {
+  const p = conn.profile!;
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(p.summary);
+  useEffect(() => setText(p.summary), [p.summary]);
+  const needsReview = !p.reviewedAt || p.unreviewed > 0;
+  return (
+    <div className="connection-profile small">
+      {editing ? (
+        <div className="row">
+          <input value={text} maxLength={200} onChange={(e) => setText(e.target.value)} aria-label="この接続でできること" />
+          <button className="btn small" disabled={!text.trim() || busy === `${conn.id}/summary`} onClick={() => { onSave(text.trim()); setEditing(false); }}>保存</button>
+          <button className="btn small ghost" onClick={() => { setText(p.summary); setEditing(false); }}>キャンセル</button>
+        </div>
+      ) : (
+        <p>
+          {p.summary}
+          <button className="btn link small" onClick={() => setEditing(true)}>直す</button>
+        </p>
+      )}
+      {needsReview ? (
+        <div className="row">
+          <span className="badge warn">{p.reviewedAt ? `まだ見ていない役割 ${p.unreviewed} 件` : '役割はまだ見ていません'}</span>
+          <button className="btn small" disabled={busy === `${conn.id}/review`} onClick={onReview}>この役割で使う</button>
+        </div>
+      ) : (
+        p.agentId && <span className="badge ok">秘書から使えます</span>
+      )}
+    </div>
   );
 }
 

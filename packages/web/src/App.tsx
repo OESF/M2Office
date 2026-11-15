@@ -31,7 +31,7 @@ import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
 import { RecorderDialog } from './Recorder.js';
 import { meetingMinutesRequest } from './meeting-request.js';
-import { AgentForm, ApprovalTray, AskBox, Elapsed, FILE_ACCEPT, isRecordingFile, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner, tooLargeMessage } from './components.js';
+import { AgentForm, ApprovalRow, ApprovalTray, AskBox, Elapsed, FILE_ACCEPT, isRecordingFile, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner, tooLargeMessage } from './components.js';
 import { DemoBanner } from './demo-terms.js';
 import { Sources } from './sources.js';
 import { Schedules } from './Schedules.js';
@@ -591,6 +591,20 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
     // openItem は描くたびに作り直すが、中で使うのは状態の設定関数だけ
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuAgents]));
+  /*
+    秘書に頼んだ業務の承認のうち、本人が判断するもの（仕様書 第47.5節）。秘書のキャンバスの中で判断できる。
+    承認トレイにも同じものが出て、どちらで判断してもよい
+  */
+  const inlineApprovals = approvals.filter((a) => a.inFlow === true);
+  // 承認トレイに出すのは、流れの外の承認だけ（ほかの人の依頼・定時実行・時間がたったもの。第47.5節）
+  const trayApprovals = approvals.filter((a) => a.inFlow !== true);
+  const inlineKey = inlineApprovals.map((a) => a.id).join(',');
+  // 新しく承認を待つものが出たら、秘書のキャンバスを開く（画面を移らずに判断できるように）
+  useEffect(() => {
+    if (inlineKey) setTalkOpen(true);
+    // setTalkOpen は状態の設定関数
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inlineKey]);
   // たたんでいる間に出た結果には、まだ見ていない印を出す（第6.2節）
   const [seen, setSeen] = useState<string | null>(null);
   useEffect(() => { if (talkOpen && result) setSeen(result.id); }, [talkOpen, result]);
@@ -713,7 +727,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         navBottom={(
           <>
             <NavHeading>自分の状況</NavHeading>
-            <NavItem icon="approvals" label="承認トレイ" description="あなたが判断する承認と、操作の確認" count={approvals.length}
+            <NavItem icon="approvals" label="承認トレイ" description="あなたが判断する承認と、操作の確認" count={trayApprovals.length}
               active={view.kind === 'approvals'} onClick={() => setView({ kind: 'approvals' })} />
             <NavItem icon="history" label="実行履歴" description="過去の依頼と結果"
               active={view.kind === 'history'} onClick={() => setView({ kind: 'history' })} />
@@ -839,7 +853,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'approvals' && (
             <>
               <h1>承認トレイ <HelpTip article="start-approvals">承認すると業務が続きから進み、却下するとそこで終わります。社外に出るものとお金の確定は、承認のあとにだけ行います。</HelpTip></h1>
-              <ApprovalTray items={approvals} onDecided={() => void refresh()} />
+              <ApprovalTray items={trayApprovals} onDecided={() => void refresh()} />
             </>
           )}
           {view.kind === 'notifications' && (
@@ -1052,6 +1066,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <h3>秘書のキャンバス</h3>
           </div>
           <div className="talk-body">
+            {/* 秘書に頼んだ業務の承認は、ここでその場で判断できる（承認トレイへ移らなくてよい。仕様書 第47.5節） */}
+            <InlineApprovals items={inlineApprovals} onDecided={() => void refresh()} />
             {result ? (
               <CanvasView
                 result={result}
@@ -1066,6 +1082,37 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
         </aside>
       </SideNavLayout>
       {showTour && <Tour onDone={finishTour} />}
+    </div>
+  );
+}
+
+/**
+ * 秘書のキャンバスの中の承認（仕様書 第47.5節）。秘書に頼んだ業務の承認を、開いた形で出し、その場で判断する。
+ *
+ * @remarks
+ * 承認はボタンで行う（言葉では承認しない。Q-369）。直しや取りやめは、秘書に言えばよい（「期限は来週にして」「やめて」）。
+ * 判断したら、一覧を読み直す（業務が続きから進み、終われば秘書が結果を伝える）
+ */
+function InlineApprovals({ items, onDecided }: { items: ApprovalView[]; onDecided: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (items.length === 0) return null;
+  async function decide(id: string, decision: 'approved' | 'rejected') {
+    setBusy(id);
+    setError(null);
+    try {
+      await api.decide(id, decision);
+      onDecided();
+    } catch (e) {
+      setError(describeError(e, decision === 'approved' ? '承認できませんでした' : '却下できませんでした'));
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <div className="canvas-approvals">
+      {items.map((a) => <ApprovalRow key={a.id} approval={a} busy={busy === a.id} onDecide={(id, d) => void decide(id, d)} defaultOpen />)}
+      {error && <p className="error small">{error}</p>}
     </div>
   );
 }

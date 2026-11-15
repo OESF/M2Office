@@ -6,6 +6,7 @@
  * LINE の一斉配信は、今月の無料の範囲を超えるなら送らない（Q-177）。出せなかった出し先は理由を残して知らせ、ほかの出し先は止めない。
  */
 
+import { mcpSiteOf, type SiteHandOff } from '../connectors/site-handoff.js';
 import { thumbnailPng } from '../signage/thumbnail.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -46,6 +47,11 @@ export interface AnnouncementSignage {
 
 /** お知らせの作成の処理に使うもの。 */
 export interface AnnouncementServiceDeps {
+  /**
+   * MCP でつないだサイトに入れるとき、そのサイトの業務に頼む口（仕様書 第47.6節）。入れるサイトの設定が MCP のサイトのときだけ使う。
+   * 無ければ MCP のサイトには入れられない
+   */
+  handOffToSite?: SiteHandOff;
   store: AnnouncementStore;
   repo: Repository;
   box: SecretBox;
@@ -446,13 +452,19 @@ export class AnnouncementService {
     const wp = await this.deps.repo.getTenantSettings(who.tenantId).then((s) => s.webColumns.wordpress);
     // 入れる記事の種類と分類（第45.20.2節）。決められなければ聞き返す
     let where = '';
-    if (a.channels.includes('web') && avail.wordpress) {
+    // 入れるサイトが MCP でつないだサイトなら、その業務に頼む（第47.6節）。REST API の WordPress の種類は確かめない
+    const mcp = mcpSiteOf(settings.site);
+    if (a.channels.includes('web') && avail.wordpress && !mcp) {
       const auth = await this.wordpress(who.tenantId);
       const target = auth ? await this.webTarget(who.tenantId, auth, settings).catch(() => null) : null;
       if (target && 'ask' in target) problems.push(target.ask);
       else if (target) where = `の「${target.type.name}（${target.type.restBase}）」${target.taxonomy && settings.webCategory ? `・${target.taxonomy.name}「${settings.webCategory}」` : ''}`;
     }
-    const web = !a.channels.includes('web') ? '' : !avail.wordpress ? 'WordPress につないでいないため、承認の後に文を写して使う'
+    const web = !a.channels.includes('web') ? ''
+      : mcp ? (settings.webPublish === 'draft'
+        ? 'MCP でつないだサイトに、承認の後に下書きとして入れるよう頼む'
+        : 'MCP でつないだサイトに、承認の後に公開を頼む（公開の前に、サイトの変わる所を見て、もう一度承認する）')
+      : !avail.wordpress ? 'WordPress につないでいないため、承認の後に文を写して使う'
       : settings.webPublish === 'draft' ? `WordPress（${wp?.siteUrl}）${where}に下書きとして入れる`
         : a.publishAt ? `WordPress（${wp?.siteUrl}）${where}に予約公開で入れる` : `WordPress（${wp?.siteUrl}）${where}に公開する`;
     let mail: AnnouncementPreview['mail'] = null;
@@ -542,6 +554,34 @@ export class AnnouncementService {
    */
   private async publishWeb(who: AnnouncementViewer, a: StoredAnnouncement, scheduled: boolean): Promise<string | null> {
     const settings = (await this.deps.repo.getTenantSettings(who.tenantId)).announcements;
+    // 入れるサイトが MCP でつないだサイトなら、そのサイトの業務に頼む（第47.6節）。公開まで行う設定なら、
+    // その業務が相手の見直しの結果を見せて、もう一度承認を求める（案 A。会話の中で承認する）
+    const mcp = mcpSiteOf(settings.site);
+    if (mcp) {
+      const at = new Date().toISOString();
+      if (!this.deps.handOffToSite) {
+        await this.deps.store.setOutput(who.tenantId, a.id, 'web', { status: 'failed', result: {}, reason: 'MCP でつないだサイトに入れる準備がありません', doneAt: at });
+        return 'MCP でつないだサイトに入れる準備がありません';
+      }
+      const publish = settings.webPublish !== 'draft';
+      const r = await this.deps.handOffToSite(who, mcp, [
+        publish ? '次のお知らせを、サイトのお知らせとして公開してください。' : '次のお知らせを、サイトのお知らせの**下書き**として入れてください。公開はしません。',
+        `題名: ${a.texts.web.title}`,
+        a.startDate || a.endDate ? `お知らせの対象の期間: ${a.startDate ?? ''}〜${a.endDate ?? ''}` : '',
+        scheduled && a.publishAt ? `公開の日時（予約）: ${a.publishAt}` : '',
+        '本文（HTML）:',
+        columnHtml(a.texts.web.body),
+      ].filter(Boolean).join('\n'));
+      if ('error' in r) {
+        await this.deps.store.setOutput(who.tenantId, a.id, 'web', { status: 'failed', result: {}, reason: r.error, doneAt: at });
+        return r.error;
+      }
+      await this.deps.store.setOutput(who.tenantId, a.id, 'web', {
+        status: 'done', result: { site: r.siteName, runId: r.runId },
+        reason: publish ? `「${r.siteName}」に頼みました。公開の前に、サイトの変わる所を見て承認してください` : `「${r.siteName}」に下書きを頼みました`, doneAt: at,
+      });
+      return null;
+    }
     const auth = await this.wordpress(who.tenantId);
     const at = new Date().toISOString();
     if (!auth) {

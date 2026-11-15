@@ -7,6 +7,7 @@
  * カバー画像（第32.7.1節・第32.18.2節）は版に含め、書き上げたときと「作り直す」で作る。
  */
 
+import { mcpSiteOf, type SiteHandOff } from '../connectors/site-handoff.js';
 import type { CompanyDesignTokens } from '@m2office/shared';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -43,6 +44,11 @@ export interface ColumnViewer {
 
 /** 使うもの。 */
 export interface ColumnServiceDeps {
+  /**
+   * MCP でつないだサイトに入れるとき、そのサイトの業務に頼む口（仕様書 第47.6節）。入れるサイトの設定が MCP のサイトのときだけ使う。
+   * 無ければ MCP のサイトには入れられない
+   */
+  handOffToSite?: SiteHandOff;
   /** 会社の見た目（第46.5節）。あれば型の色と挿絵の雰囲気に使う。無ければロゴから推し量る */
   design?(tenantId: string): Promise<CompanyDesignTokens | null>;
   store: ColumnStore;
@@ -443,6 +449,22 @@ export class ColumnService {
     const { store, repo } = this.deps;
     const v = (await store.versions(who.tenantId, id)).find((x) => x.version === version)!;
     const settings = (await repo.getTenantSettings(who.tenantId)).webColumns;
+    // 入れるサイトが MCP でつないだサイトなら、そのサイトの業務に下書きを頼む（公開はしない。第47.6節）
+    const mcp = mcpSiteOf(settings.site);
+    if (mcp) {
+      if (!this.deps.handOffToSite) return { error: 'MCP でつないだサイトに入れる準備がありません' };
+      const r = await this.deps.handOffToSite(who, mcp, [
+        '次のコラムを、サイトの読み物の記事（ブログ・コラムなど）の**下書き**として入れてください。公開はしません（公開するときは、あとで人が頼みます）。',
+        `題名: ${v.title}`,
+        v.description ? `抜粋: ${v.description}` : '',
+        '本文（HTML）:',
+        columnHtml(finalMarkdown(v, settings)),
+      ].filter(Boolean).join('\n'));
+      if ('error' in r) return { error: r.error };
+      await store.update(who.tenantId, id, { status: 'placed', submittedVersion: v.version, wpPostId: null, wpEditUrl: null, runId: null });
+      await this.audit(who, 'column.place', id, { version: v.version, site: `mcp:${mcp}`, handedRun: r.runId });
+      return { placed: true, editUrl: null };
+    }
     if (!settings.wordpress) {
       await store.update(who.tenantId, id, { status: 'approved', submittedVersion: v.version, runId: null });
       await this.audit(who, 'column.approve', id, { version: v.version });

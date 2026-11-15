@@ -25,6 +25,9 @@ export const MCP_CALL_TIMEOUT_MS = 180_000;
  */
 export const MCP_RESULT_LIMIT = 20_000;
 
+/** ツールの一覧（`tools/list`）の続き（`nextCursor`）を読む回数の上限。1 回で返さないサーバのため（仕様書 第47.4.3節）。 */
+export const MCP_LIST_PAGES = 10;
+
 import type { ArgSpec, ToolArgsSchema } from '../tools/registry.js';
 import { outboundFetch } from '../net/outbound.js';
 
@@ -43,6 +46,11 @@ export interface McpToolInfo {
    * 会社の接続の危険度の初期値に使う（仕様書 第12.11.2節）。目印が無ければ `undefined`
    */
   readOnly?: boolean;
+  /**
+   * 見える状態を壊すツールだという MCP の目印（`annotations.destructiveHint`）。
+   * ツールの役割を決める手がかりに使う（仕様書 第47.4.1節）。目印が無ければ `undefined`
+   */
+  destructive?: boolean;
 }
 
 /** ツールを呼んだ結果。失敗しても例外にせず、理由を返す。 */
@@ -79,8 +87,16 @@ export class HttpMcpClient implements McpClient {
   async listTools(url: string, auth?: Record<string, string>) {
     try {
       const session = await this.initialize(url, auth);
-      const res = await this.rpc(url, 'tools/list', {}, session, auth);
-      const tools = (res.tools as { name: string; description?: string; annotations?: { readOnlyHint?: boolean }; inputSchema?: unknown }[] | undefined) ?? [];
+      type Listed = { name: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }; inputSchema?: unknown };
+      // 道具の多いサーバは一覧を分けて返す（`nextCursor`。MCP の決まり）。続きを MCP_LIST_PAGES まで読む（仕様書 第47.4.3節）
+      const tools: Listed[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < MCP_LIST_PAGES; page++) {
+        const res = await this.rpc(url, 'tools/list', cursor ? { cursor } : {}, session, auth);
+        tools.push(...((res.tools as Listed[] | undefined) ?? []));
+        cursor = typeof res.nextCursor === 'string' && res.nextCursor ? res.nextCursor : undefined;
+        if (!cursor) break;
+      }
       return {
         ok: true as const,
         tools: tools.map((t) => {
@@ -88,6 +104,7 @@ export class HttpMcpClient implements McpClient {
           return {
             name: t.name, description: t.description ?? '',
             ...(typeof t.annotations?.readOnlyHint === 'boolean' ? { readOnly: t.annotations.readOnlyHint } : {}),
+            ...(typeof t.annotations?.destructiveHint === 'boolean' ? { destructive: t.annotations.destructiveHint } : {}),
             ...(args ? { args } : {}),
           };
         }),

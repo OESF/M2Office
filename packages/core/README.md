@@ -12,9 +12,9 @@ Node.js 22 以上。PostgreSQL への接続が必要です（`DATABASE_URL`）�
 ## 構成
 
 ```
-src/engine/      実行エンジン。承認による中断と再開、ジョブの投入。実行を見られる人と承認を判断できる人（run-access.ts。権限区画に属する業務は区画に入っている人だけ。approval-compartments.ts で古い承認に区画を埋める。ADR-0096）
+src/engine/      実行エンジン。承認による中断と再開、ジョブの投入。道具の多い会社の接続から段で使う道具を先に選ぶ（tool-select.ts。仕様書 第47.4.3節）。承認の画面に相手の見直しの結果と注意を出す（approval-present.ts）。実行を見られる人と承認を判断できる人（run-access.ts。権限区画に属する業務は区画に入っている人だけ。approval-compartments.ts で古い承認に区画を埋める。ADR-0096）
 src/tools/       ツールの登録簿と内蔵ツール（quote.ts は見積書。金額は quoteTotals の決まった計算。recruit.ts は採用の文の点検）
-src/connectors/  メール・予定・タスク・チャット・本人の Google の連絡先（google/people.ts。第27.15節）への接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れとアプリの自動登録（oauth.ts。動的クライアント登録）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）
+src/connectors/  メール・予定・タスク・チャット・本人の Google の連絡先（google/people.ts。第27.15節）への接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れとアプリの自動登録（oauth.ts。動的クライアント登録）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）。ツールの役割と接続の説明を推論で決める（profile.ts）・接続ごとの汎用の業務（connection-agent.ts。仕様書 第47.4.1節・第47.7節、ADR-0148）・コラムとお知らせを MCP のサイトの業務に頼む（site-handoff.ts。第47.6節）
 src/chat/        グループの名前で共有する（group-share.ts。グループに合う Chat のスペースを探す・承認の画面に届く先とグループとの違いを出す。仕様書 第16.7.12.1節、ADR-0076）と、Chat で秘書に頼む受け口の部品（inbound.ts。出来事の読み取り・Google の署名の確かめ・置き場。第10.16節、ADR-0138）
 src/privacy/     データの渡し先（委託先）の一覧の組み立て（recipients.ts。第16.11.3節 G-3）
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き（pdf-render.ts は帳票の PDF と見積書の罫線の表と印、quote-sample.ts は見積書の見本の読み取り）。
@@ -203,6 +203,8 @@ src/hr/          人事・給与（内蔵の拡張。第30章）。段 1: 置き
                  共有の端末での打刻（terminal.ts。登録・30 秒ごとに変わる QR・名前と番号。第30.6.3節）
 src/secretary/   秘書。3 層の応答振り分け、定時実行の確認・停止・再開・今すぐ実行（推論なし。第10.9.8節）、
                  社内のお知らせを出す・取り下げる・並べる・済んだにする（notices.ts。第10.15節）
+                 承認を待っている業務への言葉での取りやめと直し（approval-talk.ts。言葉では承認しない。第47.5節）
+                 サイトの更新の対象のサイトを決める（site-choice.ts。頼みの名前・その日の答え・聞き返す。第47.6節）
                  在庫の依頼の見分けと、在庫の数の問いへのその場の答え（inventory.ts。第29.15節）
                  最初の画面の一言（home.ts。今日の様子と次の頼みの候補を AI に作らせる指示と答えの読み方・会話の例の取り出し。第6.1.5節）
                  秘書に渡すいまの日時と曜日（clock.ts。文字の会話・音声・最初の画面の一言で同じ形。第10.3.1節）

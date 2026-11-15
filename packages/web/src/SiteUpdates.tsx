@@ -15,13 +15,36 @@ const timeLabel = (iso: string) => new Intl.DateTimeFormat('ja-JP', { timeZone: 
 
 type Site = Awaited<ReturnType<typeof api.siteUpdates.site>>;
 
+/** MCP でつないだサイト（仕様書 第47.3節）。 */
+type McpSite = { id: string; name: string; url: string | null; summary: string; ready: boolean };
+
+/**
+ * MCP でつないだサイト 1 つ（仕様書 第47.3節・第47.7節）。サイトの運営会社の道具で直す。
+ * 秘書に頼むと、頼みと話の流れから対象のサイトを選ぶ
+ */
+function McpSiteCard({ site }: { site: McpSite }) {
+  return (
+    <div className="card site-card">
+      <div className="row wrap">
+        <strong>{site.name}</strong>
+        <span className={site.ready ? 'badge' : 'badge warn'}>{site.ready ? '更新可能' : '役割を確かめていません'}</span>
+        <span className="muted small">MCP</span>
+      </div>
+      {site.url && <p className="small"><a href={site.url} target="_blank" rel="noreferrer">{site.url}</a></p>}
+      {site.summary && <p className="small muted">{site.summary}</p>}
+    </div>
+  );
+}
+
 /** つないでいるサイト。開いたときに WordPress に問い合わせた結果を出す。 */
-function SiteCard({ site }: { site: Site | null }) {
+function SiteCard({ site, others }: { site: Site | null; others: number }) {
   if (!site) return <div className="card site-card"><Busy>サイトを確かめています…</Busy></div>;
+  // MCP でつないだサイトがあれば、REST API の WordPress が無いことは問題ではない（出さない）
+  if (!site.connected && others > 0) return null;
   if (!site.connected) {
     return (
       <div className="card site-card">
-        <p className="error small">WordPress がつながっていません。管理者ページの「接続 › WordPress」でつなぎます</p>
+        <p className="error small">WordPress がつながっていません。管理者ページの「接続 › サイト」でつなぎます</p>
       </div>
     );
   }
@@ -129,12 +152,14 @@ export function SiteUpdates({ changeKey }: {
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
+  const [mcpSites, setMcpSites] = useState<McpSite[]>([]);
 
   // つないでいるサイトは、開いたときに 1 度だけ確かめる（WordPress に問い合わせるため）
   useEffect(() => {
     api.siteUpdates.site().then(setSite).catch((e) => {
       setSite({ connected: true, siteUrl: null, account: null, name: null, description: null, missing: null, types: [], problem: describeError(e, 'つないでいるサイトを確かめられませんでした') });
     });
+    api.siteUpdates.mcpSites().then((r) => setMcpSites(r.items)).catch(() => setMcpSites([]));
   }, []);
 
   const load = useCallback(() => {
@@ -157,7 +182,8 @@ export function SiteUpdates({ changeKey }: {
 
   return (
     <>
-      <SiteCard site={site} />
+      <SiteCard site={site} others={mcpSites.length} />
+      {mcpSites.map((s) => <McpSiteCard key={s.id} site={s} />)}
       <div className="card">
         {!items && !error && <Busy>読み込んでいます…</Busy>}
         {note && <p className="ok-msg small">{note}</p>}

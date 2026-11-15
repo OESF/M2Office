@@ -93,7 +93,7 @@ export interface AnnouncementOutput {
   channel: AnnouncementChannel;
   status: 'waiting' | 'done' | 'failed' | 'ended';
   /** 結果（Web は記事の URL・LINE は送った数・サイネージの画面は流した画面） */
-  result: { link?: string; editUrl?: string; postId?: string; sent?: number; assetId?: string; screens?: string[]; draft?: boolean; bulkMailId?: string; queued?: number; restBase?: string };
+  result: { link?: string; editUrl?: string; postId?: string; sent?: number; assetId?: string; screens?: string[]; draft?: boolean; bulkMailId?: string; queued?: number; restBase?: string; /** MCP でつないだサイトに頼んだとき、そのサイトの名前と頼んだ実行（第47.6節） */ site?: string; runId?: string };
   reason: string;
   doneAt: string | null;
 }
@@ -154,6 +154,11 @@ export interface AnnouncementRecipientsRefined {
 export interface AnnouncementSettings {
   /** 使うか（既定は切り）。 */
   enabled: boolean;
+  /**
+   * 入れるサイト（`rest` は REST API の WordPress、`mcp:<接続の ID>` はサイトの運営会社の MCP でつないだサイト。仕様書 第47.6節）。
+   * 無ければ REST API の WordPress。会社の設定で決め、頼むたびには選ばない（2026-11-15 に三浦さんが決めた）
+   */
+  site?: string;
   /** Web サイト（WordPress）に、承認の後に公開まで行うか、下書きまでにするか（既定は公開まで） */
   webPublish: 'publish' | 'draft';
   /** お知らせを入れる WordPress のカテゴリー（無ければ初めて出すときに作る） */

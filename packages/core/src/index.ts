@@ -75,6 +75,17 @@ export {
 } from './connectors/oauth.js';
 export { CONNECTION_PRESETS, presetById, scopesForTools, presetRisk, resolveArgNames, type ConnectionPreset } from './connectors/presets.js';
 export {
+  CONNECTOR_TOOL_ROLES, CONNECTOR_ROLE_WORDS, riskOfRole, heuristicRole, profileToolRoles, profileConnectionSummary, applyReviewedRoles, siteInfoTool, parseSiteInfo, descriptionExcerpt,
+  type ConnectorToolRole, type ToolRoleProfile, type ConnectionProfile, type ToolHint,
+} from './connectors/profile.js';
+export {
+  CONNECTION_AGENT_PREFIX, SITE_CONNECTION_AGENT_PREFIX, connectionAgent, connectionAgentId, siteConnectionAgentId, connectionIdOfAgent, siteLabelOf,
+} from './connectors/connection-agent.js';
+export { selectConnectionTools, TOOL_SELECT_THRESHOLD, TOOL_SELECT_MAX } from './engine/tool-select.js';
+export { mcpSiteOf, siteHandOff, type SiteHandOff } from './connectors/site-handoff.js';
+export { APPROVAL_STOP, APPROVAL_MODIFY, APPROVAL_TALK_HOURS, isApprovalCorrection, correctedRequest, type ApprovalTalkDeps, type PendingTalkApproval } from './secretary/approval-talk.js';
+export { answeredSite, isRestSiteAgent, isSiteAgent, namedSite, siteAliases, siteAskText, siteKeyOfAgent, type SiteOption } from './secretary/site-choice.js';
+export {
   ConnectionCredentials, needsConnectionMessage, lostConnectionMessage, type ConnectionCredentialsDeps,
 } from './connectors/credentials.js';
 export type {

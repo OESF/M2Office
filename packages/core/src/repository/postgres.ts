@@ -2413,24 +2413,26 @@ export class PostgresRepository implements Repository {
   }
 
   async listConnections(tenantId: string): Promise<TenantConnection[]> {
-    return this.q<TenantConnection>(tenantId,
+    const rows = await this.q<TenantConnection & { profile: TenantConnection['profile'] | null }>(tenantId,
       `select tenant_id as "tenantId", id, name, description, transport, url, auth, tools, origin,
-              coalesce(send_policy, 'block') as "sendPolicy",
+              coalesce(send_policy, 'block') as "sendPolicy", profile,
               created_by as "createdBy", created_at as "createdAt", updated_at as "updatedAt"
          from tenant_connections where tenant_id = $1 order by id`,
       [tenantId]);
+    // 説明の無い接続は profile を持たない形にする（第47.7節）
+    return rows.map(({ profile, ...rest }) => (profile ? { ...rest, profile } : rest));
   }
 
   async saveConnection(c: TenantConnection): Promise<void> {
     await this.q(c.tenantId,
-      `insert into tenant_connections (tenant_id, id, name, description, transport, url, auth, tools, origin, created_by, created_at, updated_at, send_policy)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      `insert into tenant_connections (tenant_id, id, name, description, transport, url, auth, tools, origin, created_by, created_at, updated_at, send_policy, profile)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        on conflict (tenant_id, id) do update set
          name = excluded.name, description = excluded.description, transport = excluded.transport, url = excluded.url,
          auth = excluded.auth, tools = excluded.tools, origin = excluded.origin, updated_at = excluded.updated_at,
-         send_policy = excluded.send_policy`,
+         send_policy = excluded.send_policy, profile = excluded.profile`,
       [c.tenantId, c.id, c.name, c.description, c.transport, c.url, JSON.stringify(c.auth), JSON.stringify(c.tools),
-        c.origin, c.createdBy, c.createdAt, c.updatedAt, c.sendPolicy ?? 'block']);
+        c.origin, c.createdBy, c.createdAt, c.updatedAt, c.sendPolicy ?? 'block', c.profile ? JSON.stringify(c.profile) : null]);
   }
 
   async deleteConnection(tenantId: string, id: string): Promise<boolean> {

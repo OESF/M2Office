@@ -55,6 +55,8 @@ import type { InventoryService } from '../inventory/service.js';
 import { INVENTORY_ORDER, INVENTORY_RECORD } from '../inventory/agents.js';
 import { normalizeGroupName } from '../chat/group-share.js';
 import { FOLLOW_UP_SKIPS, PAST_WORK, delegateContext, followsUp, hasContext, loadWorkingMemory, mentionsToOpen, openItemRequest, routeSituation, screenMention, type ScreenContext, type WorkingMemory } from './working-memory.js';
+import { APPROVAL_MODIFY, APPROVAL_STOP, APPROVAL_TALK_HOURS, correctedRequest, isApprovalCorrection, type ApprovalTalkDeps, type PendingTalkApproval } from './approval-talk.js';
+import { answeredSite, isRestSiteAgent, isSiteAgent, namedSite, siteAskText, siteKeyOfAgent, type SiteOption } from './site-choice.js';
 
 /** 秘書がどの層で応答したか。計測と表示に使う（仕様書 第10.9.1節）。 */
 export type ResponseLayer = 'direct' | 'light' | 'full';
@@ -143,6 +145,18 @@ export interface SecretaryDeps {
   /** 社内のお知らせ（仕様書 第10.15節）。無ければお知らせの依頼を扱わない。 */
   notices?: NoticeService;
   /**
+   * 会社がつないでいるサイトと、本人が選んだ対象のサイト（仕様書 第47.6節）。無ければ対象のサイトを決めない。
+   *
+   * @remarks サイトが 2 つ以上のときだけ、サイトの更新の対象のサイトを決める（頼みの名前 → その日の答え → 聞き返す）
+   */
+  sites?(tenantId: string, userId: string): Promise<{ sites: SiteOption[] }>;
+  /**
+   * 承認を待っている業務への、言葉での取りやめと直し（仕様書 第47.5節）。無ければ扱わない。
+   *
+   * @remarks 言葉では承認しない（Q-369）。承認は画面のボタンで行う
+   */
+  approvals?: ApprovalTalkDeps;
+  /**
    * 在庫管理（仕様書 第29.15節）。無ければ在庫の依頼を見分けない。
    *
    * @remarks `access` は、会社が在庫管理を使っていて本人が利用範囲の中なら真を返す
@@ -190,6 +204,10 @@ export class Secretary {
 
   /** 本人ごとの、最後に取り次いだ業務（取り消して別の業務を頼んだら、頼み直しとして学ぶ。第11.13.7節 ④）。 */
   private readonly lastRoutes = new Map<string, { request: string; agentId: string; runId: string; at: number }>();
+  /** どちらのサイトかを聞き返して、答えを待っている頼み（第47.6節）。10 分で忘れる。 */
+  private readonly siteAsks = new Map<string, { message: string; agentId: string; until: number }>();
+  /** その日の会話で本人が答えたサイト（第47.6節）。日が変われば使わない。 */
+  private readonly siteChoices = new Map<string, { date: string; key: string }>();
   /**
    * 「カテゴリー」がメールとサイトのどちらか分からず聞き返した頼み（仕様書 第45.17.1節）。答えが来たら、この頼みを続ける。
    *
@@ -523,6 +541,17 @@ export class Secretary {
     const planned = await this.answerPlans(tenantId, userId, message, scheduleAgents);
     if (planned) return { reply: planned, keep: true };
 
+    // 承認を待っている業務への、言葉での取りやめ（「やめて」）と直し（「期限は来週にして」）。言葉では承認しない（第47.5節、Q-369）。
+    // 段取りの取りやめ（上）とサイネージの確かめへの答え（下）を先にする。どちらも「やめて」を使うため
+    if (!this.signagePending.has(`${tenantId}:${userId}`)) {
+      const talked = await this.approvalTalk(tenantId, userId, cmd, message);
+      if (talked) return { reply: talked, keep: true };
+    }
+
+    // 「どちらのサイトですか」への答え（第47.6節）。サイトが決まれば、聞き返す前の頼みを、そのサイトで頼む
+    const siteAnswered = await this.answerSiteAsk(tenantId, userId, cmd, scheduleAgents);
+    if (siteAnswered) return siteAnswered;
+
     // 勤怠と有給（第30.20節）。「出勤」「有給あと何日？」「来週の金曜、有給で休みます」は推論に選ばせずに、本人の分だけ扱う
     const att = this.deps.attendance ? attendanceRequest(cmd) : null;
     if (att && this.deps.attendance && (await this.deps.attendance.settings(tenantId)).enabled) {
@@ -795,12 +824,16 @@ export class Secretary {
       };
     }
     if (routed.agent) {
-      await this.audit(tenantId, userId, 'secretary.route', routed.agent.id);
+      // サイトを使う業務なら、対象のサイトを決め、そのサイトの業務に取り替える。決まらなければ聞き返す（第47.6節）
+      const sited = await this.chooseSite(tenantId, userId, routeMessage, routed.agent, available);
+      if ('reply' in sited) return { reply: sited.reply, keep: true };
+      const agent = sited.agent;
+      await this.audit(tenantId, userId, 'secretary.route', agent.id);
       // 専門の業務は頼んで実行し、結果をあとで伝える。本人に実行の可否を聞かない（第10.9.6節、ADR-0033）
-      const delegated = await this.delegate(tenantId, userId, routeMessage, routed.agent, routed.reason, llm);
+      const delegated = await this.delegate(tenantId, userId, routeMessage, agent, routed.reason, llm);
       // 取り次いだ業務を覚えておく（すぐ取り消して別の業務を頼んだら、頼み直しとして学ぶ）
       const runId = delegated.reply.lookup?.runId;
-      if (runId && !runId.startsWith('plan:')) this.lastRoutes.set(routeKey, { request: routeMessage, agentId: routed.agent.id, runId, at: Date.now() });
+      if (runId && !runId.startsWith('plan:')) this.lastRoutes.set(routeKey, { request: routeMessage, agentId: agent.id, runId, at: Date.now() });
       return delegated;
     }
 
@@ -1701,6 +1734,106 @@ export class Secretary {
     }
   }
 
+  /**
+   * サイトを使う業務の、対象のサイトを決める（仕様書 第47.6節）。
+   *
+   * @param available 本人が使える業務（取り替える先を探す）
+   * @returns 頼む業務（決まったサイトの業務に取り替えたもの）か、聞き返す答え
+   * @remarks
+   * 順番: 頼みの中のサイトの名前 → その日の会話で答えたサイト → 聞き返す。サイトの更新の業務だけ（コラムとお知らせは設定で決める）。
+   * サイトが 1 つ以下・ほかの業務は、そのまま返す。危険度: read（業務を取り替えるだけ）
+   */
+  private async chooseSite(
+    tenantId: string, userId: string, message: string, agent: AgentDefinition, available: AgentDefinition[],
+  ): Promise<{ agent: AgentDefinition } | { reply: SecretaryReply }> {
+    if (!this.deps.sites || !isSiteAgent(agent.id)) return { agent };
+    const { sites } = await this.deps.sites(tenantId, userId).catch(() => ({ sites: [] as SiteOption[] }));
+    if (sites.length < 2) return { agent };
+    const today = jstDate(new Date());
+    const choice = this.siteChoices.get(`${tenantId}:${userId}`);
+    const key = namedSite(message, sites)?.key
+      ?? (choice?.date === today && sites.some((s) => s.key === choice.key) ? choice.key : null);
+    if (!key) {
+      this.siteAsks.set(`${tenantId}:${userId}`, { message, agentId: agent.id, until: Date.now() + 10 * 60_000 });
+      await this.audit(tenantId, userId, 'secretary.site_ask', agent.id);
+      return { reply: { layer: 'direct', text: siteAskText(sites), evidence: [], tokensUsed: 0 } };
+    }
+    return this.agentForSite(key, agent, available, sites);
+  }
+
+  /** 決まったサイトに合わせて、頼む業務を取り替える（第47.6節）。 */
+  private agentForSite(key: string, agent: AgentDefinition, available: AgentDefinition[], sites: SiteOption[]): { agent: AgentDefinition } | { reply: SecretaryReply } {
+    if (siteKeyOfAgent(agent.id) === key) return { agent };
+    if (key === 'rest') {
+      const rest = available.find((a) => a.id === SITE_REST_EDIT_ID);
+      return rest ? { agent: rest } : { reply: { layer: 'direct', text: `「${sites.find((s) => s.key === key)?.name ?? 'そのサイト'}」を直す業務を使えません（サイトの更新を入れていないか、使える人に入っていません）。`, evidence: [], tokensUsed: 0 } };
+    }
+    const mcp = available.find((a) => siteKeyOfAgent(a.id) === key && !isRestSiteAgent(a.id));
+    return mcp ? { agent: mcp } : { reply: { layer: 'direct', text: `「${sites.find((s) => s.key === key)?.name ?? 'そのサイト'}」を直す業務を使えません。`, evidence: [], tokensUsed: 0 } };
+  }
+
+  /**
+   * 「どちらのサイトですか」への答えを受ける（第47.6節）。答えたサイトはその日の会話で使い、聞き返す前の頼みをそのサイトで頼む。
+   *
+   * @returns サイトの答えでなければ `null`（聞き返しは忘れ、ふだんの振り分けへ）
+   */
+  private async answerSiteAsk(tenantId: string, userId: string, cmd: string, available: AgentDefinition[]): Promise<{ reply: SecretaryReply; keep: boolean } | null> {
+    const key = `${tenantId}:${userId}`;
+    const asked = this.siteAsks.get(key);
+    if (!asked || !this.deps.sites) return null;
+    this.siteAsks.delete(key);
+    if (asked.until < Date.now()) return null;
+    const { sites } = await this.deps.sites(tenantId, userId).catch(() => ({ sites: [] as SiteOption[] }));
+    const site = answeredSite(cmd, sites);
+    const agent = available.find((a) => a.id === asked.agentId);
+    if (!site || !agent) return null;
+    this.siteChoices.set(key, { date: jstDate(new Date()), key: site.key });
+    await this.audit(tenantId, userId, 'secretary.site_choice', site.key);
+    const chosen = this.agentForSite(site.key, agent, available, sites);
+    if ('reply' in chosen) return { reply: chosen.reply, keep: true };
+    const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+    return this.delegate(tenantId, userId, `${asked.message}（対象のサイト: ${site.name}）`, chosen.agent, `対象のサイト: ${site.name}`, llm);
+  }
+
+  /**
+   * 承認を待っている業務への、言葉での取りやめと直し（仕様書 第47.5節）。
+   *
+   * @returns 扱ったときの答え。承認待ちが無い・取りやめでも直しでもないときは `null`（ふだんの振り分けへ）
+   * @remarks
+   * 危険度: external-send を止める側（承認を却下する）。直しのときは、もとの依頼に直しを足して同じ業務をやり直す。
+   * 新しい承認は、また会話の中に出る。言葉では承認しない（Q-369）
+   */
+  private async approvalTalk(tenantId: string, userId: string, cmd: string, message: string): Promise<SecretaryReply | null> {
+    const talk = this.deps.approvals;
+    if (!talk) return null;
+    const stop = APPROVAL_STOP.test(cmd.trim());
+    if (!stop && !APPROVAL_MODIFY.test(cmd)) return null;
+    const since = Date.now() - APPROVAL_TALK_HOURS * 3_600_000;
+    const pending = (await talk.pending(tenantId, userId).catch(() => [] as PendingTalkApproval[])).filter((p) => Date.parse(p.createdAt) >= since);
+    const target = pending[0];
+    if (!target) return null;
+    if (stop) {
+      await talk.reject(tenantId, userId, target.approvalId, cmd.trim());
+      await this.audit(tenantId, userId, 'secretary.approval_stop', target.approvalId);
+      return { layer: 'direct', text: `「${target.agentName}」は取りやめました。承認を待っていた操作は行いません。`, evidence: [], tokensUsed: 0 };
+    }
+    const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
+    const { correction, tokensUsed } = await isApprovalCorrection(llm, message, target);
+    if (!correction || !this.deps.startAgent) return null;
+    const agents = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
+    const def = agents.find((a) => a.id === target.agentId);
+    if (!def) return null;
+    await talk.reject(tenantId, userId, target.approvalId, message.trim());
+    const started = await this.deps.startAgent(tenantId, userId, def, correctedRequest(target.input, message.trim())).catch(() => null);
+    await this.audit(tenantId, userId, 'secretary.approval_revise', target.approvalId);
+    return started
+      ? {
+        layer: 'light', text: `直して、もう一度「${def.name}」で用意します。用意できたら、ここで承認をお願いします。`, evidence: [], tokensUsed,
+        mentions: [runMention(def.name, message, started.runId)],
+      }
+      : { layer: 'light', text: '承認は取りやめましたが、やり直せませんでした。もう一度頼んでください。', evidence: [], tokensUsed };
+  }
+
   private async audit(tenantId: string, userId: string, action: string, target: string) {
     this.trace(tenantId, userId, action, target);
     await this.deps.repo.appendAudit({
@@ -1806,6 +1939,9 @@ function runMention(agentName: string, request: string, runId: string): Conversa
   const req = request.replace(/\s+/g, ' ').trim();
   return { kind: 'run', title: `${agentName}「${req.length > 60 ? `${req.slice(0, 60)}…` : req}」`, id: runId, url: `/runs/${encodeURIComponent(runId)}` };
 }
+
+/** REST API のサイトを直す業務（サイトの更新の「サイトの直し案」。第47.6節で REST API のサイトに決まったときの取り替え先）。 */
+const SITE_REST_EDIT_ID = 'site-updates:edit';
 
 /** 探す・調べる依頼。過去を指していても（「さっきの〇〇も探して」）業務に取り次ぐ（第10.7.4.2節）。 */
 const SEARCHING = /探して|探しといて|調べて|検索して|見つけて/;

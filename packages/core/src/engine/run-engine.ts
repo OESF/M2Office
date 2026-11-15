@@ -34,6 +34,7 @@ import { standardMinutes, stepLabel } from '../agents/index.js';
 import { describeCall } from './describe-call.js';
 import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
+import { selectConnectionTools } from './tool-select.js';
 import { expandQuery } from '../knowledge/expand.js';
 import { queryEmbedder } from '../knowledge/embed.js';
 import type { CardService } from '../cards/service.js';
@@ -849,10 +850,15 @@ export class RunEngine {
       // 承認の直後でない段（組み立てを除く）では、社外への送信とお金のツールを推論に見せない。呼んでも止めるだけで、
       // 推論が「エラーが発生しました」と書き、その文が承認の画面に出てしまう（2026-09-27 に Slack への投稿で確認）
       const allowed = registry.allowed(stepTools);
-      const tools = allowed.filter((t) => gatedByApproval || mode === 'plan' || !alwaysRequiresApproval(t.risk));
+      const visible = allowed.filter((t) => gatedByApproval || mode === 'plan' || !alwaysRequiresApproval(t.risk));
+      // 会社の接続の道具が多い段では、要るものを先に選ばせる（仕様書 第47.4.3節）。内蔵の道具はすべて渡す
+      const lastText = [...previous].reverse().map((p) => (p.output as { text?: unknown } | null)?.text).find((t): t is string => typeof t === 'string' && t.length > 0) ?? '';
+      const selection = await selectConnectionTools(llm, visible, `${step.instruction}\n\n入力: ${JSON.stringify(input).slice(0, 4000)}\n\n前の段の答え: ${lastText.slice(0, 3000)}`);
+      const tools = selection.tools;
+      const allowedNames = new Set(tools.map((t) => t.name));
       // 見せなかったツールがあれば、それは承認のあとの段で行うことを伝える。伝えないと推論が「ツールが使えないため行えない」と
       // 書き、承認の前の組み立てがその文をなぞって送る操作を記録せず、承認が自動で通ってしまった（2026-09-27 に Slack で確認）
-      const held = allowed.length - tools.length;
+      const held = allowed.length - visible.length;
       const system = buildSystemPrompt(def, tools, settings.writingStyle, await this.companyNames(run.tenantId, settings), await this.preferencesOf(run.tenantId, requestedBy, def.id));
       // 承認の前の組み立てでは、記録された操作を「待つ」ものと取り違えさせない（2026-09-25 に本物の推論で、
       // 社内への共有を記録したあと「承認待ち」として投稿と登録を出さずに終えた）
@@ -878,8 +884,8 @@ export class RunEngine {
       */
       const alreadyCalled = new Map<string, unknown>();
       let text = '';
-      let tokensUsed = 0;
-      let spent = 0;
+      let tokensUsed = selection.tokensUsed;
+      let spent = selection.response ? costOf(selection.response) : 0;
       // 必ず呼ぶツールを促したか（一度だけ）
       let nudged = false;
 
@@ -929,6 +935,11 @@ export class RunEngine {
           if (!stepTools.includes(call.name)) {
             // 段の区切りを推論の行儀に頼らない。この段で使えないツールは呼ばない（仕様書 第9.2.7節）
             roundResults.push({ name: call.name, error: `この段（${stepLabel(step)}）では使えないツールです` });
+            continue;
+          }
+          if (selection.selected && tool.connection && !allowedNames.has(call.name)) {
+            // 選んだ道具の外を呼んだ。引数の定義を見ていないので呼ばない（第47.4.3節）
+            roundResults.push({ name: call.name, error: 'この段では選んだ道具だけを使えます。要る道具が無ければ、そう答えてください' });
             continue;
           }
           if (mode === 'plan' && tool.risk !== 'read' && tool.risk !== 'draft') {
@@ -1044,7 +1055,7 @@ export class RunEngine {
         history.push({ role: 'user', content: toolReport(roundResults) });
       }
 
-      const output = { text, tools: toolResults, ...(mode === 'plan' ? { planned: true } : {}) };
+      const output = { text, tools: toolResults, ...(mode === 'plan' ? { planned: true } : {}), ...(selection.selected ? { selectedTools: selection.selected } : {}) };
       await repo.updateRunStep(run.tenantId, {
         ...runStep, status: 'succeeded', output, endedAt: new Date().toISOString(),
       });

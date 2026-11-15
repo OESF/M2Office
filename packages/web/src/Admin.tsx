@@ -68,7 +68,8 @@ const TABS: {
       { id: 'permissions', label: 'Google に求める許可' },
       { id: 'retention', label: 'Google のデータを残す日数' },
       // いくつかの機能が使う会社の外のサービス（仕様書 第6.6.2.1節。第 0.361.0 版で拡張機能の設定から移した）
-      { id: 'wordpress', label: 'WordPress' },
+      // 会社のサイト。REST API の WordPress と、MCP でつないだサイト（仕様書 第47.3節）
+      { id: 'wordpress', label: 'サイト' },
       { id: 'line', label: 'LINE 公式アカウント' },
       { id: 'mailbox', label: '窓口のメール' },
       { id: 'mcp', label: 'コネクタ（MCP）' },
