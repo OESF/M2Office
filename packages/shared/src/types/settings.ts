@@ -475,6 +475,11 @@ export interface UserSettings {
   secretary: {
     /** 秘書の名前。呼びかけに使う。 */
     name: string;
+    /**
+     * 既定のサイト（`rest` か `mcp:<接続の ID>`。仕様書 第47.6節）。使えるサイトが 2 つ以上の人が個人設定で選ぶ。
+     * サイトの更新の頼みにサイトの名前が無いとき、秘書はこのサイトを直す。使えるサイトが 1 つの人は選ばない（そのサイトになる）
+     */
+    site?: string | null;
     /** 自分の呼ばれ方。空なら表示名に「さん」を付ける。 */
     callMe: string;
     style: 'polite' | 'concise';

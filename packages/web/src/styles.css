@@ -2529,6 +2529,8 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
   padding: calc(8px * var(--space-scale)) calc(12px * var(--space-scale));
 }
 .scope-pop .check { display: flex; align-items: center; gap: 6px; padding: 3px 0; white-space: nowrap; }
+/* 行（.row）の中に置いても、印（丸・四角）を横に引き伸ばさない（.row input の flex: 1 が効いてしまうため） */
+.scope-pop input { flex: none; width: auto; margin: 0; padding: 0; }
 .scope-pop-head { margin-top: calc(8px * var(--space-scale)); }
 .scope-pop.up { top: auto; bottom: calc(100% + 4px); }
 
@@ -3316,6 +3318,10 @@ iframe.card-img.large { border: 1px solid var(--line); background: #fff; }
 /* 秘書のキャンバスの中の承認（仕様書 第47.5節）。結果の上に並べる */
 .canvas-approvals { display: grid; gap: 0.5rem; margin-bottom: 0.75rem; }
 
-/* MCP でつないだサイト（仕様書 第47.3節） */
-.mcp-sites { display: grid; gap: 0.4rem; margin-top: 0.75rem; }
-.mcp-sites h4 { margin: 0; }
+/* つないでいるサイト 1 つ。REST API と MCP を同じ形で並べる（仕様書 第47.3節） */
+.site-row { display: grid; gap: 4px; padding-block: 12px; border-bottom: 1px solid var(--line); }
+.site-row:last-child { border-bottom: 0; }
+.site-row > .row { gap: 8px; }
+.site-row .site-row-action { margin-left: auto; }
+.site-row .table { margin-top: 8px; }
+.site-row-scope { display: flex; align-items: center; gap: 8px; }

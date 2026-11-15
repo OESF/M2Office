@@ -25,7 +25,7 @@ import {
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath,
   readSiteName, siteAliases, siteConnectionAgentId, siteHandOff, siteLabelOf, type SiteOption, type TenantConnection,
 } from '@m2office/core';
-import { canRunAgent, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, type SiteUpdatesSettings, fileInputKey } from '@m2office/shared';
+import { canRunAgent, canUseAgent, siteScopeTarget, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, type SiteUpdatesSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1062,10 +1062,7 @@ export function buildDeps(): AppDeps {
       return { runId, already: false };
     },
     // 会社がつないでいるサイト（仕様書 第47.6節）。秘書がサイトの更新の対象のサイトを決めるのに使う
-    sites: async (tenantId) => {
-      const [view, settings] = await Promise.all([tenantView(tenantId), repo.getTenantSettings(tenantId)]);
-      return { sites: await siteOptions(view, settings.webColumns.wordpress?.siteUrl ?? null) };
-    },
+    sites: async (tenantId, userId) => userSites({ repo, tenantView }, tenantId, userId),
     // 承認を待っている業務への、言葉での取りやめと直し（仕様書 第47.5節）。本人が判断する承認（approver: requester）だけ
     approvals: {
       pending: async (tenantId, userId) => {
@@ -1403,4 +1400,23 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+/**
+ * 本人が使えるサイトと、使えないサイト・既定のサイト（仕様書 第47.6節）。サイトごとの利用範囲（管理者が「接続 › サイト」で決める）で分ける。
+ *
+ * @remarks 既定のサイトは、使えるサイトの中にあるときだけ返す（使えなくなったサイトは既定にしない）
+ */
+export async function userSites(
+  deps: { repo: Repository; tenantView(tenantId: string): Promise<{ agents: AgentDefinition[]; connections: TenantConnection[] }> },
+  tenantId: string, userId: string,
+): Promise<{ sites: SiteOption[]; denied: SiteOption[]; site: string | null }> {
+  const [view, settings, mine, groups] = await Promise.all([
+    deps.tenantView(tenantId), deps.repo.getTenantSettings(tenantId), deps.repo.getUserSettings(tenantId, userId), deps.repo.listUserGroupIds(tenantId, userId),
+  ]);
+  const all = await siteOptions(view, settings.webColumns.wordpress?.siteUrl ?? null);
+  const ok = (s: SiteOption) => canUseAgent(settings.access, siteScopeTarget(s.key), userId, groups);
+  const sites = all.filter(ok);
+  const site = mine.secretary.site && sites.some((s) => s.key === mine.secretary.site) ? mine.secretary.site : null;
+  return { sites, denied: all.filter((s) => !ok(s)), site };
 }

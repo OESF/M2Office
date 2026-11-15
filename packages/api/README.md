@@ -506,10 +506,12 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/admin/connections/mcp` | 管理者: URL を受け取り、ツールの一覧を取って会社の接続として登録する（読むだけの印が付いたツールは「読むだけ」、ほかは「社外へ送る」扱い）。`preset`（`slack`）で型から、`auth`（`oauth`・`api_key`）で認証の要る接続を登録する。`oauth` は相手の認可サーバの情報を読み、アプリの自動登録の口（`registration_endpoint`）があれば記録する（仕様書 第12.11.6.2節、Q-99）。認証の要る接続のツールは、認証情報のあとで取る。ツールを取ったら、推論がツールの役割と接続の説明を作る（第47.4.1節。危険度は軽くしない） |
 | `PUT /v1/admin/connections/mcp/:id/credentials` | 管理者: 認証情報を登録する。`oauth` はクライアント ID とシークレット（ID を替えると全員の認可を消す。自動で登録したアプリより先に使う）、`api_key` は会社の鍵（その鍵でツールを問い合わせる）。値は暗号化し、返さない（仕様書 第12.11.6節） |
 | `PUT /v1/admin/connections/mcp/:id` | 管理者: 接続の名前と、ツールごとの危険度・役割（役割を直したら、役割から危険度を決め直す）、接続の説明（`summary`。直したら取り直しで上書きしない）を変える |
+| `GET /v1/me/sites`・`PUT /v1/me/sites` | 本人が使えるサイト（サイトごとの利用範囲 `site-rest`・`site-mcp-<接続の ID>` で絞る）と、既定のサイト（`site`。`null` で選ばない）。仕様書 第47.6節 |
 | `GET /v1/admin/extensions/sites` | 管理者: コラムの作成とお知らせの作成で「入れるサイト」に選べるサイト（`rest` か `mcp:<接続の ID>`。仕様書 第47.6節）。設定の口（`PUT …/web-columns/settings`・`PUT …/announcements/settings`）は `site` を受ける |
 | `GET /v1/site-updates/mcp-sites` | サイトの更新: MCP でつないだサイト（名前・URL・説明・秘書から使えるか。仕様書 第47.3節） |
 | `POST /v1/admin/connections/mcp/:id/roles/review` | 管理者: 推論が決めたツールの役割を見て「この役割で使う」とする。役割から危険度を決め直し（読む・見直しは読むだけ、準備は下書き、確定と戻すは社外へ送る）、その接続の道具を使う汎用の業務（`connection-<ID>`）が秘書の振り分けに出る。利用範囲が無ければ管理者だけにする（仕様書 第47.4.1節・第47.7節、Q-368） |
 | `POST /v1/admin/connections/mcp/:id/refresh` | 管理者: ツールの一覧を取り直す（決めた危険度は保つ。説明が変わったツールで役割を見ていたものは、危険度を初期値に戻して役割を決め直す）。認証の要る接続は管理者自身の認可（会社の鍵）で問い合わせる。一覧を分けて返すサーバは続き（`nextCursor`）まで読む |
+| `GET /v1/admin/connections/mcp/:id/users` | 管理者: その接続を自分のアカウントで許可（`oauth`）している人。M2Office の利用者・相手のアカウント・許可した日時。認可の中身は返さない（仕様書 第47.3節） |
 | `POST /v1/admin/connections/mcp/:id/check` | 管理者: 接続の確認（宣言したツールが提供されているか） |
 | `GET /v1/admin/connections/mcp/:id/impact` | 管理者: 接続を消すと使えなくなる業務 |
 | `GET /v1/admin/connections/mcp/:id/tools/:tool/impact` | 管理者: そのツールを止めると使えなくなる業務の名前と、飛ばす定時実行の数（仕様書 第6.6.3.1節） |

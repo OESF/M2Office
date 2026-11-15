@@ -13,7 +13,7 @@ import {
   GOOGLE_APP_IDS, LAUNCHER_LABEL_MAX, LAUNCHER_LINK_MAX, checkLauncherUrl, type LauncherLink, isTextSize, DEFAULT_QUIET_HOURS,
 } from '@m2office/shared';
 import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, correctionProgress, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE, NOTIFICATION_KIND_LABELS, photoMime, HR_PHOTO_MAX_BYTES } from '@m2office/core';
-import type { AppDeps } from '../context.js';
+import { userSites, type AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
 
 /** 業務の定義に無い、好みの持ち主の名前（メールの下書き・販促物。第11.13.7節）。 */
@@ -30,6 +30,27 @@ import { voiceNameOf } from '../voice/persona.js';
  */
 export function meRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
+
+  /**
+   * 本人が使えるサイトと既定のサイト（仕様書 第47.6節）。使えるサイトが 2 つ以上のときだけ、個人設定で既定のサイトを選ぶ。
+   */
+  app.get('/sites', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const r = await userSites(deps, tenant.id, user.id);
+    return c.json({ sites: r.sites.map((s) => ({ key: s.key, name: s.name })), site: r.site });
+  });
+
+  /** 既定のサイトを選ぶ（`site` は使えるサイトの `key`。`null` で選ばない）。本人の設定だけを変える。 */
+  app.put('/sites', async (c) => {
+    const { tenant, user } = c.get('ctx');
+    const body = await c.req.json<{ site?: unknown }>().catch(() => ({} as { site?: unknown }));
+    const want = body.site === null ? null : typeof body.site === 'string' ? body.site : undefined;
+    if (want === undefined) return c.json({ error: 'site を指定してください' }, 400);
+    if (want !== null && !(await userSites(deps, tenant.id, user.id)).sites.some((s) => s.key === want)) return c.json({ error: 'そのサイトは使えません' }, 400);
+    const mine = await deps.repo.getUserSettings(tenant.id, user.id);
+    await deps.repo.saveUserSettings(tenant.id, user.id, 'secretary', { ...mine.secretary, site: want });
+    return c.json({ site: want });
+  });
 
   /**
    * 本人が登録した秘書のアバターを、画面に埋め込める形で返す（仕様書 第6.1.3節）。

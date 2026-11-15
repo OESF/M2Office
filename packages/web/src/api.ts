@@ -1173,7 +1173,7 @@ export type ScopeValue = 'all' | { groups: string[]; users: string[] };
 /** 利用範囲の画面の選択肢。 */
 export interface AccessOptions {
   scopes: Record<string, { groups: string[]; users: string[] }>;
-  targets: { id: string; name: string; kind: 'agent' | 'extension' }[];
+  targets: { id: string; name: string; kind: 'agent' | 'extension' | 'site' }[];
   groups: { id: string; name: string; memberCount: number }[];
   users: { id: string; displayName: string; email: string }[];
 }
@@ -1918,7 +1918,7 @@ export const api = {
       missing: string[] | null; problem: string | null; types: { name: string; restBase: string }[];
     }>('/site-updates/site'),
     /** MCP でつないだサイト（仕様書 第47.3節）。`ready` は秘書から使えるか（管理者が役割を見たか）。 */
-    mcpSites: () => call<{ items: { id: string; name: string; url: string | null; summary: string; ready: boolean }[] }>('/site-updates/mcp-sites'),
+    mcpSites: () => call<{ items: { id: string; name: string; url: string | null; summary: string; ready: boolean }[]; rest?: boolean }>('/site-updates/mcp-sites'),
     /** 本人の WordPress の接続（第45.16節）。使えない会社・人には 403。 */
     wordpressUser: () => call<WordPressUserView>('/site-updates/wordpress-user'),
     /** 本人の WordPress の利用者をつなぐ。会社のサイトで確かめてから預ける。 */
@@ -3209,6 +3209,8 @@ export const api = {
       call(mcpPath(id), { method: 'PUT', body: JSON.stringify(v) }),
     /** 推論が決めたツールの役割を、管理者が見て「この役割で使う」とする（仕様書 第47.4.1節）。 */
     reviewMcpRoles: (id: string) => call<{ ok: true; agentId: string }>(`${mcpPath(id)}/roles/review`, { method: 'POST' }),
+    /** その接続を自分のアカウントで許可している人（仕様書 第47.3節）。 */
+    mcpConnectionUsers: (id: string) => call<{ items: { userId: string; name: string; account: string | null; connectedAt: string }[] }>(`${mcpPath(id)}/users`),
     refreshMcpConnection: (id: string) =>
       call<{ ok: true; added: string[]; removed: string[] }>(`${mcpPath(id)}/refresh`, { method: 'POST' }),
     checkMcpConnection: (id: string) => call<ConnectorCheck>(`${mcpPath(id)}/check`, { method: 'POST' }),
@@ -3271,6 +3273,10 @@ export const api = {
   },
   /** 個人設定「サービスとの接続」（仕様書 第6.5.9節）。 */
   myConnections: () => call<{ items: MyConnectionView[] }>('/me/connections'),
+  /** 本人が使えるサイトと既定のサイト（仕様書 第47.6節）。 */
+  mySites: () => call<{ sites: { key: string; name: string }[]; site: string | null }>('/me/sites'),
+  /** 既定のサイトを選ぶ（`null` で選ばない）。 */
+  setMySite: (site: string | null) => call<{ site: string | null }>('/me/sites', { method: 'PUT', body: JSON.stringify({ site }) }),
   /** 結び付いている外部のアプリ（個人設定の「サービスとの接続」。仕様書 第11.12節）。 */
   myAppLinks: () => call<{ items: AppBindingView[] }>('/me/app-links'),
   /** 外部のアプリとの結び付きを削除する。 */

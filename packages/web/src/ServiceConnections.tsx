@@ -7,7 +7,9 @@
 
 import { useEffect, useState } from 'react';
 import type { InquirySettings, WebColumnSettings } from '@m2office/shared';
-import { api, describeError, type McpConnectionView } from './api.js';
+import { siteScopeTarget } from '@m2office/shared';
+import { api, describeError, type AccessOptions, type McpConnectionView } from './api.js';
+import { ScopeField, useAccessOptions } from './Scope.js';
 import { copyText } from './clipboard.js';
 
 /** 接続の小分けの ID。 */
@@ -54,14 +56,25 @@ function WordPressCard({ settings, onChanged }: { settings: WebColumnSettings; o
     api.admin.removeWordPress().then(() => { setError(null); onChanged(); })
       .catch((e) => setError(describeError(e, '外せませんでした'))).finally(() => setWorking(false));
   };
+  // REST API の WordPress のサイトの名前（公開のページの題名。読めなければ URL の名前）
+  const [restName, setRestName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!settings.wordpress) return;
+    api.admin.contentSites().then((r) => setRestName(r.sites.find((s) => s.key === 'rest')?.name ?? null)).catch(() => setRestName(null));
+  }, [settings.wordpress]);
+  // サイトごとの利用できる人（仕様書 第47.6節）
+  const access = useAccessOptions();
   return (
     <div className="card service-connection">
       {settings.wordpress ? (
-        <div className="row wrap">
-          <span className="badge ok">接続中</span>
-          <span>{settings.wordpress.siteUrl}<span className="muted">（{settings.wordpress.username}）</span></span>
-          <button className="btn ghost small" disabled={working} onClick={remove}>切断</button>
-        </div>
+        <SiteRow
+          scope={access.options ? { target: siteScopeTarget('rest'), options: access.options, onSaved: () => void access.reload() } : null}
+          name={restName ?? hostOf(settings.wordpress.siteUrl)} state="接続中" kind="REST API" url={settings.wordpress.siteUrl}
+          account={`WordPress の利用者: ${settings.wordpress.username}`}
+          action={<button className="btn ghost small" disabled={working} onClick={remove}>切断</button>}
+        >
+          <WordPressUsers />
+        </SiteRow>
       ) : (
         <div className="service-connection-form">
           <input value={wp.siteUrl} placeholder="https://www.example.jp" aria-label="WordPress のサイトの URL" onChange={(e) => setWp({ ...wp, siteUrl: e.target.value })} />
@@ -72,8 +85,7 @@ function WordPressCard({ settings, onChanged }: { settings: WebColumnSettings; o
         </div>
       )}
       {error && <p className="error">{error}</p>}
-      {settings.wordpress && <WordPressUsers />}
-      <McpSites />
+      <McpSites options={access.options} onScopeSaved={() => void access.reload()} />
     </div>
   );
 }
@@ -82,24 +94,93 @@ function WordPressCard({ settings, onChanged }: { settings: WebColumnSettings; o
  * MCP でつないだサイト（仕様書 第47.3節）。「接続 › コネクタ（MCP）」で登録した接続のうち、推論が会社のサイトを扱うとしたもの。
  * 秘書が、頼みと話の流れから対象のサイトを選ぶ（第47.6節）。
  */
-function McpSites() {
+function McpSites({ options, onScopeSaved }: { options: AccessOptions | null; onScopeSaved: () => void }) {
   const [items, setItems] = useState<McpConnectionView[] | null>(null);
   useEffect(() => {
     api.admin.mcpConnections().then((r) => setItems(r.items.filter((c) => c.profile?.site))).catch(() => setItems([]));
   }, []);
   if (!items || items.length === 0) return null;
   return (
-    <div className="mcp-sites">
-      <h4>MCP でつないだサイト</h4>
+    <>
       {items.map((c) => (
-        <div key={c.id} className="row wrap small">
-          <strong>{c.name}</strong>
-          {c.profile?.agentId ? <span className="badge ok">秘書から使えます</span> : <span className="badge warn">役割はまだ見ていません</span>}
-          <span className="muted">{c.profile?.summary}</span>
-        </div>
+        <SiteRow
+          key={c.id} name={c.profile?.siteName || c.name} kind="MCP" url={c.profile?.siteUrl ?? null}
+          // 役割を確かめるまでは使えない（「接続 › コネクタ（MCP）」で確かめる。第47.4.1節）
+          state={c.profile?.agentId ? '接続中' : '役割を確かめていません'} warn={!c.profile?.agentId}
+          account={`コネクタ: ${c.name}（${c.authState.text}）`} title={c.profile?.summary ?? ''}
+          scope={options ? { target: siteScopeTarget(`mcp:${c.id}`), options, onSaved: onScopeSaved } : null}
+        >
+          {c.authState.type === 'oauth' && <McpUsers id={c.id} />}
+        </SiteRow>
       ))}
+    </>
+  );
+}
+
+/**
+ * MCP のサイトを自分のアカウントで許可している人（仕様書 第47.3節）。REST API の WordPress の利用者の表と同じ形。
+ * 許可している人がいるときだけ出す。認可の中身は出さない
+ */
+function McpUsers({ id }: { id: string }) {
+  const [items, setItems] = useState<{ userId: string; name: string; account: string | null; connectedAt: string }[]>([]);
+  useEffect(() => { api.admin.mcpConnectionUsers(id).then((r) => setItems(r.items)).catch(() => setItems([])); }, [id]);
+  if (!items.length) return null;
+  return (
+    <table className="table small">
+      <thead><tr><th>M2Office の利用者</th><th>サイトのアカウント</th><th>つないだ日時</th></tr></thead>
+      <tbody>
+        {items.map((u) => (
+          <tr key={u.userId}>
+            <td>{u.name}</td><td>{u.account ?? '—'}</td>
+            <td>{new Date(u.connectedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * つないでいるサイト 1 つ（仕様書 第47.3節）。REST API でつないだ WordPress も、MCP でつないだサイトも、同じ形で並べる:
+ * サイトの名前・状態・つなぎ方・URL・つないでいる利用者かコネクタ。
+ */
+function SiteRow({ name, state, warn = false, kind, url, account, title, action, scope, children }: {
+  name: string; state: string; warn?: boolean; kind: 'REST API' | 'MCP'; url: string | null; account: string;
+  /** 指し示すと出る説明（MCP のサイトでできること）。 */
+  title?: string;
+  action?: React.ReactNode;
+  /** このサイトを使える人（利用範囲。第47.6節）。読み込めるまでは `null` */
+  scope: { target: string; options: AccessOptions; onSaved: () => void } | null;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="site-row">
+      <div className="row wrap">
+        <strong title={title}>{name}</strong>
+        <span className={`badge ${warn ? 'warn' : 'ok'}`}>{state}</span>
+        <span className="muted small">{kind}</span>
+        {action && <span className="site-row-action">{action}</span>}
+      </div>
+      {url && <a className="small" href={url} target="_blank" rel="noreferrer">{url}</a>}
+      <span className="small muted">{account}</span>
+      {scope && (
+        <div className="site-row-scope small">
+          <span className="muted">利用できる人</span>
+          <ScopeField target={scope.target} options={scope.options} onSaved={scope.onSaved} />
+        </div>
+      )}
+      {children}
     </div>
   );
+}
+
+/** URL の名前の部分（読めなければそのまま）。 */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 /**

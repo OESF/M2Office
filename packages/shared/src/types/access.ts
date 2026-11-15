@@ -56,6 +56,15 @@ export function scopeTargetOf(agentId: string): string {
 }
 
 /**
+ * つないでいるサイトの利用範囲の対象（仕様書 第47.6節）。`rest` → `site-rest`、`mcp:<接続の ID>` → `site-mcp-<接続の ID>`。
+ *
+ * @remarks 対象に「:」を含めない（{@link scopeTargetOf} が拡張機能の ID として切り出してしまうため）
+ */
+export function siteScopeTarget(siteKey: string): string {
+  return siteKey.startsWith('mcp:') ? `site-mcp-${siteKey.slice(4)}` : `site-${siteKey}`;
+}
+
+/**
  * 利用者が業務エージェントを使えるか。
  *
  * @param access 会社の利用範囲の設定

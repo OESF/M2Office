@@ -153,13 +153,15 @@ export function SiteUpdates({ changeKey }: {
   const [busy, setBusy] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
   const [mcpSites, setMcpSites] = useState<McpSite[]>([]);
+  // REST API のサイトを本人が使えるか（使える人は管理者が「接続 › サイト」で決める。第47.6節）
+  const [restAllowed, setRestAllowed] = useState(true);
 
   // つないでいるサイトは、開いたときに 1 度だけ確かめる（WordPress に問い合わせるため）
   useEffect(() => {
     api.siteUpdates.site().then(setSite).catch((e) => {
       setSite({ connected: true, siteUrl: null, account: null, name: null, description: null, missing: null, types: [], problem: describeError(e, 'つないでいるサイトを確かめられませんでした') });
     });
-    api.siteUpdates.mcpSites().then((r) => setMcpSites(r.items)).catch(() => setMcpSites([]));
+    api.siteUpdates.mcpSites().then((r) => { setMcpSites(r.items); setRestAllowed(r.rest !== false); }).catch(() => setMcpSites([]));
   }, []);
 
   const load = useCallback(() => {
@@ -182,7 +184,7 @@ export function SiteUpdates({ changeKey }: {
 
   return (
     <>
-      <SiteCard site={site} others={mcpSites.length} />
+      {restAllowed && <SiteCard site={site} others={mcpSites.length} />}
       {mcpSites.map((s) => <McpSiteCard key={s.id} site={s} />)}
       <div className="card">
         {!items && !error && <Busy>読み込んでいます…</Busy>}

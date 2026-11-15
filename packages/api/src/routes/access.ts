@@ -14,16 +14,20 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { AccessScope, TenantSettings } from '@m2office/shared';
-import type { AppDeps } from '../context.js';
+import { siteScopeTarget } from '@m2office/shared';
+import { siteOptions, type AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
 import { groupEmails, reachNotes, resolveGroupSpace } from '@m2office/core';
 
 /** 利用範囲を設定できる対象（公式の業務エージェントと拡張機能）。 */
 async function targetsOf(deps: AppDeps, tenantId: string) {
-  const view = await deps.tenantView(tenantId);
+  const [view, settings] = await Promise.all([deps.tenantView(tenantId), deps.repo.getTenantSettings(tenantId)]);
+  // つないでいるサイトも、使える人を決める対象（仕様書 第47.6節）
+  const sites = await siteOptions(view, settings.webColumns.wordpress?.siteUrl ?? null, { anyRest: true });
   return [
     ...view.allAgents.filter((a) => !a.id.includes(':')).map((a) => ({ id: a.id, name: a.name, kind: 'agent' as const })),
     ...view.entries.map((e) => ({ id: e.pkg.manifest.id, name: e.pkg.manifest.name, kind: 'extension' as const })),
+    ...sites.map((s) => ({ id: siteScopeTarget(s.key), name: s.name, kind: 'site' as const })),
   ];
 }
 

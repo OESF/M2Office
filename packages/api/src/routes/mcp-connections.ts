@@ -316,6 +316,22 @@ export function mcpConnectionsRoute(deps: AppDeps) {
     return c.json({ ok: true, agentId: scopeId });
   });
 
+  /**
+   * その接続を自分のアカウントで許可している人（`oauth`。仕様書 第12.11.6.3節・第47.3節）。M2Office の利用者・相手のアカウント・許可した日時。
+   * 認可の中身は返さない。「接続 › サイト」で、REST API の WordPress の利用者の表と同じ形で並べる
+   */
+  app.get('/:id/users', async (c) => {
+    const { tenant } = c.get('ctx');
+    const id = c.req.param('id');
+    const [rows, users] = await Promise.all([deps.repo.listUserConnections(tenant.id, { connectionId: id }), deps.repo.listUsers(tenant.id)]);
+    return c.json({
+      items: rows.map((r) => ({
+        userId: r.userId, name: users.find((u) => u.id === r.userId)?.displayName ?? '（利用者）',
+        account: r.accountLabel || null, connectedAt: r.connectedAt,
+      })),
+    });
+  });
+
   /** 接続を確かめる（第12.11.3節）。登録したツールを MCP サーバが提供しているかを返す。状態は変えない。 */
   app.post('/:id/check', async (c) => {
     const { tenant, user } = c.get('ctx');

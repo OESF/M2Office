@@ -25,7 +25,7 @@ const restEdit = def('site-updates:edit', 'サイトの直し案');
 const mcpEdit = def('site-updates:site-clinic', 'サイトの直し案（みどり皮膚科クリニック）');
 const announce = def('announcements:draft', 'お知らせの作成');
 
-function world(route = 'site-updates:edit') {
+function world(route = 'site-updates:edit', access: { sites?: SiteOption[]; denied?: SiteOption[]; site?: string | null } = {}) {
   const started: { agentId: string; input: Record<string, unknown> }[] = [];
   const repo = {
     getTenantSettings: async () => ({ agents: { disabled: [] }, access: { scopes: {} }, company: { legalName: '', shortName: '' } }),
@@ -48,7 +48,7 @@ function world(route = 'site-updates:edit') {
   const s = new Secretary({
     repo, llm, connector: {} as never, agents: [restEdit, mcpEdit, announce],
     startAgent: async (_t, _u, a, input) => { started.push({ agentId: a.id, input }); return { runId: `run-${started.length}`, already: false }; },
-    sites: async () => ({ sites }),
+    sites: async () => ({ sites: access.sites ?? sites, denied: access.denied ?? [], site: access.site ?? null }),
   });
   return { s, started };
 }
@@ -114,4 +114,35 @@ test('MCP のサイトに入れるときは、そのサイトの業務を、元�
   assert.deepEqual(jobs.map((j) => [j.agentId, j.requestedBy, j.origin, j.input['request']]), [['site-updates:site-clinic', 'u1', 'secretary', '次のお知らせを公開してください']]);
   const none = await siteHandOff(repo, async () => [])({ tenantId: 't', userId: 'u1' }, 'clinic', 'x');
   assert.ok('error' in none, '業務が無ければ（役割を確かめていない・サイトの更新を入れていない）理由を返す');
+});
+
+test('使えるサイトが 1 つの人は聞き返さず、そのサイトの業務に取り替える', async () => {
+  const w = world('site-updates:edit', { sites: [sites[1]!], denied: [sites[0]!] });
+  const reply = await w.s.respond('t', 'u1', 'トップの診療時間を直して');
+  assert.doesNotMatch(reply.text, /どちらのサイトですか/);
+  assert.equal(w.started[0]?.agentId, 'site-updates:site-clinic');
+});
+
+test('使えないサイトの名前を挙げられたら、使えないと答え、別のサイトを直さない', async () => {
+  const w = world('site-updates:edit', { sites: [sites[1]!], denied: [sites[0]!] });
+  const reply = await w.s.respond('t', 'u1', '趣味のブログの記事の題名を直して');
+  assert.match(reply.text, /「趣味のブログ」のサイトは、あなたは使えません/);
+  assert.equal(w.started.length, 0);
+});
+
+test('名前が無ければ、個人設定の既定のサイトを直す（聞き返さない）', async () => {
+  const w = world('site-updates:edit', { site: 'mcp:clinic' });
+  const reply = await w.s.respond('t', 'u1', 'トップの診療時間を直して');
+  assert.doesNotMatch(reply.text, /どちらのサイトですか/);
+  assert.equal(w.started[0]?.agentId, 'site-updates:site-clinic');
+  // 頼みに名前があれば、そちらが先
+  await w.s.respond('t', 'u1', '趣味のブログの記事の題名を直して');
+  assert.equal(w.started[1]?.agentId, 'site-updates:edit');
+});
+
+test('サイトの利用範囲の対象は「:」を含まない名前にする（拡張機能の ID と取り違えない）', async () => {
+  const { siteScopeTarget, scopeTargetOf } = await import('@m2office/shared');
+  assert.equal(siteScopeTarget('rest'), 'site-rest');
+  assert.equal(siteScopeTarget('mcp:clinic'), 'site-mcp-clinic');
+  assert.equal(scopeTargetOf(siteScopeTarget('mcp:clinic')), 'site-mcp-clinic');
 });

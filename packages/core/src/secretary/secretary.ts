@@ -147,9 +147,10 @@ export interface SecretaryDeps {
   /**
    * 会社がつないでいるサイトと、本人が選んだ対象のサイト（仕様書 第47.6節）。無ければ対象のサイトを決めない。
    *
-   * @remarks サイトが 2 つ以上のときだけ、サイトの更新の対象のサイトを決める（頼みの名前 → その日の答え → 聞き返す）
+   * @returns `sites` は本人が使えるサイト、`denied` は会社がつないでいるが本人は使えないサイト、`site` は本人の既定のサイト
+   * @remarks サイトの更新の対象のサイトを決める（頼みの名前 → 使えるサイトが 1 つ → 既定のサイト → その日の答え → 聞き返す）
    */
-  sites?(tenantId: string, userId: string): Promise<{ sites: SiteOption[] }>;
+  sites?(tenantId: string, userId: string): Promise<{ sites: SiteOption[]; denied?: SiteOption[]; site?: string | null }>;
   /**
    * 承認を待っている業務への、言葉での取りやめと直し（仕様書 第47.5節）。無ければ扱わない。
    *
@@ -1740,18 +1741,26 @@ export class Secretary {
    * @param available 本人が使える業務（取り替える先を探す）
    * @returns 頼む業務（決まったサイトの業務に取り替えたもの）か、聞き返す答え
    * @remarks
-   * 順番: 頼みの中のサイトの名前 → その日の会話で答えたサイト → 聞き返す。サイトの更新の業務だけ（コラムとお知らせは設定で決める）。
-   * サイトが 1 つ以下・ほかの業務は、そのまま返す。危険度: read（業務を取り替えるだけ）
+   * 順番: 頼みの中のサイトの名前 → 使えるサイトが 1 つならそれ → 個人設定の既定のサイト → その日の会話で答えたサイト → 聞き返す。
+   * サイトの更新の業務だけ（コラムとお知らせは設定で決める）。危険度: read（業務を取り替えるだけ）
    */
   private async chooseSite(
     tenantId: string, userId: string, message: string, agent: AgentDefinition, available: AgentDefinition[],
   ): Promise<{ agent: AgentDefinition } | { reply: SecretaryReply }> {
     if (!this.deps.sites || !isSiteAgent(agent.id)) return { agent };
-    const { sites } = await this.deps.sites(tenantId, userId).catch(() => ({ sites: [] as SiteOption[] }));
-    if (sites.length < 2) return { agent };
+    const { sites, denied = [], site } = await this.deps.sites(tenantId, userId).catch(() => ({ sites: [] as SiteOption[], denied: [] as SiteOption[], site: null }));
+    if (sites.length === 0 && denied.length === 0) return { agent };
+    // 使えないサイトの名前を挙げられたら、使えないと答える（取り違えて別のサイトを直さない）
+    const named = namedSite(message, [...sites, ...denied]);
+    if (named && !sites.some((s) => s.key === named.key)) {
+      return { reply: { layer: 'direct', text: `「${named.name}」のサイトは、あなたは使えません（使える人は管理者が決めています）。`, evidence: [], tokensUsed: 0 } };
+    }
+    if (sites.length === 0) return { reply: { layer: 'direct', text: '使えるサイトがありません（使える人は管理者が「接続 › サイト」で決めています）。', evidence: [], tokensUsed: 0 } };
     const today = jstDate(new Date());
     const choice = this.siteChoices.get(`${tenantId}:${userId}`);
-    const key = namedSite(message, sites)?.key
+    const key = named?.key
+      ?? (sites.length === 1 ? sites[0]!.key : null)
+      ?? (site && sites.some((s) => s.key === site) ? site : null)
       ?? (choice?.date === today && sites.some((s) => s.key === choice.key) ? choice.key : null);
     if (!key) {
       this.siteAsks.set(`${tenantId}:${userId}`, { message, agentId: agent.id, until: Date.now() + 10 * 60_000 });

@@ -977,6 +977,7 @@ function ServicesSettings() {
     <>
       {msg && <p className={msg.ok ? 'ok-msg' : 'error'}>{msg.text}</p>}
       <CanvaCard onNone={() => setCanvaNone(true)} />
+      <DefaultSiteCard />
       <WordPressUserCard onNone={() => setWordpressNone(true)} />
       <AppLinkCards />
       {items.length === 0 && canvaNone && wordpressNone && <p className="muted">接続できるサービスはありません</p>}
@@ -1003,6 +1004,31 @@ function ServicesSettings() {
         </div>
       ))}
     </>
+  );
+}
+
+/**
+ * 既定のサイト（仕様書 第47.6節）。本人が使えるサイトが 2 つ以上あるときだけ出す。
+ * サイトの更新の頼みにサイトの名前が無いとき、秘書はこのサイトを直す。使えるサイトが 1 つの人は選ばない（そのサイトになる）
+ */
+function DefaultSiteCard() {
+  const [data, setData] = useState<{ sites: { key: string; name: string }[]; site: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { api.mySites().then(setData).catch(() => setData(null)); }, []);
+  if (!data || data.sites.length < 2) return null;
+  const choose = (site: string | null) => {
+    setError(null);
+    api.setMySite(site).then((r) => setData({ ...data, site: r.site })).catch((e) => setError(describeError(e, '選べませんでした')));
+  };
+  return (
+    <div className="card">
+      <h3>既定のサイト</h3>
+      <select value={data.site ?? ''} aria-label="既定のサイト" onChange={(e) => choose(e.target.value || null)}>
+        <option value="">決めない（秘書が聞き返す）</option>
+        {data.sites.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
+      </select>
+      {error && <p className="error small">{error}</p>}
+    </div>
   );
 }
 
