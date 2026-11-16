@@ -1,6 +1,6 @@
 ---
 title: M2Office 仕様書
-version: 0.594.0
+version: 0.600.1
 status: draft
 created: 2026-09-20
 updated: 2026-10-01

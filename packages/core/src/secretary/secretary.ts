@@ -17,7 +17,7 @@ import type { HelpCatalog } from '../help/articles.js';
 import { DIRECT_QUERIES, sourceNote, type DirectAnswer, type EvidenceItem } from './catalog.js';
 import { KNOWLEDGE_CATEGORY_LABEL, KNOWLEDGE_PRIORITY_NOTE, rewriteNote } from '../knowledge/search.js';
 import { LOOKUP_AGENT_ID } from '../agents/index.js';
-import { REFERS_TO_PAST, recall, type QueryEmbed } from './recall.js';
+import { ANSWER_FRESH, REFERS_TO_PAST, recall, type QueryEmbed } from './recall.js';
 import { silentLogger } from '../log/logger.js';
 import { CORRECTION, correctMemory } from './correct.js';
 import { answerSchedule } from './schedules.js';
@@ -27,7 +27,7 @@ import { expandQuery } from '../knowledge/expand.js';
 import { queryEmbedder, semanticSearchEnabled } from '../knowledge/embed.js';
 import { UNKNOWN_ANSWER } from '../knowledge/gaps.js';
 import { memorySemanticEnabled } from '../memory/embed.js';
-import { jstDay } from '../memory/learn.js';
+import { isSpeakingStyleMemory, jstDay } from '../memory/learn.js';
 import { bulkMailRequest, contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, mailSearchRequest, parseMailVerdicts } from './mail.js';
 import { CORRECTION_LIMITS, countCorrection, countRequest, phraseKey, rememberRoute, routeHints, routingPhrase } from '../memory/corrections.js';
@@ -868,6 +868,10 @@ export class Secretary {
       `あなたは${org ? `「${org}」` : '中小企業'}の従業員に付く秘書${s.name ? `「${s.name}」` : ''}です。`,
       `相手を「${s.callMe || `${user?.displayName ?? ''}さん`}」と呼びます。`,
       s.style === 'concise' ? '要点だけを短く答えます。' : '丁寧な日本語で、要点を先に答えます。',
+      // 文字の答えは標準語。前の答え・要約・覚えていることの方言をまねない。「標準語で話して」を設定の変更の頼みと取り違えない（第10.5.6節。2026-11-16）
+      '文字の答えは、方言やくだけた口調を使わない標準語で書きます。前のやり取り・要約・覚えていることの言葉づかいはまねません。'
+        + '「標準語で話して」のような話し方の頼みには、設定の話にせず、そのまま標準語で答えます。方言などの話し方は、音声のときだけ、個人設定の「秘書」の「話し方の指示」で決められます。'
+        + '覚えていることに同じような依頼と答えがあっても、その答えを写さず、いまの依頼に新しく答えます。',
       // AI は自分ではいまの日時を知らない。渡さないと、深夜に「おはようございます」と挨拶する（第10.3.1節）
       secretaryClockLine(prefs.profile?.timezone),
       'あなたは本人と一心同体の秘書で、本人とのやり取りをずっと覚えています。覚えていることを踏まえて答えます。',
@@ -877,6 +881,9 @@ export class Secretary {
       ANSWER_RULE,
       '\n',
       GROUNDING_RULE,
+      // 指示の終わりにも同じ確かめを置く（覚えていることの後ろの ANSWER_FRESH と対。2026-11-16）
+      '\n',
+      ANSWER_FRESH,
     ].join('');
     const res = await llm.complete({
       tier: 'standard',
@@ -1243,7 +1250,8 @@ export class Secretary {
 
   /** 覚えている本人の事実（新しいものから）。調べものに渡し、好みに合わせて組ませる。何も無ければ空。 */
   private async memoryContext(tenantId: string, userId: string): Promise<string> {
-    const rows = await Promise.resolve().then(() => this.deps.repo.listMemories(tenantId, userId)).catch(() => []);
+    // 秘書の話し方の記憶は使わない（話し方は個人設定が正。第11.2節）
+    const rows = (await Promise.resolve().then(() => this.deps.repo.listMemories(tenantId, userId)).catch(() => [])).filter((m) => !isSpeakingStyleMemory(m.text));
     const recent = [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, MEMORY_FOR_LOOKUP);
     // 使った日を記録する（使われない記憶を整理でしまうため。第11.11.4節）
     if (recent.length) void Promise.resolve().then(() => this.deps.repo.touchMemories(tenantId, userId, recent.map((m) => m.id), new Date().toISOString())).catch(() => undefined);
@@ -1822,13 +1830,21 @@ export class Secretary {
     const target = pending[0];
     if (!target) return null;
     if (stop) {
-      await talk.reject(tenantId, userId, target.approvalId, cmd.trim());
+      // 1 本の会話の承認は、理由なしの却下で業務を終える（理由つきだと会話が続くため。第48.4節）
+      await talk.reject(tenantId, userId, target.approvalId, target.conversation ? '' : cmd.trim());
       await this.audit(tenantId, userId, 'secretary.approval_stop', target.approvalId);
       return { layer: 'direct', text: `「${target.agentName}」は取りやめました。承認を待っていた操作は行いません。`, evidence: [], tokensUsed: 0 };
     }
     const llm = this.deps.llmFor ? await this.deps.llmFor(tenantId) : this.deps.llm;
     const { correction, tokensUsed } = await isApprovalCorrection(llm, message, target);
-    if (!correction || !this.deps.startAgent) return null;
+    if (!correction) return null;
+    if (target.conversation) {
+      // 1 本の会話の承認: 直しを却下の理由として同じ会話に返す。業務が直して、また承認を求める（第48.4節）
+      await talk.reject(tenantId, userId, target.approvalId, message.trim());
+      await this.audit(tenantId, userId, 'secretary.approval_revise', target.approvalId);
+      return { layer: 'light', text: `直して、もう一度用意します。用意できたら、ここで承認をお願いします。`, evidence: [], tokensUsed };
+    }
+    if (!this.deps.startAgent) return null;
     const agents = this.deps.agentsFor ? await this.deps.agentsFor(tenantId, userId) : this.deps.agents;
     const def = agents.find((a) => a.id === target.agentId);
     if (!def) return null;
@@ -1971,8 +1987,13 @@ const PROMISES_LATER = /お調べします|調べて(から)?お(伝え|知ら�
 /** サイネージに出したと言う言い回し（層 3 の推論はサイネージを動かせないため、当たれば答えを返さない。第31.11.1節）。 */
 const CLAIMS_SIGNAGE = /(サイネージ|画面)[^\n]{0,80}?(表示|出|流|映)し(ました|ておきました)/;
 
-/** 探す・読む・教えての言い回し（会社の接続のデータを求める依頼。第10.11.5.1節）。 */
-const READS_DATA = /探して|検索|調べて|読んで|教えて|見せて|見て|確認して|一覧|知りたい|ある[？?]|あります[か？?]/;
+/**
+ * 探す・読む・教えての言い回し（会社の接続のデータを求める依頼。第10.11.5.1節）。
+ *
+ * @remarks 「まとめて」「要約して」「内容」「やり取り」「新着」も読む依頼（第 0.599.3 版）。2026-11-16 に「slack の #general の内容をまとめて」が当たらず、
+ * 推論の振り分けに任されて、前に読めなかった記録を見て「ツールがない」と断った
+ */
+const READS_DATA = /探して|検索|調べて|読んで|教えて|見せて|見て|確認して|一覧|知りたい|ある[？?]|あります[か？?]|まとめ|要約|内容|やり取り|やりとり|新着|届いて/;
 
 /** 送る・書き込む言い回し。会社の接続の名前が出ても、これがあれば送る業務の取次に任せる。 */
 const SENDS_DATA = /送って|送信|投稿|書き込|返信して|リアクション|作成して|作って|登録して|予約して/;
@@ -2134,6 +2155,9 @@ const GROUNDING_RULE = [
   '・日数・金額・期限を、出典なしに会社の決まりとして断定してはいけません。',
   '・列車の時刻・天気・ニュース・価格など、外の最新の情報や、Slack などの会社の接続の中身を記憶で作ってはいけません。',
   '  分からなければ、答えを作らずに「お調べします」とだけ答えてください（秘書が調べものを起こし、終わったらお伝えします）。',
+  // 2026-11-16 に、道具の選び方の不具合で Slack を読めなかった記録（「ツール不足のため取得不可」）を覚え、直した後も記録を見て断り続けた
+  '・覚えていることや前のやり取りに「取得できなかった」「ツールが無い」とあっても、それを理由に断らないでください。接続や道具は、あとから使えるようになっていることがあります。',
+  '  頼まれたら、そのたびに「お調べします」と答えて調べ直してください。',
   '・契約書について「サインしていい？」「大丈夫？」「違法？」と聞かれても、結んでよいか・法律上どうかは判断しないでください（仕様書 第28.2節）。',
   '  契約書を渡してもらえれば、契約書チェックで注意したい点を整理できると伝えてください。重要な契約は弁護士への確認を勧めてください。',
 ].join('\n');

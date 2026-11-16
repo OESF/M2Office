@@ -256,6 +256,9 @@ test('MCP のツールの引数の定義（inputSchema）を推論に渡す形�
     required: ['query'],
   }, '知らない必須の名前は落とす');
   assert.equal(argsFromInputSchema({ type: 'object', properties: {} }), undefined);
+  // 「数か空」の枝（anyOf）は数として写す（文字にすると、相手が数を求める引数に文字を渡してしまう）
+  const either = argsFromInputSchema({ type: 'object', properties: { featuredImageId: { anyOf: [{ type: 'integer', exclusiveMinimum: 0 }, { type: 'null' }], description: '画像の番号' } } });
+  assert.deepEqual(either?.properties['featuredImageId'], { type: 'number', description: '画像の番号' });
   const [tool] = connectorTools({ ...slack, auth: { type: 'none' }, tools: [{ ...slack.tools[0]!, args }] });
   assert.deepEqual(tool!.args, args);
 });

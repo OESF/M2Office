@@ -23,7 +23,7 @@ import {
   type SecretBox, type GeminiModels,
   PostgresDemoStore, demoSubdomain, isDemoTenantId, seedDemoCompany, BUILTIN_EXTENSIONS, type DemoStore,
   type FileStore, type TenantExtensions, type HelpArticle, type ManualMeta, type LlmProvider, type Logger, type Repository, type WorkspaceConnector, aiUsageMeterFromEnv, setEnqueueAiGuard, appPath,
-  siteHandOff, userSites, outputSiteOf,
+  siteHandOff, userSites, outputSiteOf, siteChildFinished,
 } from '@m2office/core';
 import { canRunAgent, canUseAgent, siteScopeTarget, RISK_ORDER, type RiskLevel, type AgentDefinition, type ContactScope, type HrSettings, type InventorySettings, type SignageSettings, type WebColumnSettings, type InquirySettings, type CompetitorSettings, type AnnouncementSettings, type WebReviewSettings, type ContractSettings, type SalesDocsSettings, type TaxRateEntry, type ReservationSettings, type SubsidySettings, type DecisionSettings, type MemberSettings, type PrintDesignSettings, type LibrarySettings, type SiteUpdatesSettings, fileInputKey } from '@m2office/shared';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -938,6 +938,8 @@ export function buildDeps(): AppDeps {
     isAvailable,
     // 止めた実行に後から書き込まれた中身も消す（仕様書 第6.5.2.1節）
     onCancelled: async (run) => { await retentionRef.purgeRun(run, 'disconnect', new Date()); },
+    // 業務から業務へ頼んだとき（コラム・お知らせ → MCP のサイト）、子の結果を親に返す（仕様書 第48.8節）
+    onFinished: (run, outcome, reason) => siteChildFinished(repo, run, outcome, reason, { columns: columns.service, announcements: announcements.service }),
   });
   // デバッグモード（仕様書 第20.4.1節「デバッグモード」）。本番で有効にすると起動を断る
   const debug = debugEnabled() ? new DebugLog() : null;
@@ -1081,13 +1083,14 @@ export function buildDeps(): AppDeps {
           out.push({
             approvalId: a.id, runId: run.id, agentId: job.agentId, agentVersion: job.agentVersion, agentName: job.agentName ?? job.agentId,
             input: job.input, summary: a.present.split('\n').find((l) => l.trim()) ?? '', createdAt: a.createdAt,
+            ...((step?.input as { conversation?: boolean } | null)?.conversation ? { conversation: true } : {}),
           });
         }
         return out;
       },
       reject: async (tenantId, userId, approvalId, comment) => {
         const me = await repo.findUserById(tenantId, userId);
-        await engine.decideApproval(tenantId, approvalId, 'rejected', { id: userId, roles: me?.roles ?? [] }, comment);
+        await engine.decideApproval(tenantId, approvalId, 'rejected', { id: userId, roles: me?.roles ?? [] }, comment || null);
       },
     },
   });

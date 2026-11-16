@@ -1322,9 +1322,27 @@ code.uri { background: var(--subtle-bg); border: 1px solid var(--line); border-r
 @keyframes m2o-spin { to { transform: rotate(360deg); } }
 /* 時間のかかる処理の言葉の前に回る印を置く（ボタンや札の中でも崩れないように） */
 .busy-label { display: inline-flex; align-items: center; gap: 6px; }
+/*
+ * 押したボタンが答えを待つ間の回る印（仕様書 第6.8節 原則 u13。pressed.ts が aria-busy を付ける）。
+ * ボタンの中にすでに回る印（Busy）があるときは重ねない
+ */
+button[aria-busy="true"]:not(:has(.spin))::before,
+[role="button"][aria-busy="true"]:not(:has(.spin))::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: m2o-spin 0.9s linear infinite;
+}
+button[aria-busy="true"] { cursor: progress; }
 /* 動きを抑える設定の端末では回さない */
 @media (prefers-reduced-motion: reduce) {
-  .spin { animation: none; }
+  .spin, button[aria-busy="true"]::before, [role="button"][aria-busy="true"]::before { animation: none; }
 }
 
 /* 個人設定のアバターの選択（仕様書 第6.1.3節） */

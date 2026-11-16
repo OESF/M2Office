@@ -190,7 +190,7 @@ export async function similarityReview(body: string, sources: ColumnSource[], fe
   for (const sentence of sentences) {
     const hit = texts.find((t) => overlapRatio(sentence, t.text) >= OVERLAP);
     if (!hit) continue;
-    out.push({ quote: sentence.slice(0, 200), reason: `出典（${hit.title}）の文とほぼ同じです。自分の言葉で書き直してください`, suggestion: '', by: 'rule', kind: 'source' });
+    out.push({ quote: sentence.slice(0, 200), reason: `調べたページ（${hit.title}）の文とほぼ同じです。自分の言葉で書き直してください`, suggestion: '', by: 'rule', kind: 'source' });
     if (out.length >= 3) break;
   }
   return out;

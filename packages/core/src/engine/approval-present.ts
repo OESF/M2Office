@@ -93,7 +93,7 @@ export function composeApprovalPresent(p: {
   const out: string[] = [gate.present, ''];
 
   // 前の承認（無ければ実行の始め）を探す。そこから先に作られたものが、この承認で判断するもの
-  const prevGate = [...steps].reverse().find((s) => s.kind === 'approval' && s.seq < gateSeq && !s.stepId.endsWith(':confirm'));
+  const prevGate = [...steps].reverse().find((s) => s.kind === 'approval' && s.seq < gateSeq && !s.stepId.endsWith(':confirm') && !s.stepId.endsWith(':call'));
   const since = prevGate?.seq ?? -1;
   const shownBefore = new Set(((prevGate?.input ?? {}) as { artifactIds?: string[] }).artifactIds ?? []);
 

@@ -218,3 +218,35 @@ test('以前の形で判断待ちの提案も、秘書が判断する。会社�
   assert.equal(repo.promotions.find((p) => p.id === 'p1')!.status, 'approved', '判断待ちの提案を書き換える');
   assert.equal(repo.knowledge.filter((k) => k.body === '締めは毎月 25 日').length, 1, '同じ文は重ねない');
 });
+
+test('秘書の話し方（方言・口調）は記憶にしない。弁護士・弁当などは話し方とみなさない（第11.2節）', async () => {
+  const { isSpeakingStyleMemory, learningPrompt } = await import('../src/index.js');
+  assert.equal(isSpeakingStyleMemory('九州方言（博多弁）を使って親しみやすいトーンで応答する'), true);
+  assert.equal(isSpeakingStyleMemory('関西弁で話してほしい'), true);
+  assert.equal(isSpeakingStyleMemory('- 好み: 秘書はタメ口で答える'), true);
+  assert.equal(isSpeakingStyleMemory('顧問弁護士に話を通してから契約する'), false);
+  assert.equal(isSpeakingStyleMemory('昼は弁当を頼むことが多い'), false);
+  assert.equal(isSpeakingStyleMemory('社外へのメールの下書きは 3 行以内にする'), false);
+  assert.ok(learningPrompt([{ message: 'こんにちは', reply: 'こんにちは' } as never]).includes('秘書の話し方（方言・口調・トーン'), '覚える推論にも伝える');
+  // 話す・答えるの言葉が無くても、方言の言葉があれば話し方（2026-11-16 に残っていた記憶）
+  assert.equal(isSpeakingStyleMemory('三浦さんとのやり取りでは、博多弁（九州の方言）を使用している。'), true);
+  assert.equal(isSpeakingStyleMemory('九州方言（博多弁）のような温かみのある親しみやすい口調や表現を使う'), true);
+  assert.equal(isSpeakingStyleMemory('専属秘書の名前はこなみであり、関西弁混じりの独特な口調で話す。'), true);
+  assert.equal(isSpeakingStyleMemory('標準語で話すこと'), true);
+  assert.equal(isSpeakingStyleMemory('秘書のこなみは、ギャルな口調で三浦をサポートしている。'), true);
+  assert.equal(isSpeakingStyleMemory('三浦さんへの朝の挨拶に対しては、「おはようございます！三浦さん、今日も元気にいきまっしょいね！」と応答する。'), true);
+  assert.equal(isSpeakingStyleMemory('- 好み: 社外へのメールの返事は「承知しました」と返す'), false);
+  // 話し方でないもの
+  assert.equal(isSpeakingStyleMemory('重要な契約については弁護士への確認が推奨されている。'), false);
+  assert.equal(isSpeakingStyleMemory('取引先の意見を代弁する立場にある'), false);
+  assert.equal(isSpeakingStyleMemory('- 好み: 社外へのメールの返事はやわらかいトーンで書く'), false);
+});
+
+test('本人の像と会話の要約から、秘書の話し方の行と文だけを除く（第11.2節）', async () => {
+  const { withoutSpeakingStyle } = await import('../src/index.js');
+  const profile = ['## 好み', '- 契約書の最終判断は弁護士に確かめる。', '- 三浦さんとのやり取りでは、博多弁（九州の方言）を使用している。', '- 表は縦に並べる。'].join('\n');
+  assert.equal(withoutSpeakingStyle(profile), ['## 好み', '- 契約書の最終判断は弁護士に確かめる。', '- 表は縦に並べる。'].join('\n'));
+  const digest = '天気を調べた。その後、標準語への変更依頼や取り消しを経て、熊本弁で話すよう再度依頼があった。在庫を確かめた。';
+  assert.equal(withoutSpeakingStyle(digest), '天気を調べた。在庫を確かめた。');
+  assert.equal(withoutSpeakingStyle(''), '');
+});

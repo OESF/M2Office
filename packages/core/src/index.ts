@@ -82,10 +82,13 @@ export {
   CONNECTION_AGENT_PREFIX, SITE_CONNECTION_AGENT_PREFIX, connectionAgent, connectionAgentId, siteConnectionAgentId, connectionIdOfAgent, siteLabelOf,
 } from './connectors/connection-agent.js';
 export { selectConnectionTools, TOOL_SELECT_THRESHOLD, TOOL_SELECT_MAX } from './engine/tool-select.js';
-export { mcpSiteOf, siteHandOff, type SiteHandOff } from './connectors/site-handoff.js';
+export { FILE_SEND_MAX_BYTES, FILE_SEND_MAX_PER_RUN, fileSendTargetProblem, handedFilesOf, sendHandedFile, siteOfHost, type FileSendFormat, type HandedFile } from './connectors/file-send.js';
+export { mcpSiteOf, siteHandOff, handOffParentOf, REQUEST_LABEL, siteChildFinished, type SiteHandOff, type SiteHandOffParent, type SiteHandOffParents } from './connectors/site-handoff.js';
 export { siteOptions, userSites, outputSiteOf, OUTPUT_SITE_ASK, type OutputSite, type UserSitesDeps } from './connectors/sites.js';
 export { IN_FLOW_HOURS, isInFlowApproval } from './engine/in-flow.js';
-export { recordedCallFailure } from './engine/run-engine.js';
+export { CONVERSATION_CONTRACT, CONVERSATION_CONTRACT_VERSION, CONVERSATION_MAX_ROUNDS, FILES_SEND, LOAD_ALL_BELOW, TOOLS_LOAD, conversationSystem, filesSendSpec, handedFilesText, isFilesSendName, undeliveredFilesNote, foldMessages, completeByText, jsonSchemaOf, toolSpecOf } from './engine/conversation.js';
+export { toWireName, fromWireName, sanitizeSchema, checkJsonArgs, openAiToolBody, openAiToolCalls, type LlmToolSpec, type LlmToolCall, type LlmChatMessage, type LlmToolRequest } from './llm/tools.js';
+export { recordedCallFailure, childDidWork, selectionRequest } from './engine/run-engine.js';
 export { APPROVAL_STOP, APPROVAL_MODIFY, APPROVAL_TALK_HOURS, isApprovalCorrection, correctedRequest, type ApprovalTalkDeps, type PendingTalkApproval } from './secretary/approval-talk.js';
 export { answeredSite, isRestSiteAgent, isSiteAgent, namedSite, siteAliases, siteAskText, siteKeyOfAgent, type SiteOption } from './secretary/site-choice.js';
 export {

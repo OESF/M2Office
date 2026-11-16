@@ -6,6 +6,7 @@
 
 export { PostgresColumnStore, MemoryColumnStore, type ColumnStore, type NewColumnVersion } from './store.js';
 export { ruleReview, aiReview, mergeReview } from './review.js';
+export { resolveCitations, withoutQuotes, CITE_MARK } from './citation.js';
 export { inferRuleSets, guessRuleSets, type RuleClues } from './rules.js';
 export { writeColumn, rewriteColumn, parseDraft, selfReferenceRule, ColumnWriteError, type ColumnBrief, type ColumnDraft } from './writer.js';
 export { checkWordPress, createWordPressDraft, createWordPressPost, uploadWordPressMedia, columnHtml, normalizeSiteUrl, setWordPressStatus, getWordPressPost, listPostTypes, listTaxonomies, pickNewsTypes, pickColumnTypes, categoryFieldOf, ensureWordPressTerm, wpRef, parseWpRef, type WordPressAuth, type WordPressPostType, type WordPressTaxonomy } from './wordpress.js';

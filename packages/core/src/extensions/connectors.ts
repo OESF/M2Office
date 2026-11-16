@@ -70,6 +70,8 @@ export interface ConnectorToolDeclaration {
    * @remarks 無ければ推論は引数を知らずに呼ぶ。登録と「ツールを取り直す」のときに入る
    */
   args?: ToolArgsSchema;
+  /** 相手の引数の定義（JSON Schema）をそのまま。接続の業務（1 本の会話）が推論に渡し、呼ぶ前の確かめにも使う（仕様書 第48.6節）。 */
+  inputSchema?: Record<string, unknown>;
   /** 役割（読む・準備・見直し・確定・戻す）。登録と取り直しのときに推論が決める（仕様書 第47.4.1節）。 */
   role?: ConnectorToolRole;
   /** 管理者が役割を見て「この役割で使う」としたか（Q-368）。説明が変われば外す。 */
@@ -247,6 +249,14 @@ function confirmArgOf(t: ConnectorToolDeclaration): string | undefined {
   return t.confirmArg && (t.role === 'commit' || t.role === 'undo') && t.risk !== 'read' && t.risk !== 'draft' ? t.confirmArg : undefined;
 }
 
+/** JSON Schema から 1 つの引数を外す（確定の合図の引数を推論に見せないため）。 */
+function withoutSchemaProp(schema: Record<string, unknown>, name: string): Record<string, unknown> {
+  const props = { ...((schema['properties'] as Record<string, unknown> | undefined) ?? {}) };
+  delete props[name];
+  const required = Array.isArray(schema['required']) ? (schema['required'] as string[]).filter((r) => r !== name) : undefined;
+  return { ...schema, properties: props, ...(required ? { required } : {}) };
+}
+
 /** 引数の定義から 1 つを外す。 */
 function withoutArg(args: ToolArgsSchema, name: string): ToolArgsSchema {
   const { [name]: _drop, ...properties } = args.properties;
@@ -268,6 +278,8 @@ export function connectorTools(c: ConnectorDeclaration, client?: McpClient, auth
     },
     // 確定の合図の引数は推論に見せない（推論が自分で真にできないように。第47.4.2節）
     ...(t.args ? { args: confirmArgOf(t) ? withoutArg(t.args, confirmArgOf(t)!) : t.args } : {}),
+    // 相手の引数の定義をそのまま（第48.6節）。確定の合図の引数はここからも外す
+    ...(t.inputSchema ? { jsonSchema: confirmArgOf(t) ? withoutSchemaProp(t.inputSchema, confirmArgOf(t)!) : t.inputSchema } : {}),
     // 型が ID を名前に直す問い合わせを持てば、承認の前に送り先の名前を確かめる（読むだけ。第12.11.3節）
     ...(preset?.resolvers?.length && t.risk !== 'read' ? {
       async prepare(args: Record<string, unknown>, ctx) {

@@ -552,6 +552,16 @@ export function meterLlm(tenantId: string, inner: LlmProvider, meter: AiUsageMet
   };
   const wrapped: LlmProvider = { name: inner.name, complete: (req) => text(() => inner.complete(req)) };
   if (inner.completeStream) wrapped.completeStream = (req, onText) => text(() => inner.completeStream!(req, onText));
+  // 道具を使う会話（第48.6節）。費用は文と同じく数える
+  if (inner.completeTools) {
+    wrapped.completeTools = async (req) => {
+      await guard();
+      const res = await inner.completeTools!(req);
+      const c = responseCost(res, null, local);
+      log({ model: c.model, inputTokens: c.input, outputTokens: c.output, units: 0, costJpy: c.cost });
+      return res;
+    };
+  }
   if (inner.readImage) wrapped.readImage = (req) => text(() => inner.readImage!(req));
   if (inner.extractFromImage) wrapped.extractFromImage = (req) => text(() => inner.extractFromImage!(req));
   // 録音の文字起こし（第9.4.5節）。音声の入力は文章より単価が高い

@@ -11,7 +11,7 @@ import { copyText } from './clipboard.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Busy } from './components.js';
 import {
-  COLUMN_COVER_KIND_LABELS, COLUMN_SIGNAGE_STATUS_LABELS, COLUMN_SIGNAGE_VIDEO_LENGTHS, COLUMN_IMAGE_STYLES, COLUMN_IMAGE_STYLE_DEFAULT, COLUMN_NARRATION_VOICES, COLUMN_NARRATION_VOICE_DEFAULT, COLUMN_BGM_DEFAULT, type ColumnImageStyle, type ColumnNarrationVoice, type ColumnSignageVideoSeconds, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS,
+  COLUMN_COVER_KIND_LABELS, COLUMN_SIGNAGE_STATUS_LABELS, COLUMN_SIGNAGE_VIDEO_LENGTHS, COLUMN_IMAGE_STYLES, COLUMN_IMAGE_STYLE_DEFAULT, COLUMN_NARRATION_VOICES, COLUMN_NARRATION_VOICE_DEFAULT, COLUMN_BGM_DEFAULT, type ColumnImageStyle, type ColumnNarrationVoice, type ColumnSignageVideoSeconds, COLUMN_THEME_SOURCE_LABELS, WEB_COLUMN_STATUS_LABELS, stripSourceMarks,
   type ColumnPlanSlot, type ColumnSignageSet, type ColumnReviewItem, type WebColumn, type WebColumnStatus, type WebColumnTheme, type WebColumnVersion,
 } from '@m2office/shared';
 import { api, describeError, type ColumnDetail } from './api.js';
@@ -39,7 +39,7 @@ const ORIGIN_LABELS: Record<WebColumnVersion['origin'], string> = {
 
 /** 指摘の種類の呼び方。 */
 const KIND_LABELS: Record<ColumnReviewItem['kind'], string> = {
-  expression: '表現', source: '出典', privacy: '個人の情報', readability: '読みやすさ',
+  expression: '表現', source: '根拠', privacy: '個人の情報', readability: '読みやすさ',
 };
 
 const STATUS_BADGE: Record<WebColumnStatus, string> = {
@@ -57,6 +57,12 @@ const toLocalInput = (iso: string) => { const d = new Date(iso); return new Date
  * @param onOpen コラムを開く・一覧に戻る（`null`）
  * @param onApprovals 承認へ進めた後（画面を移らずに、秘書のキャンバスで承認する。仕様書 第47.5節）
  */
+/** コラムの状態の札。後ろで書いている間は回る印を添える（仕様書 第6.8節 原則 u13）。 */
+function StatusBadge({ status }: { status: WebColumnStatus }) {
+  const label = WEB_COLUMN_STATUS_LABELS[status];
+  return <span className={STATUS_BADGE[status]}>{status === 'writing' ? <Busy>{label}</Busy> : label}</span>;
+}
+
 export function Columns({ columnId, onOpen, onApprovals }: {
   columnId: string | null;
   onOpen: (columnId: string | null) => void;
@@ -180,7 +186,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
                 <tr key={s.date}>
                   <td className="small">{slotDay(s.date)}</td>
                   <td>{s.columnId ? <button className="link" onClick={() => onOpen(s.columnId!)}>{s.title || <Busy>書いています</Busy>}</button> : <span className="muted">空き</span>}</td>
-                  <td>{s.status && <span className={STATUS_BADGE[s.status]}>{WEB_COLUMN_STATUS_LABELS[s.status]}</span>}</td>
+                  <td>{s.status && <StatusBadge status={s.status} />}</td>
                 </tr>
               ))}
             </tbody>
@@ -211,7 +217,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
             {columns.map((c) => (
               <tr key={c.id} className="clickable" onClick={() => onOpen(c.id)}>
                 <td><button className="link" onClick={(e) => { e.stopPropagation(); onOpen(c.id); }}>{c.title || c.theme}</button></td>
-                <td><span className={STATUS_BADGE[c.status]}>{WEB_COLUMN_STATUS_LABELS[c.status]}</span></td>
+                <td><StatusBadge status={c.status} /></td>
                 <td>{c.status === 'writing' || c.status === 'failed' ? '' : c.reviewCount}</td>
                 <td>{c.createdByName}</td>
                 <td className="small">{when(c.updatedAt)}</td>
@@ -332,7 +338,7 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
     <div className="columns">
       <div className="cards-toolbar">
         <BackButton label="コラムの一覧" onClick={onBack} />
-        <span className={STATUS_BADGE[column.status]}>{WEB_COLUMN_STATUS_LABELS[column.status]}</span>
+        <StatusBadge status={column.status} />
         {column.wpEditUrl && <a className="btn ghost small" href={column.wpEditUrl} target="_blank" rel="noreferrer">WordPress で開く</a>}
         {current && <button className="btn ghost small" onClick={() => void copy('html')}>HTML をコピー</button>}
         {current && <button className="btn ghost small" onClick={() => void copy('markdown')}>Markdown をコピー</button>}
@@ -462,12 +468,14 @@ function ColumnEditor({ id, onBack, onApprovals }: { id: string; onBack: () => v
           ) : (
             <article className="columns-view">
               <h2>{draft.title}</h2>
-              <Markdown text={draft.body} />
+              {/* 記事に入るとおりに見せる（出典の番号は外す。第32.7.2節） */}
+              <Markdown text={stripSourceMarks(draft.body)} />
+              {/* 調べたページは記事に載せない。責任者が事実を確かめるために、畳んで残す */}
               {current.sources.length > 0 && (
-                <>
-                  <h3>出典</h3>
+                <details className="fold">
+                  <summary className="small muted">調べたページ（{current.sources.length}）</summary>
                   <ol className="small">{current.sources.map((x) => <li key={x.url}><a href={x.url} target="_blank" rel="noreferrer">{x.title || x.url}</a></li>)}</ol>
-                </>
+                </details>
               )}
             </article>
           )}

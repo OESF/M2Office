@@ -15,7 +15,7 @@
 
 import type { AgentDefinition } from '@m2office/shared';
 import type { Conversation, ConversationMention, Repository } from '../repository/types.js';
-import { jstDay } from '../memory/learn.js';
+import { jstDay, withoutSpeakingStyle } from '../memory/learn.js';
 import { jobLabel } from '../memory/work.js';
 
 /** 1 週間の記憶に入れる、本人が使った日の数（今日を除く。Q-363）。 */
@@ -106,6 +106,15 @@ export const FOLLOW_UP = /それ(?!ぞれ)|そちら|さっき|先ほど|さき�
 export const FOLLOW_UP_SKIPS = new Set(['calendar-range', 'mail-unread', 'tasks-today', 'pending-approvals', 'recent-runs']);
 
 /** 依頼が続きの頼みか（{@link FOLLOW_UP}）。 */
+/**
+ * 作業の記憶に添える、言葉づかいを引き継がない断り（仕様書 第10.5.6節「文字のとき」。第 0.599.2 版）。
+ *
+ * @remarks
+ * 推論は、渡された前の答えの言葉づかいをまねる。音声で方言を指示していた間の答えが記憶に残ると、指示を外しても
+ * 文字の答えが方言のままになる（2026-11-16 に熊本弁で確認）。記憶は中身を探すためのものと明示する
+ */
+export const STYLE_NOT_INHERITED = '（下のやり取りと要約は、話の中身を探すための記録。前の答えの言葉づかい・方言・口調はまねず、いまの応対の設定どおりに答える）';
+
 export function followsUp(message: string): boolean {
   return FOLLOW_UP.test(message);
 }
@@ -328,7 +337,7 @@ export async function loadWorkingMemory(
   const referred = referredDays(message, now, opts.timeZone);
   const screen = opts.screen ?? null;
   if (!opts.keep) {
-    const turns = (opts.transient ?? []).filter((c) => !c.createdAt || c.createdAt >= today.from);
+    const turns = hideRepeatedAnswers((opts.transient ?? []).filter((c) => !c.createdAt || c.createdAt >= today.from), message);
     return finish({ today: today.day, turns, continuedFrom: null, todaySummary: '', week: [], screen, referred, olderMentions: [] });
   }
   const since = new Date(now.getTime() - WEEK_SCAN_DAYS * 86_400_000).toISOString();
@@ -348,11 +357,12 @@ export async function loadWorkingMemory(
   const dayOf = dayOfIso;
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? '業務';
   const STATUS: Record<string, string> = { queued: '待ち', running: '実行中', awaiting_approval: '承認待ち', completed: '完了', failed: '失敗', cancelled: '中止', expired: '期限切れ' };
-  const summaryOf = new Map(digests.filter((d) => d.compartment === null).map((d) => [d.day, d.summary]));
+  // 要約の中の秘書の話し方の頼み（「熊本弁で話すよう依頼」など）は渡さない（第11.2節）
+  const summaryOf = new Map(digests.filter((d) => d.compartment === null).map((d) => [d.day, withoutSpeakingStyle(d.summary)]));
   const week: DayRecord[] = weekDays.map((day) => ({
     day,
     summary: summaryOf.get(day) ?? '',
-    turns: weekRows.filter((c) => dayOf(c.createdAt) === day),
+    turns: hideRepeatedAnswers(weekRows.filter((c) => dayOf(c.createdAt) === day), message),
     runs: work
       .filter(({ run }) => dayOf(run.startedAt) === day)
       .reverse()
@@ -366,12 +376,47 @@ export async function loadWorkingMemory(
   const carry = todayRows.length < CONTINUE_BELOW && prev ? prev.turns.slice(-CONTINUE_TURNS) : [];
   return finish({
     today: today.day,
-    turns: [...carry, ...todayRows],
+    turns: hideRepeatedAnswers([...carry, ...todayRows], message),
     continuedFrom: carry.length ? prev!.day : null,
     todaySummary: summaryOf.get(today.day) ?? '',
     week, screen, referred,
     olderMentions: weekRows,
   });
+}
+
+/** 前と同じ頼みの答えの代わりに置く文。 */
+export const REPEATED_ANSWER = '（前にも同じ頼みに答えた。その答えは写さず、いまの設定で新しく答える）';
+
+/** 頼みの文を比べる形（調べものの結果の印・空白・句読点を除く）。 */
+function requestKey(text: string): string {
+  return text.replace(/^（[^）]{0,40}結果）/, '').replace(/[\s。、．，！？!?…・〜~「」]/g, '');
+}
+
+/**
+ * いまの頼みと同じ頼み（「おはよう」と「おはようございます」も同じとみなす）か（仕様書 第10.7.4.2節。第 0.599.3 版）。
+ *
+ * @remarks 短い方が 2 字以上で、長い方がそれで始まり、違いが 6 字までなら同じとみなす
+ */
+export function sameRequest(a: string, b: string): boolean {
+  const x = requestKey(a);
+  const y = requestKey(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.length >= 2 && long.startsWith(short) && long.length - short.length <= 6;
+}
+
+/**
+ * いまの頼みと同じ前の頼みは、答えを逐語で渡さない（仕様書 第10.7.4.2節。第 0.599.3 版）。
+ *
+ * @remarks
+ * 同じ頼みを繰り返すのは、前の答えが合っていなかったか、改めて聞きたいときである。前の答えを渡すと、推論がそのまま写す。
+ * 2026-11-16 に、方言で答えていた間の「おはよう」の答えを、話し方を外した後も 10 回中 10 回そのまま写した。
+ * 「標準語で話して」にも、前の取り違えた答えを写した。頼んだこと自体は残す（「前にも聞いた」は分かる）
+ */
+function hideRepeatedAnswers(rows: Conversation[], message: string): Conversation[] {
+  if (!message.trim()) return rows;
+  return rows.map((c) => (sameRequest(c.message, message) ? { ...c, reply: REPEATED_ANSWER } : c));
 }
 
 /** 話に出たものと最後に頼んだ業務をそろえて、作業の記憶にする。 */
@@ -455,6 +500,7 @@ export function situationText(m: WorkingMemory, max: number, opts: { turns?: num
   const build = (mentions: string[], sum: string, turns: string[]) => [
     title, ...head,
     ...(mentions.length ? ['### 話に出たもの（新しい順。開くときは ID とリンクを使う）', ...mentions] : []),
+    ...(sum || turns.length ? [STYLE_NOT_INHERITED] : []),
     ...(sum ? ['### 今日のここまでの要約', sum] : []),
     ...(turns.length ? [`### 直近のやり取り（古い順${m.continuedFrom ? `。先頭は前に使った日 ${m.continuedFrom} の続き` : ''}）`, ...turns] : []),
   ].join('\n');
@@ -506,7 +552,7 @@ export function weekText(m: WorkingMemory, max: number, onlyReferred = false): s
   const referred = m.week.filter((d) => m.referred.includes(d.day));
   const others = onlyReferred ? [] : m.week.filter((d) => !m.referred.includes(d.day));
   if (!referred.length && !others.length) return '';
-  const title = '## 1 週間の記憶（本人が秘書と話した日の 7 日分。新しい日から。「〇曜日に頼んだ」はここから探す）';
+  const title = `## 1 週間の記憶（本人が秘書と話した日の 7 日分。新しい日から。「〇曜日に頼んだ」はここから探す）\n${STYLE_NOT_INHERITED}`;
   let left = max - title.length - 1;
   const parts: string[] = [];
   for (const d of referred) {

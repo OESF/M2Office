@@ -37,6 +37,8 @@ export async function profiledTools(
     return {
       name: t.name, description,
       ...(t.args ? { args: t.args } : {}),
+      // 相手の引数の定義をそのまま持つ（第48.6節）
+      ...(t.inputSchema ? { inputSchema: t.inputSchema } : {}),
       // 説明の変わらないツールは、決めた危険度と役割を残す。変わったツールで役割を見ていたものは、初期値に戻す
       risk: before && (same || !before.roleReviewed) ? before.risk : initialRisk(t, preset),
       // 管理者が見た役割だけを残す。見ていない役割は、取り直すたびに決め直す（決め方を直したときに古い答えが残らないように）

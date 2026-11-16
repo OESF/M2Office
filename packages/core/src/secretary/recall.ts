@@ -12,7 +12,7 @@
 
 import type { AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
-import { jstDay } from '../memory/learn.js';
+import { isSpeakingStyleMemory, jstDay, withoutSpeakingStyle } from '../memory/learn.js';
 import { jobLabel, learnableWork, readWorkAnswers } from '../memory/work.js';
 import type { EvidenceItem } from './catalog.js';
 import { MEMORY_BUDGET, situationText, weekText, type WorkingMemory } from './working-memory.js';
@@ -96,6 +96,15 @@ export function caseMailLine(m: { name: string; reply: number; action: number; w
 }
 
 /**
+ * 覚えていることの後ろに置く、答える前の確かめ（仕様書 第10.5.6節。第 0.599.3 版）。
+ *
+ * @remarks
+ * 今日のやり取りに、同じ挨拶へ方言で答えた記録があると、推論が答えをそのまま写した。「標準語で話して」には、前に画面の設定の話で答えた記録を写した（2026-11-16）。
+ * 秘書への指示の中だけでは効かず、記録の後ろにも置いたら標準語になった（本物の推論で 9 回中 9 回）
+ */
+export const ANSWER_FRESH = '（答える前の確かめ: 上の記録に同じような依頼と答えがあっても、その答えを写さず、いまの依頼に新しく答える。文字の答えは方言を使わない標準語で書く。話し方の頼みは設定の変更の頼みではない）';
+
+/**
  * 本人についての記憶を集める。
  *
  * @param agents 業務の名前を引くための定義
@@ -112,7 +121,7 @@ export async function recall(
 ): Promise<Recall> {
   // 1 つが読めなくても答えは返す（記憶が欠けても、秘書が使えなくなるよりよい）
   const safe = <T>(read: () => Promise<T[]>): Promise<T[]> => Promise.resolve().then(read).catch(() => []);
-  const [today, digests, allMemories, work, profile, settings, cases] = await Promise.all([
+  const [today, digests, storedMemories, work, profile, settings, cases] = await Promise.all([
     safe(() => repo.listConversationsOfDay(tenantId, userId, jstDay(now))),
     safe(() => repo.listConversationDigests(tenantId, userId, DIGEST_SCAN)),
     safe(() => repo.listMemories(tenantId, userId)),
@@ -121,11 +130,14 @@ export async function recall(
     Promise.resolve().then(() => repo.getUserSettings(tenantId, userId)).catch(() => null),
     safe(() => repo.listCaseNotes(tenantId, userId, { limit: CASES_MAX })),
   ]);
+  // 秘書の話し方の記憶は使わない（話し方は個人設定が正。第11.2節）。一覧には残り、本人が削除できる
+  const allMemories = storedMemories.filter((m) => !isSpeakingStyleMemory(m.text));
   // 仕事のやり方の好みは、いつも渡す。事実の選び方とは別にする（第11.13.2節）
   const preferences = allMemories.filter((m) => m.kind === 'preference').slice(0, PREFERENCE_MAX);
   const memories = allMemories.filter((m) => m.kind !== 'preference');
   // 本人の像は、覚えることを許している人だけに使う（第11.13.1節）
-  const profileText = profile && settings?.memory.learning !== false ? profile.body : '';
+  // 本人の像の中の秘書の話し方（「博多弁を使用している」など）は使わない（第11.2節）
+  const profileText = profile && settings?.memory.learning !== false ? withoutSpeakingStyle(profile.body) : '';
 
   // 今日のやり取り（古い順に並べる）
   const todayLines = today.slice(-TODAY_MAX).map((c) => `- 依頼: ${cut(c.message)}\n  答え: ${cut(c.reply)}`);
@@ -162,7 +174,7 @@ export async function recall(
   const matched = [...new Set([...byMeaning, ...byWords])].slice(0, DIGEST_MATCH);
   const digestLines = [...recent, ...matched]
     .sort((a, b) => a.day.localeCompare(b.day))
-    .map((d) => `- ${d.day}: ${cut(d.summary, 600)}`);
+    .map((d) => `- ${d.day}: ${cut(withoutSpeakingStyle(d.summary), 600)}`);
 
   // 覚えた事実。多ければ、意味の近いもの → 言葉の重なるもの → 新しいものの順に選ぶ（第11.13.4節）
   const byId = new Map(memories.map((m) => [m.id, m]));
@@ -237,6 +249,9 @@ export async function recall(
     '前に頼んだ業務の様子（いつ頼んだか・完了したか・失敗したか）は、1 週間の記憶の「頼んだ業務」から答えてください。業務の答えの中身が書かれていなければ、完了したことと、結果は実行の記録で見られることを伝えてください（頼み直さない）。',
     '',
     ...all,
+    '',
+    // 記録の後ろにも置く。前に同じ挨拶へ方言で答えた記録があると、答えをそのまま写した（2026-11-16。仕様書 第10.5.6節）
+    ANSWER_FRESH,
   ].join('\n');
   const counts = [
     profileText ? '本人の像' : '',

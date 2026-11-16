@@ -8,7 +8,7 @@
  * @see 仕様書 第10.11.7節 終わったことを伝える
  */
 
-import { AG05_WEEKLY_BRIEF, LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS, PLAN_REPORT_AGENT_ID, PROACTIVE_TRIGGER, mentionsOfRun, planProgress } from '@m2office/core';
+import { AG05_WEEKLY_BRIEF, LOOKUP_AGENT_ID, MORNING_BRIEF, OFFICIAL_AGENTS, PLAN_REPORT_AGENT_ID, PROACTIVE_TRIGGER, REQUEST_LABEL, mentionsOfRun, planProgress } from '@m2office/core';
 import type { Repository } from '@m2office/core';
 import { randomUUID } from 'node:crypto';
 
@@ -76,11 +76,13 @@ export async function listLookups(
     const name = isLookup ? null : (nameOf(job.agentId) ?? '業務');
     const steps = await repo.listRunSteps(tenantId, run.id);
     const firstText = Object.values(job.input).find((v): v is string => typeof v === 'string' && v.trim() !== '');
+    // 人に見せる短い頼み（本文の HTML を含む長い頼みのとき、業務を起こした側が添える。第47.6節）
+    const label = typeof job.input[REQUEST_LABEL] === 'string' && job.input[REQUEST_LABEL] ? job.input[REQUEST_LABEL] : null;
     // いま呼んでいるツールの言葉と、その動きを始めた時刻（第10.11.6節）
     const now = done || run.status === 'awaiting_approval' ? null : currentActivity(steps);
     out.push({
       runId: run.id,
-      request: job.agentId === MORNING_BRIEF.id ? '今朝のブリーフ' : job.agentId === AG05_WEEKLY_BRIEF.id ? '今週のブリーフ' : String(job.input['request'] ?? firstText ?? name ?? ''),
+      request: job.agentId === MORNING_BRIEF.id ? '今朝のブリーフ' : job.agentId === AG05_WEEKLY_BRIEF.id ? '今週のブリーフ' : String(label ?? job.input['request'] ?? firstText ?? name ?? ''),
       agentName: name,
       agentId: job.agentId,
       proactive: job.input['trigger'] === PROACTIVE_TRIGGER,

@@ -9,6 +9,7 @@
  */
 
 import type { EvalCase } from '@m2office/shared';
+import type { LlmToolCall, LlmToolRequest } from './tools.js';
 
 /** モデルの役割。実際のモデル名は設定で解決する。 */
 export type ModelTier = 'fast' | 'standard' | 'advanced';
@@ -155,6 +156,12 @@ export interface LlmProvider {
    * 使った量が応答に無いときは、文字数から多めに見積もる（費用を少なく数えないため）
    */
   completeStream?(req: LlmRequest, onText: LlmTextSink): Promise<LlmResponse>;
+  /**
+   * 道具の定義を渡し、呼び出しを構造で受け取る（推論の道具呼び出しの機能。仕様書 第48.6節、ADR-0149）。
+   *
+   * @remarks 接続の業務（1 本の会話）が使う。持たない提供者（見本など）では未定義にし、呼び出し側は文の約束（```tool）に戻す
+   */
+  completeTools?(req: LlmToolRequest): Promise<LlmResponse & { toolCalls: LlmToolCall[] }>;
   /**
    * 画像や PDF から文字を読み取る（OCR。仕様書 第9.4.1節、Q-56、ADR-0017）。
    *

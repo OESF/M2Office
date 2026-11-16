@@ -3,7 +3,7 @@
  *
  * **校正は助言である。** 公開してよいかを決めるのは責任者で、本文を勝手に直さない（直し案を示すだけ）。
  * 決まったプログラムの確かめは、業種ごとの言葉の一覧（断定・最上級・効き目の保証・体験談・治療の前後・費用の強調）と、
- * 個人の情報らしい書き方と、出典の無さを見る。推論の確かめは、表現の決まりと出典の無い断定を文脈で読む。
+ * 個人の情報らしい書き方と、調べたページの無さを見る。推論の確かめは、表現の決まりと根拠の確かめが要る断定を文脈で読む（第32.7.2節）。
  * 言葉の一覧は運営が持ち、会社に作らせない（ADR-0028）。どの決まりを当てるかは AI が選ぶ（rules.ts。第32.18.3節）。
  */
 
@@ -75,7 +75,7 @@ function around(body: string, index: number, length: number): string {
 /**
  * 決まったプログラムの校正。
  *
- * @param sources 出典の数（0 なら出典が無いと指摘する）
+ * @param sources 調べたページの数（0 なら、事実を確かめられないと指摘する）
  * @returns 指摘（同じ箇所・同じ理由は 1 つにまとめる）
  */
 export function ruleReview(body: string, rules: readonly ColumnRuleSet[], sources: number): ColumnReviewItem[] {
@@ -96,7 +96,7 @@ export function ruleReview(body: string, rules: readonly ColumnRuleSet[], source
     }
   }
   if (sources === 0) {
-    out.push({ quote: '', reason: '出典がありません。数字や効き目を書くときは、公的な機関・学会などの出典を付けてください', suggestion: '', by: 'rule', kind: 'source' });
+    out.push({ quote: '', reason: '調べたページがありません。数字や効き目は、公的な機関・学会などの情報で確かめてください', suggestion: '', by: 'rule', kind: 'source' });
   }
   return out;
 }
@@ -112,7 +112,7 @@ function reviewPrompt(body: string, rules: readonly ColumnRuleSet[]): string {
   return [
     'あなたは Web のコラムの校閲担当です。下の本文を読み、次の点で問題のある箇所を挙げてください。',
     `1. 表現の決まり: ${law}`,
-    '2. 出典の無い断定（数字・統計・効き目を、出典の番号 [n] なしに言い切っている）',
+    '2. 根拠の確かめが要る断定（数字・統計・効き目・制度を言い切っている箇所。公的な情報で確かめるべき所）',
     '3. お客様・患者を特定しうる事例や名前',
     '決まり:',
     '- 問題の無い箇所は挙げない。迷う箇所だけ挙げる。多くても 8 つまで',

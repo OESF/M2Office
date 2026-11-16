@@ -4,6 +4,7 @@
  * @see 仕様書 第20.2節 LLM 抽象化層
  */
 
+import { openAiToolBody, openAiToolCalls, type LlmToolCall, type LlmToolRequest } from './tools.js';
 import type { Logger } from '../log/logger.js';
 import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmTranscribeRequest, type LlmTranscribeResponse, type LlmImageGenerateRequest, type LlmProvider, type LlmRequest, type LlmResponse, type LlmSpeechRequest, type LlmTextSink, type LlmVideoRequest, type ModelTier } from './provider.js';
 import { pcmToWav, wavDurationMs } from '../media/wav.js';
@@ -178,6 +179,32 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     const used = json.usage ?? {};
     return {
       text: json.choices?.[0]?.message?.content ?? '',
+      tokensUsed: used.total_tokens ?? (used.prompt_tokens ?? 0) + (used.completion_tokens ?? 0),
+      ...(used.prompt_tokens !== undefined ? { inputTokens: used.prompt_tokens } : {}),
+      ...(used.completion_tokens !== undefined ? { outputTokens: used.completion_tokens } : {}),
+      model: json.model ?? model,
+    };
+  }
+
+  /**
+   * 道具の定義を渡し、呼び出しを構造で受け取る（OpenAI 互換の `tools`。仕様書 第48.6節）。退避は {@link complete} と同じ。
+   */
+  async completeTools(req: LlmToolRequest): Promise<LlmResponse & { toolCalls: LlmToolCall[] }> {
+    const body = openAiToolBody(req);
+    const { res, model } = await this.withFallback(req.tier, (m) => fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({ model: m, messages: body.messages, tools: body.tools, max_tokens: req.maxOutputTokens }),
+    }), 'LLM 呼び出しに失敗しました');
+    const json = (await res.json()) as {
+      model?: string;
+      choices?: { message?: { content?: string | null; tool_calls?: { id?: string; function?: { name?: string; arguments?: string }; extra_content?: unknown }[] } }[];
+      usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number };
+    };
+    const used = json.usage ?? {};
+    const out = openAiToolCalls(json.choices?.[0]?.message, req.tools.map((t) => t.name));
+    return {
+      text: out.text, toolCalls: out.toolCalls,
       tokensUsed: used.total_tokens ?? (used.prompt_tokens ?? 0) + (used.completion_tokens ?? 0),
       ...(used.prompt_tokens !== undefined ? { inputTokens: used.prompt_tokens } : {}),
       ...(used.completion_tokens !== undefined ? { outputTokens: used.completion_tokens } : {}),

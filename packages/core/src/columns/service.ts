@@ -8,11 +8,12 @@
  */
 
 import { mcpSiteOf, type SiteHandOff } from '../connectors/site-handoff.js';
+import { resolveCitations, withoutQuotes } from './citation.js';
 import type { OutputSite } from '../connectors/sites.js';
 import type { CompanyDesignTokens } from '@m2office/shared';
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  canUseAgent, WEB_COLUMNS_EXTENSION_ID,
+  canUseAgent, stripSourceMarks, WEB_COLUMNS_EXTENSION_ID,
   type ColumnCoverKind, type ColumnImageStyle, type ColumnReviewItem, type ColumnRuleSet, type ColumnWordPress, type WebColumn, type WebColumnCover,
   type WebColumnSettings, type WebColumnVersion,
 } from '@m2office/shared';
@@ -145,11 +146,12 @@ function monthStartIso(now = new Date()): string {
 const charCount = (s: string) => s.replace(/\s/g, '').length;
 
 /**
- * 記事に入れる本文（Markdown）。末尾に出典・監修者・AI が書いたことの表示（入のとき）を足す（第32.9節）。
+ * 記事に入れる本文（Markdown）。末尾に監修者・AI が書いたことの表示（入のとき）を足す（第32.9節）。
+ *
+ * @remarks 調べたページ（出典）は記事に載せない。本文に残った出典の番号も外す（第32.7.2節）
  */
-export function finalMarkdown(v: Pick<WebColumnVersion, 'body' | 'sources'> & { cover?: WebColumnCover | null }, s: Pick<WebColumnSettings, 'supervisor' | 'aiNotice'>): string {
-  const parts = [v.body.trim()];
-  if (v.sources.length > 0) parts.push(['## 出典', '', ...v.sources.map((x, i) => `${i + 1}. [${x.title || x.url}](${x.url})`)].join('\n'));
+export function finalMarkdown(v: Pick<WebColumnVersion, 'body'> & { cover?: WebColumnCover | null }, s: Pick<WebColumnSettings, 'supervisor' | 'aiNotice'>): string {
+  const parts = [stripSourceMarks(v.body.trim())];
   if (s.supervisor?.name) parts.push(`監修: ${[s.supervisor.title, s.supervisor.name].filter(Boolean).join(' ')}`);
   if (s.aiNotice) parts.push(`この記事は AI の下書きをもとに、担当者が確かめて掲載しています。${v.cover?.kind === 'ai' ? 'カバー画像は AI で作成しました。' : ''}`);
   return parts.join('\n\n');
@@ -261,10 +263,13 @@ export class ColumnService {
         style: styleText({ ...settings.writingStyle, selfReference: '' }), selfReference: settings.writingStyle.selfReference,
         ...(tendency ? { tendency } : {}), ...(voice ? { voice } : {}),
       });
+      // 引用の出典の印を、本物のページの題名と URL にする（第32.7.2節）
+      const cited = await resolveCitations(draft.body, draft.sources, this.deps.pagesFor?.(who.tenantId) ?? null);
+      draft.body = cited.body;
       const review = [...mergeReview(
         ruleReview(draft.body, settings.webColumns.rules, draft.sources.length),
         await aiReview(llm, draft.body, settings.webColumns.rules),
-      ), ...(await this.similar(who.tenantId, draft.body, draft.sources))];
+      ), ...cited.review, ...(await this.similar(who.tenantId, draft.body, draft.sources))];
       const title = draft.titles[0] ?? c.theme;
       // カバーを作れなくても、下書きは残す（画面の「画像を作成」で作れる）
       const made = await this.makeCover(who, { title, description: draft.description, request: c.memo }, {}).catch((err: unknown) => {
@@ -443,6 +448,20 @@ export class ColumnService {
   }
 
   /**
+   * MCP でつないだサイトに頼んだ業務（子）の結果を受け取る（仕様書 第48.8節）。入れられたら「入れた」、入らなければ下書きに戻す。
+   *
+   * @param runId 子の実行（コラムが待っている実行と違えば、古い頼みなので何もしない）
+   * @remarks 危険度: write-internal（コラムの状態を変えるだけ）
+   */
+  async siteResult(who: ColumnViewer, id: string, runId: string, done: boolean, reason: string | null): Promise<void> {
+    const { store } = this.deps;
+    const c = await store.get(who.tenantId, id);
+    if (!c || c.runId !== runId || c.status !== 'awaiting') return;
+    await store.update(who.tenantId, id, done ? { status: 'placed', runId: null } : { status: 'draft', runId: null });
+    await this.audit(who, done ? 'column.place' : 'column.place_failed', id, { via: 'mcp', runId, ...(reason ? { reason } : {}) });
+  }
+
+  /**
    * 予約のコラムを、公開の日時に入れる（ワーカーが呼ぶ）。承認した版の指紋と違えば入れず、下書きに戻す。
    *
    * @returns 入れた先。入れられなければ理由
@@ -476,11 +495,16 @@ export class ColumnService {
         `題名: ${v.title}`,
         v.description ? `抜粋: ${v.description}` : '',
         '本文（HTML）:',
+        v.cover ? 'アイキャッチ画像: 渡したファイル（カバー画像）を相手に送り、記事のアイキャッチにしてください。本文には入れません。' : '',
         columnHtml(finalMarkdown(v, settings)),
-      ].filter(Boolean).join('\n'));
+      ].filter(Boolean).join('\n'), {
+        parent: { kind: 'column', id }, label: `コラム「${v.title}」をサイトの下書きに入れる`,
+        // 承認した版のカバー画像を預ける（相手への送信は子の会話で M2Office が行う。第48.8.1節）
+        ...(v.cover ? { files: [{ fileId: v.cover.fileId, name: `column-cover-${id.slice(4, 12)}.png`, mimeType: 'image/png', alt: v.cover.alt, purpose: '記事のアイキャッチ画像（カバー画像）' }] } : {}),
+      });
       if ('error' in r) return { error: r.error };
-      // 下書きを作るのは相手の道具（頼んだ業務が後で行う）。ここでは「入れた」にせず承認済みにとどめ、入らなかったときに入れ直せるようにする
-      await store.update(who.tenantId, id, { status: 'approved', submittedVersion: v.version, wpPostId: null, wpEditUrl: null, runId: null });
+      // 下書きを作るのは相手の道具（頼んだ業務＝子が後で行う）。子が終わるまで「承認待ち」にし、結果で「入れた」か「下書き」にする（親と子。第48.8節）
+      await store.update(who.tenantId, id, { status: 'awaiting', submittedVersion: v.version, wpPostId: null, wpEditUrl: null, runId: r.runId });
       await this.audit(who, 'column.place', id, { version: v.version, site: `mcp:${mcp}`, handedRun: r.runId });
       return { placed: false, editUrl: null, handedTo: r.siteName };
     }
@@ -558,7 +582,8 @@ export class ColumnService {
   private async similar(tenantId: string, body: string, sources: { title: string; url: string }[]): Promise<ColumnReviewItem[]> {
     const fetcher = this.deps.pagesFor?.(tenantId) ?? null;
     if (!fetcher || !sources.length) return [];
-    return similarityReview(body, sources, fetcher).catch(() => []);
+    // 出典を明示した引用は、似すぎとして指摘しない（第32.7.2節）
+    return similarityReview(withoutQuotes(body), sources, fetcher).catch(() => []);
   }
 
   // ---- カバー画像（第32.7.1節・第32.18.2節） -----------------------------------

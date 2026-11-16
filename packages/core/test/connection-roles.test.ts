@@ -92,7 +92,7 @@ test('推論が使えなくても、名前から説明を作る', async () => {
   assert.deepEqual(await profileConnectionSummary(llm, '医院のサイト', [{ name: 'get_notice', role: 'read', description: '' }]), { summary: 'お知らせの作成と公開ができます', site: true });
 });
 
-test('接続の業務は、管理者が役割を見るまで作らない。見たあとは「進める → 承認 → 確定」で、確定の道具は承認の後の段だけ', () => {
+test('接続の業務は、管理者が役割を見るまで作らない。見たあとは 1 本の会話の段 1 つで、すべての道具を持つ（第48章）', () => {
   assert.equal(connectionAgent(site(), new Set()), null, '役割を見ていなければ作らない');
   const reviewed = site({ tools: applyReviewedRoles(site().tools), profile: { ...site().profile!, reviewedAt: '2026-11-15T00:00:00Z' } });
   const all = new Set(reviewed.tools.map((t) => `clinic-site.${t.name}`));
@@ -101,25 +101,21 @@ test('接続の業務は、管理者が役割を見るまで作らない。見�
   assert.equal(def.name, '医院のサイト');
   assert.equal(def.menu, false, 'メニューには出さない（秘書が取り次ぐ）');
   assert.match(def.routeHint!, /お知らせの作成と公開/);
+  assert.equal(def.steps.length, 1, '段の型（進める → 承認 → 確定）ではなく、1 本の会話の段 1 つ');
+  const [work] = def.steps;
+  assert.ok(work?.type === 'agent' && work.conversation, '1 本の会話の段');
+  assert.ok(work?.type === 'agent' && work.tools!.includes('clinic-site.confirm_notice_change') && work.tools!.includes('clinic-site.prepare_notice_change'), '確定の道具も持つ（呼んだ所で止める）');
   // 会社のサイトを扱う接続は、サイトの更新の付属の業務にする（第47.7節）
   const asSite = connectionAgent({ ...reviewed, profile: { ...reviewed.profile!, siteName: 'みどり皮膚科' } }, all, { site: true })!;
   assert.equal(asSite.id, siteConnectionAgentId('clinic-site'));
   assert.equal(asSite.id, 'site-updates:site-clinic-site', '利用範囲はサイトの更新と同じ');
   assert.equal(asSite.name, 'サイトの直し案（みどり皮膚科）');
   assert.match(asSite.routeHint!, /会社のサイト「みどり皮膚科」/);
-  const [work, gate, commit] = def.steps;
-  assert.equal(work?.type, 'agent');
-  assert.equal(gate?.type, 'approval');
-  assert.ok(gate?.type === 'approval' && gate.approver === 'requester', '依頼した本人が承認する');
-  assert.ok(work?.type === 'agent' && work.tools!.includes('clinic-site.prepare_notice_change') && !work.tools!.includes('clinic-site.confirm_notice_change'));
-  assert.ok(commit?.type === 'agent' && commit.tools!.includes('clinic-site.confirm_notice_change'));
-  // 定義の検証（承認ゲートの有無・段のツール）を通る
+  assert.ok(asSite.steps[0]?.type === 'agent' && asSite.steps[0].conversation?.present.startsWith('「みどり皮膚科」のサイトで'), '承認の 1 行目にサイトを出す');
+  // 定義の検証を通る（会話の段は、呼び出しの所で承認を求めるので承認ゲートを持つものとみなす）
   const registry = new ToolRegistry();
   for (const t of BUILTIN_TOOLS) registry.register(t);
   validateDefinition(def, registry.extend(connectorTools(reviewed)));
-  // 止めたツールは入れない
-  const withoutConfirm = connectionAgent(reviewed, new Set([...all].filter((n) => !n.endsWith('confirm_notice_change'))))!;
-  assert.equal(withoutConfirm.steps.length, 1, '確定の道具が無ければ「進める」だけ');
   // 読むだけの接続は作らない（秘書の調べものが使う）
   const readOnly = site({ tools: [{ name: 'get_notice', description: '', risk: 'read', role: 'read', roleReviewed: true }], profile: { ...site().profile!, reviewedAt: 'x' } });
   assert.equal(connectionAgent(readOnly, new Set(['clinic-site.get_notice'])), null);

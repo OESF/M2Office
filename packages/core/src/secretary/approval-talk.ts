@@ -24,6 +24,11 @@ export interface PendingTalkApproval {
   input: Record<string, unknown>;
   /** 承認の画面の 1 行目（何の承認か）。 */
   summary: string;
+  /**
+   * 1 本の会話の呼び出しの承認か（仕様書 第48.4節）。そうなら、直しは却下の理由として同じ会話に返し（業務をやり直さない）、
+   * 取りやめは理由なしの却下で業務を終える
+   */
+  conversation?: boolean;
   createdAt: string;
 }
 

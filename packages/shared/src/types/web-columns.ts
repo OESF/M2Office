@@ -161,7 +161,7 @@ export const COLUMN_PREPARE_DAYS = 7;
 
 /** 既定の設定。既定は切り（第32.2節）。 */
 export const DEFAULT_WEB_COLUMN_SETTINGS: WebColumnSettings = {
-  enabled: false, topics: [], audience: '', industry: '9999', rules: [], rulesBy: 'ai', supervisor: null, aiNotice: true, wordpress: null, aiIllustration: false, wpCategory: 'コラム',
+  enabled: false, topics: [], audience: '', industry: '9999', rules: [], rulesBy: 'ai', supervisor: null, aiNotice: false, wordpress: null, aiIllustration: false, wpCategory: 'コラム',
 };
 
 /** コラムの状態。 */
@@ -434,3 +434,15 @@ export const COLUMN_NARRATED_LIMITS = {
   bgmMs: 5 * 60_000,
   bgmTracks: 10,
 } as const;
+
+/**
+ * 本文から出典の番号（`[1]`・`[1, 3]`・`[1][2]` など）を外す（第32.7.2節）。第 0.598.0 版より前の版の本文に残っている。
+ *
+ * @remarks Markdown のリンク（`[文](URL)`）と、番号でない角かっこは残す
+ */
+export function stripSourceMarks(body: string): string {
+  return body
+    .replace(/[ \t\u3000]*\[\d{1,2}(?:\s*[,，、]\s*\d{1,2})*\](?!\()/g, '')
+    // 外したあとに残る「 。」を詰める
+    .replace(/[ \t\u3000]+([。、．，])/g, '$1');
+}

@@ -177,7 +177,7 @@ test('予約: 承認の後に日時が先なら予約にして待ち、その日
   assert.ok(notes.some((n) => /入れられませんでした/.test(n.title)));
 });
 
-test('似すぎ: 出典の文と 10 字のまとまりの 7 割以上が重なる文を指摘し、読めない出典は確かめない', async () => {
+test('似すぎ: 調べたページの文と 10 字のまとまりの 7 割以上が重なる文を指摘し、読めないページは確かめない', async () => {
   const src = '歯みがきは一日に二回、やわらかい歯ブラシで小さく動かしながら、一本ずつ丁寧にみがくことが勧められています。';
   assert.ok(overlapRatio(src, src) > 0.9);
   assert.ok(overlapRatio('まったく違う話題について、自分の言葉で書いた文章をここに置いています。', src) < 0.2);
@@ -192,7 +192,7 @@ test('似すぎ: 出典の文と 10 字のまとまりの 7 割以上が重な�
   const body = `## みがき方\n${src}\nうちでは、仕上げみがきの時間を短くする工夫を伝えています。お子さんが嫌がらないように声をかけます。`;
   const items = await similarityReview(body, [{ title: '手引き', url: 'https://example.jp/guide' }, { title: '止まっている', url: 'https://down.example.jp/' }], fetcher);
   assert.equal(items.length, 1);
-  assert.match(items[0]!.reason, /出典（手引き）の文とほぼ同じです/);
+  assert.match(items[0]!.reason, /調べたページ（手引き）の文とほぼ同じです/);
   assert.equal(items[0]!.kind, 'source');
   assert.deepEqual(await similarityReview(body, [{ title: '止まっている', url: 'https://down.example.jp/' }], fetcher), []);
 });

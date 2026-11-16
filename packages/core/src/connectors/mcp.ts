@@ -51,6 +51,8 @@ export interface McpToolInfo {
    * ツールの役割を決める手がかりに使う（仕様書 第47.4.1節）。目印が無ければ `undefined`
    */
   destructive?: boolean;
+  /** 相手の引数の定義（JSON Schema）をそのまま。入れ子・必須・列挙を落とさない（仕様書 第48.6節）。 */
+  inputSchema?: Record<string, unknown>;
 }
 
 /** ツールを呼んだ結果。失敗しても例外にせず、理由を返す。 */
@@ -106,6 +108,7 @@ export class HttpMcpClient implements McpClient {
             ...(typeof t.annotations?.readOnlyHint === 'boolean' ? { readOnly: t.annotations.readOnlyHint } : {}),
             ...(typeof t.annotations?.destructiveHint === 'boolean' ? { destructive: t.annotations.destructiveHint } : {}),
             ...(args ? { args } : {}),
+            ...(t.inputSchema && typeof t.inputSchema === 'object' ? { inputSchema: t.inputSchema as Record<string, unknown> } : {}),
           };
         }),
       };
@@ -233,7 +236,12 @@ export function argsFromInputSchema(schema: unknown): ToolArgsSchema | undefined
 
 function toArgSpec(raw: unknown): ArgSpec | null {
   if (!raw || typeof raw !== 'object') return null;
-  const r = raw as { type?: unknown; description?: unknown; enum?: unknown; items?: unknown };
+  const outer = raw as { type?: unknown; description?: unknown; anyOf?: unknown; oneOf?: unknown };
+  // 「数か空」のような枝（anyOf・oneOf）は、null でない最初の枝の型を使う。説明は外側を先にする
+  // （読めないと文字として扱い、相手が数を求める引数に文字を渡してしまう。2026-11-15 にアイキャッチの番号で確認）
+  const branches = (Array.isArray(outer.anyOf) ? outer.anyOf : Array.isArray(outer.oneOf) ? outer.oneOf : null) as { type?: unknown }[] | null;
+  const branch = outer.type === undefined && branches ? branches.find((b) => b && typeof b === 'object' && b.type !== 'null') : undefined;
+  const r = (branch ? { ...branch, ...(typeof outer.description === 'string' ? { description: outer.description } : {}) } : raw) as { type?: unknown; description?: unknown; enum?: unknown; items?: unknown };
   // 型が並び（["string","null"]）のときは null 以外の最初のもの
   const t = Array.isArray(r.type) ? r.type.find((x) => x !== 'null') : r.type;
   const type: ArgSpec['type'] = t === 'integer' || t === 'number' ? 'number'

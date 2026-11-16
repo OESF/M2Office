@@ -228,6 +228,11 @@ export interface Tool {
    *
    * @remarks 承認の画面で「Slack へ送ります（slack_send_message）」のように出すのに使う。内蔵のツールは持たない
    */
+  /**
+   * 引数の定義の JSON Schema（会社の接続の道具だけ。相手の定義をそのまま。仕様書 第48.6節）。
+   * 接続の業務（1 本の会話）は、これを推論の道具呼び出しの機能に渡し、呼ぶ前の確かめにも使う
+   */
+  jsonSchema?: Record<string, unknown>;
   connection?: {
     id: string; name: string; tool: string; labels?: Record<string, string>;
     /** 役割（仕様書 第47.4.1節）。承認の画面で見直しの結果を出すのに使う。 */

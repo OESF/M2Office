@@ -35,6 +35,12 @@ import { describeCall } from './describe-call.js';
 import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
 import { selectConnectionTools } from './tool-select.js';
+import {
+  CONVERSATION_CONTRACT_VERSION, CONVERSATION_MAX_ROUNDS, FILES_SEND, LOAD_ALL_BELOW, TOOLS_LOAD, TOOLS_LOAD_SPEC,
+  completeByText, conversationSystem, filesSendSpec, foldMessages, isFilesSendName, toolSpecOf, undeliveredFilesNote,
+} from './conversation.js';
+import { FILE_SEND_MAX_PER_RUN, handedFilesOf, sendHandedFile, type FileSendFormat, type HandedFile } from '../connectors/file-send.js';
+import { checkJsonArgs, type LlmChatMessage, type LlmToolCall } from '../llm/tools.js';
 import { expandQuery } from '../knowledge/expand.js';
 import { queryEmbedder } from '../knowledge/embed.js';
 import type { CardService } from '../cards/service.js';
@@ -94,6 +100,8 @@ export interface RunEngineDeps {
   connector: WorkspaceConnector;
   /** ファイルの中身の置き場。文書を扱うツールに渡す。 */
   files: FileStore;
+  /** 預けたファイルを相手に送る口（仕様書 第48.8.1節）。省略時は `fetch`。試しで差し替える */
+  fileSendFetch?: typeof fetch;
   /** アプリログ。省略時は何も書かない（開発規約 第7章）。 */
   logger?: Logger;
   /** Web での調査の提供者。`web.research` に渡す（仕様書 第9.4.2節）。 */
@@ -137,6 +145,12 @@ export interface RunEngineDeps {
    * @remarks 止めた後に書き込んだステップの中身を消すために使う。止めた側はその時点の中身しか消せないため
    */
   onCancelled?(run: Run): Promise<void>;
+  /**
+   * 業務が終わった（完了・失敗・却下で取りやめ）ときに呼ぶ（仕様書 第48.8節「親と子」）。
+   *
+   * @remarks 業務から業務へ頼んだとき（コラム → MCP のサイト）、子の結果を親に返すために使う。失敗しても業務の結果は変えない
+   */
+  onFinished?(run: Run, outcome: 'completed' | 'failed' | 'cancelled', reason: string | null): Promise<void>;
   /**
    * 名刺管理（内蔵の拡張。仕様書 第27章）。ツールに渡す。無ければ名刺のツールは「使えない」と返す。
    *
@@ -293,6 +307,26 @@ const BRIEF_NOTICE_MAX = 8000;
  *
  * @see 仕様書 第9.3節 実行ライフサイクル
  */
+/**
+ * 道具を選ぶ係（{@link selectConnectionTools}）に渡す依頼の文。**頼みそのものを先頭に置く**（仕様書 第47.4.3節）。
+ *
+ * @remarks
+ * 入力をそのまま JSON にして切ると、秘書が添えたこれまでの話（`context`。長い）が先に来て、頼みが切れて届かないことがあった
+ * （2026-11-16 に、「Slack の #general の最近のやり取りをまとめて」で Slack の道具が選ばれず、前の話のサイトの道具が選ばれた）。
+ * これまでの話と段の指示は、短くして後ろに付ける
+ */
+export function selectionRequest(instruction: string, input: Record<string, unknown>, lastText: string): string {
+  const { request, context, ...rest } = input;
+  const others = Object.keys(rest).length ? JSON.stringify(rest).slice(0, 1500) : '';
+  return [
+    typeof request === 'string' && request ? `頼み: ${request.slice(0, 2000)}` : '',
+    others ? `ほかの入力: ${others}` : '',
+    typeof context === 'string' && context ? `これまでの話（参考。頼みが「それ」「さっきの」を指すときだけ使う）:\n${context.slice(0, 1200)}` : '',
+    lastText ? `前の段の答え:\n${lastText.slice(0, 1500)}` : '',
+    `この段で行うこと:\n${instruction.slice(0, 1200)}`,
+  ].filter(Boolean).join('\n\n');
+}
+
 export class RunEngine {
   private readonly log: Logger;
 
@@ -449,6 +483,16 @@ export class RunEngine {
       if (stoppedDuring) return stoppedDuring;
       if (result.kind === 'failed') return this.fail(current, result.reason);
 
+      if (result.kind === 'awaiting') {
+        // 1 本の会話の段が、見える状態を変える呼び出しで止まった（仕様書 第48.4節）。cursor は進めない。
+        // 承認か却下（理由つき）の後、保存した会話から続ける
+        await repo.updateRun({
+          ...current, status: 'awaiting_approval',
+          tokensUsed: current.tokensUsed + result.tokensUsed, costJpy: current.costJpy + result.costJpy,
+        });
+        return { outcome: 'awaiting_approval', approvalId: result.approvalId };
+      }
+
       if (result.kind === 'confirm') {
         // 操作の確認で止める。cursor はこのステップのまま進めない。
         // 承認されると decideApproval が cursor を 1 つ進め、記録した操作を次の advance で実行する
@@ -545,11 +589,19 @@ export class RunEngine {
       detail: { decision, runId: run.id }, occurredAt: now,
     });
 
+    // 1 本の会話の呼び出し（第48.4節）: 承認なら行って続け、理由つきの却下なら理由を返して続ける。cursor は進めない
+    const inConversation = !!(stepRow.input as { conversation?: boolean } | null)?.conversation;
+    if (inConversation && (decision === 'approved' || (comment ?? '').trim())) {
+      await repo.updateRun({ ...run, status: 'queued' });
+      return { runId: run.id };
+    }
+
     if (decision === 'rejected') {
       await repo.updateRun({
         ...run, status: 'cancelled', endedAt: now,
-        failureReason: comment ?? '承認が却下されました',
+        failureReason: comment || '承認が却下されました',
       });
+      await this.finished(run, 'cancelled', comment || '承認が却下されました');
       return { runId: run.id };
     }
 
@@ -817,6 +869,258 @@ export class RunEngine {
     });
   }
 
+  /**
+   * 1 本の会話の段を動かす（仕様書 第48.3節・第48.4節、ADR-0149）。
+   *
+   * @remarks
+   * 相手の道具の説明どおりに、道具を呼んで答えを返す、を繰り返す。見える状態を変える呼び出し（人の判断が要るもの）を
+   * 呼んだら、行わずに止めて承認を作り、会話を段の記録に保存する。承認されたら、止めた呼び出しをそのとおりに行って答えを会話に返し、
+   * 却下（理由つき）なら理由をその呼び出しの答えとして返して続ける。推論をやり直さない。言い換えさせない
+   */
+  private async runConversationStep(
+    run: Run, def: AgentDefinition, step: AgentStep, input: Record<string, unknown>, requestedBy: string,
+    settings: TenantSettings, registry: ToolRegistry, ai: { llm: LlmProvider; research?: ResearchProvider; kind?: AiKind },
+  ): Promise<
+    | { kind: 'ok'; tokensUsed: number; costJpy: number }
+    | { kind: 'awaiting'; tokensUsed: number; costJpy: number; approvalId: string }
+    | { kind: 'failed'; reason: string }
+  > {
+    const { repo } = this.deps;
+    const { llm } = ai;
+    const conv = step.conversation!;
+    const maxRounds = conv.maxRounds ?? CONVERSATION_MAX_ROUNDS;
+    const stepTools = (step.tools ?? def.tools).filter((n) => registry.get(n));
+    const all = registry.allowed(stepTools);
+    type State = {
+      contract: number; messages: LlmChatMessage[]; loaded: string[]; rounds: number;
+      log: unknown[]; text: string;
+      /** 預けたファイルを送った回数（第48.8.1節。上限を数える） */
+      sent?: number;
+      /** 相手が受け付けた、預けたファイルの印（送れていないものを答えに付ける。第48.8.1節） */
+      delivered?: string[];
+      pending?: { call: LlmToolCall; skipped: string[]; approvalStepId: string };
+    };
+    // 頼んだ業務（親）が預けたファイル（第48.8.1節）
+    const handed = handedFilesOf(input);
+    const connectionId = all.find((t) => t.connection)?.connection?.id;
+    const steps = await repo.listRunSteps(run.tenantId, run.id);
+    let row = [...steps].reverse().find((x) => x.seq === run.cursor && x.stepId === step.id && x.kind === 'agent') ?? null;
+    let state = (row?.output as { conversation?: State } | null)?.conversation ?? null;
+    let tokensUsed = 0;
+    let spent = 0;
+    const save = async (status: RunStep['status'], endedAt: string | null = null) => {
+      const next: RunStep = { ...row!, status, output: { text: state!.text, tools: state!.log, conversation: { ...state!, messages: foldMessages(state!.messages) } }, endedAt };
+      row = next;
+      await repo.updateRunStep(run.tenantId, next);
+    };
+    try {
+      if (!state) {
+        const names = await this.companyNames(run.tenantId, settings);
+        const loadAll = all.length <= LOAD_ALL_BELOW;
+        const connection = all.find((t) => t.connection)?.connection;
+        const request = typeof input['request'] === 'string' ? input['request'] : JSON.stringify(input);
+        const context = typeof input['context'] === 'string' && input['context'] ? `\n\nこれまでの会話:\n${input['context']}` : '';
+        state = {
+          contract: CONVERSATION_CONTRACT_VERSION, rounds: 0, log: [], text: '',
+          loaded: loadAll ? all.map((t) => t.name) : [],
+          messages: [
+            {
+              role: 'system',
+              content: conversationSystem({
+                connectionName: connection?.name ?? def.name, summary: def.description,
+                company: [names.legalName && `会社: ${names.legalName}${names.shortName && names.shortName !== names.legalName ? `（${names.shortName}）` : ''}`].filter(Boolean).join('\n'),
+                tools: all, loadAll, files: handed,
+              }),
+            },
+            { role: 'user', content: `${request}${context}` },
+          ],
+        };
+        row = {
+          id: randomUUID(), runId: run.id, seq: run.cursor, stepId: step.id, kind: 'agent', status: 'running',
+          input: { instruction: '1 本の会話（第48章）', contract: CONVERSATION_CONTRACT_VERSION, ...(ai.kind ? { ai: ai.kind } : {}) },
+          output: null, startedAt: new Date().toISOString(), endedAt: null,
+        };
+        await repo.appendRunStep(run.tenantId, row);
+      }
+      // 止めていた呼び出しの続き: 承認なら行い、却下なら理由を返す（第48.4節）
+      if (state.pending) {
+        const gate = steps.find((x) => x.id === state!.pending!.approvalStepId);
+        const out = (gate?.output ?? {}) as { decision?: string; comment?: string | null };
+        if (out.decision !== 'approved' && out.decision !== 'rejected') return { kind: 'failed', reason: '承認の判断が見つかりません' };
+        const { call, skipped } = state.pending;
+        let answer: unknown;
+        if (out.decision === 'approved') {
+          answer = await this.invokeTool(run, def, run.cursor, { name: call.name, args: call.args }, requestedBy, registry, ai.research, llm);
+          state.log.push(answer);
+          await repo.updateRunStep(run.tenantId, { ...gate!, output: { ...(gate!.output as object), executed: true, tools: [answer] } });
+        } else {
+          answer = { rejected: true, reason: out.comment ?? '', note: '人が却下しました。理由に沿って直してください' };
+        }
+        state.messages.push({ role: 'tool', toolCallId: call.id, content: JSON.stringify(answer) });
+        for (const id of skipped) state.messages.push({ role: 'tool', toolCallId: id, content: JSON.stringify({ notExecuted: '前の呼び出しの承認を待っていたため、行っていません。要るなら、もう一度呼んでください' }) });
+        delete state.pending;
+        await save('running');
+      }
+
+      while (state.rounds < maxRounds) {
+        const stopped = await this.cancelledNow(run, tokensUsed, spent);
+        if (stopped) return { kind: 'failed', reason: stopped.outcome === 'cancelled' ? stopped.reason : '止められました' };
+        const last = state.rounds === maxRounds - 1;
+        const loadedTools = all.filter((t) => state!.loaded.includes(t.name));
+        const specs = last ? [] : [
+          ...loadedTools.map(toolSpecOf),
+          ...(all.length > loadedTools.length ? [TOOLS_LOAD_SPEC] : []),
+          ...(handed.length > 0 ? [filesSendSpec(handed)] : []),
+        ];
+        const messages = foldMessages(last ? [...state.messages, { role: 'user', content: 'ここまでに分かったことで、頼んだ人への答えを書いてください。道具はもう使えません。' }] : state.messages);
+        const tier = def.tier ?? 'standard';
+        const res = llm.completeTools && specs.length > 0
+          ? await llm.completeTools({ tier, messages, tools: specs, maxOutputTokens: STEP_OUTPUT_TOKENS })
+          : specs.length > 0
+            ? await completeByText(llm, tier, messages, specs, STEP_OUTPUT_TOKENS)
+            : { ...(await llm.complete({ tier, maxOutputTokens: STEP_OUTPUT_TOKENS, messages: messages.map((m) => (m.role === 'tool' ? { role: 'user' as const, content: `道具の答え: ${m.content}` } : { role: m.role, content: m.content })) })), toolCalls: [] };
+        tokensUsed += res.tokensUsed;
+        spent += costOf(res);
+        state.rounds += 1;
+        if (res.toolCalls.length === 0) {
+          // 預けたファイルを送れていなければ、答えの最初にそう書く（推論の言い分に任せない。第48.8.1節）
+          state.text = [undeliveredFilesNote(handed, state.delivered ?? []), res.text.trim()].filter(Boolean).join('\n');
+          state.messages.push({ role: 'assistant', content: res.text });
+          await save('succeeded', new Date().toISOString());
+          return { kind: 'ok', tokensUsed, costJpy: spent };
+        }
+        state.messages.push({ role: 'assistant', content: res.text, toolCalls: res.toolCalls });
+        if (res.text.trim()) state.text = res.text.trim();
+        for (const [i, call] of res.toolCalls.entries()) {
+          const reply = (content: unknown) => state!.messages.push({ role: 'tool', toolCallId: call.id, content: JSON.stringify(content) });
+          if (call.name === TOOLS_LOAD) {
+            const want = (Array.isArray(call.args['names']) ? call.args['names'] : []).filter((n): n is string => typeof n === 'string');
+            const found = all.filter((t) => want.includes(t.name)).map((t) => t.name);
+            state.loaded = [...new Set([...state.loaded, ...found])];
+            // files_send は取り寄せなくても呼べる（前に接続の名前を付けて頼まれても、そう返す）
+            const filesSend = handed.length > 0 && want.some((n) => isFilesSendName(n) && !found.includes(n));
+            reply({
+              loaded: found, notFound: want.filter((n) => !found.includes(n) && !(handed.length > 0 && isFilesSendName(n))),
+              ...(filesSend ? { note: `${FILES_SEND} は取り寄せずに、この名前のまま呼べます` } : {}),
+            });
+            continue;
+          }
+          if (handed.length > 0 && isFilesSendName(call.name) && !registry.get(call.name)) {
+            // 預けたファイルを送る（M2Office の道具。中身は親の承認で見ているので止めない。第48.8.1節）
+            const sent = await this.sendFile(run, connectionId, handed, call.args, state.sent ?? 0);
+            reply(sent);
+            state.sent = (state.sent ?? 0) + 1;
+            if ((sent as { sent?: boolean }).sent === true && typeof call.args['fileId'] === 'string') state.delivered = [...new Set([...(state.delivered ?? []), call.args['fileId']])];
+            continue;
+          }
+          const tool = registry.get(call.name);
+          if (!tool || !def.tools.includes(call.name) || !stepTools.includes(call.name)) { reply({ error: '使えない道具です' }); continue; }
+          if (!state.loaded.includes(call.name)) { reply({ error: `${TOOLS_LOAD} で取り寄せてから呼んでください` }); continue; }
+          // 呼ぶ前の確かめは、相手の元の定義（inputSchema）があるときだけ。簡単な形に写した定義は写し違いがありうるので、
+          // 確かめは相手に任せる（相手の断りは道具の答えとして返り、推論が直せる。第48.6節）
+          const problems = tool.jsonSchema ? checkJsonArgs(tool.jsonSchema, call.args) : [];
+          if (problems.length > 0) { reply({ error: `引数が正しくありません: ${problems.slice(0, 5).join('、')}` }); continue; }
+          if (needsHuman([{ name: call.name }], registry, settings.automation, def.id)) {
+            // 見える状態を変える呼び出し。行わずに止め、会話を保存して承認を作る（第48.4節）
+            const skipped = res.toolCalls.slice(i + 1).map((c) => c.id);
+            await save('running');
+            const approval = await this.suspendConversationCall(run, def, step, call, requestedBy, registry);
+            state.pending = { call, skipped, approvalStepId: approval.stepId };
+            await save('awaiting');
+            return { kind: 'awaiting', tokensUsed, costJpy: spent, approvalId: approval.id };
+          }
+          await this.markActivity(run.tenantId, row!, tool.activityLabel);
+          const result = await this.invokeTool(run, def, run.cursor, { name: call.name, args: call.args }, requestedBy, registry, ai.research, llm);
+          await this.markActivity(run.tenantId, row!, null);
+          state.log.push(result);
+          // 外から来た答えはデータとして返す（不変則 I-6）
+          reply(result);
+        }
+        await save('running');
+      }
+      return { kind: 'failed', reason: '会話の往復の上限に達しました' };
+    } catch (err) {
+      if (row && state) await save('failed', new Date().toISOString()).catch(() => undefined);
+      return { kind: 'failed', reason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * 預けたファイルを、相手の道具が示した送り先へ送る（仕様書 第48.8.1節）。
+   *
+   * @remarks
+   * 送れるのは預けたファイルだけ、送り先はその接続のサイトの https だけ（{@link sendHandedFile}）。
+   * 会社の AI の方針の接続ごとの送り先の決まり（`connectionBlocked`）も効く。監査ログに送り先のホストだけを残す（URL の道は一時の鍵を含むことがある）。
+   * 危険度: external-send（中身は親の承認で見たもの、送り先はその接続のサイトに限る）
+   */
+  private async sendFile(run: Run, connectionId: string | undefined, handed: HandedFile[], args: Record<string, unknown>, sentSoFar: number): Promise<unknown> {
+    const { repo } = this.deps;
+    const file = handed.find((f) => f.fileId === args['fileId']);
+    if (!file) return { error: '渡されたファイルではありません' };
+    if (sentSoFar >= FILE_SEND_MAX_PER_RUN) return { error: `この業務で送れるのは ${FILE_SEND_MAX_PER_RUN} 回までです` };
+    const conn = connectionId ? (await repo.listConnections(run.tenantId)).find((c) => c.id === connectionId) : undefined;
+    if (!conn) return { error: 'この業務の接続が分からないため、送れません' };
+    const blocked = await this.deps.connectionBlocked?.(run.tenantId, conn.id);
+    if (blocked) return { error: blocked };
+    const bytes = await this.deps.files.get(run.tenantId, file.fileId);
+    if (!bytes) return { error: 'ファイルを読めませんでした' };
+    const url = typeof args['url'] === 'string' ? args['url'] : '';
+    const format: FileSendFormat = args['format'] === 'multipart' || args['format'] === 'binary' ? args['format'] : 'json';
+    const jf = (args['jsonFields'] && typeof args['jsonFields'] === 'object' ? args['jsonFields'] : {}) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+    const names = { filename: str(jf['filename']), mimeType: str(jf['mimeType']), data: str(jf['data']), field: str(args['formField']) };
+    const r = await sendHandedFile({ file, bytes, url, serverUrl: conn.url, format, names }, this.deps.fileSendFetch);
+    let host = '';
+    try { host = new URL(url).hostname; } catch { /* 読めない URL はホストを残さない */ }
+    await repo.appendAudit({
+      id: randomUUID(), tenantId: run.tenantId, actorType: 'system', actorId: 'engine',
+      action: 'connection.file_send', targetType: 'run', targetId: run.id,
+      detail: { connectionId: conn.id, fileId: file.fileId, host, bytes: bytes.byteLength, format, ...('error' in r ? { error: r.error } : { status: r.status }) },
+      occurredAt: new Date().toISOString(),
+    });
+    if ('error' in r) return r;
+    // 相手の応答は外から来た文。データとして返す（不変則 I-6）
+    return { sent: r.ok, status: r.status, response: r.response, ...(r.ok ? {} : { note: '相手が受け付けませんでした' }) };
+  }
+
+  /**
+   * 1 本の会話の、見える状態を変える呼び出しで止め、承認を作る（仕様書 第48.4節）。
+   *
+   * @remarks 承認の中身は、止めた呼び出しそのもの（引数は決まっていて変わらない）と、直前の見直しの結果。依頼した本人が判断する
+   */
+  private async suspendConversationCall(
+    run: Run, def: AgentDefinition, step: AgentStep, call: LlmToolCall, requestedBy: string, registry: ToolRegistry,
+  ): Promise<{ id: string; stepId: string }> {
+    const { repo } = this.deps;
+    const now = new Date().toISOString();
+    const steps = await repo.listRunSteps(run.tenantId, run.id);
+    // 承認の画面に、ここまでの会話の段の文と道具の答え（見直しの結果）を出すため、段を済んだものとして渡す
+    const shown = steps.map((x) => (x.seq === run.cursor && x.stepId === step.id && x.kind === 'agent' ? { ...x, status: 'succeeded' as const } : x));
+    const gate: ApprovalStep = { id: `${step.id}:call`, type: 'approval', approverRole: [], approver: 'requester', present: step.conversation!.present };
+    const present = composeApprovalPresent({
+      def, gate, gateSeq: run.cursor + 1, steps: shown, artifacts: await repo.listArtifacts(run.tenantId, run.id),
+      plan: { step, calls: [{ name: call.name, args: call.args }] }, registry,
+    });
+    const runStep: RunStep = {
+      id: randomUUID(), runId: run.id, seq: run.cursor, stepId: `${step.id}:call`,
+      kind: 'approval', status: 'awaiting', input: { present, toolCalls: [{ name: call.name, args: call.args }], conversation: true },
+      output: null, startedAt: now, endedAt: null,
+    };
+    await repo.appendRunStep(run.tenantId, runStep);
+    const approval: Approval = {
+      id: randomUUID(), runStepId: runStep.id, tenantId: run.tenantId, approverRole: [], approverUserId: requestedBy,
+      compartment: def.compartment ?? '', present, decision: null, decidedBy: null, comment: null, decidedAt: null, createdAt: now,
+    };
+    await repo.createApproval(approval);
+    await repo.appendAudit({
+      id: randomUUID(), tenantId: run.tenantId, actorType: 'system', actorId: 'engine',
+      action: 'run.await_approval', targetType: 'run', targetId: run.id,
+      detail: { stepId: step.id, approvalId: approval.id, tools: [call.name], conversation: true }, occurredAt: now,
+    });
+    await this.askDeciders(run, approval, def.name, step.conversation!.present, requestedBy, now);
+    return { id: approval.id, stepId: runStep.id };
+  }
+
   private async runAgentStep(
     run: Run,
     def: AgentDefinition,
@@ -833,10 +1137,13 @@ export class RunEngine {
     mode: 'run' | 'plan' = 'run',
   ): Promise<
     | { kind: 'ok' | 'stopped'; tokensUsed: number; costJpy: number }
+    | { kind: 'awaiting'; tokensUsed: number; costJpy: number; approvalId: string }
     | { kind: 'confirm'; tokensUsed: number; costJpy: number; calls: ToolCall[] }
     | { kind: 'planned'; tokensUsed: number; costJpy: number; calls: ToolCall[]; unable: UnableCall[]; done: DoneCall[] }
     | { kind: 'failed'; reason: string }
   > {
+    // 1 本の会話の段（接続の業務。仕様書 第48章）は、段の型ではなく会話で動かす
+    if (step.conversation && mode === 'run') return this.runConversationStep(run, def, step, input, requestedBy, settings, registry, ai);
     const { repo } = this.deps;
     const { llm } = ai;
     // 文脈はメモリではなく永続化層から読み直す。承認後に別のワーカーが続けても同じ結果になる
@@ -860,7 +1167,7 @@ export class RunEngine {
       const visible = allowed.filter((t) => gatedByApproval || mode === 'plan' || !alwaysRequiresApproval(t.risk));
       // 会社の接続の道具が多い段では、要るものを先に選ばせる（仕様書 第47.4.3節）。内蔵の道具はすべて渡す
       const lastText = [...previous].reverse().map((p) => (p.output as { text?: unknown } | null)?.text).find((t): t is string => typeof t === 'string' && t.length > 0) ?? '';
-      const selection = await selectConnectionTools(llm, visible, `${step.instruction}\n\n入力: ${JSON.stringify(input).slice(0, 4000)}\n\n前の段の答え: ${lastText.slice(0, 3000)}`);
+      const selection = await selectConnectionTools(llm, visible, selectionRequest(step.instruction, input, lastText));
       const tools = selection.tools;
       const allowedNames = new Set(tools.map((t) => t.name));
       // 見せなかったツールがあれば、それは承認のあとの段で行うことを伝える。伝えないと推論が「ツールが使えないため行えない」と
@@ -895,8 +1202,6 @@ export class RunEngine {
       let spent = selection.response ? costOf(selection.response) : 0;
       // 必ず呼ぶツールを促したか（一度だけ）
       let nudged = false;
-      // どれか 1 つは呼ぶはずのツールを促したか（一度だけ。第47.7節）
-      let nudgedOne = false;
 
       for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
         // 最後の往復ではツールを使わせない。ここまでに分かったことで答えさせる
@@ -926,18 +1231,6 @@ export class RunEngine {
           nudged = true;
           history.push({ role: 'assistant', content: res.text });
           history.push({ role: 'user', content: `この段で必ず呼ぶツールを、まだ呼んでいません: ${missing.join('、')}。指示に従って呼んでください。` });
-          continue;
-        }
-        // どれか 1 つは呼ぶはずのツールを、どれも呼ばずに終えようとしたら、一度だけ促す（読むだけで済む頼みなら、そのまま答えさせる）
-        const oneOf = (step.requireOneOf ?? []).filter((n) => stepTools.includes(n) && (!selection.selected || allowedNames.has(n)));
-        if (calls.length === 0 && oneOf.length > 0 && !oneOf.some((n) => called.has(n)) && !nudgedOne && round < MAX_TOOL_ROUNDS - 1) {
-          nudgedOne = true;
-          history.push({ role: 'assistant', content: res.text });
-          history.push({
-            role: 'user',
-            content: `依頼が、作る・入れる・直す・公開するものなら、まだ道具で行っていません。次のどれかを呼んで進めてください: ${oneOf.join('、')}。`
-              + '文で答えて終えたり、道具を呼ばずに「行いました」「控えます」と書いたりしないでください。読むだけで済む依頼なら、そのまま答えてください。',
-          });
           continue;
         }
         if (calls.length === 0) {
@@ -1377,6 +1670,8 @@ export class RunEngine {
       const input = s.input as { toolCalls?: ToolCall[]; plannedStep?: number } | null;
       const output = s.output as { executed?: boolean } | null;
       if (s.kind !== 'approval' || s.status !== 'succeeded' || !input?.toolCalls || output?.executed) continue;
+      // 1 本の会話の呼び出しは、会話の段が続きとして行う（第48.4節）
+      if ((input as { conversation?: boolean }).conversation) continue;
       // 組み立てた段の操作は、その段のものとして実行する。操作の確認は、確認を求めた段（承認で進めた cursor の 1 つ手前）
       const stepIndex = input.plannedStep ?? current.cursor - 1;
       const results: unknown[] = [];
@@ -1453,6 +1748,7 @@ export class RunEngine {
       detail: { tokensUsed: run.tokensUsed, costJpy: run.costJpy, savedMinutes }, occurredAt: now,
     });
     await this.registerInLibrary(run);
+    await this.finished(run, 'completed', note);
     return { outcome: 'completed' };
   }
 
@@ -1480,7 +1776,17 @@ export class RunEngine {
       action: 'run.fail', targetType: 'run', targetId: run.id,
       detail: { reason }, occurredAt: now,
     });
+    await this.finished(run, 'failed', reason);
     return { outcome: 'failed', reason };
+  }
+
+  /** 業務が終わったことを知らせる（親と子。第48.8節）。知らせる側の失敗で業務の結果を変えない。 */
+  private async finished(run: Run, outcome: 'completed' | 'failed' | 'cancelled', reason: string | null): Promise<void> {
+    try {
+      await this.deps.onFinished?.(run, outcome, reason);
+    } catch (err) {
+      this.log.warn('業務の結果を頼んだ業務に返せませんでした', { runId: run.id, tenantId: run.tenantId, err: err instanceof Error ? err.message : 'unknown' });
+    }
   }
 }
 
@@ -1515,6 +1821,21 @@ type ToolCall = {
   /** 送り先が社内だけと確かめられた（仕様書 第9.4.0節）。送るツールでも、人の判断を要しない。 */
   internal?: boolean;
 };
+
+/**
+ * 子の業務（1 本の会話）が、相手の側で実際に何かを行ったか（下書き・準備・確定の道具が 1 つでもうまくいったか。第48.8節）。
+ *
+ * @remarks 業務が「完了」でも、道具を呼ばずに答えて終えたなら行っていない。親（コラムなど）を「入れた」にしない
+ */
+export function childDidWork(steps: RunStep[]): boolean {
+  return steps.some((s) => {
+    const tools = ((s.output ?? {}) as { tools?: unknown[] }).tools ?? [];
+    return tools.some((t) => {
+      const risk = (t as { risk?: string }).risk;
+      return (risk === 'draft' || risk === 'external-send' || risk === 'write-internal') && recordedCallFailure(t) === null;
+    });
+  });
+}
 
 /**
  * 承認の後に実行した操作の結果が、失敗か（失敗なら理由）。

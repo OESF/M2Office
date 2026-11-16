@@ -25,6 +25,7 @@ import { applyTheme } from './theme.js';
 import { applyTextSize, resetTextSizeForLogin } from './text-size.js';
 import { DebugOverlay } from './DebugPanel.js';
 import { setDebugMode } from './debug.js';
+import { installPressTracker } from './pressed.js';
 
 // 読み込みの途中で明るさが変わらないよう、描画の前に反映する（仕様書 第6.1.2節）
 // 申し込みのページは、紹介のサイトから移ってきたとき急に暗くならないよう、いつも明るい表示にする（第23.3.1節）
@@ -140,6 +141,8 @@ function Root() {
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root が見つかりません');
+// 押したボタンが答えを待つ間、回る印を出す（仕様書 第6.8節 原則 u13）
+installPressTracker();
 // 再生のページはログインの確かめ（/v1/me）を通さない。端末で何か月も開いたままにするため、開発の二重の実行もしない
 createRoot(root).render(location.hostname.startsWith('ops.')
   ? <StrictMode><Suspense fallback={null}><OpsRoot /></Suspense><TableColumns /></StrictMode>

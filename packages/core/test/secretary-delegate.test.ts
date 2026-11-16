@@ -213,6 +213,10 @@ test('送る依頼（「Slack に投稿して」）は調べものに回さな�
   assert.match(routing, /会社の接続（Slack）のメッセージ・チャンネル・人などを探す・読む依頼/);
   assert.equal(asksConnectionData('投稿はしないで、Slack で探して', [{ id: 'slack', name: 'Slack' }]), true, '打ち消しの「投稿はしない」は送る依頼ではない');
   assert.equal(asksConnectionData('Slack の使い方を教えて', []), false, '会社に接続が無ければ当てない');
+  // 「まとめて」「内容」も読む依頼（2026-11-16 に当たらず、推論が前の失敗の記録を見て断った）
+  assert.equal(asksConnectionData('slackの#generalの内容をまとめて', [{ id: 'slack', name: 'Slack' }]), true);
+  assert.equal(asksConnectionData('Slack の #general の最近のやり取りを要約して', [{ id: 'slack', name: 'Slack' }]), true);
+  assert.equal(asksConnectionData('Slack の #general の内容をまとめて資料を作って', [{ id: 'slack', name: 'Slack' }]), false, '作る依頼は業務の取次に任せる');
 });
 
 test('層 3 が「あとで伝える」と約束したら、実際に調べものを起こす。起こせなければ約束の文を返さない（第10.11.5.1節）', async () => {

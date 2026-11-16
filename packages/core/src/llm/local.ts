@@ -8,6 +8,7 @@
  * @see 仕様書 第8.6節 配備の形
  */
 
+import { openAiToolBody, openAiToolCalls, type LlmToolCall, type LlmToolRequest } from './tools.js';
 import { EMBEDDING_DIMENSIONS, type LlmEmbedRequest, type LlmEmbedResponse, type LlmExtractRequest, type LlmImageRequest, type LlmProvider, type LlmRequest, type LlmResponse, type LlmTextSink, type ModelTier } from './provider.js';
 import { readChatStream } from './stream.js';
 import { LlmRequestError } from './gemini.js';
@@ -91,6 +92,16 @@ export class LocalLlmProvider implements LlmProvider {
     const model = this.config.models[req.tier];
     const json = await this.post({ model, messages: req.messages, ...(req.maxOutputTokens ? { max_tokens: req.maxOutputTokens } : {}) });
     return this.toResponse(json, model);
+  }
+
+  /** 道具の定義を渡し、呼び出しを構造で受け取る（OpenAI 互換の `tools`。仕様書 第48.6節）。道具を扱えないモデルでは、窓口が断る */
+  async completeTools(req: LlmToolRequest): Promise<LlmResponse & { toolCalls: LlmToolCall[] }> {
+    const model = this.config.models[req.tier];
+    const body = openAiToolBody(req);
+    const json = await this.post({ model, messages: body.messages, tools: body.tools, ...(req.maxOutputTokens ? { max_tokens: req.maxOutputTokens } : {}) });
+    const choices = json['choices'] as { message?: { content?: string | null; tool_calls?: { id?: string; function?: { name?: string; arguments?: string }; extra_content?: unknown }[] } }[] | undefined;
+    const out = openAiToolCalls(choices?.[0]?.message, req.tools.map((t) => t.name));
+    return { ...this.toResponse(json, model), text: out.text, toolCalls: out.toolCalls };
   }
 
   /** 文を少しずつ受け取りながら推論する（OpenAI 互換の `stream`。仕様書 第43.11.2節）。 */

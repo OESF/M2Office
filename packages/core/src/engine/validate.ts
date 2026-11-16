@@ -42,7 +42,8 @@ export function validateDefinition(def: AgentDefinition, registry: ToolRegistry)
 
   // 2. 危険度に見合う承認ゲートがあるか
   const risky = registry.allowed(def.tools).filter((t) => alwaysRequiresApproval(t.risk));
-  const hasApproval = def.steps.some((s) => s.type === 'approval');
+  // 1 本の会話の段は、見える状態を変える呼び出しの所で止めて承認を求める（第48.4節）
+  const hasApproval = def.steps.some((s) => s.type === 'approval' || (s.type === 'agent' && !!s.conversation));
   if (risky.length > 0 && !hasApproval) {
     throw new DefinitionInvalidError(
       `承認ゲートが必要です。対象のツール: ${risky.map((t) => t.name).join(', ')}`,
@@ -70,16 +71,6 @@ export function validateDefinition(def: AgentDefinition, registry: ToolRegistry)
     const outside = step.required.filter((t) => !usable.includes(t));
     if (outside.length > 0) {
       throw new DefinitionInvalidError(`段「${step.id}」が必ず呼ぶツールが、その段で使えません: ${outside.join(', ')}`);
-    }
-  }
-
-  // 2e. どれか 1 つは呼ぶはずのツールも、その段で使えるツールの一部でなければならない（第47.7節）
-  for (const step of def.steps) {
-    if (step.type !== 'agent' || !step.requireOneOf) continue;
-    const usable = step.tools ?? def.tools;
-    const outside = step.requireOneOf.filter((t) => !usable.includes(t));
-    if (outside.length > 0) {
-      throw new DefinitionInvalidError(`段「${step.id}」がどれか 1 つ呼ぶはずのツールが、その段で使えません: ${outside.join(', ')}`);
     }
   }
 

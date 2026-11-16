@@ -112,6 +112,11 @@ test('MCP のサイトに入れるときは、そのサイトの業務を、元�
   const r = await handOff({ tenantId: 't', userId: 'u1' }, 'clinic', '次のお知らせを公開してください');
   assert.ok('runId' in r && r.siteName === 'みどり皮膚科クリニック');
   assert.deepEqual(jobs.map((j) => [j.agentId, j.requestedBy, j.origin, j.input['request']]), [['site-updates:site-clinic', 'u1', 'secretary', '次のお知らせを公開してください']]);
+  // 本文の HTML を含む頼みは人に見せず、短い頼みを添える（秘書のキャンバスの「ご依頼」に出す。第47.6節）
+  await handOff({ tenantId: 't', userId: 'u1' }, 'clinic', '次のコラムを入れてください\n本文（HTML）:\n<p>本文</p>', { parent: { kind: 'column', id: 'col-1' }, label: 'コラム「春の肌」をサイトの下書きに入れる', files: [{ fileId: 'cover-1', name: 'c.png', mimeType: 'image/png', purpose: 'アイキャッチ' }] });
+  assert.deepEqual(jobs[1]?.input['files'], [{ fileId: 'cover-1', name: 'c.png', mimeType: 'image/png', purpose: 'アイキャッチ' }], '承認したカバー画像を預ける（第48.8.1節）');
+  assert.equal(jobs[1]?.input['requestLabel'], 'コラム「春の肌」をサイトの下書きに入れる');
+  assert.deepEqual(jobs[1]?.input['parent'], { kind: 'column', id: 'col-1' });
   const none = await siteHandOff(repo, async () => [])({ tenantId: 't', userId: 'u1' }, 'clinic', 'x');
   assert.ok('error' in none, '業務が無ければ（役割を確かめていない・サイトの更新を入れていない）理由を返す');
 });
@@ -167,4 +172,27 @@ test('コラムやお知らせを入れるサイトは本人ごと: 使えるサ
   assert.deepEqual(await outputSiteOf(make({ site: 'mcp:clinic' }), 't', 'u1'), { key: 'mcp:clinic', name: 'みどり皮膚科クリニック' });
   const onlyMcp = await outputSiteOf(make({ scopes: { 'site-rest': { users: ['someone'], groups: [] } } }), 't', 'u1');
   assert.deepEqual(onlyMcp, { key: 'mcp:clinic', name: 'みどり皮膚科クリニック' }, '使えるサイトが 1 つならそれ');
+});
+
+test('親と子: MCP のサイトに頼んだ業務の結果を、頼んだコラム・お知らせに返す。道具を何も行わずに終えたら入れられなかったとする（第48.8節）', async () => {
+  const { siteChildFinished } = await import('../src/index.js');
+  const got: { kind: string; id: string; runId: string; done: boolean; reason: string | null }[] = [];
+  const parents = {
+    columns: { siteResult: async (_w: unknown, id: string, runId: string, done: boolean, reason: string | null) => { got.push({ kind: 'column', id, runId, done, reason }); } },
+    announcements: { siteResult: async (_w: unknown, id: string, runId: string, done: boolean, reason: string | null) => { got.push({ kind: 'announcement', id, runId, done, reason }); } },
+  };
+  const make = (input: Record<string, unknown>, tools: unknown[]) => ({
+    getJob: async () => ({ id: 'j', tenantId: 't', requestedBy: 'u1', input }),
+    listRunSteps: async () => [{ kind: 'agent', output: { tools } }],
+  }) as unknown as Repository;
+  const run = { id: 'r9', jobId: 'j', tenantId: 't' } as never;
+  await siteChildFinished(make({ request: 'x', parent: { kind: 'column', id: 'col-1' } }, [{ name: 'site.create_blog_draft', risk: 'draft', result: { text: '{"postId":1}' } }]), run, 'completed', null, parents);
+  await siteChildFinished(make({ request: 'x', parent: { kind: 'column', id: 'col-2' } }, []), run, 'completed', null, parents);
+  await siteChildFinished(make({ request: 'x', parent: { kind: 'announcement', id: 'a-1' } }, []), run, 'failed', 'LLM 呼び出しに失敗しました', parents);
+  await siteChildFinished(make({ request: 'x' }, []), run, 'completed', null, parents);
+  assert.deepEqual(got, [
+    { kind: 'column', id: 'col-1', runId: 'r9', done: true, reason: null },
+    { kind: 'column', id: 'col-2', runId: 'r9', done: false, reason: 'サイトの側で何も行いませんでした' },
+    { kind: 'announcement', id: 'a-1', runId: 'r9', done: false, reason: 'LLM 呼び出しに失敗しました' },
+  ], '親が無い業務には何もしない');
 });

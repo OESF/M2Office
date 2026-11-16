@@ -12,9 +12,9 @@ Node.js 22 以上。PostgreSQL への接続が必要です（`DATABASE_URL`）�
 ## 構成
 
 ```
-src/engine/      実行エンジン。承認による中断と再開、ジョブの投入（起こしたのが本人かシステムかを記録する）。一連の流れの中の承認の見分け（in-flow.ts。仕様書 第47.5節）。道具の多い会社の接続から段で使う道具を先に選ぶ（tool-select.ts。仕様書 第47.4.3節）。承認の画面に相手の見直しの結果と注意を出す（approval-present.ts）。実行を見られる人と承認を判断できる人（run-access.ts。権限区画に属する業務は区画に入っている人だけ。approval-compartments.ts で古い承認に区画を埋める。ADR-0096）
+src/engine/      実行エンジン。会社の接続の業務の 1 本の会話（conversation.ts の約束事・取り寄せ・畳み方。RunEngine.runConversationStep が、見える状態を変える呼び出しで止めて続ける。仕様書 第48章）。承認による中断と再開、ジョブの投入（起こしたのが本人かシステムかを記録する）。一連の流れの中の承認の見分け（in-flow.ts。仕様書 第47.5節）。道具の多い会社の接続から段で使う道具を先に選ぶ（tool-select.ts。仕様書 第47.4.3節）。承認の画面に相手の見直しの結果と注意を出す（approval-present.ts）。実行を見られる人と承認を判断できる人（run-access.ts。権限区画に属する業務は区画に入っている人だけ。approval-compartments.ts で古い承認に区画を埋める。ADR-0096）
 src/tools/       ツールの登録簿と内蔵ツール（quote.ts は見積書。金額は quoteTotals の決まった計算。recruit.ts は採用の文の点検）
-src/connectors/  メール・予定・タスク・チャット・本人の Google の連絡先（google/people.ts。第27.15節）への接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れとアプリの自動登録（oauth.ts。動的クライアント登録）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）。ツールの役割と接続の説明を推論で決める（profile.ts）・接続ごとの汎用の業務（connection-agent.ts。仕様書 第47.4.1節・第47.7節、ADR-0148）・コラムとお知らせを MCP のサイトの業務に頼む（site-handoff.ts。第47.6節）
+src/connectors/  メール・予定・タスク・チャット・本人の Google の連絡先（google/people.ts。第27.15節）への接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れとアプリの自動登録（oauth.ts。動的クライアント登録）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）。ツールの役割と接続の説明を推論で決める（profile.ts）・接続ごとの汎用の業務（connection-agent.ts。仕様書 第47.4.1節・第47.7節、ADR-0148）・コラムとお知らせを MCP のサイトの業務に頼む（site-handoff.ts。第47.6節）・頼んだ業務に預けたファイルを相手の示した送り先へ送る（file-send.ts。送り先はその接続のサイトの https だけ。第48.8.1節）
 src/chat/        グループの名前で共有する（group-share.ts。グループに合う Chat のスペースを探す・承認の画面に届く先とグループとの違いを出す。仕様書 第16.7.12.1節、ADR-0076）と、Chat で秘書に頼む受け口の部品（inbound.ts。出来事の読み取り・Google の署名の確かめ・置き場。第10.16節、ADR-0138）
 src/privacy/     データの渡し先（委託先）の一覧の組み立て（recipients.ts。第16.11.3節 G-3）
 src/files/       ファイルの置き場と、PDF・Excel・CSV・Word の読み書き（pdf-render.ts は帳票の PDF と見積書の罫線の表と印、quote-sample.ts は見積書の見本の読み取り）。
@@ -41,6 +41,7 @@ src/health/      接続先の健全性（呼び出しの成否と時間だけを
 src/retention/   Google から取得したデータの保持（期間を過ぎた実行の中身を消す、承認待ちの期限切れ）と、許可がなくなったときの業務の後始末
 src/llm/         LLM 抽象化層（OpenAI 互換、設定されていない会社の推論、自動テスト用のスタブ、ローカル AI の口 local.ts、
                  配備の形と会社の AI の方針から使う AI を決める policy.ts。仕様書 第8.6節・第16.3.7.1節）。
+                 推論の道具呼び出しの機能の共通の形（tools.ts。相手の JSON Schema を整えて渡し、元の定義で引数を確かめる。第48.6節）
                  models.ts は役割ごとの既定のモデルと、モデルごとの値段の表（出どころと確認日つき。第20.2.2節）
                  gemini.ts は一時的な失敗（混雑・障害・届かない・モデルが無い）のとき、同じ鍵のまま設定にあるほかのモデルへ退避する（3 回まで。第20.2.5節）。
                  動画（Veo）は作業を頼み、できるまで見に行き、鍵を付けて受け取る（延長に失敗したら最初の 8 秒を返す。第32.18.6節）

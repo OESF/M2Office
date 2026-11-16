@@ -522,6 +522,20 @@ export class AnnouncementService {
     return { status: 'published', outputs: await this.deps.store.outputs(who.tenantId, id) };
   }
 
+  /**
+   * MCP でつないだサイトに頼んだ業務（子）の結果を受け取る（仕様書 第48.8節）。Web の出し先を済みか失敗にする。
+   *
+   * @remarks 危険度: write-internal（出し先の記録を変えるだけ）
+   */
+  async siteResult(who: AnnouncementViewer, id: string, runId: string, done: boolean, reason: string | null): Promise<void> {
+    const out = (await this.deps.store.outputs(who.tenantId, id)).find((o) => o.channel === 'web');
+    if (!out || out.status !== 'waiting' || (out.result as { runId?: string }).runId !== runId) return;
+    await this.deps.store.setOutput(who.tenantId, id, 'web', {
+      status: done ? 'done' : 'failed', result: out.result, reason: done ? '' : (reason ?? 'サイトに入れられませんでした'), doneAt: new Date().toISOString(),
+    });
+    await this.audit(who, done ? 'announcement.web_done' : 'announcement.web_failed', id, { via: 'mcp', runId });
+  }
+
   /** 予約を取り消す（出す前だけ。Web の予約公開の記事は WordPress の側で消してもらう）。 */
   async cancel(who: AnnouncementViewer, id: string): Promise<string | null> {
     const a = await this.deps.store.get(who.tenantId, id);
@@ -584,14 +598,18 @@ export class AnnouncementService {
         scheduled && a.publishAt ? `公開の日時（予約）: ${a.publishAt}` : '',
         '本文（HTML）:',
         columnHtml(a.texts.web.body),
-      ].filter(Boolean).join('\n'));
+      ].filter(Boolean).join('\n'), {
+        parent: { kind: 'announcement', id: a.id },
+        label: publish ? `お知らせ「${a.texts.web.title}」をサイトで公開する` : `お知らせ「${a.texts.web.title}」をサイトの下書きに入れる`,
+      });
       if ('error' in r) {
         await this.deps.store.setOutput(who.tenantId, a.id, 'web', { status: 'failed', result: {}, reason: r.error, doneAt: at });
         return r.error;
       }
+      // 子が終わるまで「待っている」にし、結果で済み・失敗にする（親と子。第48.8節）
       await this.deps.store.setOutput(who.tenantId, a.id, 'web', {
-        status: 'done', result: { site: r.siteName, runId: r.runId },
-        reason: publish ? `「${r.siteName}」に頼みました。公開の前に、サイトの変わる所を見て承認してください` : `「${r.siteName}」に下書きを頼みました`, doneAt: at,
+        status: 'waiting', result: { site: r.siteName, runId: r.runId },
+        reason: publish ? `「${r.siteName}」に頼みました。公開の前に、サイトの変わる所を見て承認してください` : `「${r.siteName}」に下書きを頼みました`, doneAt: null,
       });
       return null;
     }
