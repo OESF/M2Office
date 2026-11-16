@@ -191,7 +191,7 @@ test('「〇〇のメールを探して」は、推論に選ばせずに秘書�
   const d = deps();
   const llm = llmWith({ route: 'none' });
   const s = new Secretary({ repo: d.repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
-  const ask = '三浦皮膚科クリニックのメールを探して';
+  const ask = '見本商事のメールを探して';
   const reply = await s.respond('t', 'u1', ask);
   assert.equal(d.lookups.length, 1, '調べものを起こす');
   assert.equal(d.lookups[0]!.request, ask);

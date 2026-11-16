@@ -48,7 +48,7 @@ export function siteKeyOfAgent(agentId: string): string | null {
 /** 当てるために、全角と半角・大文字と小文字・空白をそろえる。 */
 const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, '');
 
-/** 名前の終わりの一般的な言葉（「みうら皮膚科」でも「みうら皮膚科クリニック」に当てる）。 */
+/** 名前の終わりの一般的な言葉（「みどり皮膚科」でも「みどり皮膚科クリニック」に当てる）。 */
 const GENERIC_TAIL = /(クリニック|医院|病院|診療所|歯科医院|株式会社|有限会社|のサイト|のホームページ|サイト|ホームページ|ウェブサイト|webサイト)$/i;
 const GENERIC_HEAD = /^(株式会社|有限会社|医療法人(社団|財団)?)/;
 

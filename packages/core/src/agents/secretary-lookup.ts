@@ -64,8 +64,8 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
         'ほかに渡された書類（moreFileIds。「,」で区切ったファイルの ID）があれば、それぞれを file.read_text で読む（同時に呼んでよい）。2 つの版を比べる依頼なら file.compare を使ってよい。',
         '社内の規程や議事録が要るときは knowledge.search を使う。',
         'メールを探す依頼（「〇〇のメールを探して」「〇〇社と決めた条件のメールは？」）では、gmail.search と library.search を同時に呼ぶ。'
-          + 'gmail.search の query は、相手の名前・会社の名前・件名の言葉を、そのまま空白で区切って入れる（例: 「三浦皮膚科クリニック」。言葉は引用符で囲まずに入れ、分かれば from: や newer_than:1y も足す）。'
-          + 'library.search は、query に同じ言葉を、words に言い換え（会社の名前の略・「クリニック」と「医院」など）を入れる。メールのやり取りの要約（docType が「メールのやり取り」）と、メールで届いた資料が当たる。'
+          + 'gmail.search の query は、相手の名前・会社の名前・件名の言葉を、そのまま空白で区切って入れる（言葉は引用符で囲まずに入れ、分かれば from: や newer_than:1y も足す）。'
+          + 'library.search は、query に同じ言葉を、words に言い換え（会社の名前の略や、ほかの呼び方）を入れる。メールのやり取りの要約（docType が「メールのやり取り」）と、メールで届いた資料が当たる。'
           + 'どちらも 0 件なら、言葉を減らすか言い換えて、もう 1 回だけ探す。中身を聞かれたら、当たった資料を library.read で読む（使えるときだけ）。',
         '取引先の人の電話番号・メールアドレス・住所・役職や、名刺を交換した人を尋ねられたら、contacts.search で名刺を探す（使えるときだけ）。'
           + '交換した日で尋ねられたら from・to に日付を入れる。見つからなければ、推測せずに「名刺が見つかりませんでした」と答える。'
@@ -141,7 +141,7 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
     examples: [
       { title: '渡した書類について聞く', input: { request: 'この見積書の合計はいくらですか' } },
       { title: '規程と照らす', input: { request: 'この申請は経費規程に合っていますか' } },
-      { title: 'メールを探す', input: { request: '三浦皮膚科クリニックのメールを探して' } },
+      { title: 'メールを探す', input: { request: '見本商事のメールを探して' } },
       { title: '出張の行程を組む', input: { request: '10 月 1 日の 10 時から 15 時まで大阪の道頓堀の近くで会議。東京から日帰りで、新幹線の時刻も含めた行程を教えて' } },
     ],
     notes: [

@@ -225,7 +225,7 @@ test('メールの確認: 推論の振り分けを読み、返信・対応が要
 
 test('「〇〇のメールを探して」は未読の件数に当てず、メールを探す依頼として見分ける（第10.9.6節）', () => {
   const match = (m: string) => DIRECT_QUERIES.find((q) => q.patterns.some((p) => p.test(m)) && !q.excludes?.some((p) => p.test(m)))?.id;
-  for (const m of ['三浦皮膚科クリニックのメールを探して', 'A 社と決めた支払い条件のメールはどこ？', '先月の見積のメールを検索して', 'サンプル商事からのメールを出して']) {
+  for (const m of ['見本商事のメールを探して', 'A 社と決めた支払い条件のメールはどこ？', '先月の見積のメールを検索して', 'サンプル商事からのメールを出して']) {
     assert.equal(match(m), undefined, `${m} は件数の答えにしない`);
     assert.equal(mailSearchRequest(m), true, m);
     assert.equal(mailCheckRequest(m), false, `${m} は未読の振り分けにしない`);
