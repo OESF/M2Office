@@ -230,6 +230,10 @@ test('記事の形: 調べたページ（出典）は載せず、本文に残っ
   const md = finalMarkdown({ body: '保湿は大切です [1]。数字は 2 割 [2, 3]です。[詳しく](https://example.jp/a) は別に。', sources: [{ title: '手引き', url: 'https://example.go.jp' }] } as never, { supervisor: null, aiNotice: false });
   assert.ok(!md.includes('出典') && !md.includes('example.go.jp'), '調べたページは記事に載せない（第32.7.2節）');
   assert.equal(md, '保湿は大切です。数字は 2 割です。[詳しく](https://example.jp/a) は別に。', '番号は外し、リンクは残す');
+  // 長い空白でも遅くならない（CodeQL の js/polynomial-redos）
+  const started = Date.now();
+  finalMarkdown({ body: `${'\t'.repeat(50_000)}x${' '.repeat(50_000)}y`, sources: [] } as never, { supervisor: null, aiNotice: false });
+  assert.ok(Date.now() - started < 1000, '空白の長い本文もすぐ終わる');
   assert.ok(!md.includes('AI の下書き'));
   // 断り書きは、管理者が入れたときだけ（既定は入れない。何を断るかは公開する人が決める。Q-164）
   assert.equal(DEFAULT_TENANT_SETTINGS.webColumns.aiNotice, false);

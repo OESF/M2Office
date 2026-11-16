@@ -21,7 +21,7 @@
  * 会社の会話・メール・資料などの中身は使わない（問題集の見本のやり取りだけを使う）。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tsImport } from 'tsx/esm/api';
@@ -189,9 +189,14 @@ if (!stub) {
   mkdirSync(join(dir, 'results'), { recursive: true });
   // 同じ日に何度か回したら、前の結果を残して番号を付ける
   const day = new Date().toISOString().slice(0, 10);
+  // 確かめてから書くのではなく、無いときだけ作る（wx）。あれば番号を進める
   let file = join(dir, 'results', `${day}.md`);
-  for (let n = 2; existsSync(file); n++) file = join(dir, 'results', `${day}-${n}.md`);
-  writeFileSync(file, `${lines.join('\n')}\n`);
+  for (let n = 2; ; n++) {
+    try { writeFileSync(file, `${lines.join('\n')}\n`, { flag: 'wx' }); break; } catch (err) {
+      if (err?.code !== 'EEXIST') throw err;
+      file = join(dir, 'results', `${day}-${n}.md`);
+    }
+  }
   console.log(`結果: ${file}`);
 } else {
   console.log(lines.join('\n'));

@@ -5424,8 +5424,9 @@ console.log('\n■ 65. Web のコラム（内蔵の拡張。第32.18.1節）');
     col = (await call('a', `/v1/columns/${id}`, {}, 'member')).body;
     const exp = (await call('a', `/v1/columns/${id}/export`, {}, 'member')).body;
     const del = await call('a', `/v1/columns/${id}`, { method: 'DELETE' }, 'member');
-    col.column?.status === 'approved' && /AI の下書き/.test(exp.markdown ?? '') && !/<html/.test(exp.html ?? '') && del.status === 409
-      ? ok('承認すると、WordPress につないでいない会社では承認済みになり、本文を写せる。承認したものは削除できない')
+    // AI が書いたことの表示は、既定では入れない（管理者が入れたときだけ。第 0.596.0 版、Q-164）
+    col.column?.status === 'approved' && !/AI の下書き/.test(exp.markdown ?? '') && (exp.markdown ?? '').length > 0 && !/<html/.test(exp.html ?? '') && del.status === 409
+      ? ok('承認すると、WordPress につないでいない会社では承認済みになり、本文を写せる（AI の表示は既定で入れない）。承認したものは削除できない')
       : ng('承認の後が違う', JSON.stringify({ status: col.column?.status, exp: Object.keys(exp ?? {}), del: del.status }));
 
     // 下書きは削除できる
@@ -9603,8 +9604,8 @@ console.log('\n■ 138. 資料のメールの添付（本人が入れる・直�
     await owner.query(`delete from library_mail_watch where tenant_id in ('t-alpha', 't-beta')`);
     await owner.query(`delete from library_tombstones where tenant_id in ('t-alpha', 't-beta')`);
   };
-  /** メールから来た資料の名前（新しい順）。 */
-  const mailNames = async (who = 'member', tenant = 'a') => ((await call(tenant, '/v1/library?entry=mail', {}, who)).body.items ?? []).map((i) => i.originalName).sort();
+  /** メールの添付から来た資料の名前（新しい順）。やり取りの資料（形 `mail`。第44.18節）は除く。 */
+  const mailNames = async (who = 'member', tenant = 'a') => ((await call(tenant, '/v1/library?entry=mail', {}, who)).body.items ?? []).filter((i) => i.format !== 'mail').map((i) => i.originalName).sort();
   try {
     await clean();
     await call('a', '/v1/admin/extensions/library/enabled', { method: 'PUT', body: JSON.stringify({ enabled: true }) });

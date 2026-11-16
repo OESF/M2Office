@@ -197,7 +197,7 @@ test('承認の画面に、相手の見直しの結果（直す前と後）と�
         { name: 'clinic-site.prepare_notice_change', risk: 'draft', result: ext(JSON.stringify({ confirmationToken: 'a'.repeat(64), urlChangeWarning: 'URL が変わります。以前の URL は表示されなくなります' })) },
         { name: 'clinic-site.review_notice_change', risk: 'read', result: ext(JSON.stringify({
           current: { title: '診療時間', contentHtml: '<p>月曜は休診</p>', slug: 'a' },
-          proposed: { title: '診療時間', contentHtml: '<p>月曜と木曜は休診</p>', slug: 'a' },
+          proposed: { title: '診療時間', contentHtml: '<p>月曜と木曜は休診</p><scr<script>ipt>x</script><br>次の行', slug: 'a' },
           changedFields: ['contentHtml'],
         })) },
       ],
@@ -208,6 +208,8 @@ test('承認の画面に、相手の見直しの結果（直す前と後）と�
   assert.match(text, /contentHtml/);
   assert.match(text, /月曜は休診/);
   assert.match(text, /月曜と木曜は休診/);
+  assert.doesNotMatch(text, /<script/i, '入れ子の札を消し残さない（CodeQL の js/incomplete-multi-character-sanitization）');
+  assert.match(text, /\n> ?次の行|\n次の行/, '改行の札は改行にする');
   assert.doesNotMatch(text, /\*\*title\*\*/, '変わらない項目は出さない');
   assert.match(text, /注意（相手の言葉のまま）/);
   assert.match(text, /URL が変わります。以前の URL は表示されなくなります/);

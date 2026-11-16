@@ -10,6 +10,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import { stepLabel } from '../agents/index.js';
 import { hideInternalIds } from '@m2office/shared';
 import { describeCall, describeDone, type DescribeContext } from './describe-call.js';
+import { scanHtml } from '../site-updates/segments.js';
 
 // 以前ここで定義していた。core の利用者のために、ここからも書き出す
 export { hideInternalIds };
@@ -183,12 +184,30 @@ export function composeApprovalPresent(p: {
 /** 見直しの結果の値を、承認の画面に出す長さ。 */
 const REVIEW_VALUE_MAX = 1500;
 
-/** 見直しの結果の値を、人が読める文にする。HTML はタグを落とす。 */
+/** 行を区切る札（改行にする）。 */
+const LINE_BREAK_TAG = /^<(br|\/p|\/h\d|\/li)\b/i;
+
+/**
+ * 見直しの結果の値を、人が読める文にする。HTML は札と注釈を落とす。
+ *
+ * @remarks 札は {@link scanHtml}（前から 1 回だけ読む）で見分ける。正規表現で札を消すと、消し残しや遅い入力が出るため
+ */
 function reviewValue(v: unknown): string {
   if (v === null || v === undefined || v === '') return '（なし）';
   const text = typeof v === 'string' ? v : JSON.stringify(v, null, 1);
-  const plain = /<[a-z][\s\S]*>/i.test(text) ? text.replace(/<(br|\/p|\/h\d|\/li)\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim() : text;
+  const plain = text.includes('<') ? withoutTags(text).replace(/\n{3,}/g, '\n\n').trim() : text;
   return cut(hideInternalIds(plain), REVIEW_VALUE_MAX);
+}
+
+/** 札を外す。外して新しく札ができる入れ子（`<scr<script>ipt>`）もあるので、変わらなくなるまで外し、残った札の印は全角にする。 */
+function withoutTags(html: string): string {
+  let text = html;
+  for (let i = 0; i < 5; i++) {
+    const next = scanHtml(text).map((t) => (t.kind === 'text' ? t.raw : t.kind === 'tag' && LINE_BREAK_TAG.test(t.raw) ? '\n' : '')).join('');
+    if (next === text) break;
+    text = next;
+  }
+  return text.replace(/<(?=[a-z/!?])/gi, '＜');
 }
 
 /** 引用の形にする（複数行を保つ）。 */

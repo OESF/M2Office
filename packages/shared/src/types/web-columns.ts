@@ -441,8 +441,9 @@ export const COLUMN_NARRATED_LIMITS = {
  * @remarks Markdown のリンク（`[文](URL)`）と、番号でない角かっこは残す
  */
 export function stripSourceMarks(body: string): string {
+  // 空白の数に上限を付ける（上限の無い繰り返しから始まる正規表現は、長い空白で遅くなる）
   return body
-    .replace(/[ \t\u3000]*\[\d{1,2}(?:\s*[,，、]\s*\d{1,2})*\](?!\()/g, '')
-    // 外したあとに残る「 。」を詰める
-    .replace(/[ \t\u3000]+([。、．，])/g, '$1');
+    .replace(/[ \t\u3000]{0,3}\[\d{1,2}(?:\s{0,3}[,，、]\s{0,3}\d{1,2}){0,9}\](?!\()/g, '')
+    // 外したあとに残る「 。」を詰める（空白は句読点の直前の 1 続きだけを見る）
+    .replace(/(?<![ \t\u3000])[ \t\u3000]{1,20}(?=[。、．，])/g, '');
 }

@@ -252,7 +252,7 @@ export async function profileConnectionSummary(
  * @returns 無ければ `null`
  */
 export function siteInfoTool<T extends { name: string; role?: ConnectorToolRole; args?: { required?: string[] } }>(tools: T[]): T | null {
-  return tools.find((t) => t.role === 'read' && !(t.args?.required?.length) && /site.*info|info.*site|get_site$|site_profile|get_site_settings/i.test(t.name)) ?? null;
+  return tools.find((t) => t.role === 'read' && !(t.args?.required?.length) && /site.{0,20}info|info.{0,20}site|get_site$|site_profile|get_site_settings/i.test(t.name.slice(0, 100))) ?? null;
 }
 
 /**
