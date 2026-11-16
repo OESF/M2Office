@@ -1472,6 +1472,36 @@ test('1 本の会話: 準備と見直しは止めずに進め、確定の呼び�
   assert.deepEqual(w.sent.at(-1), { name: 'confirm_notice_change', args: { confirmationToken: 'a'.repeat(64) } }, '止めた呼び出しをそのとおりに行う');
   const lastMessages = w.requests.at(-1)!.messages;
   assert.ok(lastMessages.some((m) => m.role === 'tool' && m.content.includes('site.example/notice/1')), '確定の答えを会話に返して続ける');
+  // 行ったことは M2Office が記録から最初に書く（第49.7節）
+  const out = (await w.repo.listRunSteps('t', 'r1')).find((s) => s.kind === 'agent')!.output as { text: string; record: { name: string; ok: boolean }[] };
+  assert.deepEqual(out.record.map((r) => [r.name, r.ok]), [['clinic-site.prepare_notice_change', true], ['clinic-site.review_notice_change', true], ['clinic-site.confirm_notice_change', true]]);
+  assert.match(out.text, /^\*\*行ったこと\*\*（M2Office の記録）\n- 準備しました: 医院のサイト（prepare_notice_change）（postId: 7）\n- 行いました: 医院のサイト（confirm_notice_change）.* — https:\/\/site\.example\/notice\/1\n- 読んだもの: 医院のサイト（review_notice_change）/);
+  assert.ok(out.text.endsWith('公開しました。トップページで確かめられます。'));
+});
+
+test('行ったことの記録: 失敗の形・番号と URL の印・読んだものを、言葉の意味を読まずに書く（第49.7節）', async () => {
+  const { recordCall, doneRecordText, readsText, failureOf } = await import('../src/index.js');
+  const tool = { name: 'site.create_post', risk: 'draft' as const, helpText: '', connection: { id: 'site', name: 'サイト', tool: 'create_post' } };
+  const okRec = recordCall({ name: 'site.create_post', args: { title: '秋の便り', body: 'x'.repeat(200) } }, { name: 'site.create_post', risk: 'draft', result: { source: 'external', text: JSON.stringify({ success: true, post_id: 101090, edit_url: 'https://site.example/wp-admin/post.php?post=101090', nested: { id: 9 } }) } }, tool);
+  assert.equal(okRec.ok, true);
+  assert.deepEqual(okRec.marks, ['post_id: 101090', 'https://site.example/wp-admin/post.php?post=101090'], '上の段の番号と最初の URL だけを拾う');
+  assert.equal(okRec.target, 'title: 秋の便り', '長い本文は指したものに出さない');
+  const ngRec = recordCall({ name: 'site.create_post', args: {} }, { name: 'site.create_post', risk: 'draft', result: { source: 'external', text: JSON.stringify({ success: false, message: '権限がありません' }) } }, tool);
+  assert.equal(ngRec.ok, false, '相手が success: false を返したら失敗');
+  assert.equal(ngRec.reason, '権限がありません');
+  assert.equal(failureOf({ name: 'x', result: { available: false, reason: '未接続' } }), '未接続');
+  assert.equal(failureOf({ error: '使えない道具です' }), '使えない道具です');
+  const text = doneRecordText([okRec, ngRec]);
+  assert.match(text, /- 下書きを作りました: サイト（create_post）（title: 秋の便り） — post_id: 101090/);
+  assert.match(text, /- 行えませんでした: サイト（create_post） — 権限がありません/);
+  assert.ok(!text.includes('行っていません'));
+  const reads = [
+    recordCall({ name: 'gmail.search', args: { query: '見積' } }, { name: 'gmail.search', risk: 'read', result: { items: [] } }, { name: 'gmail.search', risk: 'read', helpText: '条件に合うメールを探します。本文は読みません' }),
+    recordCall({ name: 'gmail.search', args: { query: '見積' } }, { name: 'gmail.search', risk: 'read', result: { items: [] } }, { name: 'gmail.search', risk: 'read', helpText: '条件に合うメールを探します。本文は読みません' }),
+    recordCall({ name: 'slack.read', args: { channel: 'C1' } }, { error: '取得できませんでした' }, { name: 'slack.read', risk: 'read', helpText: '' }),
+  ];
+  assert.equal(readsText(reads), '**読んだもの**（M2Office の記録）\n- 条件に合うメールを探します（query: 見積）', '同じものは 1 つにまとめ、読めなかったものは出さない');
+  assert.equal(readsText([]), '');
 });
 
 test('1 本の会話: 理由つきの却下は会話に返して直させ、理由なしの却下は業務を終える', async () => {
@@ -1550,13 +1580,15 @@ test('1 本の会話: files_send は接続の名前を前に付けて呼ばれ�
   assert.ok(answers[0]!.includes('この名前のまま呼べます'));
   assert.ok(answers.some((a) => a.includes('777')), '前に名前が付いていても送る');
   const doneText = ((await sent.repo.listRunSteps('t', 'r1')).at(-1)!.output as { text: string }).text;
-  assert.equal(doneText, 'アイキャッチを付けました。', '送れたときは何も足さない');
+  assert.match(doneText, /^\*\*行ったこと\*\*（M2Office の記録）\n- 渡したファイルを送りました: 記事のアイキャッチ画像\n/, '送れたことを、記録から最初に書く');
+  assert.ok(!doneText.includes('行っていません'), 'ファイルを送れたなら「行っていません」と書かない');
+  assert.ok(doneText.endsWith('\n\nアイキャッチを付けました。'), '推論の文は後ろに置く');
   // 送らずに終えたとき
   const unsent = conversationWorld([{ text: 'アップロード済みの画像を設定しました。', calls: [] }], { input, files, fileSendFetch: fakeFetch });
   assert.equal((await unsent.engine.advance(unsent.run)).outcome, 'completed');
   const text = ((await unsent.repo.listRunSteps('t', 'r1')).at(-1)!.output as { text: string }).text;
-  assert.match(text, /^（渡したファイル（記事のアイキャッチ画像）は、相手に送れていません）/, '推論の言い分に任せず、送れていないことを書く');
-  assert.ok(String(unsent.requests[0]!.messages[0]!.content).includes('前の記事の画像など）で代えず'), '別のファイルで代えないよう伝える');
+  assert.match(text, /^\*\*行ったこと\*\*（M2Office の記録）\n- 見える状態を変える操作は、行っていません\n- 渡したファイルを送れていません: 記事のアイキャッチ画像/, '推論の言い分に任せず、行っていないことと送れていないことを書く');
+  assert.ok(String(unsent.requests[0]!.messages[0]!.content).includes('別のファイルで代えないでください'), '別のファイルで代えないよう伝える');
 });
 
 test('1 本の会話: 元の定義が無い道具は、写した定義で呼び出しを止めず、確かめを相手に任せる', async () => {
@@ -1568,10 +1600,11 @@ test('1 本の会話: 元の定義が無い道具は、写した定義で呼び�
   assert.deepEqual(w.sent.map((x) => x.args), [{ postId: 7 }], '写しでは文字でも、数のまま相手に渡す');
 });
 
-test('名前で頼まれたものが無いとき: 約束事の版 2 と調べものの指示が、探し直し・読むだけなら近いもので進める・送るなら代えないを伝える（第10.11.5.2節）', async () => {
+test('名前で頼まれたものが無いとき: 約束事（版 2 から）と調べものの指示が、探し直し・読むだけなら近いもので進める・送るなら代えないを伝える（第10.11.5.2節）', async () => {
   const { CONVERSATION_CONTRACT, CONVERSATION_CONTRACT_VERSION, conversationSystem: system } = await import('../src/index.js');
   const { SECRETARY_LOOKUP } = await import('../src/agents/secretary-lookup.js');
-  assert.equal(CONVERSATION_CONTRACT_VERSION, 2);
+  assert.ok(CONVERSATION_CONTRACT_VERSION >= 2);
+  assert.match(CONVERSATION_CONTRACT, /M2Office が記録から答えの最初に書きます/, '版 3: 行ったことは M2Office が記録で書く（第49.7節）');
   assert.match(CONVERSATION_CONTRACT, /^8\. 頼みが名前で指したもの/m);
   assert.match(CONVERSATION_CONTRACT, /送る・作る・直す・公開する頼みでは近いもので代えず/);
   assert.ok(system({ connectionName: 'Slack', summary: '', company: '', tools: [], loadAll: true }).includes('8. 頼みが名前で指したもの'), '接続の業務の最初の指示に入る');

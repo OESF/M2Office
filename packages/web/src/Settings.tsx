@@ -603,7 +603,7 @@ function PromotionHistory() {
 }
 
 /** しまった理由の言い方（仕様書 第11.11.4節）。 */
-const ARCHIVE_REASON: Record<string, string> = { merged: 'まとめた', stale: '新しい事実で古くなった', unused: '半年使われていない' };
+const ARCHIVE_REASON: Record<string, string> = { merged: 'まとめた', stale: '新しい事実で古くなった', unused: '半年使われていない', 'speaking-style': '秘書の話し方（個人設定で決める）', momentary: 'その時だけのこと' };
 
 /** 日本時間の今日（`YYYY-MM-DD`）。案件の期限が過ぎたかを見る。 */
 const jstToday = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);

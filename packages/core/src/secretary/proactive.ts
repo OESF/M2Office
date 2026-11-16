@@ -32,6 +32,7 @@ export interface ProactiveDeps {
 }
 
 /** オンライン会議の場所（リンクだけのもの）。移動の知らせにしない。 */
+// @wordlist 形を読む（第49.4節）
 const ONLINE = /^https?:\/\/|meet\.google\.com|zoom\.us|teams\.microsoft|webex|オンライン|online/i;
 
 /**

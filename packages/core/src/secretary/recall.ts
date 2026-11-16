@@ -12,7 +12,7 @@
 
 import type { AgentDefinition } from '@m2office/shared';
 import type { Repository } from '../repository/types.js';
-import { isSpeakingStyleMemory, jstDay, withoutSpeakingStyle } from '../memory/learn.js';
+import { jstDay } from '../memory/learn.js';
 import { jobLabel, learnableWork, readWorkAnswers } from '../memory/work.js';
 import type { EvidenceItem } from './catalog.js';
 import { MEMORY_BUDGET, situationText, weekText, type WorkingMemory } from './working-memory.js';
@@ -130,14 +130,14 @@ export async function recall(
     Promise.resolve().then(() => repo.getUserSettings(tenantId, userId)).catch(() => null),
     safe(() => repo.listCaseNotes(tenantId, userId, { limit: CASES_MAX })),
   ]);
-  // 秘書の話し方の記憶は使わない（話し方は個人設定が正。第11.2節）。一覧には残り、本人が削除できる
-  const allMemories = storedMemories.filter((m) => !isSpeakingStyleMemory(m.text));
+  // 秘書の話し方の記憶は、推論が種類を確かめてしまってある（第11.2節・第49.6節）。しまったものの一覧に残り、本人が削除できる
+  const allMemories = storedMemories;
   // 仕事のやり方の好みは、いつも渡す。事実の選び方とは別にする（第11.13.2節）
   const preferences = allMemories.filter((m) => m.kind === 'preference').slice(0, PREFERENCE_MAX);
   const memories = allMemories.filter((m) => m.kind !== 'preference');
   // 本人の像は、覚えることを許している人だけに使う（第11.13.1節）
-  // 本人の像の中の秘書の話し方（「博多弁を使用している」など）は使わない（第11.2節）
-  const profileText = profile && settings?.memory.learning !== false ? withoutSpeakingStyle(profile.body) : '';
+  // 本人の像の中の秘書の話し方の文は、種類を確かめたときに外してある（第49.6節）
+  const profileText = profile && settings?.memory.learning !== false ? profile.body : '';
 
   // 今日のやり取り（古い順に並べる）
   const todayLines = today.slice(-TODAY_MAX).map((c) => `- 依頼: ${cut(c.message)}\n  答え: ${cut(c.reply)}`);
@@ -174,7 +174,7 @@ export async function recall(
   const matched = [...new Set([...byMeaning, ...byWords])].slice(0, DIGEST_MATCH);
   const digestLines = [...recent, ...matched]
     .sort((a, b) => a.day.localeCompare(b.day))
-    .map((d) => `- ${d.day}: ${cut(withoutSpeakingStyle(d.summary), 600)}`);
+    .map((d) => `- ${d.day}: ${cut(d.summary, 600)}`);
 
   // 覚えた事実。多ければ、意味の近いもの → 言葉の重なるもの → 新しいものの順に選ぶ（第11.13.4節）
   const byId = new Map(memories.map((m) => [m.id, m]));

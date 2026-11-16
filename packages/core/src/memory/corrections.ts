@@ -14,7 +14,6 @@ import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
 import type { Memory, Repository } from '../repository/types.js';
 import { MEMORY_MAX_CHARS, refuseToRemember } from '../secretary/memory.js';
-import { isSpeakingStyleMemory } from './learn.js';
 
 /** 直しの入口の種類（メールは別の表で数える）。 */
 export type CorrectionKind = 'conversation' | 'remake' | 'reject' | 'reroute';
@@ -149,7 +148,8 @@ export async function learnFromCorrection(deps: CorrectionDeps, input: Correctio
  */
 export function preferencesForAgent(memories: Memory[], agentId: string): Memory[] {
   // 秘書の話し方の頼み（方言・口調）は業務に渡さない。業務の文（承認の前の確かめ・結果）が方言になるため（第11.2節）
-  const prefs = memories.filter((m) => m.kind === 'preference' && !isSpeakingStyleMemory(m.text));
+  // 秘書の話し方は、しまってあるので一覧に来ない（種類は推論が確かめる。第49.6節）
+  const prefs = memories.filter((m) => m.kind === 'preference');
   return [
     ...prefs.filter((m) => m.agentId === agentId).slice(0, CORRECTION_LIMITS.agentPreferences),
     ...prefs.filter((m) => !m.agentId).slice(0, CORRECTION_LIMITS.generalPreferences),

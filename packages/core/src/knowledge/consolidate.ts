@@ -7,6 +7,7 @@
  * 推論に渡す文はデータであり、指示として扱わせない（不変則 I-6）。
  */
 
+import { reviewMemoryKinds } from '../memory/kinds.js';
 import { randomUUID } from 'node:crypto';
 import type { LlmProvider } from '../llm/provider.js';
 import type { KnowledgeItem, Memory, Repository } from '../repository/types.js';
@@ -249,6 +250,9 @@ export class Consolidator {
     const at = now.toISOString();
     const counts: ConsolidationCounts = { merged: 0, stale: 0, unused: 0, conflict: 0 };
     const settings = await repo.getUserSettings(tenantId, userId);
+    // 覚えたことの種類を確かめ、秘書の話し方とその時だけのことをしまう（第49.6節）。まだ 1 度も確かめていなければ全部を、
+    // 確かめていれば、その後に覚えたもの（本人が「覚えて」と頼んだものなど）だけを。失敗しても整理は続ける
+    await reviewMemoryKinds(repo, llm, tenantId, userId, now, settings.memory.kindsCheckedAt ? { since: settings.memory.kindsCheckedAt } : 'all').catch(() => undefined);
     let items: Memory[] = (await repo.listMemories(tenantId, userId)).slice(0, CONSOLIDATE_LIMITS.memories);
     const cutoff = now.getTime() - UNUSED_DAYS * 86_400_000;
     for (const m of items) {

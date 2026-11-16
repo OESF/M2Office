@@ -15,6 +15,7 @@ import type { Repository } from '../repository/types.js';
 import type { Run } from '@m2office/shared';
 import { enqueueJob } from '../engine/enqueue.js';
 import { childDidWork } from '../engine/run-engine.js';
+import { handedFilesOf } from './file-send.js';
 import { siteConnectionAgentId } from './connection-agent.js';
 import type { HandedFile } from './file-send.js';
 
@@ -74,8 +75,8 @@ export function siteHandOff(repo: Repository, agentsOf: (tenantId: string) => Pr
 
 /** 子の結果を受け取る親の処理（コラムとお知らせ）。 */
 export interface SiteHandOffParents {
-  columns?: { siteResult(who: { tenantId: string; userId: string }, id: string, runId: string, done: boolean, reason: string | null): Promise<void> };
-  announcements?: { siteResult(who: { tenantId: string; userId: string }, id: string, runId: string, done: boolean, reason: string | null): Promise<void> };
+  columns?: { siteResult(who: { tenantId: string; userId: string }, id: string, runId: string, done: boolean, reason: string | null, notes?: string[]): Promise<void> };
+  announcements?: { siteResult(who: { tenantId: string; userId: string }, id: string, runId: string, done: boolean, reason: string | null, notes?: string[]): Promise<void> };
 }
 
 /**
@@ -91,9 +92,26 @@ export async function siteChildFinished(
   const job = await repo.getJob(run.tenantId, run.jobId);
   const parent = job ? handOffParentOf(job.input) : null;
   if (!job || !parent) return;
-  const done = outcome === 'completed' && childDidWork(await repo.listRunSteps(run.tenantId, run.id));
+  const steps = await repo.listRunSteps(run.tenantId, run.id);
+  // 状態は子の答えの文ではなく、子の記録で決める（第49.7節「親と子」）
+  const done = outcome === 'completed' && childDidWork(steps);
   const why = done ? null : outcome === 'completed' ? 'サイトの側で何も行いませんでした' : (reason ?? 'サイトに入れられませんでした');
+  // 預けたファイル（カバー画像など）が相手に届いていなければ、そう添える
+  const notes = undeliveredOf(steps, handedFilesOf(job.input)).map((p) => `${p}を送れていません`);
   const who = { tenantId: run.tenantId, userId: job.requestedBy };
-  if (parent.kind === 'column') await parents.columns?.siteResult(who, parent.id, run.id, done, why);
-  else await parents.announcements?.siteResult(who, parent.id, run.id, done, why);
+  if (parent.kind === 'column') await parents.columns?.siteResult(who, parent.id, run.id, done, why, notes);
+  else await parents.announcements?.siteResult(who, parent.id, run.id, done, why, notes);
+}
+
+/**
+ * 預けたファイルのうち、子の記録で相手に届いていないものの用途（第48.8.1節・第49.7節）。
+ *
+ * @remarks 子の会話の段の記録（`conversation.delivered`）だけを見る。答えの文は見ない
+ */
+export function undeliveredOf(steps: { output: unknown }[], files: { fileId: string; purpose: string }[]): string[] {
+  const delivered = new Set(steps.flatMap((s) => {
+    const d = ((s.output as { conversation?: { delivered?: unknown } } | null)?.conversation)?.delivered;
+    return Array.isArray(d) ? d.filter((x): x is string => typeof x === 'string') : [];
+  }));
+  return files.filter((f) => !delivered.has(f.fileId)).map((f) => f.purpose);
 }

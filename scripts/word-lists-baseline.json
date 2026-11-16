@@ -1,0 +1,17 @@
+{
+  "packages/core/src/secretary/approval-talk.ts": 1,
+  "packages/core/src/secretary/catalog.ts": 2,
+  "packages/core/src/secretary/contacts.ts": 12,
+  "packages/core/src/secretary/correct.ts": 1,
+  "packages/core/src/secretary/inventory.ts": 7,
+  "packages/core/src/secretary/launcher.ts": 1,
+  "packages/core/src/secretary/mail.ts": 6,
+  "packages/core/src/secretary/memory.ts": 2,
+  "packages/core/src/secretary/notices.ts": 5,
+  "packages/core/src/secretary/recall.ts": 1,
+  "packages/core/src/secretary/reservations.ts": 1,
+  "packages/core/src/secretary/schedules.ts": 7,
+  "packages/core/src/secretary/secretary.ts": 16,
+  "packages/core/src/secretary/site-choice.ts": 2,
+  "packages/core/src/secretary/working-memory.ts": 5
+}

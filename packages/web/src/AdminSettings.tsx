@@ -851,7 +851,7 @@ export function UserSettings({ meId, page }: { meId: string; page: string }) {
 /** 知識の種類ごとの小分け（仕様書 第11.11.5節）。以前の `items` は社内規程として開く。 */
 const KNOWLEDGE_CATEGORY: Record<string, 'rule' | 'minutes' | 'learned'> = { rules: 'rule', items: 'rule', minutes: 'minutes', learned: 'learned' };
 /** しまった理由の言い方。 */
-const ARCHIVE_REASON: Record<string, string> = { merged: 'まとめた', stale: '新しい事実で古くなった', unused: '半年使われていない', conflict: '社内規程と食い違う' };
+const ARCHIVE_REASON: Record<string, string> = { merged: 'まとめた', stale: '新しい事実で古くなった', unused: '半年使われていない', conflict: '社内規程と食い違う', 'speaking-style': '秘書の話し方（個人設定で決める）', momentary: 'その時だけのこと' };
 /** 廃止した・しまったものを戻せる期間。 */
 const RESTORE_MS = 365 * 86_400_000;
 /** 日本時間の今日。 */

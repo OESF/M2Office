@@ -453,12 +453,12 @@ export class ColumnService {
    * @param runId 子の実行（コラムが待っている実行と違えば、古い頼みなので何もしない）
    * @remarks 危険度: write-internal（コラムの状態を変えるだけ）
    */
-  async siteResult(who: ColumnViewer, id: string, runId: string, done: boolean, reason: string | null): Promise<void> {
+  async siteResult(who: ColumnViewer, id: string, runId: string, done: boolean, reason: string | null, notes: string[] = []): Promise<void> {
     const { store } = this.deps;
     const c = await store.get(who.tenantId, id);
     if (!c || c.runId !== runId || c.status !== 'awaiting') return;
     await store.update(who.tenantId, id, done ? { status: 'placed', runId: null } : { status: 'draft', runId: null });
-    await this.audit(who, done ? 'column.place' : 'column.place_failed', id, { via: 'mcp', runId, ...(reason ? { reason } : {}) });
+    await this.audit(who, done ? 'column.place' : 'column.place_failed', id, { via: 'mcp', runId, ...(reason ? { reason } : {}), ...(notes.length ? { notes } : {}) });
   }
 
   /**

@@ -32,12 +32,13 @@ import { silentLogger, type Logger } from '../log/logger.js';
 import { ApprovalForbiddenError, RunNotResumableError } from './errors.js';
 import { standardMinutes, stepLabel } from '../agents/index.js';
 import { describeCall } from './describe-call.js';
+import { doneRecordText, readsText, recordCall, recordsOfSteps, type RecordedCall } from './done-record.js';
 import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
 import { selectConnectionTools } from './tool-select.js';
 import {
   CONVERSATION_CONTRACT_VERSION, CONVERSATION_MAX_ROUNDS, FILES_SEND, LOAD_ALL_BELOW, TOOLS_LOAD, TOOLS_LOAD_SPEC,
-  completeByText, conversationSystem, filesSendSpec, foldMessages, isFilesSendName, toolSpecOf, undeliveredFilesNote,
+  completeByText, conversationSystem, filesSendSpec, foldMessages, isFilesSendName, toolSpecOf,
 } from './conversation.js';
 import { FILE_SEND_MAX_PER_RUN, handedFilesOf, sendHandedFile, type FileSendFormat, type HandedFile } from '../connectors/file-send.js';
 import { checkJsonArgs, type LlmChatMessage, type LlmToolCall } from '../llm/tools.js';
@@ -898,6 +899,8 @@ export class RunEngine {
       sent?: number;
       /** 相手が受け付けた、預けたファイルの印（送れていないものを答えに付ける。第48.8.1節） */
       delivered?: string[];
+      /** 呼び出しの記録（行ったことを M2Office が書く。第49.7節） */
+      record?: RecordedCall[];
       pending?: { call: LlmToolCall; skipped: string[]; approvalStepId: string };
     };
     // 頼んだ業務（親）が預けたファイル（第48.8.1節）
@@ -909,7 +912,7 @@ export class RunEngine {
     let tokensUsed = 0;
     let spent = 0;
     const save = async (status: RunStep['status'], endedAt: string | null = null) => {
-      const next: RunStep = { ...row!, status, output: { text: state!.text, tools: state!.log, conversation: { ...state!, messages: foldMessages(state!.messages) } }, endedAt };
+      const next: RunStep = { ...row!, status, output: { text: state!.text, tools: state!.log, record: state!.record ?? [], conversation: { ...state!, messages: foldMessages(state!.messages) } }, endedAt };
       row = next;
       await repo.updateRunStep(run.tenantId, next);
     };
@@ -952,9 +955,11 @@ export class RunEngine {
         if (out.decision === 'approved') {
           answer = await this.invokeTool(run, def, run.cursor, { name: call.name, args: call.args }, requestedBy, registry, ai.research, llm);
           state.log.push(answer);
+          state.record = [...(state.record ?? []), recordCall(call, answer, registry.get(call.name))];
           await repo.updateRunStep(run.tenantId, { ...gate!, output: { ...(gate!.output as object), executed: true, tools: [answer] } });
         } else {
           answer = { rejected: true, reason: out.comment ?? '', note: '人が却下しました。理由に沿って直してください' };
+          state.record = [...(state.record ?? []), recordCall(call, { error: `人が却下しました${out.comment ? `（${out.comment}）` : ''}` }, registry.get(call.name))];
         }
         state.messages.push({ role: 'tool', toolCallId: call.id, content: JSON.stringify(answer) });
         for (const id of skipped) state.messages.push({ role: 'tool', toolCallId: id, content: JSON.stringify({ notExecuted: '前の呼び出しの承認を待っていたため、行っていません。要るなら、もう一度呼んでください' }) });
@@ -983,8 +988,10 @@ export class RunEngine {
         spent += costOf(res);
         state.rounds += 1;
         if (res.toolCalls.length === 0) {
-          // 預けたファイルを送れていなければ、答えの最初にそう書く（推論の言い分に任せない。第48.8.1節）
-          state.text = [undeliveredFilesNote(handed, state.delivered ?? []), res.text.trim()].filter(Boolean).join('\n');
+          // 行ったこと（見える状態を変えた呼び出しと成否・預けたファイル・読んだもの）は、答えの最初に M2Office が記録から書く。
+          // 推論の文は、その後ろに説明として置く（推論の言い分に任せない。第49.7節・Q-385）
+          const files = handed.map((f) => ({ purpose: f.purpose, delivered: (state!.delivered ?? []).includes(f.fileId) }));
+          state.text = [doneRecordText(state.record ?? [], files), res.text.trim()].filter(Boolean).join('\n\n');
           state.messages.push({ role: 'assistant', content: res.text });
           await save('succeeded', new Date().toISOString());
           return { kind: 'ok', tokensUsed, costJpy: spent };
@@ -1033,6 +1040,7 @@ export class RunEngine {
           const result = await this.invokeTool(run, def, run.cursor, { name: call.name, args: call.args }, requestedBy, registry, ai.research, llm);
           await this.markActivity(run.tenantId, row!, null);
           state.log.push(result);
+          state.record = [...(state.record ?? []), recordCall(call, result, tool)];
           // 外から来た答えはデータとして返す（不変則 I-6）
           reply(result);
         }
@@ -1197,6 +1205,8 @@ export class RunEngine {
         投稿や送信では**二重に実行される**。前の結果を返し、呼び直さない。
       */
       const alreadyCalled = new Map<string, unknown>();
+      // 呼んだ道具の記録（行ったこと・読んだものを M2Office が書く。第49.7節）
+      const record: RecordedCall[] = [];
       let text = '';
       let tokensUsed = selection.tokensUsed;
       let spent = selection.response ? costOf(selection.response) : 0;
@@ -1355,6 +1365,7 @@ export class RunEngine {
           if (mode === 'plan' && tool.risk === 'draft') done.push({ name: call.name, args: call.args, result: (result as { result?: unknown } | null)?.result });
           alreadyCalled.set(key, result);
           roundResults.push(result);
+          if (mode === 'run') record.push(recordCall(call, result, tool));
         }
         // 呼んだツールは、往復のどれで呼んだものもすべて記録する（仕様書 第9.3.2節）
         toolResults.push(...roundResults);
@@ -1369,7 +1380,12 @@ export class RunEngine {
         history.push({ role: 'user', content: toolReport(roundResults) });
       }
 
-      const output = { text, tools: toolResults, ...(mode === 'plan' ? { planned: true } : {}), ...(selection.selected ? { selectedTools: selection.selected } : {}) };
+      // 読んだものを添える段（秘書の調べものの答え）は、この業務の記録から、読んだものを答えの後ろに書く（第49.7節）
+      if (step.record === 'reads' && mode === 'run') {
+        const reads = readsText([...recordsOfSteps(previous.filter((p) => p.kind === 'agent')), ...record]);
+        if (reads) text = [text.trim(), reads].filter(Boolean).join('\n\n');
+      }
+      const output = { text, tools: toolResults, ...(record.length ? { record } : {}), ...(mode === 'plan' ? { planned: true } : {}), ...(selection.selected ? { selectedTools: selection.selected } : {}) };
       await repo.updateRunStep(run.tenantId, {
         ...runStep, status: 'succeeded', output, endedAt: new Date().toISOString(),
       });

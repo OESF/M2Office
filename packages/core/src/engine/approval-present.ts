@@ -185,6 +185,7 @@ export function composeApprovalPresent(p: {
 const REVIEW_VALUE_MAX = 1500;
 
 /** 行を区切る札（改行にする）。 */
+// @wordlist 形を読む（第49.4節）
 const LINE_BREAK_TAG = /^<(br|\/p|\/h\d|\/li)\b/i;
 
 /**

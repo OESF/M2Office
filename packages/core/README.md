@@ -12,7 +12,7 @@ Node.js 22 以上。PostgreSQL への接続が必要です（`DATABASE_URL`）�
 ## 構成
 
 ```
-src/engine/      実行エンジン。会社の接続の業務の 1 本の会話（conversation.ts の約束事・取り寄せ・畳み方。RunEngine.runConversationStep が、見える状態を変える呼び出しで止めて続ける。仕様書 第48章）。承認による中断と再開、ジョブの投入（起こしたのが本人かシステムかを記録する）。一連の流れの中の承認の見分け（in-flow.ts。仕様書 第47.5節）。道具の多い会社の接続から段で使う道具を先に選ぶ（tool-select.ts。仕様書 第47.4.3節）。承認の画面に相手の見直しの結果と注意を出す（approval-present.ts）。実行を見られる人と承認を判断できる人（run-access.ts。権限区画に属する業務は区画に入っている人だけ。approval-compartments.ts で古い承認に区画を埋める。ADR-0096）
+src/engine/      実行エンジン。会社の接続の業務の 1 本の会話（conversation.ts の約束事・取り寄せ・畳み方。RunEngine.runConversationStep が、見える状態を変える呼び出しで止めて続ける。仕様書 第48章）。承認による中断と再開、ジョブの投入（起こしたのが本人かシステムかを記録する）。一連の流れの中の承認の見分け（in-flow.ts。仕様書 第47.5節）。道具の多い会社の接続から段で使う道具を先に選ぶ（tool-select.ts。仕様書 第47.4.3節）。承認の画面に相手の見直しの結果と注意を出す（approval-present.ts）。行ったこと・読んだものを記録から書く（done-record.ts。業務の結果の「行ったこと」と調べものの「読んだもの」。仕様書 第49.7節）。実行を見られる人と承認を判断できる人（run-access.ts。権限区画に属する業務は区画に入っている人だけ。approval-compartments.ts で古い承認に区画を埋める。ADR-0096）
 src/tools/       ツールの登録簿と内蔵ツール（quote.ts は見積書。金額は quoteTotals の決まった計算。recruit.ts は採用の文の点検）
 src/connectors/  メール・予定・タスク・チャット・本人の Google の連絡先（google/people.ts。第27.15節）への接続口（見本と Google の実装）と、MCP サーバのクライアント。認証の要る会社の接続の許可の流れとアプリの自動登録（oauth.ts。動的クライアント登録）・登録の型（presets.ts。Slack）・呼ぶときの認可（credentials.ts。仕様書 第12.11.6節）。ツールの役割と接続の説明を推論で決める（profile.ts）・接続ごとの汎用の業務（connection-agent.ts。仕様書 第47.4.1節・第47.7節、ADR-0148）・コラムとお知らせを MCP のサイトの業務に頼む（site-handoff.ts。第47.6節）・頼んだ業務に預けたファイルを相手の示した送り先へ送る（file-send.ts。送り先はその接続のサイトの https だけ。第48.8.1節）
 src/chat/        グループの名前で共有する（group-share.ts。グループに合う Chat のスペースを探す・承認の画面に届く先とグループとの違いを出す。仕様書 第16.7.12.1節、ADR-0076）と、Chat で秘書に頼む受け口の部品（inbound.ts。出来事の読み取り・Google の署名の確かめ・置き場。第10.16節、ADR-0138）
@@ -456,6 +456,7 @@ AG-02 議事録の作成・共有は、承認②のあとに `knowledge.register
 - 機能ごとの学びを秘書の目に入れる（第11.13.9節、ADR-0136。`memory/feature-learning.ts`）: `ProfileBuilder` に `mail.store` を渡すと、`profileMailMaterial()` でメールで覚えた相手・よくやり取りする相手・並べているカテゴリーを本人の像の材料にし（件名と本文は渡さない。`user_profiles.used_mail` に印）、進んでいる案件と朝のブリーフの関心の分野も渡します。`lastMailCorrection()` でメールの直しも作り直す理由にします。`recall()` の `opts.mailPeople`（秘書は `mailPeopleFor()` を渡す）で、依頼に出てくる相手と「大事」と直した相手を答えの材料にします。`PostgresMailStore.purgeUser()` は印の付いた本人の像も消します
 - 段 3（第11.13.5節・第11.13.6節）: `CaseNoteBuilder`（`memory/cases.ts`）が本人ごとに 1 日 1 回、会話の要約と頼んだ業務から案件ノート（`case_notes`）を書き足し、`recall()` は進んでいる案件を 15 件まで渡します。`promote()` は「- 3=K2」の形で、すでにある会社の知識と同じ事柄を見分け、確かめた人の数（`knowledge_items.confirmations`）を増やします（検索は `confirmationWeight()` で秘書が学んだことの中だけ上げる）。`KnowledgeGaps`（`knowledge/gaps.ts`）が答えられなかった問いを誰が聞いたかを残さずに残し、週 1 回探し直して管理者に知らせます
 - 段 2（第11.13.4節）: `MemoryEmbedder`（`memory/embed.ts`）が記憶と会話の要約の埋め込みを後から作り、`recall()` は依頼の文の埋め込み（会社の知識の検索と 1 回で使い回す）で意味の近い事実（類似度 0.5 以上・30 件まで）と要約を選び、足りない分を言葉の重なりと新しさで埋めます。使えなければ段 1 までの選び方に戻ります（`MEMORY_SEMANTIC`）
+- 覚えたことの種類（第49.6節、ADR-0150。`memory/kinds.ts`）: 学ぶ推論は行の頭に「- 話し方: 」「- その時だけ: 」を付け、`parseLearning()` はその行を覚えません。`reviewMemoryKinds()` は、いまある記憶・本人の像の行・会話の要約の文を 1 度だけ推論に確かめさせ（番号と種類だけを返させる）、秘書の話し方とその時だけのことの記憶をしまい（理由 `speaking-style`・`momentary`）、本人の像と要約から話し方のものだけを外します。確かめた日時は本人の設定の `memory.kindsCheckedAt`。週 1 回の整理は、その後に覚えた記憶を確かめます。言葉の一覧では分けません
 - 以前の二重の承認の関数と API（ADR-0016）はなくしました。`memory/promotion.ts` には、秘書が付ける知識の題名（`promotionTitle()`）だけが残っています
 
 ### 会話で記憶を直す（`secretary/correct.ts`）

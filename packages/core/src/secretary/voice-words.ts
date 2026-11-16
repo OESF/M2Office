@@ -111,6 +111,7 @@ export function correctHeard(text: string, words: VoiceWord[], mishears: Mishear
 }
 
 /** 「〇〇じゃなくて△△」（本人が聞き違えを直した）。 */
+// @wordlist 定型（第49.4節）
 const CORRECTION = /^\s*[「『]?(.{1,20}?)[」』]?(?:じゃなくて|ではなくて|でなく)[「『]?(.{1,20}?)[」』]?(?:です|だよ|だ|ね|さん)?[。．.!！]?\s*$/;
 
 /** 聞き違えを直す言い方なら、その組（見分けられなければ `null`）。 */

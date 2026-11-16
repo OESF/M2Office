@@ -15,7 +15,7 @@
 
 import type { AgentDefinition } from '@m2office/shared';
 import type { Conversation, ConversationMention, Repository } from '../repository/types.js';
-import { jstDay, withoutSpeakingStyle } from '../memory/learn.js';
+import { jstDay } from '../memory/learn.js';
 import { jobLabel } from '../memory/work.js';
 
 /** 1 週間の記憶に入れる、本人が使った日の数（今日を除く。Q-363）。 */
@@ -358,7 +358,7 @@ export async function loadWorkingMemory(
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? '業務';
   const STATUS: Record<string, string> = { queued: '待ち', running: '実行中', awaiting_approval: '承認待ち', completed: '完了', failed: '失敗', cancelled: '中止', expired: '期限切れ' };
   // 要約の中の秘書の話し方の頼み（「熊本弁で話すよう依頼」など）は渡さない（第11.2節）
-  const summaryOf = new Map(digests.filter((d) => d.compartment === null).map((d) => [d.day, withoutSpeakingStyle(d.summary)]));
+  const summaryOf = new Map(digests.filter((d) => d.compartment === null).map((d) => [d.day, d.summary]));
   const week: DayRecord[] = weekDays.map((day) => ({
     day,
     summary: summaryOf.get(day) ?? '',

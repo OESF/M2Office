@@ -93,8 +93,10 @@ export function signageFileRequest(message: string): Extract<SignageRequest, { k
   return { kind: 'add-file', screens: flowScreens(message), ...(start ? { bandStart: start } : {}) };
 }
 
+// @wordlist 形を読む（第49.4節）
 const QUOTED = /[「『"](.+?)[」』"]/;
 /** 呼び出しの文そのもの（「〇番の方・患者様・お客様」で始まり「ください」「どうぞ」で終わる。空白を除いた形で見る）。 */
+// @wordlist 定型（第49.4節）
 const CALL_SENTENCE = /^\d{1,4}番(?:の)?(?:方|患者様|患者さん|お客様|お客さま|さん)[、,]?.+(?:ください|くださいませ|どうぞ)[。.!！]*$/;
 
 /** 「待合だけに」「入口と待合に」「入口の画面に」から画面の名前を取り出す（かぎかっこの中は見ない）。 */
@@ -221,8 +223,10 @@ export function signageConfirmText(req: SignageRequest): string | null {
 }
 
 /** 確かめに「はい」と答えたか。 */
+// @wordlist 定型（第49.4節）
 export const SIGNAGE_YES = /^(はい|うん|ええ|お願い(します)?|出して(ください)?|消して(ください)?|ok|オーケー|大丈夫|それで(お願いします)?)[。！!、\s]*$/i;
 /** 確かめに「いいえ」と答えたか。 */
+// @wordlist 安全の側（第49.4節）
 export const SIGNAGE_NO = /^(いいえ|いや|やめて|やめる|やめます|キャンセル|取りやめ|やっぱりやめ)/;
 
 /**

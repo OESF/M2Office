@@ -206,6 +206,11 @@ export function meRoute(deps: AppDeps) {
       const current = (await deps.repo.getUserSettings(tenant.id, user.id)).brief;
       value = { ...(value as object), seededAt: current.seededAt ?? new Date().toISOString(), seedNote: current.seedNote };
     }
+    if (checked.section === 'memory') {
+      // 記憶の種類を確かめた日時は画面から変えさせない（第49.6節）
+      const current = (await deps.repo.getUserSettings(tenant.id, user.id)).memory;
+      if (current.kindsCheckedAt) value = { ...(value as object), kindsCheckedAt: current.kindsCheckedAt };
+    }
     await deps.repo.saveUserSettings(tenant.id, user.id, checked.section, value as never);
     await audit(deps, tenant.id, user.id, 'me.settings.update', checked.section);
     return c.json({ ok: true });

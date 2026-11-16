@@ -527,13 +527,13 @@ export class AnnouncementService {
    *
    * @remarks 危険度: write-internal（出し先の記録を変えるだけ）
    */
-  async siteResult(who: AnnouncementViewer, id: string, runId: string, done: boolean, reason: string | null): Promise<void> {
+  async siteResult(who: AnnouncementViewer, id: string, runId: string, done: boolean, reason: string | null, notes: string[] = []): Promise<void> {
     const out = (await this.deps.store.outputs(who.tenantId, id)).find((o) => o.channel === 'web');
     if (!out || out.status !== 'waiting' || (out.result as { runId?: string }).runId !== runId) return;
     await this.deps.store.setOutput(who.tenantId, id, 'web', {
       status: done ? 'done' : 'failed', result: out.result, reason: done ? '' : (reason ?? 'サイトに入れられませんでした'), doneAt: new Date().toISOString(),
     });
-    await this.audit(who, done ? 'announcement.web_done' : 'announcement.web_failed', id, { via: 'mcp', runId });
+    await this.audit(who, done ? 'announcement.web_done' : 'announcement.web_failed', id, { via: 'mcp', runId, ...(notes.length ? { notes } : {}) });
   }
 
   /** 予約を取り消す（出す前だけ。Web の予約公開の記事は WordPress の側で消してもらう）。 */

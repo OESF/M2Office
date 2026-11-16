@@ -27,7 +27,7 @@ import { expandQuery } from '../knowledge/expand.js';
 import { queryEmbedder, semanticSearchEnabled } from '../knowledge/embed.js';
 import { UNKNOWN_ANSWER } from '../knowledge/gaps.js';
 import { memorySemanticEnabled } from '../memory/embed.js';
-import { isSpeakingStyleMemory, jstDay } from '../memory/learn.js';
+import { jstDay } from '../memory/learn.js';
 import { bulkMailRequest, contactRequest } from './contacts.js';
 import { MAIL_TRIAGE_RULE, mailCheckRequest, mailCheckText, mailSearchRequest, parseMailVerdicts } from './mail.js';
 import { CORRECTION_LIMITS, countCorrection, countRequest, phraseKey, rememberRoute, routeHints, routingPhrase } from '../memory/corrections.js';
@@ -877,6 +877,10 @@ export class Secretary {
       'あなたは本人と一心同体の秘書で、本人とのやり取りをずっと覚えています。覚えていることを踏まえて答えます。',
       // この層では設定を変えたり業務を動かしたりしない。行っていないことを「行いました」と答えさせない（2026-09-28 に、朝のブリーフの中身を「変更しました」と答えた）
       'この会話では設定の変更や業務の実行は行いません。行っていない変更・実行を「行いました」「更新しました」と言わないでください。頼まれたら、どう頼めばよいか（言い方の例）か、どの画面で行えるかを伝えてください。',
+      // 調べものを始めるのは道具の呼び出しで行い、M2Office が記録で知る。「お調べします」の文を言葉で見張らない（第49.7節、ADR-0150）
+      lookup
+        ? `この場で答えるのに、メール・予定・Web・会社の接続先・渡された書類などを調べる必要があるときは、${LOOKUP_START} を呼んでください。M2Office が調べものを始め、終わったら本人に伝えます。調べると文で約束するだけで終えないでください。`
+        : 'あとで調べて伝えると約束しないでください。この場で分かる範囲で答えてください。',
       '\n',
       ANSWER_RULE,
       '\n',
@@ -885,34 +889,28 @@ export class Secretary {
       '\n',
       ANSWER_FRESH,
     ].join('');
-    const res = await llm.complete({
-      tier: 'standard',
-      messages: [
-        { role: 'system', content: persona },
-        // 覚えていることと会社の規程は、本人の依頼とは別のメッセージで渡す（不変則 I-6）
-        ...(remembered.text ? [{ role: 'user' as const, content: remembered.text }] : []),
-        ...(knowledge.text ? [{ role: 'user' as const, content: knowledge.text }] : []),
-        { role: 'user', content: message },
-      ],
-    });
+    const messages: { role: 'system' | 'user'; content: string }[] = [
+      { role: 'system', content: persona },
+      // 覚えていることと会社の規程は、本人の依頼とは別のメッセージで渡す（不変則 I-6）
+      ...(remembered.text ? [{ role: 'user' as const, content: remembered.text }] : []),
+      ...(knowledge.text ? [{ role: 'user' as const, content: knowledge.text }] : []),
+      { role: 'user', content: message },
+    ];
+    // 調べものを始める道具を渡せるのは、調べものを使える会社で、推論が道具の呼び出しを使えるときだけ
+    const res = lookup && llm.completeTools
+      ? await llm.completeTools({ tier: 'standard', messages, tools: [LOOKUP_START_SPEC] })
+      : { ...(await llm.complete({ tier: 'standard', messages })), toolCalls: [] };
     await this.audit(tenantId, userId, 'secretary.chat', 'full');
+    // 調べものを始める道具を呼んだら、実際に始める（行ったことは記録で決める。第10.11.5.1節・第49.7節）
+    if (lookup && res.toolCalls.some((c) => c.name === LOOKUP_START)) {
+      await this.audit(tenantId, userId, 'secretary.lookup_start', LOOKUP_AGENT_ID);
+      return this.delegate(tenantId, userId, message, lookup, '秘書がこの場で答えられず、調べものを始めた', llm);
+    }
     // 推論はサイネージを動かせない。出していないのに「画面に表示しました」と答えさせない（第31.11.1節。2026-10-12）
     if (this.deps.signage && CLAIMS_SIGNAGE.test(res.text)) {
       await this.audit(tenantId, userId, 'secretary.false_claim', 'signage');
       return {
         reply: { layer: 'full', text: 'サイネージにはまだ出していません。「『出したい文』を出して」のように、かぎかっこで囲んで頼んでいただければ、そのまま出します。', evidence: [], tokensUsed: res.tokensUsed },
-        keep: true,
-      };
-    }
-    // 「お調べします」「少々お待ちください」と約束したのに、何も起こさないまま返さない（第10.11.5.1節）。
-    // 約束したら実際に調べものを起こす。起こせない会社では、約束の文を返さない
-    if (PROMISES_LATER.test(res.text)) {
-      if (lookup) {
-        await this.audit(tenantId, userId, 'secretary.promise', LOOKUP_AGENT_ID);
-        return this.delegate(tenantId, userId, message, lookup, '秘書があとで伝えると約束した調べもの', llm);
-      }
-      return {
-        reply: { layer: 'full', text: 'この場ではお調べできません。分かる範囲のことを聞いていただくか、しばらくしてからお試しください。', evidence: [], tokensUsed: res.tokensUsed },
         keep: true,
       };
     }
@@ -1250,8 +1248,8 @@ export class Secretary {
 
   /** 覚えている本人の事実（新しいものから）。調べものに渡し、好みに合わせて組ませる。何も無ければ空。 */
   private async memoryContext(tenantId: string, userId: string): Promise<string> {
-    // 秘書の話し方の記憶は使わない（話し方は個人設定が正。第11.2節）
-    const rows = (await Promise.resolve().then(() => this.deps.repo.listMemories(tenantId, userId)).catch(() => [])).filter((m) => !isSpeakingStyleMemory(m.text));
+    // 秘書の話し方の記憶は、推論が種類を確かめてしまってある（第11.2節・第49.6節）
+    const rows = await Promise.resolve().then(() => this.deps.repo.listMemories(tenantId, userId)).catch(() => []);
     const recent = [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, MEMORY_FOR_LOOKUP);
     // 使った日を記録する（使われない記憶を整理でしまうため。第11.11.4節）
     if (recent.length) void Promise.resolve().then(() => this.deps.repo.touchMemories(tenantId, userId, recent.map((m) => m.id), new Date().toISOString())).catch(() => undefined);
@@ -1977,12 +1975,15 @@ const TRANSIENT_TURNS = 30;
 /** 調べものに渡す、覚えている本人の事実の件数。 */
 const MEMORY_FOR_LOOKUP = 20;
 
-/**
- * あとで伝えると約束する言い回し（第10.11.5.1節）。層 3 の答えがこれに当たれば、実際に調べものを起こす。
- *
- * @remarks 「お調べします」は層 3 の指示で決めた言い方。そのほかは推論がよく使う約束の形
- */
-const PROMISES_LATER = /お調べします|調べて(から)?お(伝え|知らせ)|(少々|しばらく)お待ち(ください|いただけ)|(分かり|わかり|取得でき|確認でき|調べ終わり)(まし)?たら.{0,12}(お伝え|お知らせ|ご連絡|ご報告)/;
+/** 層 3 に渡す、調べものを始める道具の名前（第10.11.5.1節・第49.7節）。 */
+const LOOKUP_START = 'lookup_start';
+
+/** 調べものを始める道具の定義。 */
+const LOOKUP_START_SPEC = {
+  name: LOOKUP_START,
+  description: 'この場では答えられず、メール・予定・Web・会社の接続先・渡された書類などを調べる必要があるときに呼ぶ。M2Office が調べものを始め、終わったら本人に伝える',
+  parameters: { type: 'object', properties: { what: { type: 'string', description: '調べること（頼みの言葉のまま）' } }, required: ['what'] },
+};
 
 /** サイネージに出したと言う言い回し（層 3 の推論はサイネージを動かせないため、当たれば答えを返さない。第31.11.1節）。 */
 const CLAIMS_SIGNAGE = /(サイネージ|画面)[^\n]{0,80}?(表示|出|流|映)し(ました|ておきました)/;
@@ -2177,11 +2178,14 @@ export const NOTE_REQUEST = /(説明|ヘルプ|記事)(に|へ|の).{0,200}補�
 /** 補足を消す頼み */
 const NOTE_REMOVE = /補足(を|は)?.{0,6}(消して|削除|外して|いらない|不要)/;
 /** 「1 人の上限を 5 割にして」「1 人の AI の上限を 30% にして」（第6.6.2節）。 */
+// @wordlist 定型（第49.4節）
 export const AI_SHARE_SET = /^\s*(?:1|一)\s*人(?:あたり)?の(?:AI\s*の(?:利用の)?)?上限を\s*(?:会社の(?:上限の)?)?\s*(?:(\d{1,2})\s*割|(\d{1,3})\s*%)\s*に(?:して|する|変えて)/;
 
 /** 「技術部の共有は技術チームのスペースにして」（グループに合う Chat のスペースを覚え直す。第16.7.12.1節）。 */
+// @wordlist 定型（第49.4節）
 export const GROUP_SPACE_SET = /^\s*(.{1,30}?)(?:グループ)?(?:の|への)共有(?:先)?(?:は|を)[「『]?(.{1,60}?)[」』]?(?:という|の)?(?:チャットの)?スペース(?:に|へ)(?:して|する|変えて|決めて|しておいて)/;
 /** 「技術部の共有先を忘れて」。 */
+// @wordlist 定型（第49.4節）
 export const GROUP_SPACE_FORGET = /^\s*(.{1,30}?)(?:グループ)?(?:の|への)共有(?:先)?(?:の(?:スペース|組み合わせ))?を(?:忘れて|消して|やめて)/;
 
 /**

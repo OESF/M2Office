@@ -77,6 +77,7 @@ export function caseMailMaterial(categories: MailCategoryRow[], threads: MailThr
   return [...out.values()];
 }
 
+// @wordlist 形を読む（第49.4節）
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const cut = (s: unknown, max: number) => (typeof s === 'string' ? [...s.replace(/\s+/g, ' ').trim()].slice(0, max).join('') : '');
 

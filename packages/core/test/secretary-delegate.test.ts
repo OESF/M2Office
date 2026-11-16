@@ -219,26 +219,37 @@ test('送る依頼（「Slack に投稿して」）は調べものに回さな�
   assert.equal(asksConnectionData('Slack の #general の内容をまとめて資料を作って', [{ id: 'slack', name: 'Slack' }]), false, '作る依頼は業務の取次に任せる');
 });
 
-test('層 3 が「あとで伝える」と約束したら、実際に調べものを起こす。起こせなければ約束の文を返さない（第10.11.5.1節）', async () => {
+test('層 3 は、調べる必要があれば調べものを始める道具を呼び、M2Office はその呼び出しの記録で調べものを始める。約束の文を言葉で見張らない（第10.11.5.1節・第49.7節）', async () => {
   const d = deps();
-  const llm = llmFull('none', '承知いたしました！取得できましたら結果をお伝えしますね。少々お待ちください！');
+  const tools: string[][] = [];
+  const base = llmFull('none', '');
+  const llm = {
+    ...base,
+    async completeTools(req: { tools: { name: string }[] }) {
+      tools.push(req.tools.map((x) => x.name));
+      return { text: '', tokensUsed: 1, toolCalls: [{ id: 'c1', name: 'lookup_start', args: { what: '来週の大阪の天気' } }] };
+    },
+  } as unknown as LlmProvider;
   const s = new Secretary({ repo: d.repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
   const reply = await s.respond('t', 'u1', '来週の大阪の天気はどうですか');
-  assert.equal(d.lookups.length, 1);
-  assert.ok(reply.lookup, '約束したら、あとで届く印を付ける');
-  assert.doesNotMatch(reply.text, /少々お待ちください/);
+  assert.deepEqual(tools, [['lookup_start']], '調べものを使える会社では、調べものを始める道具を渡す');
+  assert.equal(d.lookups.length, 1, '呼んだら、実際に調べものを始める');
+  assert.ok(reply.lookup, 'あとで届く印を付ける');
 
+  // 約束の文だけを返しても、言葉では見張らない（道具を呼ばなければ始めない）
+  const words = deps();
+  const promise = { ...base, async completeTools() { return { text: '承知いたしました！少々お待ちください！', tokensUsed: 1, toolCalls: [] }; } } as unknown as LlmProvider;
+  const s2 = new Secretary({ repo: words.repo, llm: promise, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: words.startAgent, startLookup: words.startLookup });
+  await s2.respond('t', 'u1', '来週の大阪の天気はどうですか');
+  assert.equal(words.lookups.length, 0, '言葉の一覧で約束を見つけて調べものを起こさない');
+
+  // 調べものを使えない会社では道具を渡さず、約束しないよう伝える
   const none = deps();
-  const s2 = new Secretary({ repo: none.repo, llm, connector: {} as never, agents: [] });
-  const r2 = await s2.respond('t', 'u1', '来週の大阪の天気はどうですか');
-  assert.equal(r2.lookup, undefined);
-  assert.doesNotMatch(r2.text, /お待ちください|お伝えします/, '起こせないのに約束しない');
-
-  const plain = deps();
-  const s3 = new Secretary({ repo: plain.repo, llm: llmFull('none', '経費の締めは毎月 25 日です。'), connector: {} as never, agents: [agent('secretary-lookup')], startAgent: plain.startAgent, startLookup: plain.startLookup });
-  const r3 = await s3.respond('t', 'u1', '経費の締めはいつですか');
-  assert.equal(plain.lookups.length, 0, '約束の無い答えはそのまま返す');
-  assert.equal(r3.text, '経費の締めは毎月 25 日です。');
+  const plain = llmFull('none', '分かる範囲でお答えします。');
+  const s3 = new Secretary({ repo: none.repo, llm: plain, connector: {} as never, agents: [] });
+  const r3 = await s3.respond('t', 'u1', '来週の大阪の天気はどうですか');
+  assert.equal(r3.lookup, undefined);
+  assert.ok(plain.systems.some((x) => x.includes('あとで調べて伝えると約束しないでください')));
 });
 
 test('推論が、出していないのに「画面に表示しました」と答えたら、その答えを返さず、出していないと伝える（第31.11.1節）', async () => {
