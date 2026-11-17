@@ -178,6 +178,8 @@ export interface ContactStore extends GoogleContactStore {
   /** 本人が取り込んで、読み取り中か読み取れなかった名刺。 */
   listUnresolvedCards(who: CardViewer): Promise<ContactCard[]>;
   listContacts(who: CardViewer, q: ContactQuery): Promise<ContactSummary[]>;
+  /** 一覧と同じ絞り込みでの数（名刺の画面のページを数える。仕様書 第6.8節 原則 u14）。 */
+  countContacts(who: CardViewer, q: Omit<ContactQuery, 'limit' | 'offset'>): Promise<number>;
   getContact(who: CardViewer, id: string): Promise<Contact | null>;
   listCardsOfContact(who: CardViewer, contactId: string): Promise<ContactCard[]>;
   /** 同じ範囲の、有効な連絡先のうち、メールアドレスのどれかが同じもの。 */
@@ -403,26 +405,18 @@ export class PostgresContactStore implements ContactStore {
       [who.tenantId, who.userId]);
   }
 
-  async listContacts(who: CardViewer, query: ContactQuery): Promise<ContactSummary[]> {
-    // 空白で区切った言葉が、どれも項目のどれかに当たるものを返す（「ミライ工業 山本」で会社名と氏名に当たる）。
-    // 氏名・ふりがな・会社名・住所は空白を除いて比べる（名刺の「佐野 毅」を「佐野毅」でも探せるように。第27.8節）
+  /**
+   * 一覧と数で同じにする絞り込み（言葉・範囲・状態・交換した日）。`$1`〜`$7` を使う。
+   *
+   * @remarks 空白で区切った言葉が、どれも項目のどれかに当たるものを返す（「ミライ工業 山本」で会社名と氏名に当たる）。
+   * 氏名・ふりがな・会社名・住所は空白を除いて比べる（名刺の「佐野 毅」を「佐野毅」でも探せるように。第27.8節）
+   */
+  private contactFilter(who: CardViewer, query: ContactQuery): { where: string; params: unknown[] } {
     const terms = (query.q ?? '').trim().split(/[\s　]+/).filter(Boolean).slice(0, 4);
     const likes = terms.length > 0 ? terms.map((t) => `%${t.replace(/[\\%_]/g, '\\$&')}%`) : null;
     const digits = terms.length === 1 ? terms[0]!.replace(/[^0-9]/g, '') : '';
-    return this.q<ContactSummary>(who,
-      `select k.id, k.scope, k.owner_user_id as "ownerUserId", k.name, k.name_kana as "nameKana", k.company,
-              k.department, k.title, k.emails, k.status, k.trashed_at as "trashedAt",
-              last.id as "cardId", last.front_file_id as "frontFileId", coalesce(last.front_rotation, 0) as "frontRotation",
-              last.front_corners as "frontCorners",
-              f.kind as "frontKind", to_char(last.received_on, 'YYYY-MM-DD') as "lastReceivedOn",
-              (select count(*)::int from contact_cards c where c.contact_id = k.id) as "cardCount"
-         from contacts k
-         left join lateral (
-           select c.id, c.front_file_id, c.front_rotation, c.front_corners, c.received_on from contact_cards c
-            where c.contact_id = k.id order by c.received_on desc, c.created_at desc limit 1
-         ) last on true
-         left join files f on f.id = last.front_file_id
-        where k.tenant_id = $1 and k.status = $2
+    return {
+      where: `k.tenant_id = $1 and k.status = $2
           and ($3::text = 'all' or k.scope = $3)
           and ($4::text[] is null or not exists (
                 select 1 from unnest($4::text[]) t
@@ -436,11 +430,37 @@ export class PostgresContactStore implements ContactStore {
                             or array_to_string(k.related, ' ') ilike t or array_to_string(k.products, ' ') ilike t))
                or ($5::text <> '' and regexp_replace(k.phones::text, '[^0-9]', '', 'g') like '%' || $5 || '%'))
           and ($6::date is null or exists (select 1 from contact_cards c where c.contact_id = k.id and c.received_on >= $6))
-          and ($7::date is null or exists (select 1 from contact_cards c where c.contact_id = k.id and c.received_on <= $7))
-        order by coalesce(last.received_on, k.created_at::date) desc, k.updated_at desc
+          and ($7::date is null or exists (select 1 from contact_cards c where c.contact_id = k.id and c.received_on <= $7))`,
+      params: [who.tenantId, query.status ?? 'active', query.scope ?? 'all', likes, digits.length >= 3 ? digits : '',
+        query.receivedFrom ?? null, query.receivedTo ?? null],
+    };
+  }
+
+  async listContacts(who: CardViewer, query: ContactQuery): Promise<ContactSummary[]> {
+    const f = this.contactFilter(who, query);
+    return this.q<ContactSummary>(who,
+      `select k.id, k.scope, k.owner_user_id as "ownerUserId", k.name, k.name_kana as "nameKana", k.company,
+              k.department, k.title, k.emails, k.status, k.trashed_at as "trashedAt",
+              last.id as "cardId", last.front_file_id as "frontFileId", coalesce(last.front_rotation, 0) as "frontRotation",
+              last.front_corners as "frontCorners",
+              f.kind as "frontKind", to_char(last.received_on, 'YYYY-MM-DD') as "lastReceivedOn",
+              (select count(*)::int from contact_cards c where c.contact_id = k.id) as "cardCount"
+         from contacts k
+         left join lateral (
+           select c.id, c.front_file_id, c.front_rotation, c.front_corners, c.received_on from contact_cards c
+            where c.contact_id = k.id order by c.received_on desc, c.created_at desc limit 1
+         ) last on true
+         left join files f on f.id = last.front_file_id
+        where ${f.where}
+        order by coalesce(last.received_on, k.created_at::date) desc, k.updated_at desc, k.id desc
         limit $8 offset $9`,
-      [who.tenantId, query.status ?? 'active', query.scope ?? 'all', likes, digits.length >= 3 ? digits : '',
-        query.receivedFrom ?? null, query.receivedTo ?? null, query.limit, query.offset ?? 0]);
+      [...f.params, query.limit, query.offset ?? 0]);
+  }
+
+  async countContacts(who: CardViewer, query: Omit<ContactQuery, 'limit' | 'offset'>): Promise<number> {
+    const f = this.contactFilter(who, { ...query, limit: 0 });
+    const rows = await this.q<{ n: number }>(who, `select count(*)::int as n from contacts k where ${f.where}`, f.params);
+    return rows[0]?.n ?? 0;
   }
 
   async getContact(who: CardViewer, id: string): Promise<Contact | null> {

@@ -41,11 +41,14 @@ export interface Repository {
    * @param opts.requestedBy 指定すれば、その利用者が依頼したものに絞る
    * @param opts.agentId 指定すれば、その業務の実行に絞る（社内ナレッジ Q&A のこれまでの質問。第9.5.4節）
    * @param opts.before 指定すれば、この時刻より前に始まったものだけ（続きを読む）
+   * @param opts.offset 先頭から飛ばす件数（実行履歴の画面のページ。第6.8節 原則 u14）
    */
   listRunsWithJobs(
     tenantId: string,
-    opts: { limit: number; requestedBy?: string; agentId?: string; before?: string },
+    opts: { limit: number; requestedBy?: string; agentId?: string; before?: string; offset?: number },
   ): Promise<{ run: Run; job: Job }[]>;
+  /** 実行の数（依頼した人・業務で絞れる）。実行履歴の画面のページを数える（第6.8節 原則 u14）。 */
+  countRuns(tenantId: string, opts: { requestedBy?: string; agentId?: string }): Promise<number>;
   /** エージェント別の実行件数・トークン・費用を集計する。 */
   usageByAgent(tenantId: string): Promise<{ agentId: string; runs: number; tokens: number; costJpy: number }[]>;
   /** 実行待ちのジョブを 1 件取り出して `running` にする（ワーカー用）。 */
@@ -237,8 +240,10 @@ export interface Repository {
    * @param query 語句。空なら絞り込まない
    */
   listConversations(
-    tenantId: string, userId: string, opts: { query?: string; limit: number },
+    tenantId: string, userId: string, opts: { query?: string; limit: number; offset?: number },
   ): Promise<Conversation[]>;
+  /** 本人の会話の数（語句で絞れる）。会話ログの画面のページを数える（仕様書 第6.8節 原則 u14）。 */
+  countConversations(tenantId: string, userId: string, query?: string): Promise<number>;
   /** 1 件を消す。本人のものでなければ消さず `false`。 */
   deleteConversation(tenantId: string, userId: string, id: string): Promise<boolean>;
   /**
@@ -317,8 +322,12 @@ export interface Repository {
    * @remarks 取り次ぎの好み（`routing`）は含めない（事実や好みとして答えの材料に混ぜないため）。取り次ぎの好みは {@link Repository.listRoutingMemories}
    */
   listMemories(tenantId: string, userId: string): Promise<Memory[]>;
-  /** 本人の取り次ぎの好み（使っているものだけ。新しい順。第11.13.7節）。秘書が業務を選ぶときにだけ使う。 */
-  listRoutingMemories(tenantId: string, userId: string): Promise<Memory[]>;
+  /**
+   * 本人の取り次ぎの好み（使っているものだけ。新しい順。第11.13.7節）。
+   *
+   * @param limit 秘書が業務を選ぶときは新しい 200 件（既定）。記憶の画面は `null` ですべて（見て、直して、消せるように。第6.8節 原則 u14）
+   */
+  listRoutingMemories(tenantId: string, userId: string, limit?: number | null): Promise<Memory[]>;
   /** 週ごとの直しの数と頼んだ数を足す（第11.13.7節「数える」。種類は `conversation`・`remake`・`reject`・`reroute`・`requests`）。 */
   addLearningCount(tenantId: string, userId: string, week: string, kind: string, n: number): Promise<void>;
   /** 週ごとの直しの数と頼んだ数（`since` の週から。新しい週から）。 */
@@ -373,7 +382,9 @@ export interface Repository {
   /** 秘書が学んだ会社の知識の、確かめた人の数を 1 つ増やす（第11.13.6節）。 */
   confirmKnowledge(tenantId: string, id: string): Promise<void>;
   /** 本人の案件ノート（第11.13.5節）。`status` が無ければ進んでいるものだけ。最後に動いた日の新しい順。 */
-  listCaseNotes(tenantId: string, userId: string, opts?: { status?: 'open' | 'closed' | 'all'; limit?: number }): Promise<CaseNote[]>;
+  listCaseNotes(tenantId: string, userId: string, opts?: { status?: 'open' | 'closed' | 'all'; limit?: number; offset?: number }): Promise<CaseNote[]>;
+  /** 本人の案件ノートの数（記憶の画面のページを数える。仕様書 第6.8節 原則 u14）。 */
+  countCaseNotes(tenantId: string, userId: string, status?: 'open' | 'closed' | 'all'): Promise<number>;
   /** 案件ノートを置く（同じ ID は書き換える）。 */
   saveCaseNote(note: CaseNote): Promise<void>;
   /** 本人の案件ノートを 1 つ消す。本人のものでなければ `false`。 */

@@ -146,7 +146,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `PUT /v1/me/photo` | 本人のアバターを入れる（`file`。中身で PNG・JPEG を確かめる。1 MB まで。上書き）。`{ photo }` に新しい URL を返す（仕様書 第6.5.1.2節） |
 | `DELETE /v1/me/photo` | 本人が入れたアバターを削除する（Google の写真に戻る）。入れていなければ 404 |
 | `POST /v1/jobs` | ジョブを作成し待ち行列へ入れる。実行はワーカーが担う |
-| `GET /v1/jobs` | **本人が依頼した**実行の一覧。`agentId`（業務）・`before`（時刻。続き）・`limit`（1〜50）で絞れる（社内ナレッジ Q&A のこれまでの質問。仕様書 第9.5.4節） |
+| `GET /v1/jobs` | **本人が依頼した**実行の一覧。`agentId`（業務）・`before`（時刻。続き）・`limit`（1〜50）で絞れる（社内ナレッジ Q&A のこれまでの質問。仕様書 第9.5.4節）。`offset` でページを送り、`total`（すべての数）を返す（第6.8節 原則 u14） |
 | `GET /v1/briefs?agent=…&before=…` | 本人の朝のブリーフ・週次ブリーフの一覧（新しい順・30 件ずつ・本文なし）と、いままとめている実行（仕様書 第9.5.5.1.2節） |
 | `GET /v1/briefs/:runId` ／ `DELETE /v1/briefs/:runId` | 本人のブリーフ 1 件の本文 ／ 削除。本人のものでなければ 404 |
 | `GET /v1/mail` | 本人のメールの画面（返事が要る・対応が要る・返事待ち・目を通すだけ・宣伝・お知らせ、並べるカテゴリー（`categories`）と 1 件ごとのカテゴリー、見回りの様子と最後の取得、AI の上限で止めているか）。まだ一度も見ていなければ、その場で見る（仕様書 第9.5.1.1節）。代理アクセスでは 404 |
@@ -170,7 +170,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `POST /v1/notifications/:id/read` | 既読にする |
 | `DELETE /v1/notifications/:id` ／ `POST /v1/notifications/delete` | 本人の通知を 1 件消す ／ 選んだものをまとめて消す（`ids`。100 件まで）。ほかの人の通知は消えない（第6.5.5節） |
 | `GET /v1/schedules` | 本人の定時実行 |
-| `GET /v1/cards` | 名刺の一覧と検索（`q`・`scope`・`trash=1`、交換した日の範囲 `from`・`to`）。本人の読み取り中・読み取れなかった名刺（`unresolved`）と進み具合（`progress`）、会社の既定の範囲も返す。名刺管理を切っている会社と利用範囲の外の人には、`/v1/cards` のどの口も 403（仕様書 第27.8節） |
+| `GET /v1/cards` | 名刺の一覧と検索（`q`・`scope`・`trash=1`、交換した日の範囲 `from`・`to`）。本人の読み取り中・読み取れなかった名刺（`unresolved`）と進み具合（`progress`）、会社の既定の範囲も返す。名刺管理を切っている会社と利用範囲の外の人には、`/v1/cards` のどの口も 403（仕様書 第27.8節）。100 件ずつ。`offset` でページを送り、`total`・`pageSize` を返す（第6.8節 原則 u14） |
 | `POST /v1/cards/import` | 表（CSV・Excel。multipart の `file` と `scope`。5 MB・1,000 行まで）から名刺を取り込む。列の見出しはよくある言い方と推論で読み、1 行を 1 枚の名刺（画像なし）として登録し、同じ人はまとめる。登録した数・まとめた数・取り込めなかった行・列の読み方を返す（仕様書 第27.4節） |
 | `GET /v1/cards/export` | 管理者: 会社で共有の名刺を CSV（`format=csv`。BOM 付きの UTF-8）か Excel（`format=xlsx`）で書き出す。自分だけの名刺は入れない。監査ログ `contact.export`（第27.10節） |
 | `POST /v1/cards` | 名刺のファイルを受け付ける（multipart。`file` を 50 まで・`backOf`（裏を組にする表の番号の JSON）・`scope`）。読み取りを待たずに 202。受け付けなかったものは `rejected`（第27.4節） |
@@ -568,7 +568,7 @@ Google はリダイレクト URI に HTTPS を要求します（例外は `local
 | `DELETE /v1/me/sessions/:id` | 端末を個別にログアウト |
 | `GET /v1/me/usage` | 本人の利用状況（区画は名前 `compartments` と、画面に出す説明 `compartmentLabels`） |
 | `GET /v1/me/memories` | 本人が秘書に覚えられていること（`source` が `learned` なら秘書が会話から自分で覚えたもの。仕様書 第11.5.2節。`kind` が `preference` なら仕事のやり方の好み。第11.13.2節）。取り次ぎの好み（`kind: routing`）も並べ、好みには業務の名前（`agentName`）を添える（第11.13.7節） |
-| `GET /v1/me/cases` | 本人の進んでいる案件ノート（題名・状態・次にやること・期限・最後に動いた日・結んだメールのカテゴリー `mailCategory`。仕様書 第11.13.5節・第11.13.8節） |
+| `GET /v1/me/cases` | 本人の進んでいる案件ノート（題名・状態・次にやること・期限・最後に動いた日・結んだメールのカテゴリー `mailCategory`。仕様書 第11.13.5節・第11.13.8節）。50 件ずつ。`offset` でページを送り、`total` を返す（第6.8節 原則 u14） |
 | `DELETE /v1/me/cases/:id` | 案件ノートを 1 つ消す（本人だけ） |
 | `GET /v1/admin/knowledge/gaps` | 管理者: 秘書が答えられなかった問い（同じ問いをまとめた回数・最後・答えが入った知識。誰が聞いたかは返さない。第11.13.6節） |
 | `POST /v1/admin/knowledge/gaps/dismiss` | 管理者: 答えられなかった問いを外す（`{ question }`。同じ問いをまとめて） |
@@ -625,6 +625,7 @@ src/context.ts        依存の構築（永続化・LLM・接続口・ツール�
 src/auth/             認証の設定とログイン状態（Cookie）
 src/middleware/       テナント解決、利用者の確認、ロールの確認、要求のログと想定外のエラーの処理
 src/routes/           エンドポイント
+src/paging.ts         一覧の口のページ（1 ページの件数と offset の読み方。増え続ける一覧は件数で切らずにページで送る。仕様書 第6.8節 原則 u14）
 src/secretary/        秘書の調べものと秘書が頼んだ業務の状態、朝のブリーフの自動の用意
 src/chat/             Chat で秘書に頼む橋渡し（bridge.ts。送った人の秘書に渡し、答えと後ろへ回した依頼の結果を Chat に返す）と、Pub/Sub から取りに行く見回り（pubsub.ts）。仕様書 第10.16.3節
 src/voice/            音声の中継（Gemini Live）、秘書の名乗りの指示、声を試す

@@ -23,6 +23,7 @@ import { HelpTip, Markdown } from './help.js';
 import { profileSections } from './profile-sections.js';
 import { playSample } from './voice.js';
 import { openMailCategory } from './Mail.js';
+import { PAGE_SIZE, Pager, usePaged } from './Pager.js';
 
 /** 通知の種類（個人設定で切れるもの）。 */
 type NotificationKindKey = keyof UserSettings['notifications']['kinds'];
@@ -509,12 +510,15 @@ function ConversationSettings({ settings, onChange, onSave }: {
   /** 保存の処理。終わるのを待って、結果をボタンの横に出す（第6.10.4.2節）。 */
   onSave: () => Promise<unknown>;
 }) {
-  const [items, setItems] = useState<ConversationView[]>([]);
   const [query, setQuery] = useState('');
+  // 探している言葉（「探す」を押したときに決まる）。変わったら最初のページから読む
+  const [searched, setSearched] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
-  const load = (q = query) => api.myConversations(q)
-    .then((r) => setItems(r.items)).catch((e) => setMsg(describeError(e)));
-  useEffect(() => { void load(''); }, []);
+  // 会話は 4 週残るので、50 件ずつのページで送る（第6.8節 原則 u14）
+  const paged = usePaged<ConversationView>((offset) => api.myConversations(searched, offset), searched);
+  const items = paged.items ?? [];
+  useEffect(() => { if (paged.error) setMsg(describeError(paged.error)); }, [paged.error]);
+  const load = (q?: string) => { if (q !== undefined && q !== searched) setSearched(q); else void paged.reload(); };
 
   return (
     <div className="card">
@@ -533,13 +537,13 @@ function ConversationSettings({ settings, onChange, onSave }: {
 
       <div className="row">
         <input value={query} placeholder="言葉で探す" onChange={(e) => setQuery(e.target.value)} />
-        <button className="btn ghost" onClick={() => void load()}>探す</button>
+        <button className="btn ghost" onClick={() => load(query)}>探す</button>
         {items.length > 0 && (
           <button className="btn danger" onClick={() => {
             if (!confirm('会話ログをすべて削除しますか。元に戻せません。')) return;
             void api.clearConversations()
               .then((r) => setMsg(`${r.removed} 件を削除しました`))
-              .then(() => load(''))
+              .then(() => { setQuery(''); load(''); })
               .catch((e) => setMsg(describeError(e)));
           }}>すべて削除</button>
         )}
@@ -547,6 +551,8 @@ function ConversationSettings({ settings, onChange, onSave }: {
       {items.length === 0 ? (
         <p className="muted small">会話はありません。</p>
       ) : (
+        <>
+        <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />
         <table className="table conversation-log">
           <tbody>
             {items.map((c) => (
@@ -577,6 +583,8 @@ function ConversationSettings({ settings, onChange, onSave }: {
             ))}
           </tbody>
         </table>
+        {items.length > 10 && <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />}
+        </>
       )}
       {msg && <p className="muted small">{msg}</p>}
     </div>
@@ -626,14 +634,23 @@ function MemorySettings({ settings, onChange, onSave }: {
   const [mailLessons, setMailLessons] = useState<Awaited<ReturnType<typeof api.mail.lessons>>['items']>([]);
   const loadMail = () => api.mail.lessons().then((r) => setMailLessons(r.items)).catch(() => setMailLessons([]));
   // 進んでいる案件ノート（仕様書 第11.13.5節）
-  const [cases, setCases] = useState<Awaited<ReturnType<typeof api.myCases>>['items']>([]);
+  // 案件ノートは 50 件ずつのページで送る（第6.8節 原則 u14）
+  const casePaged = usePaged((offset) => api.myCases(offset));
+  const cases = casePaged.items ?? [];
+  // 覚えていることは画面でページを送る（API はすべてを返す）
+  const [memPage, setMemPage] = useState(0);
+  // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
+  useEffect(() => {
+    const last = Math.max(0, Math.ceil(items.length / PAGE_SIZE) - 1);
+    if (memPage > last) setMemPage(last);
+  }, [items.length, memPage]);
   // 整理でしまったもの（仕様書 第11.11.4節）。開いたときに読む
   const [archived, setArchived] = useState<MemoryView[] | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   // 直している 1 件（ID と書きかけの文）
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const load = () => api.myMemories().then((r) => setItems(r.items)).catch((e) => setMsg(describeError(e)));
-  const loadCases = () => api.myCases().then((r) => setCases(r.items)).catch(() => setCases([]));
+  const loadCases = () => casePaged.reload();
   useEffect(() => { void load(); void loadCases(); void loadMail(); }, []);
 
   const saveEdit = async () => {
@@ -672,7 +689,8 @@ function MemorySettings({ settings, onChange, onSave }: {
 
       {cases.length > 0 && (
         <details className="fold memory-fold">
-          <summary>進んでいる案件（{cases.length}）</summary>
+          <summary>進んでいる案件（{casePaged.total}）</summary>
+          <Pager page={casePaged.page} total={casePaged.total} onPage={casePaged.setPage} />
           <table className="table small">
             <thead><tr><th>案件</th><th className="nowrap">期限</th><th className="nowrap">最後に動いた日</th><th /></tr></thead>
             <tbody>
@@ -707,9 +725,11 @@ function MemorySettings({ settings, onChange, onSave }: {
         {items.length === 0 ? (
           <p className="muted small">まだ何も覚えていません。</p>
         ) : (
+          <>
+          <Pager page={memPage} total={items.length} onPage={setMemPage} />
           <table className="table">
             <tbody>
-              {items.map((m) => (
+              {items.slice(memPage * PAGE_SIZE, (memPage + 1) * PAGE_SIZE).map((m) => (
                 <tr key={m.id}>
                   {editing?.id === m.id ? (
                     <td colSpan={3}>
@@ -741,6 +761,7 @@ function MemorySettings({ settings, onChange, onSave }: {
               ))}
             </tbody>
           </table>
+          </>
         )}
         {(items.length > 0 || mailLessons.length > 0) && (
           <div className="row">

@@ -15,6 +15,7 @@ import {
 import { AUDIO, AiNotConfiguredError, AiPolicyBlockedError, LEARNED_SOURCE, correctionProgress, cleanTopics, buildPresence, loadFile, refusalMessage, refuseToRemember, jstMonth, ensureChatDm, CHAT_DM_SETUP_SCOPE, NOTIFICATION_KIND_LABELS, photoMime, HR_PHOTO_MAX_BYTES } from '@m2office/core';
 import { userSites, type AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 /** 業務の定義に無い、好みの持ち主の名前（メールの下書き・販促物。第11.13.7節）。 */
 const AGENT_LABEL: Record<string, string> = { mail: 'メールの返事の下書き', 'print-designs': '販促物の作成' };
@@ -282,10 +283,13 @@ export function meRoute(deps: AppDeps) {
    */
   app.get('/conversations', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const items = await deps.repo.listConversations(tenant.id, user.id, {
-      query: c.req.query('q') ?? '', limit: 50,
-    });
-    return c.json({ items });
+    const query = c.req.query('q') ?? '';
+    const offset = offsetOf(c.req.query('offset'));
+    const [items, total] = await Promise.all([
+      deps.repo.listConversations(tenant.id, user.id, { query, limit: PAGE, offset }),
+      deps.repo.countConversations(tenant.id, user.id, query),
+    ]);
+    return c.json({ items, total });
   });
 
   /** 会話ログを 1 件消す。 */
@@ -314,7 +318,8 @@ export function meRoute(deps: AppDeps) {
   app.get('/memories', async (c) => {
     const { tenant, user } = c.get('ctx');
     // 取り次ぎの好み（第11.13.7節）も、覚えていることとして並べる（見て、直して、消せるように。第10.7節）
-    const [facts, routing] = await Promise.all([deps.repo.listMemories(tenant.id, user.id), deps.repo.listRoutingMemories(tenant.id, user.id)]);
+    // 画面ではすべてを出す（件数で切らない。第6.8節 原則 u14）。ページは画面で送る
+    const [facts, routing] = await Promise.all([deps.repo.listMemories(tenant.id, user.id), deps.repo.listRoutingMemories(tenant.id, user.id, null)]);
     const items = [...facts, ...routing].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     // 好みに業務の名前を添える（どの業務の好みか）
     const view = await deps.tenantView(tenant.id);
@@ -352,7 +357,11 @@ export function meRoute(deps: AppDeps) {
   /** 進んでいる案件ノート（第11.13.5節）。秘書がまとめたもの。本人のものだけを返す。結んだメールのカテゴリーの名前も添える（第11.13.8節） */
   app.get('/cases', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const notes = await deps.repo.listCaseNotes(tenant.id, user.id, { limit: 50 });
+    const offset = offsetOf(c.req.query('offset'));
+    const [notes, total] = await Promise.all([
+      deps.repo.listCaseNotes(tenant.id, user.id, { limit: PAGE, offset }),
+      deps.repo.countCaseNotes(tenant.id, user.id),
+    ]);
     const cats = notes.some((n) => n.mailCategoryId)
       ? new Map((await deps.mail.service.store.categories({ tenantId: tenant.id, userId: user.id }).catch(() => [])).map((x) => [x.id, x.name]))
       : new Map<string, string>();
@@ -360,6 +369,7 @@ export function meRoute(deps: AppDeps) {
       items: notes.map(({ mailCategoryId, mailOnly: _, ...n }) => ({
         ...n, mailCategory: mailCategoryId && cats.has(mailCategoryId) ? { id: mailCategoryId, name: cats.get(mailCategoryId)! } : null,
       })),
+      total,
     });
   });
 

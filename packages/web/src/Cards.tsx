@@ -15,6 +15,10 @@ import { ApiError, api, describeError, type CardDetail, type CardList, type Card
 import { BulkMailView } from './BulkMail.js';
 import { cropCard, prepareCardPhoto } from './card-image.js';
 import { BackButton } from './back-button.js';
+import { Pager } from './Pager.js';
+
+/** 名刺の一覧の 1 ページの件数（API と同じ。画像を並べるので 100 件。第6.8節 原則 u14）。 */
+const CARD_PAGE = 100;
 
 /**
  * ファイルを選ぶときに受け付ける形式（第27.4節）。
@@ -114,6 +118,9 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
   const [q, setQ] = useState('');
   const [scope, setScope] = useState<'all' | ContactScope>('all');
   const [trash, setTrash] = useState(false);
+  // ページ（100 件ずつ。第6.8節 原則 u14）。探す言葉・範囲・ごみ箱を変えたら最初のページへ戻す
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [q, scope, trash]);
   // 表から取り込んだ結果など、うまくいった知らせ
   const [notice, setNotice] = useState<string | null>(null);
   // ごみ箱で選んだ名刺（まとめて戻す・完全に削除する。第27.7節）。ごみ箱を開き直したら選び直す
@@ -132,12 +139,15 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
   const mobile = isMobile();
 
   const load = useCallback(() => {
-    api.cards.list({ q, scope, trash }).then((r) => {
+    api.cards.list({ q, scope, trash, offset: page * CARD_PAGE }).then((r) => {
       setList(r);
+      // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
+      const last = Math.max(0, Math.ceil(r.total / r.pageSize) - 1);
+      if (page > last) setPage(last);
       // 選ばなければ会社の既定の範囲（第27.7節）。毎回選ばせない
       setPersonal((p) => (p === null ? r.defaultScope === 'personal' : p));
     }).catch((e) => setMessage(describeError(e, '読み込めませんでした')));
-  }, [q, scope, trash]);
+  }, [q, scope, trash, page]);
   // Google の同意から戻ったら、入れる途中だった名刺を入れる（第27.15節）
   useGoogleResume((t) => { setNotice(t); load(); }, setMessage);
   // 探す言葉は打ち終わりを待って読み直す
@@ -294,6 +304,7 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
       {trash && list && list.items.length > 0 && (
         <TrashBar items={list.items} selected={selected} onSelect={setSelected} onChanged={load} onMessage={setMessage} />
       )}
+      {list && <Pager page={page} total={list.total} pageSize={list.pageSize} onPage={(p) => { setPage(p); window.scrollTo(0, 0); }} />}
       {list?.items.map((c) => (
         trash
           ? <TrashRow key={c.id} item={c} onChanged={load} onError={setMessage}
@@ -303,6 +314,7 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
               onCheck={(on) => setPicked((cur) => { const n = new Map(cur); if (on) n.set(c.id, c); else n.delete(c.id); return n; })} />
             : <CardRow key={c.id} item={c} onOpen={() => onOpen(c.id)} />
       ))}
+      {list && list.items.length > 10 && <Pager page={page} total={list.total} pageSize={list.pageSize} onPage={setPage} />}
     </div>
   );
 }

@@ -31,6 +31,7 @@ import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
 import { RecorderDialog } from './Recorder.js';
 import { meetingMinutesRequest } from './meeting-request.js';
+import { PAGE_SIZE, Pager, usePaged } from './Pager.js';
 import { EMPTY_HISTORY, INPUT_HISTORY_MAX, mergeHistory, shouldRecall, stepHistory, type HistoryState } from './input-history.js';
 import { AgentForm, ApprovalRow, ApprovalTray, AskBox, Elapsed, FILE_ACCEPT, isRecordingFile, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner, tooLargeMessage } from './components.js';
 import { DemoBanner } from './demo-terms.js';
@@ -1046,13 +1047,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'history' && (
             <>
               <h1>実行履歴</h1>
-              {history.length === 0 && <p className="muted">まだ履歴はありません</p>}
-              {history.map(({ run, job }) => (
-                <HistoryRow
-                  key={run.id} run={run} viewerId={me.user.id}
-                  agentName={agents.find((a) => a.id === job?.agentId)?.name ?? '不明な業務'}
-                />
-              ))}
+              <HistoryList latest={history} viewerId={me.user.id} nameOf={(id) => agents.find((a) => a.id === id)?.name ?? '不明な業務'} />
             </>
           )}
         </main>
@@ -1884,8 +1879,35 @@ const tail = (text: string) => (text.length > CAPTION_MAX ? `…${text.slice(-CA
  *
  * @remarks 本人の受け取り箱の整理なので、消す前に確認を挟まない（ADR-0028）
  */
+/**
+ * 実行履歴（仕様書 第6.2.4節）。50 件ずつのページで送る（第6.8節 原則 u14）。
+ *
+ * @remarks 最初のページは、画面全体で数秒ごとに読み直している一覧をそのまま使い（動いている業務の状態がすぐ変わる）、2 ページめからはそのページを読む。
+ */
+function HistoryList({ latest, viewerId, nameOf }: {
+  latest: { run: { id: string; status: string; startedAt: string }; job: { agentId: string } | null }[]; viewerId: string; nameOf: (agentId: string | undefined) => string;
+}) {
+  const paged = usePaged((offset) => api.jobs(offset));
+  // 新しい実行が増えたら、すべての数を読み直す
+  const newest = latest[0]?.run.id ?? '';
+  const { reload } = paged;
+  useEffect(() => { void reload(); }, [newest, reload]);
+  const items = paged.page === 0 ? latest : (paged.items ?? []);
+  if (items.length === 0 && paged.page === 0) return <p className="muted">まだ履歴はありません</p>;
+  const pager = <Pager page={paged.page} total={Math.max(paged.total, latest.length)} onPage={paged.setPage} />;
+  return (
+    <>
+      {pager}
+      {items.map(({ run, job }) => (
+        <HistoryRow key={run.id} run={run} viewerId={viewerId} agentName={nameOf(job?.agentId)} />
+      ))}
+      {items.length > 10 && pager}
+    </>
+  );
+}
+
 /** お知らせの画面の 1 ページの件数（API と同じ。仕様書 第6.5.5節）。 */
-const NOTICE_PAGE = 50;
+const NOTICE_PAGE = PAGE_SIZE;
 
 /**
  * お知らせの画面（仕様書 第6.5.5節）。
@@ -1917,13 +1939,7 @@ function Notifications({ items: latest, total, onRead, onOpenBrief }: {
   // 既読にした・消したら、画面全体の件数と、開いているページを読み直す
   const changed = () => { onRead(); if (page > 0) loadPage(page); };
   const go = (p: number) => { setSelected(new Set()); setError(null); setPage(p); };
-  const pager = pages > 1 && (
-    <div className="row notice-pager">
-      <button className="btn ghost small" disabled={page === 0} onClick={() => go(page - 1)}>‹ 前ページ</button>
-      <span className="muted small">{page * NOTICE_PAGE + 1}〜{Math.min(total, (page + 1) * NOTICE_PAGE)} 件め / {total} 件</span>
-      <button className="btn ghost small" disabled={page >= pages - 1} onClick={() => go(page + 1)}>次ページ ›</button>
-    </div>
-  );
+  const pager = <Pager page={page} total={total} pageSize={NOTICE_PAGE} onPage={go} />;
   if (items.length === 0 && page === 0) return <p className="muted">お知らせはありません</p>;
   const all = selected.size === items.length;
   const toggle = (id: string) => setSelected((cur) => {

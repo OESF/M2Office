@@ -15,6 +15,10 @@ import {
 import type { CardFields, ContactScope } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { offsetOf } from '../paging.js';
+
+/** 名刺の一覧の 1 ページの件数（名刺は画像を並べるので 100 件）。 */
+const CARD_PAGE = 100;
 
 /** 名刺の口の環境。会社の既定の範囲を、入口で確かめたときに持たせる。 */
 type CardsEnv = { Variables: AppEnv['Variables'] & { cardsDefaultScope: ContactScope } };
@@ -83,16 +87,18 @@ export function cardsRoute(deps: AppDeps) {
   app.get('/', async (c) => {
     const v = who(c);
     const scope = c.req.query('scope');
-    const [items, unresolved, batches] = await Promise.all([
-      store.listContacts(v, {
-        q: (c.req.query('q') ?? '').slice(0, 100),
-        scope: scope === 'company' || scope === 'personal' ? scope : 'all',
-        // 交換した日の範囲（まとめてのメールの宛先を探す。第27.9.1節）
-        ...(/^\d{4}-\d{2}-\d{2}$/.test(c.req.query('from') ?? '') ? { receivedFrom: c.req.query('from')! } : {}),
-        ...(/^\d{4}-\d{2}-\d{2}$/.test(c.req.query('to') ?? '') ? { receivedTo: c.req.query('to')! } : {}),
-        status: c.req.query('trash') === '1' ? 'trash' : 'active',
-        limit: 100, offset: Math.max(0, Number(c.req.query('offset')) || 0),
-      }),
+    const filter = {
+      q: (c.req.query('q') ?? '').slice(0, 100),
+      scope: (scope === 'company' || scope === 'personal' ? scope : 'all') as ContactScope | 'all',
+      // 交換した日の範囲（まとめてのメールの宛先を探す。第27.9.1節）
+      ...(/^\d{4}-\d{2}-\d{2}$/.test(c.req.query('from') ?? '') ? { receivedFrom: c.req.query('from')! } : {}),
+      ...(/^\d{4}-\d{2}-\d{2}$/.test(c.req.query('to') ?? '') ? { receivedTo: c.req.query('to')! } : {}),
+      status: c.req.query('trash') === '1' ? 'trash' as const : 'active' as const,
+    };
+    // 100 件ずつのページで送る。`total` は同じ絞り込みでのすべての数（第6.8節 原則 u14）
+    const [items, total, unresolved, batches] = await Promise.all([
+      store.listContacts(v, { ...filter, limit: CARD_PAGE, offset: offsetOf(c.req.query('offset')) }),
+      store.countContacts(v, filter),
       store.listUnresolvedCards(v),
       store.activeBatches(v),
     ]);
@@ -103,7 +109,8 @@ export function cardsRoute(deps: AppDeps) {
       items, progress,
       unresolved: unresolved.map((x) => ({ id: x.id, status: x.status, failureReason: x.failureReason, frontFileId: x.frontFileId, createdAt: x.createdAt })),
       defaultScope: c.get('cardsDefaultScope'),
-      hasMore: items.length === 100,
+      hasMore: items.length === CARD_PAGE,
+      total, pageSize: CARD_PAGE,
     });
   });
 

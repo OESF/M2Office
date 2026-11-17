@@ -691,6 +691,9 @@ export interface CardList {
   unresolved: { id: string; status: 'pending' | 'reading' | 'failed'; failureReason: string | null; frontFileId: string | null; createdAt: string }[];
   defaultScope: ContactScope;
   hasMore: boolean;
+  /** 同じ絞り込みでのすべての数と、1 ページの件数（仕様書 第6.8節 原則 u14）。 */
+  total: number;
+  pageSize: number;
 }
 
 /** 名刺の受け付けの結果。 */
@@ -1620,7 +1623,7 @@ export const api = {
   /** 名刺管理（内蔵の拡張。仕様書 第27章）。 */
   cards: {
     /** 一覧と検索。本人の読み取り中・読み取れなかった名刺と、進み具合も返る（第27.8節）。 */
-    list: (q: { q?: string; scope?: 'all' | ContactScope; trash?: boolean; from?: string; to?: string } = {}) => {
+    list: (q: { q?: string; scope?: 'all' | ContactScope; trash?: boolean; from?: string; to?: string; offset?: number } = {}) => {
       const p = new URLSearchParams();
       if (q.q) p.set('q', q.q);
       if (q.scope && q.scope !== 'all') p.set('scope', q.scope);
@@ -1628,6 +1631,8 @@ export const api = {
       // 交換した日の範囲（まとめてのメールの宛先を探す。第27.9.1節）
       if (q.from) p.set('from', q.from);
       if (q.to) p.set('to', q.to);
+      // ページ（100 件ずつ。第6.8節 原則 u14）
+      if (q.offset) p.set('offset', String(q.offset));
       return call<CardList>(`/cards?${p.toString()}`);
     },
     /** まとめてのメール（仕様書 第27.9.1節）。下書きは作った本人だけが見られる。 */
@@ -2745,15 +2750,19 @@ export const api = {
   /** 会話の要約（仕様書 第11.9.6節）。 */
   myConversationDigests: () => call<{ items: { day: string; summary: string }[] }>('/me/conversation-digests'),
   /** 会話ログ（仕様書 第11.9.4.1節）。本人のやり取りだけが返る。 */
-  myConversations: (query = '') =>
-    call<{ items: ConversationView[] }>(`/me/conversations${query ? `?q=${encodeURIComponent(query)}` : ''}`),
+  myConversations: (query = '', offset = 0) => {
+    const p = new URLSearchParams();
+    if (query) p.set('q', query);
+    if (offset > 0) p.set('offset', String(offset));
+    return call<{ items: ConversationView[]; total: number }>(`/me/conversations${p.size ? `?${p}` : ''}`);
+  },
   deleteConversation: (id: string) => call(`/me/conversations/${id}`, { method: 'DELETE' }),
   clearConversations: () => call<{ removed: number }>('/me/conversations', { method: 'DELETE' }),
   /** 記憶とデータ（仕様書 第6.5.4節）。本人の記憶だけが返る。 */
   myMemories: () => call<{ items: MemoryView[] }>('/me/memories'),
   /** 秘書の成長（本人の像と数。仕様書 第11.13.3節）。 */
   /** 進んでいる案件ノート（仕様書 第11.13.5節）。 */
-  myCases: () => call<{ items: { id: string; title: string; state: string; nextStep: string; dueOn: string | null; lastDay: string; mailCategory: { id: string; name: string } | null }[] }>('/me/cases'),
+  myCases: (offset = 0) => call<{ total: number; items: { id: string; title: string; state: string; nextStep: string; dueOn: string | null; lastDay: string; mailCategory: { id: string; name: string } | null }[] }>(`/me/cases${offset > 0 ? `?offset=${offset}` : ''}`),
   deleteCase: (id: string) => call<{ ok: true }>(`/me/cases/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   myGrowth: () => call<{
     profile: { body: string; updatedAt: string } | null; memories: number; preferences: number; learnedThisWeek: number; promoted: number;
@@ -3302,7 +3311,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ agentId, input, origin }),
     }),
-  jobs: () => call<{ items: { run: Run; job: { agentId: string } | null }[] }>('/jobs'),
+  /** 本人の実行（新しい順に 50 件。`offset` で古いページ。`total` はすべての数。仕様書 第6.8節 原則 u14）。 */
+  jobs: (offset = 0) => call<{ items: { run: Run; job: { agentId: string } | null }[]; total: number }>(`/jobs${offset > 0 ? `?offset=${offset}` : ''}`),
   /** 本人のある業務の実行（新しい順。`before` で続き。社内ナレッジ Q&A のこれまでの質問。第9.5.4節）。 */
   jobsOf: (agentId: string, o: { limit?: number; before?: string } = {}) =>
     call<{ items: { run: Run; job: { agentId: string; input: Record<string, unknown>; createdAt: string } | null }[] }>(

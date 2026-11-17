@@ -12,6 +12,7 @@ import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable, countRequest, enqueueJob } from
 import { passCorrection } from '../corrections.js';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { offsetOf } from '../paging.js';
 
 /** 利用者が指定できる起動経路。`schedule` はワーカーだけが使う。 */
 const USER_ORIGINS: Job['origin'][] = ['menu', 'secretary', 'api'];
@@ -84,10 +85,15 @@ export function jobsRoute(deps: AppDeps) {
     const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 50);
     if (agentId !== undefined && !/^[a-z0-9-]{1,80}$/.test(agentId)) return c.json({ error: '業務の ID が違います' }, 400);
     if (before !== undefined && Number.isNaN(Date.parse(before))) return c.json({ error: '時刻が違います' }, 400);
-    const items = await deps.repo.listRunsWithJobs(ctx.tenant.id, {
-      limit, requestedBy: ctx.user.id, ...(agentId ? { agentId } : {}), ...(before ? { before } : {}),
-    });
-    return c.json({ items });
+    // 実行履歴の画面は `offset` でページを送る（第6.8節 原則 u14）。`total` は依頼した人・業務で絞ったすべての数
+    const offset = offsetOf(c.req.query('offset'));
+    const [items, total] = await Promise.all([
+      deps.repo.listRunsWithJobs(ctx.tenant.id, {
+        limit, requestedBy: ctx.user.id, ...(agentId ? { agentId } : {}), ...(before ? { before } : {}), ...(offset ? { offset } : {}),
+      }),
+      deps.repo.countRuns(ctx.tenant.id, { requestedBy: ctx.user.id, ...(agentId ? { agentId } : {}) }),
+    ]);
+    return c.json({ items, total });
   });
 
   return app;

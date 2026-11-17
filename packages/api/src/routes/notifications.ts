@@ -7,9 +7,7 @@
 import { Hono } from 'hono';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
-
-/** お知らせの画面の 1 ページの件数。 */
-const NOTIFICATION_PAGE = 50;
+import { PAGE, offsetOf } from '../paging.js';
 
 /**
  * 本人宛の通知（仕様書 第6.5.5節）。
@@ -27,13 +25,12 @@ export function notificationsRoute(deps: AppDeps) {
    */
   app.get('/', async (c) => {
     const { tenant, user } = c.get('ctx');
-    const raw = Number(c.req.query('offset') ?? 0);
-    const offset = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+    const offset = offsetOf(c.req.query('offset'));
     const [items, counts] = await Promise.all([
-      deps.repo.listNotifications(tenant.id, user.id, NOTIFICATION_PAGE, offset),
+      deps.repo.listNotifications(tenant.id, user.id, PAGE, offset),
       deps.repo.countNotifications(tenant.id, user.id),
     ]);
-    return c.json({ items, unread: counts.unread, total: counts.total, offset, pageSize: NOTIFICATION_PAGE });
+    return c.json({ items, unread: counts.unread, total: counts.total, offset, pageSize: PAGE });
   });
 
   app.post('/:id/read', async (c) => {

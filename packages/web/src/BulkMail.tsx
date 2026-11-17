@@ -83,7 +83,9 @@ export function BulkMailView({ initial, onClose, onSubmitted }: {
       const found = r.items.map(toCandidate);
       setCandidates((cur) => [...cur, ...found.filter((f) => !cur.some((c) => c.id === f.id))]);
       setChosen((cur) => new Set([...cur, ...found.map((f) => f.id)]));
-      setMessage(found.length === 0 ? '見つかりませんでした' : null);
+      // 一度に送れる宛先は 100 人まで（第27.9.1節）。それより多く見つかったら、黙って切らずにそう伝える（第6.8節 原則 u14）
+      setMessage(found.length === 0 ? '見つかりませんでした'
+        : r.total > found.length ? `${r.total} 人が見つかりました。一度に送れるのは 100 人までなので、新しく名刺を交換した ${found.length} 人を加えました。交換した日や探す言葉で分けて送ってください` : null);
     } catch (e) {
       setMessage(describeError(e, '探せませんでした'));
     } finally {

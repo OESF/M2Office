@@ -244,9 +244,17 @@ export class PostgresRepository implements Repository {
     );
   }
 
+  async countRuns(tenantId: string, opts: { requestedBy?: string; agentId?: string }): Promise<number> {
+    const rows = await this.q<{ n: string }>(tenantId,
+      `select count(*) as n from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
+        where r.tenant_id = $1 and ($2::text is null or j.requested_by = $2) and ($3::text is null or j.agent_id = $3)`,
+      [tenantId, opts.requestedBy ?? null, opts.agentId ?? null]);
+    return Number(rows[0]?.n ?? 0);
+  }
+
   async listRunsWithJobs(
     tenantId: string,
-    opts: { limit: number; requestedBy?: string; agentId?: string; before?: string },
+    opts: { limit: number; requestedBy?: string; agentId?: string; before?: string; offset?: number },
   ): Promise<{ run: Run; job: Job }[]> {
     const rows = await this.q<{ run: Run; job: Job }>(tenantId, 
       `select json_build_object(
@@ -263,8 +271,8 @@ export class PostgresRepository implements Repository {
          from runs r join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
         where r.tenant_id = $1 and ($2::text is null or j.requested_by = $2)
           and ($4::text is null or j.agent_id = $4) and ($5::timestamptz is null or r.started_at < $5)
-        order by r.started_at desc limit $3`,
-      [tenantId, opts.requestedBy ?? null, opts.limit, opts.agentId ?? null, opts.before ?? null],
+        order by r.started_at desc, r.id desc limit $3 offset $6`,
+      [tenantId, opts.requestedBy ?? null, opts.limit, opts.agentId ?? null, opts.before ?? null, Math.max(0, Math.floor(opts.offset ?? 0))],
     );
     // json_build_object は時刻を ISO 形式の文字列で返すが、タイムゾーン表記を揃える
     return rows.map(({ run, job }) => ({
@@ -1374,7 +1382,7 @@ export class PostgresRepository implements Repository {
   }
 
   async listConversations(
-    tenantId: string, userId: string, opts: { query?: string; limit: number },
+    tenantId: string, userId: string, opts: { query?: string; limit: number; offset?: number },
   ): Promise<Conversation[]> {
     const query = (opts.query ?? '').trim();
     const like = `%${escapeLike(normalizeForSearch(query))}%`;
@@ -1383,8 +1391,18 @@ export class PostgresRepository implements Repository {
               agent_id as "agentId", run_id as "runId", created_at as "createdAt", mentions
          from conversations
         where tenant_id = $1 and user_id = $2 and ($3 = '' or search_text like $4 escape '\\')
-        order by created_at desc limit $5`,
-      [tenantId, userId, query, like, opts.limit]);
+        order by created_at desc, id desc limit $5 offset $6`,
+      [tenantId, userId, query, like, opts.limit, Math.max(0, Math.floor(opts.offset ?? 0))]);
+  }
+
+  async countConversations(tenantId: string, userId: string, query = ''): Promise<number> {
+    const q = query.trim();
+    const like = `%${escapeLike(normalizeForSearch(q))}%`;
+    const rows = await this.q<{ n: string }>(tenantId,
+      `select count(*) as n from conversations
+        where tenant_id = $1 and user_id = $2 and ($3 = '' or search_text like $4 escape '\\')`,
+      [tenantId, userId, q, like]);
+    return Number(rows[0]?.n ?? 0);
   }
 
   async deleteConversation(tenantId: string, userId: string, id: string): Promise<boolean> {
@@ -1672,12 +1690,13 @@ export class PostgresRepository implements Repository {
       [tenantId, userId]);
   }
 
-  async listRoutingMemories(tenantId: string, userId: string): Promise<Memory[]> {
+  async listRoutingMemories(tenantId: string, userId: string, limit: number | null = 200): Promise<Memory[]> {
+    // limit が null なら上限なし（Postgres の limit null はすべて）
     return this.q<Memory>(tenantId,
       `select id, tenant_id as "tenantId", user_id as "userId", text, source, kind, agent_id as "agentId",
               created_at as "createdAt", last_used_at as "lastUsedAt"
-         from memories where tenant_id = $1 and user_id = $2 and status = 'active' and kind = 'routing' order by created_at desc limit 200`,
-      [tenantId, userId]);
+         from memories where tenant_id = $1 and user_id = $2 and status = 'active' and kind = 'routing' order by created_at desc limit $3`,
+      [tenantId, userId, limit]);
   }
 
   async addLearningCount(tenantId: string, userId: string, week: string, kind: string, n: number): Promise<void> {
@@ -1864,14 +1883,21 @@ export class PostgresRepository implements Repository {
     await this.q(tenantId, `update knowledge_items set confirmations = confirmations + 1 where tenant_id = $1 and id = $2`, [tenantId, id]);
   }
 
-  async listCaseNotes(tenantId: string, userId: string, opts: { status?: 'open' | 'closed' | 'all'; limit?: number } = {}): Promise<CaseNote[]> {
+  async listCaseNotes(tenantId: string, userId: string, opts: { status?: 'open' | 'closed' | 'all'; limit?: number; offset?: number } = {}): Promise<CaseNote[]> {
     const status = opts.status ?? 'open';
     return this.q<CaseNote>(tenantId,
       `select id, tenant_id as "tenantId", user_id as "userId", title, state, next_step as "nextStep", due_on::text as "dueOn",
               status, last_day::text as "lastDay", mail_category_id as "mailCategoryId", mail_only as "mailOnly",
               created_at as "createdAt", updated_at as "updatedAt"
          from case_notes where tenant_id = $1 and user_id = $2 and ($3 = 'all' or status = $3)
-        order by last_day desc, updated_at desc limit $4`, [tenantId, userId, status, opts.limit ?? 200]);
+        order by last_day desc, updated_at desc, id desc limit $4 offset $5`, [tenantId, userId, status, opts.limit ?? 200, Math.max(0, Math.floor(opts.offset ?? 0))]);
+  }
+
+  async countCaseNotes(tenantId: string, userId: string, status: 'open' | 'closed' | 'all' = 'open'): Promise<number> {
+    const rows = await this.q<{ n: string }>(tenantId,
+      `select count(*) as n from case_notes where tenant_id = $1 and user_id = $2 and ($3 = 'all' or status = $3)`,
+      [tenantId, userId, status]);
+    return Number(rows[0]?.n ?? 0);
   }
 
   async saveCaseNote(n: CaseNote): Promise<void> {
