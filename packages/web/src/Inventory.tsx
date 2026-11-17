@@ -330,7 +330,7 @@ function ListView({ onOpen, onStocktake }: { onOpen: (id: string, note?: string 
 
   const load = useCallback(() => {
     api.inventory.list({ q, stopped }).then(setList).catch((e) => setMessage(describeError(e, '読み込めませんでした')));
-    api.inventory.salesUnmatched().then((r) => setUnmatched(r.items.length)).catch(() => undefined);
+    api.inventory.salesUnmatched().then((r) => setUnmatched(r.total)).catch(() => undefined);
   }, [q, stopped]);
   useEffect(() => {
     const t = setTimeout(load, q ? 250 : 0);

@@ -21,6 +21,7 @@ import { ExternalApps } from './ExternalApps.js';
 import { DataRecipients } from './DataRecipients.js';
 import { ServiceReport } from './ServiceReport.js';
 import { HelpCenter, PageTitle, useOpenHelp } from './help.js';
+import { Pager, usePaged } from './Pager.js';
 import { AppVersionBadge } from './launcher.js';
 import { BillingSettings } from './BillingSettings.js';
 import { Icon, NavHeading, NavItem, SideNavLayout, ThemeToggle, type IconName } from './nav.js';
@@ -453,19 +454,23 @@ function AiUsage() {
  * @param viewer 代理アクセスで業務の結果まで許されたとき、許した管理者の ID（その人が依頼した実行だけ中身を開ける。第23.6.1節）
  */
 function Runs({ viewer }: { viewer: string | null }) {
-  const { data, error } = useLoad(api.admin.runs);
+  // 50 件ずつのページで送る（第6.8節 原則 u14）
+  const paged = usePaged((offset) => api.admin.runs(offset));
+  const error = paged.error ? describeError(paged.error, '読み込めませんでした') : null;
   const { data: users } = useLoad(api.admin.users);
   const nameOf = (id: string | null) => users?.items.find((u) => u.id === id)?.displayName ?? id ?? '—';
   return (
     <>
       <PageTitle trail={['実行の一覧']} help={{
         article: 'admin-runs',
-        text: '直近 100 件の業務の状態です。行を押すと、段の進みと失敗の理由が出ます。入力や成果物の中身は出ません。',
+        text: '業務の状態です（新しい順）。行を押すと、段の進みと失敗の理由が出ます。入力や成果物の中身は出ません。',
       }} />
       {error && <p className="error">{error}</p>}
-      {data?.items.map((r: AdminRun) => (
+      <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />
+      {paged.items?.map((r: AdminRun) => (
         <RunRow key={r.id} run={r} requester={nameOf(r.requestedBy)} contentFor={viewer && r.requestedBy === viewer ? viewer : null} />
       ))}
+      {(paged.items?.length ?? 0) > 10 && <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />}
     </>
   );
 }

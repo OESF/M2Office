@@ -15,7 +15,7 @@ import {
 import type { CardFields, ContactScope } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
-import { offsetOf } from '../paging.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 /** 名刺の一覧の 1 ページの件数（名刺は画像を並べるので 100 件）。 */
 const CARD_PAGE = 100;
@@ -83,7 +83,11 @@ export function cardsRoute(deps: AppDeps) {
     }
   });
 
-  /** 一覧と検索（第27.8節）。本人の読み取り中・読み取れなかった名刺と、進み具合も返す。 */
+  /**
+   * 一覧と検索（第27.8節）。本人の読み取り中・読み取れなかった名刺と、進み具合も返す。
+   * 名刺は `offset` から 100 件ずつ、読み取れなかった名刺は `unresolvedOffset` から 50 件ずつのページで返し、
+   * それぞれのすべての数を `total`・`unresolvedTotal` で返す（仕様書 第6.8節 原則 u14）。
+   */
   app.get('/', async (c) => {
     const v = who(c);
     const scope = c.req.query('scope');
@@ -96,10 +100,11 @@ export function cardsRoute(deps: AppDeps) {
       status: c.req.query('trash') === '1' ? 'trash' as const : 'active' as const,
     };
     // 100 件ずつのページで送る。`total` は同じ絞り込みでのすべての数（第6.8節 原則 u14）
-    const [items, total, unresolved, batches] = await Promise.all([
+    const [items, total, unresolved, unresolvedTotal, batches] = await Promise.all([
       store.listContacts(v, { ...filter, limit: CARD_PAGE, offset: offsetOf(c.req.query('offset')) }),
       store.countContacts(v, filter),
-      store.listUnresolvedCards(v),
+      store.listUnresolvedCards(v, { limit: PAGE, offset: offsetOf(c.req.query('unresolvedOffset')) }),
+      store.countUnresolvedCards(v),
       store.activeBatches(v),
     ]);
     const progress = batches.length > 0
@@ -108,6 +113,7 @@ export function cardsRoute(deps: AppDeps) {
     return c.json({
       items, progress,
       unresolved: unresolved.map((x) => ({ id: x.id, status: x.status, failureReason: x.failureReason, frontFileId: x.frontFileId, createdAt: x.createdAt })),
+      unresolvedTotal,
       defaultScope: c.get('cardsDefaultScope'),
       hasMore: items.length === CARD_PAGE,
       total, pageSize: CARD_PAGE,

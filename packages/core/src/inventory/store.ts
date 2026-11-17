@@ -244,7 +244,9 @@ export interface InventoryStore {
   /** 発注 1 件（品目の名前・単位つき）。 */
   getOrder(tenantId: string, id: string): Promise<InventoryOrder | null>;
   /** 発注の一覧（新しい順）。`open` なら発注前・承認待ち・入荷待ち・一部入荷だけ。 */
-  listOrders(tenantId: string, q?: { open?: boolean; limit?: number }): Promise<InventoryOrder[]>;
+  listOrders(tenantId: string, q?: { open?: boolean; limit?: number; offset?: number }): Promise<InventoryOrder[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countOrders(tenantId: string, q?: { open?: boolean }): Promise<number>;
   /** 発注の状態などを直す。 */
   updateOrder(tenantId: string, id: string, patch: Partial<Pick<InventoryOrder, 'status' | 'orderedAt' | 'dueOn' | 'runId' | 'fileId' | 'closedAt'>>): Promise<void>;
   /** 発注の品目の行を差し替える（発注待ちの出し直し。届いた数は 0 から）。 */
@@ -338,6 +340,9 @@ interface ItemRow {
   forecast_low?: unknown; forecast_factor?: unknown; forecast_note?: string | null; forecast_at?: unknown;
   forecast_weekdays?: unknown; discontinued?: { current?: InventoryDiscontinued | null } | null;
 }
+
+/** 発注の一覧と数で同じにする絞り込み（`o` は発注の表）。 */
+const ordersFilterOf = (q: { open?: boolean }): string => (q.open ? `and o.status in ('pending', 'ordered', 'partial')` : '');
 
 function toItem(r: ItemRow): InventoryItem {
   return {
@@ -696,7 +701,7 @@ export class PostgresInventoryStore implements InventoryStore {
     });
   }
 
-  private async ordersWhere(tenantId: string, where: string, params: unknown[], limit: number): Promise<InventoryOrder[]> {
+  private async ordersWhere(tenantId: string, where: string, params: unknown[], limit: number, offset = 0): Promise<InventoryOrder[]> {
     const rows = await this.q<{
       id: string; number: string; supplier_id: string | null; supplier_name: string; method: InventoryOrder['method']; status: InventoryOrder['status'];
       ordered_at: unknown; due_on: unknown; run_id: string | null; file_id: string | null; created_by: string; created_by_name: string | null; created_at: unknown; closed_at: unknown;
@@ -707,7 +712,7 @@ export class PostgresInventoryStore implements InventoryStore {
                  'pack_size', i.pack_size, 'qty', l.qty, 'received', l.received) order by i.name)
                  from inventory_order_lines l join inventory_items i on i.id = l.item_id where l.order_id = o.id) as lines
          from inventory_orders o left join users u on u.id = o.created_by
-        where o.tenant_id = $1 ${where} order by o.created_at desc limit ${limit}`, [tenantId, ...params]);
+        where o.tenant_id = $1 ${where} order by o.created_at desc, o.id desc limit ${limit} offset ${Math.max(0, Math.floor(offset))}`, [tenantId, ...params]);
     return rows.map((r) => ({
       id: r.id, number: r.number, supplierId: r.supplier_id, supplierName: r.supplier_name, method: r.method, status: r.status,
       orderedAt: r.ordered_at ? iso(r.ordered_at) : null, dueOn: r.due_on ? day(r.due_on) : null, runId: r.run_id, fileId: r.file_id,
@@ -720,8 +725,13 @@ export class PostgresInventoryStore implements InventoryStore {
     return (await this.ordersWhere(tenantId, 'and o.id = $2', [id], 1))[0] ?? null;
   }
 
-  async listOrders(tenantId: string, q: { open?: boolean; limit?: number } = {}): Promise<InventoryOrder[]> {
-    return this.ordersWhere(tenantId, q.open ? `and o.status in ('pending', 'ordered', 'partial')` : '', [], Math.min(500, q.limit ?? 200));
+  async listOrders(tenantId: string, q: { open?: boolean; limit?: number; offset?: number } = {}): Promise<InventoryOrder[]> {
+    return this.ordersWhere(tenantId, ordersFilterOf(q), [], Math.min(500, q.limit ?? 200), q.offset ?? 0);
+  }
+
+  async countOrders(tenantId: string, q: { open?: boolean } = {}): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId, `select count(*)::int as n from inventory_orders o where o.tenant_id = $1 ${ordersFilterOf(q)}`, [tenantId]);
+    return rows[0]?.n ?? 0;
   }
 
   async updateOrder(tenantId: string, id: string, patch: Partial<Pick<InventoryOrder, 'status' | 'orderedAt' | 'dueOn' | 'runId' | 'fileId' | 'closedAt'>>): Promise<void> {
@@ -1200,9 +1210,14 @@ export class MemoryInventoryStore implements InventoryStore {
     return o && o.tenantId === tenantId ? this.orderView(o) : null;
   }
 
-  async listOrders(tenantId: string, q: { open?: boolean; limit?: number } = {}): Promise<InventoryOrder[]> {
+  async listOrders(tenantId: string, q: { open?: boolean; limit?: number; offset?: number } = {}): Promise<InventoryOrder[]> {
+    const from = q.offset ?? 0;
     return [...this.orders.values()].filter((o) => o.tenantId === tenantId && (!q.open || ['pending', 'ordered', 'partial'].includes(o.status)))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, q.limit ?? 200).map((o) => this.orderView(o));
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)).slice(from, from + (q.limit ?? 200)).map((o) => this.orderView(o));
+  }
+
+  async countOrders(tenantId: string, q: { open?: boolean } = {}): Promise<number> {
+    return [...this.orders.values()].filter((o) => o.tenantId === tenantId && (!q.open || ['pending', 'ordered', 'partial'].includes(o.status))).length;
   }
 
   async updateOrder(tenantId: string, id: string, patch: Partial<Pick<InventoryOrder, 'status' | 'orderedAt' | 'dueOn' | 'runId' | 'fileId' | 'closedAt'>>): Promise<void> {

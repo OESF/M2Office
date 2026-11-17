@@ -21,6 +21,7 @@ import { semanticSearchEnabled,
 } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 import { machineRoute } from './machine.js';
 import { AUDIT_CATEGORIES, auditCsv, presentAudit, type AuditNames } from '../audit/present.js';
 
@@ -48,10 +49,16 @@ export function adminRoute(deps: AppDeps) {
     return c.json({ items: users });
   });
 
-  /** 実行の一覧。状態・費用・起動経路だけを返す（第6.6.8節）。 */
+  /**
+   * 実行の一覧。状態・費用・起動経路だけを返す（第6.6.8節）。
+   * `offset` から 50 件ずつのページで返し、`total` はすべての数（仕様書 第6.8節 原則 u14）。
+   */
   app.get('/runs', async (c) => {
     const { tenant } = c.get('ctx');
-    const rows = await deps.repo.listRunsWithJobs(tenant.id, { limit: 100 });
+    const [rows, total] = await Promise.all([
+      deps.repo.listRunsWithJobs(tenant.id, { limit: PAGE, offset: offsetOf(c.req.query('offset')) }),
+      deps.repo.countRuns(tenant.id, {}),
+    ]);
     const { allAgents } = await deps.tenantView(tenant.id);
     // 入力（job.input）と成果物は返さない。状態を見るためのものであり、中身を見るためではない
     const items = rows.map(({ run: r, job }) => ({
@@ -60,7 +67,7 @@ export function adminRoute(deps: AppDeps) {
       agentId: job.agentId, agentName: agentDisplayName(allAgents.find((a) => a.id === job.agentId)?.name, job.agentId, job.agentName),
       origin: job.origin, requestedBy: job.requestedBy,
     }));
-    return c.json({ items });
+    return c.json({ items, total });
   });
 
   /**

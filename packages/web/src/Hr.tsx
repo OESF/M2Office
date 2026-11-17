@@ -8,7 +8,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   HR_CATEGORIES, HR_EMPLOYMENTS, HR_WAGE_TYPES,
-  type HrDeadline, type HrEmployee, type HrEmployeeView, type HrNoticeSettings, type HrPayrollProfile, type HrSchedule, type HrSettings, type HrTask, type HrTerms, type PayCheck, type PaySlip, type PayTrialCompare,
+  type HrDeadline, type HrEmployee, type HrEmployeeView, type HrNoticeSettings, type HrPayrollProfile, type HrSchedule, type HrSettings, type HrTask, type HrTerms, type LeaveTake, type PayCheck, type PaySlip, type PayTrialCompare,
 } from '@m2office/shared';
 import { api, describeError, type HrImportResult } from './api.js';
 import { hrPhotoUrl, shrinkPhoto } from './photo.js';
@@ -18,6 +18,7 @@ import { SocialTab } from './SocialInsurance.js';
 import { LaborTab } from './LaborInsurance.js';
 import { ShiftTab } from './ShiftPlan.js';
 import { BackButton } from './back-button.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 const label = <T extends string>(list: { id: T; label: string }[], id: T) => list.find((x) => x.id === id)?.label ?? id;
 /** 日本時間の今日（YYYY-MM-DD）。 */
@@ -552,6 +553,35 @@ function PayrollProfile({ employeeId }: { employeeId: string }) {
   );
 }
 
+/**
+ * 1 人の有給を取った日（新しい順）。どの日も取り消せるよう、件数で切らずに 50 件ずつのページで送る（仕様書 第6.8節 原則 u14。前は 12 件で切っていた）。
+ *
+ * @param takes その人の取った日（すべて）
+ * @param onCancel 取り消す
+ */
+function LeaveTakeList({ takes, onCancel }: { takes: LeaveTake[]; onCancel: (id: string) => void }) {
+  const [page, setPage] = useState(0);
+  const sorted = [...takes].sort((a, b) => b.date.localeCompare(a.date));
+  // 取り消して件数が減り、いまのページが無くなったら、最後のページへ戻す
+  const last = Math.max(0, Math.ceil(sorted.length / PAGE_SIZE) - 1);
+  const p = Math.min(page, last);
+  const shown = sorted.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE);
+  return (
+    <>
+      <Pager page={p} total={sorted.length} onPage={setPage} />
+      <ul className="plain small">
+        {shown.map((x) => (
+          <li key={x.id} className="row">
+            <span>{x.date} {x.days === 0.5 ? '半日' : '1 日'}</span>
+            <button className="btn ghost small" onClick={() => onCancel(x.id)}>取り消す</button>
+          </li>
+        ))}
+      </ul>
+      {shown.length > 10 && <Pager page={p} total={sorted.length} onPage={setPage} />}
+    </>
+  );
+}
+
 /** 有給（残り・取得義務・出勤率・手作業の付与・管理簿。仕様書 第30.7.1節）。 */
 function LeaveTab() {
   const [rows, setRows] = useState<Awaited<ReturnType<typeof api.hr.leaveOverview>>['rows'] | null>(null);
@@ -611,14 +641,7 @@ function LeaveTab() {
                     </select>
                     <button className="btn small" disabled={!take.date} onClick={() => run(api.hr.takeLeave(take.employeeId, take.date, take.days), '入れられませんでした')}>入れる</button>
                   </div>
-                  <ul className="plain small">
-                    {[...r.takes].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12).map((x) => (
-                      <li key={x.id} className="row">
-                        <span>{x.date} {x.days === 0.5 ? '半日' : '1 日'}</span>
-                        <button className="btn ghost small" onClick={() => run(api.hr.cancelTake(x.id), '取り消せませんでした')}>取り消す</button>
-                      </li>
-                    ))}
-                  </ul>
+                  <LeaveTakeList takes={r.takes} onCancel={(id) => run(api.hr.cancelTake(id), '取り消せませんでした')} />
                 </td></tr>
               )}
               {grant?.employeeId === r.employeeId && (

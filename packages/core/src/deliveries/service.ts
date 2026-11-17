@@ -608,9 +608,13 @@ export class DeliveryService {
 
   // ---- 管理者に見せる ----
 
-  /** 配信の一覧（宛先は出さない。人数と結果の数だけ）。 */
-  async list(tenantId: string, appId?: string): Promise<DeliveryView[]> {
-    const rows = await this.deps.store.list(tenantId, { ...(appId ? { appId } : {}), limit: 50 });
+  /**
+   * 配信の一覧（宛先は出さない。人数と結果の数だけ）。
+   *
+   * @param offset 先頭から飛ばす件数（50 件ずつのページ。数は {@link DeliveryService.count}。仕様書 第6.8節 原則 u14）
+   */
+  async list(tenantId: string, appId?: string, offset = 0): Promise<DeliveryView[]> {
+    const rows = await this.deps.store.list(tenantId, { ...(appId ? { appId } : {}), limit: 50, offset });
     return Promise.all(rows.map(async (d) => {
       const c = d.purged ? null : await this.deps.store.counts(tenantId, d.id);
       return {
@@ -618,6 +622,11 @@ export class DeliveryService {
         sent: c?.sent ?? 0, failed: c?.failed ?? 0, stopped: c?.stopped ?? 0, sendAt: d.sendAt, createdAt: d.createdAt, finishedAt: d.finishedAt, test: d.test,
       };
     }));
+  }
+
+  /** 配信の一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  count(tenantId: string, appId?: string): Promise<number> {
+    return this.deps.store.count(tenantId, appId ? { appId } : {});
   }
 
   private async audit(tenantId: string, actor: string, action: string, id: string, detail: Record<string, unknown>): Promise<void> {

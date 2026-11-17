@@ -12,6 +12,7 @@ import { memberCardKeyOf } from '@m2office/shared';
 import { memberCardUrl, memberQrSvg, renderMemberCard, type MemberViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { offsetOf } from '../paging.js';
 import { tenantOrigin } from '../tenant-origin.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
@@ -82,10 +83,19 @@ export function membersRoute(deps: AppDeps) {
     return c.json(rest);
   });
 
-  /** 会員への LINE の知らせ（新しい順）と、宛先ごとの LINE でつながっている会員の数（第40.18節）。 */
+  /**
+   * 会員への LINE の知らせ（新しい順）と、宛先ごとの LINE でつながっている会員の数（第40.18節）。
+   * 知らせは `offset` から 50 件ずつのページで返し、`total` はすべての数（仕様書 第6.8節 原則 u14）。
+   */
   app.get('/messages', async (c) => {
     const w = who(c);
-    return c.json({ items: await service.messages(w), counts: await service.audienceCounts(w) });
+    // 一覧を読むときに承認の結果を知らせの状態に写すので、数はそれと並べてよい（数は状態で変わらない）
+    const [items, total, counts] = await Promise.all([
+      service.messages(w, offsetOf(c.req.query('offset'))),
+      service.countMessages(w),
+      service.audienceCounts(w),
+    ]);
+    return c.json({ items, total, counts });
   });
 
   /** 会員への LINE の知らせを用意して、承認へ進める（管理者だけ。送るのは承認の後）。 */

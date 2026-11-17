@@ -175,8 +175,10 @@ export interface ContactStore extends GoogleContactStore {
   batchProgress(who: CardViewer, batchId: string): Promise<BatchProgress>;
   /** 本人が取り込んで、まだ読み取りが終わっていない名刺のまとまり。 */
   activeBatches(who: CardViewer): Promise<BatchProgress[]>;
-  /** 本人が取り込んで、読み取り中か読み取れなかった名刺。 */
-  listUnresolvedCards(who: CardViewer): Promise<ContactCard[]>;
+  /** 本人が取り込んで、読み取り中か読み取れなかった名刺（新しい順）。`offset` で先頭から飛ばす（一覧のページ。仕様書 第6.8節 原則 u14）。 */
+  listUnresolvedCards(who: CardViewer, page?: { limit?: number; offset?: number }): Promise<ContactCard[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countUnresolvedCards(who: CardViewer): Promise<number>;
   listContacts(who: CardViewer, q: ContactQuery): Promise<ContactSummary[]>;
   /** 一覧と同じ絞り込みでの数（名刺の画面のページを数える。仕様書 第6.8節 原則 u14）。 */
   countContacts(who: CardViewer, q: Omit<ContactQuery, 'limit' | 'offset'>): Promise<number>;
@@ -263,6 +265,9 @@ const JSON_COLUMNS = new Set(['phones', 'extracted', 'corrected', 'front_corners
  * データベースの行単位の制限が、会社で共有の名刺と、自分の自分だけの名刺だけを返す（移行 036）。
  * SQL の条件を書き漏らしても、他社の名刺と他人の自分だけの名刺は返らない
  */
+/** 読み取り中か読み取れなかった名刺の絞り込み（一覧と数で同じにする。`$1` は会社、`$2` は本人）。 */
+const UNRESOLVED_WHERE = `tenant_id = $1 and owner_user_id = $2 and status in ('pending', 'reading', 'failed')`;
+
 export class PostgresContactStore implements ContactStore {
   private readonly pool: pg.Pool;
 
@@ -397,12 +402,17 @@ export class PostgresContactStore implements ContactStore {
       [who.tenantId, who.userId]);
   }
 
-  async listUnresolvedCards(who: CardViewer): Promise<ContactCard[]> {
+  async listUnresolvedCards(who: CardViewer, page: { limit?: number; offset?: number } = {}): Promise<ContactCard[]> {
     return this.q<ContactCard>(who,
       `select ${CARD_COLUMNS} from contact_cards
-        where tenant_id = $1 and owner_user_id = $2 and status in ('pending', 'reading', 'failed')
-        order by created_at desc, seq desc limit 200`,
-      [who.tenantId, who.userId]);
+        where ${UNRESOLVED_WHERE}
+        order by created_at desc, seq desc, id desc limit $3 offset $4`,
+      [who.tenantId, who.userId, Math.min(Math.max(page.limit ?? 200, 1), 500), Math.max(0, Math.floor(page.offset ?? 0))]);
+  }
+
+  async countUnresolvedCards(who: CardViewer): Promise<number> {
+    const rows = await this.q<{ n: number }>(who, `select count(*)::int as n from contact_cards where ${UNRESOLVED_WHERE}`, [who.tenantId, who.userId]);
+    return rows[0]?.n ?? 0;
   }
 
   /**

@@ -14,6 +14,7 @@ import {
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
 import { Markdown } from './help.js';
+import { Pager, usePaged } from './Pager.js';
 import { stripTableLinks } from './table-links.js';
 
 /** 回の見出し（見回った日の回は「10 月 4 日」、年月の回は「2026 年 10 月」）。 */
@@ -148,7 +149,11 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
   onAnnouncement?: (text: string) => Promise<void>;
 }) {
   const [o, setO] = useState<CompetitorOverview | null>(null);
-  const [reports, setReports] = useState<CompetitorReport[]>([]);
+  // レポートは 50 件ずつのページで送る（第6.8節 原則 u14）
+  const paged = usePaged((offset) => api.competitors.reports(offset).then((r) => ({ items: r.reports, total: r.total })));
+  const reports: CompetitorReport[] = paged.items ?? [];
+  const reloadReports = useRef(paged.reload);
+  reloadReports.current = paged.reload;
   const [openId, setOpenId] = useState<string | null>(null);
   const [openReport, setOpenReport] = useState<string | null>(null);
   const [text, setText] = useState('');
@@ -159,7 +164,7 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
 
   const load = useCallback(() => {
     api.competitors.overview().then((r) => { setO(r); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
-    api.competitors.reports().then((r) => setReports(r.reports)).catch(() => undefined);
+    void reloadReports.current();
   }, []);
   useEffect(() => { load(); }, [load, changeKey]);
   // 探している・見回っている間は、作業の進み具合だけを読み直す（地図は引かない。第36.18節「作業」）。終わったら一覧を 1 回だけ読み直す
@@ -248,6 +253,7 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
           <button className="btn ghost small" disabled={busy || working || o.competitors.length === 0} onClick={() => run(() => api.competitors.makeReport(), 'レポートを作成しました', setTopNote)}>レポートの作成</button>
         </div>
         {reports.length === 0 && <p className="muted small">まだありません</p>}
+        <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />
         {reports.map((r) => (
           <div key={r.id} className="competitors-report">
             <button className="link" onClick={() => setOpenReport(shownReport === r.id ? '' : r.id)} aria-expanded={shownReport === r.id}>
@@ -278,6 +284,7 @@ export function Competitors({ changeKey = '', onColumn, onAnnouncement }: {
             )}
           </div>
         ))}
+        {reports.length > 10 && <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />}
       </div>
     </div>
   );

@@ -688,9 +688,13 @@ export class MemberService {
     return out;
   }
 
-  /** 知らせの一覧（新しい順）。承認されなかった・失敗した実行は、知らせの状態に写す。 */
-  async messages(who: MemberViewer): Promise<MemberMessage[]> {
-    const list = await this.deps.store.listMessages(who.tenantId);
+  /**
+   * 知らせの一覧（新しい順）。承認されなかった・失敗した実行は、知らせの状態に写す。
+   *
+   * @param offset 先頭から飛ばす件数（50 件ずつのページ。数は {@link MemberService.countMessages}。仕様書 第6.8節 原則 u14）
+   */
+  async messages(who: MemberViewer, offset = 0): Promise<MemberMessage[]> {
+    const list = await this.deps.store.listMessages(who.tenantId, 50, offset);
     for (const m of list) {
       if (m.status !== 'awaiting' || !m.runId || !this.deps.runStatus) continue;
       const st = await this.deps.runStatus(who.tenantId, m.runId).catch(() => null);
@@ -698,6 +702,11 @@ export class MemberService {
       else if (st === 'failed') { m.status = 'failed'; await this.deps.store.updateMessage(who.tenantId, m.id, { status: 'failed' }); }
     }
     return list.map(({ recipients: _r, ...m }) => m);
+  }
+
+  /** 知らせの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countMessages(who: MemberViewer): Promise<number> {
+    return this.deps.store.countMessages(who.tenantId);
   }
 
   /**

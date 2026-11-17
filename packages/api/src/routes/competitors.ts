@@ -10,6 +10,7 @@ import { Hono, type Context } from 'hono';
 import type { CompetitorViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -79,8 +80,18 @@ export function competitorsRoute(deps: AppDeps) {
     return c.json({ facts: await service.facts(who(c), id === 'self' ? null : id) });
   });
 
-  /** レポート（新しい順）。 */
-  app.get('/reports/list', async (c) => c.json({ reports: await service.reports(who(c), Number(c.req.query('limit') ?? 12)) }));
+  /**
+   * レポート（新しい順）。`offset` から 50 件ずつのページで返し、`total` はすべての数（仕様書 第6.8節 原則 u14）。
+   * `limit` を渡せば、1 ページの件数を変える（50 件まで）。
+   */
+  app.get('/reports/list', async (c) => {
+    const w = who(c);
+    const [reports, total] = await Promise.all([
+      service.reports(w, Number(c.req.query('limit') ?? PAGE) || PAGE, offsetOf(c.req.query('offset'))),
+      service.countReports(w),
+    ]);
+    return c.json({ reports, total });
+  });
 
   /** いまある事実から、その場のレポートを作る（読み直さない）。 */
   app.post('/reports', async (c) => c.json({ report: await service.makeReport(who(c)) }, 201));

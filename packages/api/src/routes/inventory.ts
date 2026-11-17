@@ -17,6 +17,10 @@ import {
 import { INVENTORY_ITEM_KINDS, INVENTORY_PUBLICATION_MAX, inventoryRuleOf, withoutPurchase, type InventoryItem, type InventoryItemKind, type InventoryMoveKind, type InventoryOutPurpose, type InventoryPublicationScope, type InventoryPublicField } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
+
+/** 発注待ちを探すときに読む、閉じていない発注の数の上限（判定のためだけに読む。画面の一覧はページで送る）。 */
+const PENDING_SCAN = 5000;
 import { tenantOrigin } from '../tenant-origin.js';
 
 /** 取り込むファイルの大きさの上限（品目は数十〜数千。第29.1.1節）。 */
@@ -526,10 +530,25 @@ export function inventoryRoute(deps: AppDeps) {
     return c.json({ method: 'mail', runId, supplier: supplier.name, orderId: order.id, number: order.number, fileId: sheet?.id ?? null }, 201);
   });
 
-  /** 発注の一覧（新しい順。`open=1` で発注前・承認待ち・入荷待ち・一部入荷だけ。第29.14.4節）。 */
+  /**
+   * 発注の一覧（新しい順。`open=1` で発注前・承認待ち・入荷待ち・一部入荷だけ。第29.14.4節）。
+   * `offset` から 50 件ずつのページで返し、`total` は同じ絞り込みでのすべての数（仕様書 第6.8節 原則 u14）。
+   */
   app.get('/orders', async (c) => {
     const { tenant } = c.get('ctx');
-    return c.json({ orders: await service.orders(tenant.id, { open: c.req.query('open') === '1', limit: 100 }) });
+    const open = c.req.query('open') === '1';
+    // 一覧を読むときに承認待ちを実行の結果に合わせるので、数はそのあとに数える
+    const orders = await service.orders(tenant.id, { open, limit: PAGE, offset: offsetOf(c.req.query('offset')) });
+    const total = await service.countOrders(tenant.id, { open });
+    /*
+      発注待ち（まだ発注していない・承認待ち）は、ページに関係なくすべてを添える。画面が「その仕入先の発注待ちがあるか」を
+      ページの中だけで見ると、閉じていない発注が 50 件を超えたときに出し直しの判定が外れるため（第6.8節 原則 u14）
+    */
+    const pending = open
+      ? (await service.orders(tenant.id, { open: true, limit: PENDING_SCAN })).filter((o) => o.status === 'pending')
+        .map((o) => ({ id: o.id, number: o.number, supplierId: o.supplierId }))
+      : [];
+    return c.json({ orders, total, pending });
   });
 
   /** Web・電話の発注を「発注した」にする（入荷待ち）。 */
@@ -843,8 +862,18 @@ export function inventoryRoute(deps: AppDeps) {
   // ---- 外部のアプリの在庫の機能（第29.20.1節）の、照らせなかった販売 ----
   const sales = deps.inventory.sales;
 
-  /** 照らせなかった販売の行（在庫管理の利用範囲の人が見て、品目を選べる）。 */
-  app.get('/sales-unmatched', async (c) => c.json({ items: await sales.unmatched(c.get('ctx').tenant.id) }));
+  /**
+   * 照らせなかった販売の行（在庫管理の利用範囲の人が見て、品目を選べる）。
+   * `offset` から 50 件ずつのページで返し、`total` はすべての数（仕様書 第6.8節 原則 u14）。
+   */
+  app.get('/sales-unmatched', async (c) => {
+    const tenantId = c.get('ctx').tenant.id;
+    const [items, total] = await Promise.all([
+      sales.unmatched(tenantId, { limit: PAGE, offset: offsetOf(c.req.query('offset')) }),
+      sales.countUnmatched(tenantId),
+    ]);
+    return c.json({ items, total });
+  });
 
   /** 照らせなかった行に品目を選び、その時点で記録する。 */
   app.post('/sales-unmatched/:id/resolve', async (c) => {

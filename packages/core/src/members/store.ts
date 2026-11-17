@@ -73,8 +73,10 @@ export interface MemberStore {
   updateReward(tenantId: string, id: string, patch: Partial<Pick<MemberReward, 'name' | 'points' | 'validFrom' | 'validTo' | 'status' | 'birthdayOnly' | 'minRank'>>): Promise<void>;
   createMessage(tenantId: string, m: { kind: MemberMessage['kind']; audience: MemberAudience; text: string; recipients: string[]; createdBy: string }): Promise<string>;
   getMessage(tenantId: string, id: string): Promise<StoredMessage | null>;
-  /** 新しい順。 */
-  listMessages(tenantId: string, limit?: number): Promise<StoredMessage[]>;
+  /** 新しい順。`offset` で先頭から飛ばす（一覧のページ。仕様書 第6.8節 原則 u14）。 */
+  listMessages(tenantId: string, limit?: number, offset?: number): Promise<StoredMessage[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countMessages(tenantId: string): Promise<number>;
   updateMessage(tenantId: string, id: string, patch: MessagePatch): Promise<void>;
   /** 期間の来店の回数（取り消した来店は数えない）。 */
   visitCount(tenantId: string, from: string, to: string): Promise<number>;
@@ -298,8 +300,14 @@ export class PostgresMemberStore implements MemberStore {
     return rows[0] ? toMessage(rows[0]) : null;
   }
 
-  async listMessages(tenantId: string, limit = 30): Promise<StoredMessage[]> {
-    return (await this.q<MessageRow>(tenantId, `select * from member_messages where tenant_id = $1 order by created_at desc limit $2`, [tenantId, limit])).map(toMessage);
+  async listMessages(tenantId: string, limit = 30, offset = 0): Promise<StoredMessage[]> {
+    return (await this.q<MessageRow>(tenantId, `select * from member_messages where tenant_id = $1 order by created_at desc, id desc limit $2 offset $3`,
+      [tenantId, limit, Math.max(0, Math.floor(offset))])).map(toMessage);
+  }
+
+  async countMessages(tenantId: string): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId, `select count(*)::int as n from member_messages where tenant_id = $1`, [tenantId]);
+    return rows[0]?.n ?? 0;
   }
 
   async updateMessage(tenantId: string, id: string, patch: MessagePatch): Promise<void> {
@@ -434,9 +442,14 @@ export class MemoryMemberStore implements MemberStore {
     return { ...rest, recipients: [...rest.recipients] };
   }
 
-  async listMessages(tenantId: string, limit = 30): Promise<StoredMessage[]> {
-    return [...this.messages.values()].filter((m) => m.tenantId === tenantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit)
+  async listMessages(tenantId: string, limit = 30, offset = 0): Promise<StoredMessage[]> {
+    return [...this.messages.values()].filter((m) => m.tenantId === tenantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(offset, offset + limit)
       .map(({ tenantId: _t, ...m }) => ({ ...m, recipients: [...m.recipients] }));
+  }
+
+  async countMessages(tenantId: string): Promise<number> {
+    return [...this.messages.values()].filter((m) => m.tenantId === tenantId).length;
   }
 
   async updateMessage(tenantId: string, id: string, patch: MessagePatch): Promise<void> {

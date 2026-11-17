@@ -15,7 +15,7 @@ import { ApiError, api, describeError, type CardDetail, type CardList, type Card
 import { BulkMailView } from './BulkMail.js';
 import { cropCard, prepareCardPhoto } from './card-image.js';
 import { BackButton } from './back-button.js';
-import { Pager } from './Pager.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 /** 名刺の一覧の 1 ページの件数（API と同じ。画像を並べるので 100 件。第6.8節 原則 u14）。 */
 const CARD_PAGE = 100;
@@ -121,6 +121,8 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
   // ページ（100 件ずつ。第6.8節 原則 u14）。探す言葉・範囲・ごみ箱を変えたら最初のページへ戻す
   const [page, setPage] = useState(0);
   useEffect(() => { setPage(0); }, [q, scope, trash]);
+  // 読み取れなかった名刺のページ（50 件ずつ。第6.8節 原則 u14）
+  const [unresolvedPage, setUnresolvedPage] = useState(0);
   // 表から取り込んだ結果など、うまくいった知らせ
   const [notice, setNotice] = useState<string | null>(null);
   // ごみ箱で選んだ名刺（まとめて戻す・完全に削除する。第27.7節）。ごみ箱を開き直したら選び直す
@@ -139,15 +141,17 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
   const mobile = isMobile();
 
   const load = useCallback(() => {
-    api.cards.list({ q, scope, trash, offset: page * CARD_PAGE }).then((r) => {
+    api.cards.list({ q, scope, trash, offset: page * CARD_PAGE, unresolvedOffset: unresolvedPage * PAGE_SIZE }).then((r) => {
       setList(r);
       // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
       const last = Math.max(0, Math.ceil(r.total / r.pageSize) - 1);
       if (page > last) setPage(last);
+      const lastUnresolved = Math.max(0, Math.ceil(r.unresolvedTotal / PAGE_SIZE) - 1);
+      if (unresolvedPage > lastUnresolved) setUnresolvedPage(lastUnresolved);
       // 選ばなければ会社の既定の範囲（第27.7節）。毎回選ばせない
       setPersonal((p) => (p === null ? r.defaultScope === 'personal' : p));
     }).catch((e) => setMessage(describeError(e, '読み込めませんでした')));
-  }, [q, scope, trash, page]);
+  }, [q, scope, trash, page, unresolvedPage]);
   // Google の同意から戻ったら、入れる途中だった名刺を入れる（第27.15節）
   useGoogleResume((t) => { setNotice(t); load(); }, setMessage);
   // 探す言葉は打ち終わりを待って読み直す
@@ -285,6 +289,7 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
           <progress max={list.progress.total} value={list.progress.finished} />
         </div>
       )}
+      {!trash && list && <Pager page={unresolvedPage} total={list.unresolvedTotal} onPage={setUnresolvedPage} />}
       {!trash && list?.unresolved.map((u) => (
         <div key={u.id} className={`card-row unresolved${u.status === 'failed' ? ' failed' : ''}`}>
           <CardThumb cardId={u.id} rotation={0} kind={null} />
@@ -298,7 +303,8 @@ function CardListView({ onOpen, admin, onBulk }: { onOpen: (id: string) => void;
           )}
         </div>
       ))}
-      {list && list.items.length === 0 && (list.unresolved.length === 0 || trash) && (
+      {!trash && list && list.unresolved.length > 10 && <Pager page={unresolvedPage} total={list.unresolvedTotal} onPage={setUnresolvedPage} />}
+      {list && list.items.length === 0 && (list.unresolvedTotal === 0 || trash) && (
         <p className="muted">{trash ? 'ごみ箱は空です' : q ? '見つかりませんでした' : '名刺はまだありません'}</p>
       )}
       {trash && list && list.items.length > 0 && (

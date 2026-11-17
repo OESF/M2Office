@@ -83,7 +83,10 @@ export interface CompetitorStore {
   /** 競合ごとの、いちばん新しい回の事実の数 */
   factCounts(tenantId: string): Promise<Map<string, number>>;
   addReport(tenantId: string, r: Omit<CompetitorReport, 'id' | 'createdAt'>): Promise<string>;
-  reports(tenantId: string, limit: number): Promise<CompetitorReport[]>;
+  /** レポート（新しい順）。`offset` で先頭から飛ばす（一覧のページ。仕様書 第6.8節 原則 u14）。 */
+  reports(tenantId: string, limit: number, offset?: number): Promise<CompetitorReport[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countReports(tenantId: string): Promise<number>;
   addJob(tenantId: string, job: { kind: CompetitorJob['kind']; args: Record<string, unknown>; requestedBy: string }): Promise<string>;
   /** 待っているか動いている作業（いちばん新しいもの） */
   activeJob(tenantId: string): Promise<StoredJob | null>;
@@ -267,11 +270,16 @@ export class PostgresCompetitorStore implements CompetitorStore {
     return id;
   }
 
-  async reports(tenantId: string, limit: number): Promise<CompetitorReport[]> {
+  async countReports(tenantId: string): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId, 'select count(*)::int as n from competitor_reports where tenant_id = $1', [tenantId]);
+    return rows[0]?.n ?? 0;
+  }
+
+  async reports(tenantId: string, limit: number, offset = 0): Promise<CompetitorReport[]> {
     const rows = await this.q<{
       id: string; period: string; text: string; changes: number; themes: string[] | null; announcement_ideas: { text: string; why: string }[] | null;
       change_kinds: CompetitorReport['changeKinds'] | null; created_by: string; created_at: Date | string;
-    }>(tenantId, 'select * from competitor_reports where tenant_id = $1 order by created_at desc limit $2', [tenantId, limit]);
+    }>(tenantId, 'select * from competitor_reports where tenant_id = $1 order by created_at desc, id desc limit $2 offset $3', [tenantId, limit, Math.max(0, Math.floor(offset))]);
     return rows.map((r) => ({
       id: r.id, period: r.period, text: r.text, changes: r.changes, themes: r.themes ?? [], announcementIdeas: r.announcement_ideas ?? [],
       changeKinds: r.change_kinds ?? {}, createdBy: r.created_by, createdAt: isoNow(r.created_at),
@@ -431,8 +439,13 @@ export class MemoryCompetitorStore implements CompetitorStore {
     return id;
   }
 
-  async reports(tenantId: string, limit: number) {
-    return this.reportRows.filter((r) => r.tenantId === tenantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map(({ tenantId: _t, ...r }) => r);
+  async reports(tenantId: string, limit: number, offset = 0) {
+    return this.reportRows.filter((r) => r.tenantId === tenantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(offset, offset + limit).map(({ tenantId: _t, ...r }) => r);
+  }
+
+  async countReports(tenantId: string) {
+    return this.reportRows.filter((r) => r.tenantId === tenantId).length;
   }
 
   async addJob(tenantId: string, job: { kind: CompetitorJob['kind']; args: Record<string, unknown>; requestedBy: string }) {

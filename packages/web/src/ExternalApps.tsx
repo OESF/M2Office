@@ -13,6 +13,7 @@ import { api, describeError, type InventorySalesItemView } from './api.js';
 import { copyText } from './clipboard.js';
 import { InventoryItemPicker, withRuleItems } from './InventoryItemPicker.js';
 import { PageTitle } from './help.js';
+import { Pager, usePaged } from './Pager.js';
 
 /** 日本時間の日時。 */
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
@@ -158,11 +159,13 @@ const DELIVERY_STATUS: Record<DeliveryView['status'], string> = { awaiting_appro
 
 /** そのアプリから届いた配信の依頼（宛先は出さず、人数と結果の数だけ。第13.4.4節）。 */
 function DeliveryList({ appId }: { appId: string }) {
-  const [items, setItems] = useState<DeliveryView[] | null>(null);
-  useEffect(() => { api.admin.appDeliveries(appId).then((r) => setItems(r.items)).catch(() => setItems([])); }, [appId]);
+  // 50 件ずつのページで送る（第6.8節 原則 u14）。アプリを変えたら最初のページから
+  const paged = usePaged((offset) => api.admin.appDeliveries(appId, offset), appId);
+  const items: DeliveryView[] | null = paged.items;
   if (!items || items.length === 0) return null;
+  const pager = <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />;
   return (
-    <div className="table-scroll"><table className="table small">
+    <>{pager}<div className="table-scroll"><table className="table small">
       <thead><tr><th>受けた日時</th><th>題名</th><th>状態</th><th className="num">宛先</th><th className="num">送れた</th><th className="num">送れなかった</th><th className="num">停止</th></tr></thead>
       <tbody>
         {items.map((d) => (
@@ -174,7 +177,7 @@ function DeliveryList({ appId }: { appId: string }) {
           </tr>
         ))}
       </tbody>
-    </table></div>
+    </table></div>{items.length > 10 && pager}</>
   );
 }
 

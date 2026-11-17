@@ -395,9 +395,18 @@ export class CompetitorService {
     return (await this.deps.store.facts(who.tenantId, competitorId)).map(({ pageHash: _h, ...f }) => f);
   }
 
-  /** レポート（新しい順）。 */
-  async reports(who: CompetitorViewer, limit = 12): Promise<CompetitorReport[]> {
-    return this.deps.store.reports(who.tenantId, Math.min(50, Math.max(1, limit)));
+  /**
+   * レポート（新しい順）。
+   *
+   * @param offset 先頭から飛ばす件数（一覧のページ。数は {@link CompetitorService.countReports}。仕様書 第6.8節 原則 u14）
+   */
+  async reports(who: CompetitorViewer, limit = 12, offset = 0): Promise<CompetitorReport[]> {
+    return this.deps.store.reports(who.tenantId, Math.min(50, Math.max(1, limit)), offset);
+  }
+
+  /** レポートの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countReports(who: CompetitorViewer): Promise<number> {
+    return this.deps.store.countReports(who.tenantId);
   }
 
   /**

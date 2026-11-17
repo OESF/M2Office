@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { inventoryOrderStatusLabel, type InventoryBooking, type InventoryItemView, type InventoryOrder, type InventorySupplier } from '@m2office/shared';
 import { api, describeError, type InventoryForecastRow, type InventoryOrderResult, type InventorySlipResult } from './api.js';
+import { Pager, usePaged } from './Pager.js';
 
 const METHOD_LABELS: Record<InventorySupplier['method'], string> = { mail: 'メール', web: 'Web', phone: '電話' };
 const round = (n: number) => Math.round(n * 100) / 100;
@@ -35,13 +36,20 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
   const [qty, setQty] = useState<Record<string, string>>({});
   const [result, setResult] = useState<Record<string, InventoryOrderResult | string>>({});
   const [error, setError] = useState<string | null>(null);
-  const [orders, setOrders] = useState<InventoryOrder[]>([]);
+  // 閉じていない発注は 50 件ずつのページで送る（第6.8節 原則 u14）
+  // 発注待ちは、ページに関係なくすべて（出し直しの判定に使う）
+  const [pending, setPending] = useState<{ id: string; number: string; supplierId: string | null }[]>([]);
+  const paged = usePaged((offset) => api.inventory.orders(true, offset).then((r) => { setPending(r.pending); return { items: r.orders, total: r.total }; }));
+  const orders: InventoryOrder[] = paged.items ?? [];
+  const reloadOrders = paged.reload;
 
   const reload = useCallback(() => {
     api.inventory.forecast().then((r) => setRows(r.rows)).catch((e) => setError(describeError(e, '読み込めませんでした')));
-    api.inventory.orders(true).then((r) => setOrders(r.orders)).catch(() => undefined);
+    void reloadOrders();
+  }, [reloadOrders]);
+  useEffect(() => {
+    api.inventory.forecast().then((r) => setRows(r.rows)).catch((e) => setError(describeError(e, '読み込めませんでした')));
   }, []);
-  useEffect(reload, [reload]);
   if (!rows) return <div className="card inventory-new">{error ?? '読み込んでいます…'}</div>;
 
   const short = rows.filter((r) => r.runningOut || r.low);
@@ -52,13 +60,13 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
     groups.set(key, [...(groups.get(key) ?? []), r]);
   }
   /** その仕入先の発注待ち（まだ発注していない・承認待ち）。 */
-  const waitingFor = (supplierId: string) => orders.find((o) => o.status === 'pending' && o.supplierId === supplierId);
+  const waitingFor = (supplierId: string) => pending.find((o) => o.supplierId === supplierId);
   const start = async (supplierId: string, list: InventoryForecastRow[]) => {
     const lines = list.map((r) => ({ itemId: r.itemId, qty: Number(qty[r.itemId] ?? r.proposal?.qty ?? 0) })).filter((l) => l.qty > 0);
     try {
       const r = await api.inventory.order(supplierId, lines);
       setResult((m) => ({ ...m, [supplierId]: r }));
-      api.inventory.orders(true).then((x) => setOrders(x.orders)).catch(() => undefined);
+      void reloadOrders();
     } catch (e) {
       setResult((m) => ({ ...m, [supplierId]: describeError(e, '発注を始められませんでした') }));
     }
@@ -125,9 +133,11 @@ export function OrderPanel({ onOpenItem }: { onOpenItem: (id: string) => void })
           </div>
         );
       })}
-      {/* まだ発注していないもの（発注待ち・承認待ち）と、発注して届くのを待つもの（入荷待ち）を分ける */}
+      {/* まだ発注していないもの（発注待ち・承認待ち）と、発注して届くのを待つもの（入荷待ち）を分ける。ページはこの 2 つにまたがって送る */}
+      {orders.length > 0 && <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />}
       {orders.some((o) => o.status === 'pending') && <OpenOrders title="発注待ち" orders={orders.filter((o) => o.status === 'pending')} onChanged={reload} onOpenItem={onOpenItem} />}
       {orders.some((o) => o.status !== 'pending') && <OpenOrders title="入荷待ち" orders={orders.filter((o) => o.status !== 'pending')} onChanged={reload} onOpenItem={onOpenItem} />}
+      {orders.length > 10 && <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />}
       {expiring.length > 0 && (
         <div className="order-group">
           <div className="order-head"><strong>使用期限の近いもの</strong></div>

@@ -13,6 +13,7 @@ import {
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
 import { BackButton } from './back-button.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 const dayLabel = (iso: string | null) => (iso ? new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric' }).format(new Date(iso)) : '—');
 /** 誕生日（MM-DD）を「3/14」に。 */
@@ -243,8 +244,14 @@ function LineMessages() {
   const [text, setText] = useState(MEMBER_EXPIRY_TEXT);
   const [note, setNote] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
-  const load = () => api.members.messages().then(setData).catch((e) => setNote({ kind: 'error', text: describeError(e, '読めませんでした') }));
-  useEffect(() => { void load(); }, []);
+  // 知らせは 50 件ずつのページで送る（第6.8節 原則 u14）
+  const [page, setPage] = useState(0);
+  const load = () => api.members.messages(page * PAGE_SIZE).then((r) => {
+    setData(r);
+    const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+    if (page > last) setPage(last);
+  }).catch((e) => setNote({ kind: 'error', text: describeError(e, '読めませんでした') }));
+  useEffect(() => { void load(); }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
   const submit = async () => {
     setBusy(true);
     try {
@@ -270,9 +277,10 @@ function LineMessages() {
         <button className="btn small" disabled={busy || !text.trim() || !data?.counts[audience]} onClick={() => void submit()}>承認へ進める</button>
         <NoteText note={note} />
       </div>
+      {data && data.items.length > 0 && <Pager page={page} total={data.total} onPage={setPage} />}
       {data && data.items.length > 0 && (
         <ul className="mbr-line-list">
-          {data.items.slice(0, 10).map((m) => (
+          {data.items.map((m) => (
             <li key={m.id}>
               <span>{timeLabel(m.createdAt)}</span>
               <span>{MEMBER_AUDIENCE_LABELS[m.audience]}{m.kind === 'expiry' && '（自動）'}</span>
@@ -282,6 +290,7 @@ function LineMessages() {
           ))}
         </ul>
       )}
+      {data && data.items.length > 10 && <Pager page={page} total={data.total} onPage={setPage} />}
     </section>
   );
 }

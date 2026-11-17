@@ -3,9 +3,10 @@
  * 品目を照らせなかった行に、在庫管理を使う人が品目を選んで記録する。あるときだけ画面に出す。説明文を常に出さない（原則 u11）。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { InventoryItemView, InventorySaleUnmatched } from '@m2office/shared';
 import { api, describeError } from './api.js';
+import { Pager, usePaged } from './Pager.js';
 
 /** 日本時間の日時。 */
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
@@ -19,13 +20,12 @@ const ACTION_LABEL = { hold: '注文', use: '販売', return: '返品', receive:
  * @param onChanged 記録したあと（一覧と数を読み直す）
  */
 export function SalesUnmatchedPanel({ items, onChanged }: { items: InventoryItemView[]; onChanged: () => void }) {
-  const [rows, setRows] = useState<InventorySaleUnmatched[] | null>(null);
+  // 50 件ずつのページで送る（第6.8節 原則 u14）
+  const paged = usePaged((offset) => api.inventory.salesUnmatched(offset));
+  const rows = paged.items;
   const [pick, setPick] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
-  const load = useCallback(() => {
-    api.inventory.salesUnmatched().then((r) => setRows(r.items)).catch((e) => setMessage(describeError(e, '読み込めませんでした')));
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const loadError = paged.error ? describeError(paged.error, '読み込めませんでした') : null;
   const active = items.filter((i) => i.status === 'active');
   const record = async (row: InventorySaleUnmatched) => {
     const itemId = pick[row.id];
@@ -33,16 +33,18 @@ export function SalesUnmatchedPanel({ items, onChanged }: { items: InventoryItem
     try {
       await api.inventory.resolveSalesUnmatched(row.id, itemId);
       setMessage(null);
-      load();
+      void paged.reload();
       onChanged();
     } catch (e) {
       setMessage(describeError(e, '記録できませんでした'));
     }
   };
-  if (!rows) return <div className="card">{message ? <p className="error">{message}</p> : <p className="muted">読み込み中…</p>}</div>;
+  if (!rows) return <div className="card">{loadError ? <p className="error">{loadError}</p> : <p className="muted">読み込み中…</p>}</div>;
+  const pager = <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />;
   return (
     <div className="card sales-unmatched">
       {rows.length === 0 && <p className="muted small">照らせなかった販売はありません</p>}
+      {rows.length > 0 && pager}
       {rows.length > 0 && (
         <ul className="plain sales-unmatched-list">
           {rows.map((r) => (
@@ -61,7 +63,8 @@ export function SalesUnmatchedPanel({ items, onChanged }: { items: InventoryItem
           ))}
         </ul>
       )}
-      {message && <p className="small error" role="status">{message}</p>}
+      {rows.length > 10 && pager}
+      {(message ?? loadError) && <p className="small error" role="status">{message ?? loadError}</p>}
     </div>
   );
 }

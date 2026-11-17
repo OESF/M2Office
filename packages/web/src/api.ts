@@ -689,6 +689,8 @@ export interface CardList {
   progress: { total: number; finished: number } | null;
   /** 本人が取り込んで、読み取り中か読み取れなかった名刺。 */
   unresolved: { id: string; status: 'pending' | 'reading' | 'failed'; failureReason: string | null; frontFileId: string | null; createdAt: string }[];
+  /** 読み取り中か読み取れなかった名刺のすべての数（50 件ずつのページを数える。仕様書 第6.8節 原則 u14）。 */
+  unresolvedTotal: number;
   defaultScope: ContactScope;
   hasMore: boolean;
   /** 同じ絞り込みでのすべての数と、1 ページの件数（仕様書 第6.8節 原則 u14）。 */
@@ -1623,7 +1625,7 @@ export const api = {
   /** 名刺管理（内蔵の拡張。仕様書 第27章）。 */
   cards: {
     /** 一覧と検索。本人の読み取り中・読み取れなかった名刺と、進み具合も返る（第27.8節）。 */
-    list: (q: { q?: string; scope?: 'all' | ContactScope; trash?: boolean; from?: string; to?: string; offset?: number } = {}) => {
+    list: (q: { q?: string; scope?: 'all' | ContactScope; trash?: boolean; from?: string; to?: string; offset?: number; unresolvedOffset?: number } = {}) => {
       const p = new URLSearchParams();
       if (q.q) p.set('q', q.q);
       if (q.scope && q.scope !== 'all') p.set('scope', q.scope);
@@ -1633,6 +1635,8 @@ export const api = {
       if (q.to) p.set('to', q.to);
       // ページ（100 件ずつ。第6.8節 原則 u14）
       if (q.offset) p.set('offset', String(q.offset));
+      // 読み取れなかった名刺のページ（50 件ずつ）
+      if (q.unresolvedOffset) p.set('unresolvedOffset', String(q.unresolvedOffset));
       return call<CardList>(`/cards?${p.toString()}`);
     },
     /** まとめてのメール（仕様書 第27.9.1節）。下書きは作った本人だけが見られる。 */
@@ -1910,8 +1914,8 @@ export const api = {
     rewards: () => call<{ items: MemberReward[] }>('/members/rewards'),
     createReward: (input: { name: string; points: number; birthdayOnly?: boolean; minRank?: MemberRank }) => call<{ reward: MemberReward }>('/members/rewards', { method: 'POST', body: JSON.stringify(input) }),
     updateReward: (id: string, patch: Record<string, unknown>) => call<{ ok: true }>(`/members/rewards/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-    /** 会員への LINE の知らせと、宛先ごとの LINE でつながっている会員の数（第40.18節）。 */
-    messages: () => call<{ items: MemberMessage[]; counts: Record<MemberAudience, number> }>('/members/messages'),
+    /** 会員への LINE の知らせの `offset` から 1 ページ分とすべての数（第6.8節 原則 u14）、宛先ごとの LINE でつながっている会員の数（第40.18節）。 */
+    messages: (offset = 0) => call<{ items: MemberMessage[]; total: number; counts: Record<MemberAudience, number> }>(`/members/messages${offset > 0 ? `?offset=${offset}` : ''}`),
     /** 知らせを用意して承認へ進める（管理者だけ。送るのは承認の後）。 */
     prepareMessage: (input: { audience: MemberAudience; text: string }) => call<{ message: MemberMessage }>('/members/messages', { method: 'POST', body: JSON.stringify(input) }),
     qrUrl: (id: string) => `/v1/members/${encodeURIComponent(id)}/qr.svg`,
@@ -2202,7 +2206,8 @@ export const api = {
     remove: (id: string) => call<{ ok: true }>(`/competitors/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /** 1 社（`self` なら自社）の事実。 */
     facts: (id: string) => call<{ facts: CompetitorFact[] }>(`/competitors/${encodeURIComponent(id)}/facts`),
-    reports: () => call<{ reports: CompetitorReport[] }>('/competitors/reports/list'),
+    /** レポート（新しい順）の `offset` から 1 ページ分と、すべての数（第6.8節 原則 u14）。 */
+    reports: (offset = 0) => call<{ reports: CompetitorReport[]; total: number }>(`/competitors/reports/list${offset > 0 ? `?offset=${offset}` : ''}`),
     /** いまある事実から、その場のレポートを作る。 */
     makeReport: () => call<{ report: CompetitorReport }>('/competitors/reports', { method: 'POST', body: '{}' }),
   },
@@ -2443,8 +2448,8 @@ export const api = {
     stopPublication: (id: string) => call<InventoryPublicationView>(`/inventory/publications/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
     /** まとまりを削除する（止めてあるものだけ）。 */
     deletePublication: (id: string) => call<{ ok: true }>(`/inventory/publications/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    /** 照らせなかった販売の行。 */
-    salesUnmatched: () => call<{ items: InventorySaleUnmatched[] }>('/inventory/sales-unmatched'),
+    /** 照らせなかった販売の行の `offset` から 1 ページ分と、すべての数（第6.8節 原則 u14）。 */
+    salesUnmatched: (offset = 0) => call<{ items: InventorySaleUnmatched[]; total: number }>(`/inventory/sales-unmatched${offset > 0 ? `?offset=${offset}` : ''}`),
     /** 照らせなかった行に品目を選び、記録する。 */
     resolveSalesUnmatched: (id: string, itemId: string) =>
       call<{ ok: true }>(`/inventory/sales-unmatched/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ itemId }) }),
@@ -2460,8 +2465,14 @@ export const api = {
     /** 発注を始める。メールの仕入先なら「発注の下書き」を起こす（送るのは承認のあと）。 */
     order: (supplierId: string, lines: { itemId: string; qty: number }[]) =>
       call<InventoryOrderResult>('/inventory/orders', { method: 'POST', body: JSON.stringify({ supplierId, lines }) }),
-    /** 発注の記録（`open` なら閉じていないものだけ。第29.14.4節）。 */
-    orders: (open = true) => call<{ orders: InventoryOrder[] }>(`/inventory/orders${open ? '?open=1' : ''}`),
+    /** 発注の記録（`open` なら閉じていないものだけ。第29.14.4節）の `offset` から 1 ページ分と、同じ絞り込みでのすべての数（第6.8節 原則 u14）。 */
+    orders: (open = true, offset = 0) => {
+      const p = new URLSearchParams();
+      if (open) p.set('open', '1');
+      if (offset > 0) p.set('offset', String(offset));
+      // `pending` はページに関係なく、すべての発注待ち（出し直しの判定に使う）
+      return call<{ orders: InventoryOrder[]; total: number; pending: { id: string; number: string; supplierId: string | null }[] }>(`/inventory/orders${p.size ? `?${p}` : ''}`);
+    },
     /** Web・電話の発注を「発注した」にする。 */
     markOrdered: (id: string) => call<{ order: InventoryOrder }>(`/inventory/orders/${encodeURIComponent(id)}/ordered`, { method: 'POST' }),
     /** 発注を取り消す（社内の記録だけ）。 */
@@ -2862,7 +2873,8 @@ export const api = {
     createEffectReport: (month: 'this' | 'last') => call<{ report: EffectReport }>('/admin/effect/reports', { method: 'POST', body: JSON.stringify({ month }) }),
     /** Google ドキュメントに書き出す（本人の Google の接続）。 */
     effectReportDoc: (id: string) => call<{ url: string | null; name: string }>(`/admin/effect/reports/${encodeURIComponent(id)}/doc`, { method: 'POST', body: '{}' }),
-    runs: () => call<{ items: AdminRun[] }>('/admin/runs'),
+    /** 実行の一覧の `offset` から 1 ページ分と、すべての数（第6.8節 原則 u14）。 */
+    runs: (offset = 0) => call<{ items: AdminRun[]; total: number }>(`/admin/runs${offset > 0 ? `?offset=${offset}` : ''}`),
     /** 会社の全員の定時実行（仕様書 第6.6.8.2節）。見るだけ。 */
     schedules: () => call<{ items: AdminSchedule[] }>('/admin/schedules'),
     /** 実行 1 件の状態だけ（仕様書 第6.6.8節）。**中身は返らない。** */
@@ -2883,8 +2895,9 @@ export const api = {
     /** この内容で許す（機能と機能ごとの設定を承認する）。 */
     approveApp: (id: string, functions: AppFunctionId[], settings: AppSettings) =>
       call<ExternalApp>(`/admin/apps/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ functions, settings }) }),
-    /** そのアプリから届いた配信の依頼（宛先は出さない）。 */
-    appDeliveries: (id: string) => call<{ items: DeliveryView[] }>(`/admin/apps/${encodeURIComponent(id)}/deliveries`),
+    /** そのアプリから届いた配信の依頼（宛先は出さない）の `offset` から 1 ページ分と、すべての数（第6.8節 原則 u14）。 */
+    appDeliveries: (id: string, offset = 0) =>
+      call<{ items: DeliveryView[]; total: number }>(`/admin/apps/${encodeURIComponent(id)}/deliveries${offset > 0 ? `?offset=${offset}` : ''}`),
     /** 鍵を出し直す（前の鍵はすぐ使えなくなる）。 */
     rekeyApp: (id: string) => call<{ app: ExternalApp; key: string }>(`/admin/apps/${encodeURIComponent(id)}/rekey`, { method: 'POST' }),
     /** 外部のアプリを止める・動かす。 */

@@ -80,13 +80,25 @@ export interface UnmatchedRecord {
   createdAt: string;
 }
 
+/** 照らせなかった行の絞り込み。 */
+export interface UnmatchedQuery {
+  status?: UnmatchedRecord['status'];
+  appId?: string;
+  limit?: number;
+  /** 先頭から飛ばす件数（一覧のページ。仕様書 第6.8節 原則 u14）。 */
+  offset?: number;
+}
+
 /** 販売の置き場。 */
 export interface SalesStore {
   getSale(tenantId: string, appId: string, saleRef: string): Promise<SaleRecord | null>;
   getSaleById(tenantId: string, id: string): Promise<SaleRecord | null>;
   saveSale(tenantId: string, sale: SaleRecord): Promise<void>;
   addUnmatched(tenantId: string, rows: UnmatchedRecord[]): Promise<void>;
-  listUnmatched(tenantId: string, opts: { status?: UnmatchedRecord['status']; appId?: string; limit?: number }): Promise<(UnmatchedRecord & { saleRef: string })[]>;
+  /** 照らせなかった行（新しい順）。`offset` で先頭から飛ばす（一覧のページ。仕様書 第6.8節 原則 u14）。 */
+  listUnmatched(tenantId: string, opts: UnmatchedQuery): Promise<(UnmatchedRecord & { saleRef: string })[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countUnmatched(tenantId: string, opts: UnmatchedQuery): Promise<number>;
   getUnmatched(tenantId: string, id: string): Promise<UnmatchedRecord | null>;
   setUnmatched(tenantId: string, id: string, status: 'resolved' | 'dropped', userId: string | null, at: string): Promise<void>;
   /** 販売の、選ぶのを待っている行を「要らなくなった」にする（取り消し・送り直しのとき）。`action` を渡せばその種類だけ。 */
@@ -182,17 +194,31 @@ export class PostgresSalesStore implements SalesStore {
     }
   }
 
-  async listUnmatched(tenantId: string, opts: { status?: UnmatchedRecord['status']; appId?: string; limit?: number }): Promise<(UnmatchedRecord & { saleRef: string })[]> {
+  /** 一覧と数で同じにする絞り込み。 */
+  private unmatchedFilterOf(tenantId: string, opts: UnmatchedQuery): { where: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let where = 'u.tenant_id = $1';
     if (opts.status) { params.push(opts.status); where += ` and u.status = $${params.length}`; }
     if (opts.appId) { params.push(opts.appId); where += ` and u.app_id = $${params.length}`; }
+    return { where, params };
+  }
+
+  async listUnmatched(tenantId: string, opts: UnmatchedQuery): Promise<(UnmatchedRecord & { saleRef: string })[]> {
+    const { where, params } = this.unmatchedFilterOf(tenantId, opts);
     params.push(Math.min(500, opts.limit ?? 200));
+    const lim = params.length;
+    params.push(Math.max(0, Math.floor(opts.offset ?? 0)));
     return (await this.q<UnmatchedRow>(tenantId,
       `select u.*, coalesce(s.sale_ref, r.receipt_ref, '') as sale_ref from inventory_sale_unmatched u
          left join inventory_sales s on s.tenant_id = u.tenant_id and s.id = u.sale_id
          left join inventory_app_receipts r on r.tenant_id = u.tenant_id and r.id = u.receipt_id
-        where ${where} order by u.created_at desc limit $${params.length}`, params)).map(toUnmatched);
+        where ${where} order by u.created_at desc, u.id desc limit $${lim} offset $${params.length}`, params)).map(toUnmatched);
+  }
+
+  async countUnmatched(tenantId: string, opts: UnmatchedQuery): Promise<number> {
+    const { where, params } = this.unmatchedFilterOf(tenantId, opts);
+    const [r] = await this.q<{ n: number }>(tenantId, `select count(*)::int as n from inventory_sale_unmatched u where ${where}`, params);
+    return r?.n ?? 0;
   }
 
   async getUnmatched(tenantId: string, id: string): Promise<UnmatchedRecord | null> {
@@ -277,11 +303,17 @@ export class MemorySalesStore implements SalesStore {
     for (const r of rows) this.unmatched.set(r.id, { ...r, tenantId });
   }
 
-  async listUnmatched(tenantId: string, opts: { status?: UnmatchedRecord['status']; appId?: string; limit?: number }): Promise<(UnmatchedRecord & { saleRef: string })[]> {
+  async listUnmatched(tenantId: string, opts: UnmatchedQuery): Promise<(UnmatchedRecord & { saleRef: string })[]> {
+    const from = opts.offset ?? 0;
     return [...this.unmatched.values()]
       .filter((u) => u.tenantId === tenantId && (!opts.status || u.status === opts.status) && (!opts.appId || u.appId === opts.appId))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, opts.limit ?? 200)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)).slice(from, from + (opts.limit ?? 200))
       .map(({ tenantId: _t, ...u }) => ({ ...u, saleRef: (u.saleId ? this.sales.get(u.saleId)?.saleRef : this.receipts.get(u.receiptId ?? '')?.receiptRef) ?? '' }));
+  }
+
+  async countUnmatched(tenantId: string, opts: UnmatchedQuery): Promise<number> {
+    return [...this.unmatched.values()]
+      .filter((u) => u.tenantId === tenantId && (!opts.status || u.status === opts.status) && (!opts.appId || u.appId === opts.appId)).length;
   }
 
   async getUnmatched(tenantId: string, id: string): Promise<UnmatchedRecord | null> {
@@ -593,9 +625,13 @@ export class InventorySales {
     return views.filter((v) => ids.has(v.id)).map((v) => this.toItem(v, scope, changed.get(v.id) ?? v.updatedAt));
   }
 
-  /** 照らせなかった行（選ぶのを待っているもの。新しい順）。 */
-  async unmatched(tenantId: string): Promise<InventorySaleUnmatched[]> {
-    const [rows, apps] = await Promise.all([this.deps.store.listUnmatched(tenantId, { status: 'open' }), this.deps.apps.store.listApps(tenantId)]);
+  /**
+   * 照らせなかった行（選ぶのを待っているもの。新しい順）。
+   *
+   * @param page `limit` と `offset` で 1 ページ分を読む（仕様書 第6.8節 原則 u14）。数は {@link InventorySales.countUnmatched}
+   */
+  async unmatched(tenantId: string, page: { limit?: number; offset?: number } = {}): Promise<InventorySaleUnmatched[]> {
+    const [rows, apps] = await Promise.all([this.deps.store.listUnmatched(tenantId, { status: 'open', ...page }), this.deps.apps.store.listApps(tenantId)]);
     const names = new Map(apps.map((a) => [a.id, a.name]));
     return rows.map((u) => ({
       id: u.id, appId: u.appId, appName: names.get(u.appId) ?? '', saleRef: u.saleRef, action: u.action, itemRef: u.itemRef, code: u.code,
@@ -915,12 +951,18 @@ export class InventorySales {
     return { eventId: e.eventId, saleId: e.saleId, applied: true, lines };
   }
 
+  /** 選ぶのを待っている照らせなかった行の数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  async countUnmatched(tenantId: string): Promise<number> {
+    return this.deps.store.countUnmatched(tenantId, { status: 'open' });
+  }
+
   /** 毎朝の見張りに出す、照らせなかった行の数と例（第29.14節）。 */
   async attention(tenantId: string): Promise<{ count: number; samples: string[] }> {
-    const rows = await this.deps.store.listUnmatched(tenantId, { status: 'open', limit: 50 });
+    // 例は新しい 10 件。数は 50 件で頭打ちにせず、すべてを数える（仕様書 第6.8節 原則 u14）
+    const [rows, count] = await Promise.all([this.deps.store.listUnmatched(tenantId, { status: 'open', limit: 10 }), this.countUnmatched(tenantId)]);
     const label = { hold: '注文', use: '販売', return: '返品', receive: '入荷' } as const;
     return {
-      count: rows.length,
+      count,
       samples: rows.slice(0, 10).map((u) => `${label[u.action]} ${u.saleRef}: ${[u.itemRef, u.code, u.barcode].filter(Boolean).join(' / ')} ${u.qty}`),
     };
   }

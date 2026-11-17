@@ -11,6 +11,7 @@ import {
 } from '@m2office/shared';
 import { api, ApiError, describeError } from './api.js';
 import { SortableList } from './Sortable.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 const JST = 9 * 3_600_000;
 const SLOT = 15;
@@ -71,6 +72,8 @@ export function Reservations({ userId, changeKey }: {
   const [selected, setSelected] = useState<string | null>(null);
   const [note, setNote] = useState<Note>(null);
   const [mine, setMine] = useState<Reservation[]>([]);
+  // 自分の予約は 50 件ずつのページで送る（第6.8節 原則 u14。前は 20 件で切っていた）
+  const [minePage, setMinePage] = useState(0);
   const [manage, setManage] = useState(false);
 
   // スマホは今日と明日、週の表は月曜から 7 日、日の表はその日（前の日から続く予約も読む）
@@ -90,6 +93,10 @@ export function Reservations({ userId, changeKey }: {
   const kinds = useMemo(() => [...new Set((data?.items ?? []).filter((i) => i.status === 'active').map((i) => i.kind))], [data]);
   const byId = useMemo(() => new Map((data?.items ?? []).map((i) => [i.id, i])), [data]);
   const sel = selected ? data?.reservations.find((r) => r.id === selected) ?? mine.find((r) => r.id === selected) ?? null : null;
+
+  // 取り消して件数が減り、いまのページが無くなったら、最後のページへ戻す
+  const mineP = Math.min(minePage, Math.max(0, Math.ceil(mine.length / PAGE_SIZE) - 1));
+  const mineShown = mine.slice(mineP * PAGE_SIZE, (mineP + 1) * PAGE_SIZE);
 
   const open = (d: Draft) => { setSelected(null); setNote(null); setDraft(d); };
   const done = (text: string) => { setDraft(null); setSelected(null); setNote({ kind: 'ok', text }); load(); };
@@ -145,11 +152,13 @@ export function Reservations({ userId, changeKey }: {
       {mine.length > 0 && (
         <section className="rsv-mine">
           <h2>自分の予約</h2>
+          <Pager page={mineP} total={mine.length} onPage={setMinePage} />
           <ul>
-            {mine.slice(0, 20).map((r) => (
+            {mineShown.map((r) => (
               <li key={r.id}><button className="link" onClick={() => { setDraft(null); setSelected(r.id); }}>{rangeLabel(r)} {byId.get(r.itemId)?.name ?? ''}</button>{r.purpose && <span className="muted"> {r.purpose}</span>}</li>
             ))}
           </ul>
+          {mineShown.length > 10 && <Pager page={mineP} total={mine.length} onPage={setMinePage} />}
         </section>
       )}
     </div>

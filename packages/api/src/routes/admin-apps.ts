@@ -8,6 +8,7 @@ import { catalogScopeOf } from '@m2office/core';
 import { APP_FUNCTIONS, EXTERNAL_APP_MAX, type AppFunctionId, type AppSettings, type RiskLevel } from '@m2office/shared';
 import type { AppDeps } from '../context.js';
 import { requireRole, type AppEnv } from '../middleware/tenant.js';
+import { offsetOf } from '../paging.js';
 
 /** 承認の本文（機能と機能ごとの設定）を整える。知らない項目は捨てる。 */
 function approvalOf(body: unknown): { functions: AppFunctionId[]; settings: AppSettings } {
@@ -84,10 +85,18 @@ export function adminAppsRoute(deps: AppDeps) {
     return 'error' in res ? c.json(res, 400) : c.json(res);
   });
 
-  /** そのアプリから届いた配信の依頼（新しい順に 50 件。宛先は出さず、人数と結果の数だけ。第13.4.4節）。 */
+  /**
+   * そのアプリから届いた配信の依頼（新しい順。宛先は出さず、人数と結果の数だけ。第13.4.4節）。
+   * `offset` から 50 件ずつのページで返し、`total` はすべての数（仕様書 第6.8節 原則 u14）。
+   */
   app.get('/:id/deliveries', async (c) => {
     const { tenant } = c.get('ctx');
-    return c.json({ items: await deps.deliveries.list(tenant.id, c.req.param('id')) });
+    const appId = c.req.param('id');
+    const [items, total] = await Promise.all([
+      deps.deliveries.list(tenant.id, appId, offsetOf(c.req.query('offset'))),
+      deps.deliveries.count(tenant.id, appId),
+    ]);
+    return c.json({ items, total });
   });
 
   /** 鍵を出し直す（前の鍵はすぐ使えなくなる）。新しい鍵はこの答えでだけ返す。 */

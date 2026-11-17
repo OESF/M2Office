@@ -1017,15 +1017,20 @@ export class InventoryService {
   /**
    * 発注の一覧（新しい順）。届く予定の日を過ぎた入荷待ちには、過ぎた日数を添える。
    *
-   * @param open 発注前・承認待ち・入荷待ち・一部入荷だけ
+   * @param open 発注前・承認待ち・入荷待ち・一部入荷だけ。`limit` と `offset` で 1 ページ分を読む（仕様書 第6.8節 原則 u14）
    */
-  async orders(tenantId: string, opts: { open?: boolean; limit?: number; today?: string } = {}): Promise<InventoryOrder[]> {
+  async orders(tenantId: string, opts: { open?: boolean; limit?: number; offset?: number; today?: string } = {}): Promise<InventoryOrder[]> {
     await this.reconcileOrders(tenantId).catch(() => undefined);
     const day = opts.today ?? dateIn('Asia/Tokyo');
-    return (await this.deps.store.listOrders(tenantId, { ...(opts.open ? { open: true } : {}), ...(opts.limit ? { limit: opts.limit } : {}) })).map((o) => {
+    return (await this.deps.store.listOrders(tenantId, { ...(opts.open ? { open: true } : {}), ...(opts.limit ? { limit: opts.limit } : {}), ...(opts.offset ? { offset: opts.offset } : {}) })).map((o) => {
       const late = (o.status === 'ordered' || o.status === 'partial') && o.dueOn && o.dueOn < day ? daysBetween(o.dueOn, day) : 0;
       return late > 0 ? { ...o, overdueDays: late } : o;
     });
+  }
+
+  /** 発注の一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countOrders(tenantId: string, opts: { open?: boolean } = {}): Promise<number> {
+    return this.deps.store.countOrders(tenantId, opts.open ? { open: true } : {});
   }
 
   /** 発注 1 件。 */

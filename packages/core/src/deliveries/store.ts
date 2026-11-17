@@ -86,8 +86,10 @@ export interface DeliveryStore {
   /** アプリの依頼の番号から引く。 */
   byRequest(tenantId: string, appId: string, requestId: string): Promise<DeliveryRecord | null>;
   update(tenantId: string, id: string, patch: Partial<Omit<DeliveryRecord, 'id' | 'appId' | 'requestId'>>): Promise<void>;
-  /** 新しい順。 */
-  list(tenantId: string, opts?: { appId?: string; limit?: number }): Promise<DeliveryRecord[]>;
+  /** 新しい順。`offset` で先頭から飛ばす（一覧のページ。仕様書 第6.8節 原則 u14）。 */
+  list(tenantId: string, opts?: { appId?: string; limit?: number; offset?: number }): Promise<DeliveryRecord[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  count(tenantId: string, opts?: { appId?: string }): Promise<number>;
   /** 結果を消していない配信（古い順）。 */
   active(tenantId: string): Promise<DeliveryRecord[]>;
   /** 送る時が来た、まだ送っていない宛先を 1 人。 */
@@ -152,6 +154,9 @@ const DELIVERY_COLS: Record<string, string> = {
 };
 
 /** PostgreSQL の配信の置き場。 */
+/** 配信の一覧と数で同じにする絞り込み（`$1` は会社、`$2` はアプリ。無ければすべて）。 */
+const DELIVERY_WHERE = `tenant_id = $1 and ($2::text is null or app_id = $2)`;
+
 export class PostgresDeliveryStore implements DeliveryStore {
   private readonly pool: pg.Pool;
 
@@ -221,10 +226,16 @@ export class PostgresDeliveryStore implements DeliveryStore {
     await this.q(tenantId, `update deliveries set ${sets.join(', ')} where tenant_id = $1 and id = $2`, params);
   }
 
-  async list(tenantId: string, opts: { appId?: string; limit?: number } = {}): Promise<DeliveryRecord[]> {
+  async list(tenantId: string, opts: { appId?: string; limit?: number; offset?: number } = {}): Promise<DeliveryRecord[]> {
     const rows = await this.q<DeliveryRow>(tenantId,
-      `select * from deliveries where tenant_id = $1 and ($2::text is null or app_id = $2) order by created_at desc limit $3`, [tenantId, opts.appId ?? null, opts.limit ?? 50]);
+      `select * from deliveries where ${DELIVERY_WHERE} order by created_at desc, id desc limit $3 offset $4`,
+      [tenantId, opts.appId ?? null, opts.limit ?? 50, Math.max(0, Math.floor(opts.offset ?? 0))]);
     return rows.map(toDelivery);
+  }
+
+  async count(tenantId: string, opts: { appId?: string } = {}): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId, `select count(*)::int as n from deliveries where ${DELIVERY_WHERE}`, [tenantId, opts.appId ?? null]);
+    return rows[0]?.n ?? 0;
   }
 
   async active(tenantId: string): Promise<DeliveryRecord[]> {
@@ -373,9 +384,14 @@ export class MemoryDeliveryStore implements DeliveryStore {
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) (d as unknown as Record<string, unknown>)[k] = structuredClone(v);
   }
 
-  async list(tenantId: string, opts: { appId?: string; limit?: number } = {}): Promise<DeliveryRecord[]> {
+  async list(tenantId: string, opts: { appId?: string; limit?: number; offset?: number } = {}): Promise<DeliveryRecord[]> {
     const all = [...this.deliveries.values()].filter((d) => d.tenantId === tenantId && (!opts.appId || d.appId === opts.appId));
-    return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, opts.limit ?? 50).map((d) => this.strip(d));
+    const from = opts.offset ?? 0;
+    return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)).slice(from, from + (opts.limit ?? 50)).map((d) => this.strip(d));
+  }
+
+  async count(tenantId: string, opts: { appId?: string } = {}): Promise<number> {
+    return [...this.deliveries.values()].filter((d) => d.tenantId === tenantId && (!opts.appId || d.appId === opts.appId)).length;
   }
 
   async active(tenantId: string): Promise<DeliveryRecord[]> {
