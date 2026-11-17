@@ -1734,7 +1734,7 @@ export const api = {
   /** 問い合わせの記録（内蔵の拡張。仕様書 第33章）。 */
   inquiries: {
     /** 一覧と、絞り込みの選択肢（分類と担当。第33.21節）。`assignee` は `me` か利用者の ID。 */
-    list: (q: { status?: 'open' | 'all'; q?: string; contactId?: string; channel?: string; category?: string; assignee?: string } = {}) => {
+    list: (q: { status?: 'open' | 'all'; q?: string; contactId?: string; channel?: string; category?: string; assignee?: string; offset?: number } = {}) => {
       const p = new URLSearchParams();
       if (q.status) p.set('status', q.status);
       if (q.q) p.set('q', q.q);
@@ -1742,7 +1742,9 @@ export const api = {
       if (q.channel) p.set('channel', q.channel);
       if (q.category) p.set('category', q.category);
       if (q.assignee) p.set('assignee', q.assignee);
-      return call<{ items: Inquiry[]; facets: { categories: string[]; assignees: { id: string; name: string }[] } }>(`/inquiries${p.size ? `?${p}` : ''}`);
+      // ページ（50 件ずつ。仕様書 第6.8節 原則 u14）
+      if (q.offset) p.set('offset', String(q.offset));
+      return call<{ items: Inquiry[]; total: number; facets: { categories: string[]; assignees: { id: string; name: string }[] } }>(`/inquiries${p.size ? `?${p}` : ''}`);
     },
     /** 本人から求められたときにまとめて削除する、同じ人の問い合わせと連絡先の数（管理者だけ）。 */
     person: (id: string) => call<{ inquiries: Inquiry[]; contacts: number }>(`/inquiries/${encodeURIComponent(id)}/person`),
@@ -1765,7 +1767,7 @@ export const api = {
     /** 窓口のアカウントの新しいメールを今すぐ読む（30 秒に 1 回まで）。 */
     checkMail: () => call<{ created: number; appended: number; skipped: number; sent: number; throttled?: boolean }>('/inquiries/mail/check', { method: 'POST', body: '{}' }),
     /** 窓口のアカウントのメールのうち、問い合わせでないと見分けたもの。 */
-    skipped: () => call<{ items: InquiryMailSkipped[] }>('/inquiries/mail/skipped'),
+    skipped: (offset = 0) => call<{ items: InquiryMailSkipped[]; total: number }>(`/inquiries/mail/skipped${offset > 0 ? `?offset=${offset}` : ''}`),
     /** 問い合わせでないとしたメールを、問い合わせにする。 */
     promote: (messageId: string) => call<{ id: string }>(`/inquiries/mail/${encodeURIComponent(messageId)}/promote`, { method: 'POST', body: '{}' }),
     /** 会話の履歴のメールの中身（窓口のアカウントから読む）。 */
@@ -1798,10 +1800,10 @@ export const api = {
   /** お知らせの作成（内蔵の拡張。仕様書 第35章）。 */
   /** 契約の管理（内蔵の拡張。仕様書 第38章）。 */
   contracts: {
-    /** 一覧（期限の近い順）と、契約書の置き場をつないでいるか。 */
-    list: (q: { status?: string; kind?: string; owner?: string; q?: string } = {}) => {
-      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]);
-      return call<{ items: Contract[]; storage: { folderName: string } | null }>(`/contracts${p.size ? `?${p}` : ''}`);
+    /** 一覧（期限の近い順）の `offset` から 1 ページ分と、すべての数（第6.8節 原則 u14）、契約書の置き場をつないでいるか。 */
+    list: (q: { status?: string; kind?: string; owner?: string; q?: string; offset?: number } = {}) => {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v).map(([k, v]) => [k, String(v)]));
+      return call<{ items: Contract[]; total: number; storage: { folderName: string } | null }>(`/contracts${p.size ? `?${p}` : ''}`);
     },
     get: (id: string) => call<{ contract: Contract }>(`/contracts/${encodeURIComponent(id)}`),
     /** 手で入れる。 */
@@ -1820,9 +1822,10 @@ export const api = {
   },
   /** 販売の書類と受注（内蔵の拡張。仕様書 第42章）。 */
   sales: {
-    orders: (q: { status?: string; q?: string; from?: string; to?: string } = {}) => {
-      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]);
-      return call<{ items: SalesOrder[] }>(`/sales/orders${p.size ? `?${p}` : ''}`);
+    /** 受注の `offset` から 1 ページ分と、同じ絞り込みでのすべての数（第6.8節 原則 u14）。 */
+    orders: (q: { status?: string; q?: string; from?: string; to?: string; offset?: number } = {}) => {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v).map(([k, v]) => [k, String(v)]));
+      return call<{ items: SalesOrder[]; total: number }>(`/sales/orders${p.size ? `?${p}` : ''}`);
     },
     order: (id: string) => call<{ order: SalesOrder; documents: SalesDocument[] }>(`/sales/orders/${encodeURIComponent(id)}`),
     /** 注文書（上げたファイル）か見積書から受注にする。同じ注文があれば `duplicate: true`。 */
@@ -1852,9 +1855,10 @@ export const api = {
     stockItems: () => call<{ items: { id: string; name: string; sku: string; unit: string; available: number }[] }>('/sales/stock-items'),
     /** 受注の残りの数で納品書を作る。 */
     deliver: (orderId: string) => call<SalesCreated>(`/sales/orders/${encodeURIComponent(orderId)}/delivery`, { method: 'POST', body: '{}' }),
-    documents: (q: { kind?: string; status?: string; party?: string; from?: string; to?: string; min?: string; max?: string; unbilled?: string } = {}) => {
-      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]);
-      return call<{ items: SalesDocument[] }>(`/sales/documents${p.size ? `?${p}` : ''}`);
+    /** 書類の `offset` から 1 ページ分と、同じ絞り込みでのすべての数（第6.8節 原則 u14）。 */
+    documents: (q: { kind?: string; status?: string; party?: string; from?: string; to?: string; min?: string; max?: string; unbilled?: string; offset?: number } = {}) => {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v).map(([k, v]) => [k, String(v)]));
+      return call<{ items: SalesDocument[]; total: number }>(`/sales/documents${p.size ? `?${p}` : ''}`);
     },
     document: (id: string) => call<SalesDocDetail>(`/sales/documents/${encodeURIComponent(id)}`),
     /** 納品書をまとめて請求書の下書きを作る。 */
@@ -1870,10 +1874,10 @@ export const api = {
   },
   /** 見積書（仕様書 第42.14節）。作る・再見積は業務「見積書の作成」に頼む。 */
   quotes: {
-    /** 作った見積書（新しい版だけ）。`orders` は受注にできるか（販売の書類と受注を使えるか）。 */
-    list: (q: { party?: string; state?: string } = {}) => {
-      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v) as [string, string][]);
-      return call<{ items: SalesDocument[]; orders: boolean }>(`/quotes${p.size ? `?${p}` : ''}`);
+    /** 作った見積書（新しい版だけ）の `offset` から 1 ページ分と、すべての数（第6.8節 原則 u14）。`orders` は受注にできるか（販売の書類と受注を使えるか）。 */
+    list: (q: { party?: string; state?: string; offset?: number } = {}) => {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v).map(([k, v]) => [k, String(v)]));
+      return call<{ items: SalesDocument[]; total: number; orders: boolean }>(`/quotes${p.size ? `?${p}` : ''}`);
     },
     get: (id: string) => call<SalesDocDetail>(`/quotes/${encodeURIComponent(id)}`),
     lost: (id: string, reason: string) => call<SalesDocDetail>(`/quotes/${encodeURIComponent(id)}/lost`, { method: 'POST', body: JSON.stringify({ reason }) }),
@@ -1917,8 +1921,8 @@ export const api = {
   },
   /** サイトの更新（内蔵の拡張。仕様書 第45章）。直し案は秘書に頼んで作る。 */
   siteUpdates: {
-    /** 直しの記録（新しい順）。 */
-    list: () => call<{ items: SiteEditView[] }>('/site-updates'),
+    /** 直しの記録（新しい順）の `offset` から 1 ページ分と、すべての数（第6.8節 原則 u14）。 */
+    list: (offset = 0) => call<{ items: SiteEditView[]; total: number }>(`/site-updates${offset > 0 ? `?offset=${offset}` : ''}`),
     /** 直しが入れる画像の URL（小さな見本。第45.18.2節）。 */
     imageUrl: (id: string, fileId: string) => `/v1/site-updates/${encodeURIComponent(id)}/images/${encodeURIComponent(fileId)}`,
     /** つないでいるサイト（名前・URL・直すときに使う利用者・直せるか）。 */
@@ -1941,11 +1945,14 @@ export const api = {
   },
   /** 補助金・助成金の案内（内蔵の拡張。仕様書 第39章）。 */
   subsidies: {
-    /** 候補（過ぎたもの・見送りも含む）と、調べるのに使った会社のこと・関心・最後に調べた日時・調べているか・相談先の地域の窓口。 */
-    list: () => call<{
-      items: Subsidy[]; today: string; profile: SubsidyProfile | null; interest: string; industry: string;
+    /**
+     * 候補を `view`（候補・過ぎたもの・見送ったもの）で分けた `offset` から 1 ページ分とすべての数（第6.8節 原則 u14）と、
+     * 調べるのに使った会社のこと・関心・最後に調べた日時・調べているか・相談先の地域の窓口。
+     */
+    list: (view: 'active' | 'past' | 'skipped' = 'active', offset = 0) => call<{
+      items: Subsidy[]; total: number; today: string; profile: SubsidyProfile | null; interest: string; industry: string;
       searchedAt: string | null; searching: boolean; contacts: SubsidyContact[]; admin: boolean;
-    }>('/subsidies'),
+    }>(`/subsidies?view=${view}${offset > 0 ? `&offset=${offset}` : ''}`),
     /** いま調べる（後ろで調べる。1 日 1 回まで）。 */
     search: () => call<{ ok: true }>('/subsidies/search', { method: 'POST', body: '{}' }),
     mark: (id: string, status: SubsidyStatus) => call<{ ok: true }>(`/subsidies/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
@@ -1955,8 +1962,8 @@ export const api = {
   },
   /** 意思決定支援（内蔵の拡張。仕様書 第43章）。 */
   decisions: {
-    /** 自分の相談と、共有された相談。 */
-    list: () => call<{ items: DecisionSummary[] }>('/decisions'),
+    /** 自分の相談と、共有された相談。`offset` から 1 ページ分と、すべての数（第6.8節 原則 u14）。 */
+    list: (offset = 0) => call<{ items: DecisionSummary[]; total: number }>(`/decisions${offset > 0 ? `?offset=${offset}` : ''}`),
     /** 相談を始める（討論はワーカーが進める）。添付は先に `uploadFile` で上げた ID。 */
     start: (input: { topic: string; turns: number; crossCheck: boolean; fileIds: string[] }) =>
       call<{ id: string }>('/decisions', { method: 'POST', body: JSON.stringify(input) }),
@@ -2073,8 +2080,11 @@ export const api = {
     },
   },
   printDesigns: {
-    /** 一覧（新しく直した順。掲示の状態つき）と、今日と、本人が管理者か。 */
-    list: () => call<{ items: (PrintDesign & { state: PrintState })[]; today: string; admin: boolean; drive: boolean }>('/print-designs'),
+    /** 一覧（新しく直した順。掲示の状態つき）の `offset` から 1 ページ分と、絞ったすべての数・状態ごとの数（第6.8節 原則 u14）、今日と、本人が管理者か。 */
+    list: (q: { state?: PrintState; offset?: number } = {}) => {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => !!v).map(([k, v]) => [k, String(v)]));
+      return call<{ items: (PrintDesign & { state: PrintState })[]; total: number; counts: Record<PrintState, number>; today: string; admin: boolean; drive: boolean }>(`/print-designs${p.size ? `?${p}` : ''}`);
+    },
     /** 「ドライブから」の選ぶ画面の材料（第41.19.2節）。 */
     drivePicker: () => call<{ kind: 'google'; apiKey: string; appId: string; accessToken: string } | { kind: 'mock'; items: { id: string; name: string }[] }>('/print-designs/drive-picker'),
     get: (id: string) => call<PrintDesignDetailView>(`/print-designs/${encodeURIComponent(id)}`),
@@ -2153,7 +2163,8 @@ export const api = {
     reorder: (ids: string[]) => call<{ ok: true }>('/reservations/items/order', { method: 'PUT', body: JSON.stringify({ ids }) }),
   },
   announcements: {
-    list: () => call<{ items: Announcement[] }>('/announcements'),
+    /** 一覧（新しい順）の `offset` から 1 ページ分と、すべての数（第6.8節 原則 u14）。 */
+    list: (offset = 0) => call<{ items: Announcement[]; total: number }>(`/announcements${offset > 0 ? `?offset=${offset}` : ''}`),
     /** 1 行の欄に書いた頼みから下書きを作る。 */
     draft: (text: string) => call<{ announcement: Announcement }>('/announcements', { method: 'POST', body: JSON.stringify({ text }) }),
     get: (id: string) => call<AnnouncementDetail>(`/announcements/${encodeURIComponent(id)}`),
@@ -2197,7 +2208,8 @@ export const api = {
   },
   /** Web のコラム（内蔵の拡張。仕様書 第32章）。 */
   columns: {
-    list: () => call<{ columns: WebColumn[]; wordpress: ColumnWordPress | null; themes: WebColumnTheme[]; plan: ColumnPlanSlot[]; pageUrl: string | null }>('/columns'),
+    /** コラムの `offset` から 1 ページ分とすべての数（第6.8節 原則 u14）、入れ先・テーマ案・予定表・貼るだけのページ。 */
+    list: (offset = 0) => call<{ columns: WebColumn[]; total: number; wordpress: ColumnWordPress | null; themes: WebColumnTheme[]; plan: ColumnPlanSlot[]; pageUrl: string | null }>(`/columns${offset > 0 ? `?offset=${offset}` : ''}`),
     /** テーマ案を作る（第32.18.4節）。 */
     makeThemes: () => call<{ added: WebColumnTheme[] }>('/columns/themes', { method: 'POST', body: '{}' }),
     /** テーマ案から書き始める（書き直しの案なら書き直す）。 */
@@ -3242,7 +3254,9 @@ export const api = {
   /** スライドの作成で選べる会社のテンプレートと、会社の既定（第9.4.2節「組み込みのデザイン」）。組み込みのデザインは画面が持つ。 */
   slideDesigns: () => call<{ templates: { name: string; description: string }[]; company: SlideDesign | null; defaultChoice: string }>('/agents/slide-designs'),
   /** 作ったスライドの一覧（本人のものと会社で共有されたもの。仕様書 第9.4.2節「作ったスライドの扱い」）。 */
-  slideDecks: (kind: SlideDeckKind = 'slides') => call<{ mine: SlideDeckSummary[]; shared: SlideDeckSummary[] }>(`/slide-decks?kind=${kind}`),
+  slideDecks: (kind: SlideDeckKind = 'slides', page: { mineOffset?: number; sharedOffset?: number } = {}) =>
+    call<{ mine: SlideDeckSummary[]; shared: SlideDeckSummary[]; mineTotal: number; sharedTotal: number }>(
+      `/slide-decks?kind=${kind}${page.mineOffset ? `&mineOffset=${page.mineOffset}` : ''}${page.sharedOffset ? `&sharedOffset=${page.sharedOffset}` : ''}`),
   /** 作ったスライド 1 件。 */
   slideDeck: (id: string) => call<SlideDeckSummary>(`/slide-decks/${encodeURIComponent(id)}`),
   /** 共有の範囲を切り替える（作った人だけ）。 */
@@ -3333,7 +3347,8 @@ export const api = {
   /** 承認待ち。どの業務かを添える（仕様書 第6.2.4節）。 */
   approvals: () => call<{ items: ApprovalView[] }>('/approvals'),
   /** 自分が判断した承認と却下（仕様書 第6.2.5節）。新しい順に 100 件まで。 */
-  decidedApprovals: () => call<{ items: DecidedApprovalView[] }>('/approvals/decided'),
+  /** 本人が判断したもの（新しい順に 50 件ずつ。`total` はすべての数。仕様書 第6.8節 原則 u14）。 */
+  decidedApprovals: (offset = 0) => call<{ items: DecidedApprovalView[]; total: number }>(`/approvals/decided${offset > 0 ? `?offset=${offset}` : ''}`),
   decide: (id: string, decision: 'approved' | 'rejected', comment?: string) =>
     call<{ runId: string }>(`/approvals/${id}`, {
       method: 'POST',

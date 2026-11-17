@@ -18,6 +18,7 @@ import { api, describeError } from './api.js';
 import { BackButton } from './back-button.js';
 import { Busy } from './components.js';
 import { Markdown } from './help.js';
+import { Pager, usePaged } from './Pager.js';
 
 const RUNNING = new Set(['queued', 'gathering', 'debating', 'summarizing']);
 const timeLabel = (iso: string) => new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
@@ -37,12 +38,11 @@ export function Decisions({ id, onOpen, changeKey }: {
 
 /** 一覧と新しい相談。 */
 function DecisionList({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: string }) {
-  const [items, setItems] = useState<DecisionSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    api.decisions.list().then((r) => { setItems(r.items); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
-  }, []);
-  useEffect(load, [load]);
+  // 50 件ずつのページで送る（第6.8節 原則 u14）
+  const paged = usePaged((offset) => api.decisions.list(offset));
+  const items = paged.items;
+  const error = paged.error ? describeError(paged.error, '読めませんでした') : null;
+  const load = paged.reload;
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // 動いている相談があるあいだは読み直す
   useEffect(() => {
@@ -50,11 +50,13 @@ function DecisionList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [items, load]);
+  const pager = <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />;
   return (
     <div className="dcs">
       <NewDecision onStarted={onOpen} />
       {error && <p className="error">{error}</p>}
-      {!items ? <p className="muted">読み込み中…</p> : items.length === 0 ? null : (
+      {!items ? <p className="muted">読み込み中…</p> : items.length === 0 ? null : (<>
+        {pager}
         <ul className="dcs-list">
           {items.map((x) => (
             <li key={x.id}>
@@ -70,7 +72,8 @@ function DecisionList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
             </li>
           ))}
         </ul>
-      )}
+        {items.length > 10 && pager}
+      </>)}
     </div>
   );
 }

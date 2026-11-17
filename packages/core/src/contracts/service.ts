@@ -126,6 +126,11 @@ export class ContractService {
     return (await this.deps.store.list(who.tenantId, q)).map((c) => this.view(c, names));
   }
 
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  async count(who: ContractViewer, q: ContractQuery = {}): Promise<number> {
+    return this.deps.store.count(who.tenantId, q);
+  }
+
   /** 1 件。見つからなければ `null`。 */
   async get(who: ContractViewer, id: string): Promise<Contract | null> {
     const c = await this.deps.store.get(who.tenantId, id);

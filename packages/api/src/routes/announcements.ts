@@ -11,6 +11,7 @@ import { Hono, type Context } from 'hono';
 import { AI_NOT_CONFIGURED_MESSAGE, aiAvailable, renderScreenCard, screenCardOf, type AnnouncementViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -36,8 +37,11 @@ export function announcementsRoute(deps: AppDeps) {
     await next();
   });
 
-  /** 一覧（新しい順）。 */
-  app.get('/', async (c) => c.json({ items: await service.list(who(c)) }));
+  /** 一覧（新しい順）。`offset` で 1 ページ（50 件）ずつ返し、`total` にすべての数を添える（第6.8節 原則 u14）。 */
+  app.get('/', async (c) => {
+    const [items, total] = await Promise.all([service.list(who(c), PAGE, offsetOf(c.req.query('offset'))), service.count(who(c))]);
+    return c.json({ items, total });
+  });
 
   /** LINE の友だちの数と今月の残り（つないでいなければ `null`）。 */
   app.get('/line/status', async (c) => c.json({ line: await service.lineStatus(c.get('ctx').tenant.id) }));

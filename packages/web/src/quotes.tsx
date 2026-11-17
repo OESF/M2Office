@@ -13,6 +13,7 @@ import {
 } from '@m2office/shared';
 import { api, describeError, type SalesDocDetail } from './api.js';
 import { BackButton } from './back-button.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 /** 業務「見積書の作成」の ID。 */
 export const QUOTE_AGENT_ID = 'quote';
@@ -38,11 +39,20 @@ export function QuoteList({ onOpenRun, onOpenSales }: { onOpenRun: (runId: strin
   const [state, setState] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // ページ（50 件ずつ。第6.8節 原則 u14）。絞り込みを変えたら最初のページへ戻す
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  useEffect(() => { setPage(0); }, [party, state]);
   const load = useCallback(() => {
-    api.quotes.list({ ...(party.trim() ? { party: party.trim() } : {}), ...(state ? { state } : {}) })
-      .then((r) => { setItems(r.items); setError(null); })
+    api.quotes.list({ ...(party.trim() ? { party: party.trim() } : {}), ...(state ? { state } : {}), offset: page * PAGE_SIZE })
+      .then((r) => {
+        setItems(r.items); setTotal(r.total); setError(null);
+        // 件数が減り、いまのページが無くなったら、最後のページへ戻す
+        const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+        if (page > last) setPage(last);
+      })
       .catch((e) => setError(describeError(e, '一覧を読めませんでした')));
-  }, [party, state]);
+  }, [party, state, page]);
   useEffect(() => { const t = setTimeout(load, party ? 250 : 0); return () => clearTimeout(t); }, [load, party]);
   if (open) return <section className="slide-decks"><QuoteView id={open} onBack={() => { setOpen(null); load(); }} onOpen={setOpen} onOpenRun={onOpenRun} onOpenSales={onOpenSales} /></section>;
   if (error) return <p className="error">{error}</p>;
@@ -58,7 +68,11 @@ export function QuoteList({ onOpenRun, onOpenSales }: { onOpenRun: (runId: strin
         </select>
         <input className="contracts-search" type="search" value={party} placeholder="宛先で探す" aria-label="宛先で探す" onChange={(e) => setParty(e.target.value)} />
       </div>
-      {items.length === 0 ? <p className="muted">当たる見積書はありません。</p> : <QuoteTable docs={items} onOpen={setOpen} />}
+      {items.length === 0 ? <p className="muted">当たる見積書はありません。</p> : (<>
+        <Pager page={page} total={total} onPage={setPage} />
+        <QuoteTable docs={items} onOpen={setOpen} />
+        {items.length > 10 && <Pager page={page} total={total} onPage={setPage} />}
+      </>)}
     </section>
   );
 }

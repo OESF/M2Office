@@ -145,6 +145,9 @@ export function defaultContacts(region: string): SubsidyContact[] {
  *
  * @remarks 呼ぶ前に、利用者が使えるかを {@link subsidiesAccess} で確かめること
  */
+/** 画面の分け方（候補・過ぎたもの・見送ったもの）。 */
+export type SubsidyListView = 'active' | 'past' | 'skipped';
+
 export class SubsidyService {
   private readonly log: Logger;
 
@@ -171,6 +174,20 @@ export class SubsidyService {
   /** 候補（締め切りの近い順。過ぎたもの・見送りも含む。画面と秘書が分ける）。 */
   async list(who: SubsidyViewer): Promise<Subsidy[]> {
     return (await this.deps.store.list(who.tenantId)).map((r) => this.view(r));
+  }
+
+  /**
+   * 画面の分け方（`active`: 候補・`past`: 過ぎたもの・`skipped`: 見送ったもの）の 1 ページと、その分け方でのすべての数（仕様書 第6.8節 原則 u14）。
+   *
+   * @remarks 過ぎたかどうかは今日の日付で決まるので、すべての候補を読んでから分ける。
+   */
+  async page(who: SubsidyViewer, q: { view: SubsidyListView; limit: number; offset: number }): Promise<{ items: Subsidy[]; total: number }> {
+    const today = this.today();
+    const hit = (await this.list(who)).filter((c) => (q.view === 'skipped' ? c.status === 'skipped'
+      : q.view === 'past' ? c.status !== 'skipped' && !!c.deadline && c.deadline < today
+        : c.status !== 'skipped' && (!c.deadline || c.deadline >= today)));
+    const offset = Math.max(0, Math.floor(q.offset));
+    return { items: hit.slice(offset, offset + q.limit), total: hit.length };
   }
 
   /** 今日（日本時間）。締め切りが過ぎたかを見るのに使う。 */

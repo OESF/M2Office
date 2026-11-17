@@ -51,15 +51,23 @@ export interface SlideDeck {
 export interface SlideDeckStore {
   save(deck: SlideDeck): Promise<void>;
   get(tenantId: string, id: string): Promise<SlideDeck | null>;
-  /** 本人が作ったもの（新しい順）。 */
-  listMine(tenantId: string, userId: string, limit: number, kind?: SlideDeckKind): Promise<SlideDeck[]>;
-  /** 会社で共有されたもの（本人のものを除く。新しい順）。 */
-  listShared(tenantId: string, exceptUserId: string, limit: number, kind?: SlideDeckKind): Promise<SlideDeck[]>;
+  /** 本人が作ったもの（新しい順）。`offset` から `limit` 件。 */
+  listMine(tenantId: string, userId: string, limit: number, kind?: SlideDeckKind, offset?: number): Promise<SlideDeck[]>;
+  /** 会社で共有されたもの（本人のものを除く。新しい順）。`offset` から `limit` 件。 */
+  listShared(tenantId: string, exceptUserId: string, limit: number, kind?: SlideDeckKind, offset?: number): Promise<SlideDeck[]>;
+  /** {@link listMine} と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countMine(tenantId: string, userId: string, kind?: SlideDeckKind): Promise<number>;
+  /** {@link listShared} と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  countShared(tenantId: string, exceptUserId: string, kind?: SlideDeckKind): Promise<number>;
   remove(tenantId: string, id: string): Promise<void>;
 }
 
-/** 一覧に出す件数の上限。 */
+/** 秘書の道具が一度に読む件数の上限（画面はページで送る。仕様書 第6.8節 原則 u14）。 */
 export const SLIDE_DECK_LIST_MAX = 100;
+
+/** 置き場の絞り込み（本人のもの・会社で共有されたもの。一覧と数で同じにする）。$1 は会社、$2 は利用者、$3 は種類。 */
+const MINE_WHERE = 'tenant_id = $1 and user_id = $2 and kind = $3';
+const SHARED_WHERE = `tenant_id = $1 and sharing = 'company' and user_id <> $2 and kind = $3`;
 
 /** 作った後にこれより長く経ってから変わっていれば、人が手を入れたとみなす（組み立ての後の画像とメモの書き込みの分の余裕）。 */
 export const HAND_EDIT_GRACE_MS = 30_000;
@@ -121,15 +129,24 @@ export class PostgresSlideDeckStore implements SlideDeckStore {
     return rows[0] ? fromRow(rows[0]) : null;
   }
 
-  async listMine(tenantId: string, userId: string, limit: number, kind: SlideDeckKind = 'slides'): Promise<SlideDeck[]> {
+  async listMine(tenantId: string, userId: string, limit: number, kind: SlideDeckKind = 'slides', offset = 0): Promise<SlideDeck[]> {
     return (await this.q<Row>(tenantId,
-      `select ${COLUMNS} from slide_decks where tenant_id = $1 and user_id = $2 and kind = $4 order by updated_at desc limit $3`, [tenantId, userId, limit, kind])).map(fromRow);
+      `select ${COLUMNS} from slide_decks where ${MINE_WHERE} order by updated_at desc, id desc limit $4 offset $5`,
+      [tenantId, userId, kind, limit, Math.max(0, Math.floor(offset))])).map(fromRow);
   }
 
-  async listShared(tenantId: string, exceptUserId: string, limit: number, kind: SlideDeckKind = 'slides'): Promise<SlideDeck[]> {
+  async listShared(tenantId: string, exceptUserId: string, limit: number, kind: SlideDeckKind = 'slides', offset = 0): Promise<SlideDeck[]> {
     return (await this.q<Row>(tenantId,
-      `select ${COLUMNS} from slide_decks where tenant_id = $1 and sharing = 'company' and user_id <> $2 and kind = $4 order by updated_at desc limit $3`,
-      [tenantId, exceptUserId, limit, kind])).map(fromRow);
+      `select ${COLUMNS} from slide_decks where ${SHARED_WHERE} order by updated_at desc, id desc limit $4 offset $5`,
+      [tenantId, exceptUserId, kind, limit, Math.max(0, Math.floor(offset))])).map(fromRow);
+  }
+
+  async countMine(tenantId: string, userId: string, kind: SlideDeckKind = 'slides'): Promise<number> {
+    return (await this.q<{ n: number }>(tenantId, `select count(*)::int as n from slide_decks where ${MINE_WHERE}`, [tenantId, userId, kind]))[0]?.n ?? 0;
+  }
+
+  async countShared(tenantId: string, exceptUserId: string, kind: SlideDeckKind = 'slides'): Promise<number> {
+    return (await this.q<{ n: number }>(tenantId, `select count(*)::int as n from slide_decks where ${SHARED_WHERE}`, [tenantId, exceptUserId, kind]))[0]?.n ?? 0;
   }
 
   async remove(tenantId: string, id: string): Promise<void> {
@@ -157,14 +174,32 @@ export class InMemorySlideDeckStore implements SlideDeckStore {
     return d && d.tenantId === tenantId ? structuredClone(d) : null;
   }
 
-  async listMine(tenantId: string, userId: string, limit: number, kind: SlideDeckKind = 'slides'): Promise<SlideDeck[]> {
-    return [...this.decks.values()].filter((d) => d.tenantId === tenantId && d.userId === userId && d.kind === kind)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit).map((d) => structuredClone(d));
+  async listMine(tenantId: string, userId: string, limit: number, kind: SlideDeckKind = 'slides', offset = 0): Promise<SlideDeck[]> {
+    return this.mine(tenantId, userId, kind)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id)).slice(offset, offset + limit).map((d) => structuredClone(d));
   }
 
-  async listShared(tenantId: string, exceptUserId: string, limit: number, kind: SlideDeckKind = 'slides'): Promise<SlideDeck[]> {
-    return [...this.decks.values()].filter((d) => d.tenantId === tenantId && d.sharing === 'company' && d.userId !== exceptUserId && d.kind === kind)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit).map((d) => structuredClone(d));
+  async listShared(tenantId: string, exceptUserId: string, limit: number, kind: SlideDeckKind = 'slides', offset = 0): Promise<SlideDeck[]> {
+    return this.shared(tenantId, exceptUserId, kind)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id)).slice(offset, offset + limit).map((d) => structuredClone(d));
+  }
+
+  async countMine(tenantId: string, userId: string, kind: SlideDeckKind = 'slides'): Promise<number> {
+    return this.mine(tenantId, userId, kind).length;
+  }
+
+  async countShared(tenantId: string, exceptUserId: string, kind: SlideDeckKind = 'slides'): Promise<number> {
+    return this.shared(tenantId, exceptUserId, kind).length;
+  }
+
+  /** 本人のもの（一覧と数で同じにする絞り込み）。 */
+  private mine(tenantId: string, userId: string, kind: SlideDeckKind): SlideDeck[] {
+    return [...this.decks.values()].filter((d) => d.tenantId === tenantId && d.userId === userId && d.kind === kind);
+  }
+
+  /** 会社で共有されたもの（一覧と数で同じにする絞り込み）。 */
+  private shared(tenantId: string, exceptUserId: string, kind: SlideDeckKind): SlideDeck[] {
+    return [...this.decks.values()].filter((d) => d.tenantId === tenantId && d.sharing === 'company' && d.userId !== exceptUserId && d.kind === kind);
   }
 
   async remove(tenantId: string, id: string): Promise<void> {
@@ -233,11 +268,24 @@ export class SlideDeckService {
     };
   }
 
-  /** 本人が作ったものと、会社で共有されたもの（新しい順）。 */
-  async list(viewer: SlideDeckViewer, kind: SlideDeckKind = 'slides'): Promise<{ mine: SlideDeckSummary[]; shared: SlideDeckSummary[] }> {
+  /** 本人が作ったものと、会社で共有されたものの数（一覧と同じ絞り込み。仕様書 第6.8節 原則 u14）。 */
+  async counts(viewer: SlideDeckViewer, kind: SlideDeckKind = 'slides'): Promise<{ mine: number; shared: number }> {
     const [mine, shared] = await Promise.all([
-      this.deps.store.listMine(viewer.tenantId, viewer.userId, SLIDE_DECK_LIST_MAX, kind),
-      this.deps.store.listShared(viewer.tenantId, viewer.userId, SLIDE_DECK_LIST_MAX, kind),
+      this.deps.store.countMine(viewer.tenantId, viewer.userId, kind), this.deps.store.countShared(viewer.tenantId, viewer.userId, kind),
+    ]);
+    return { mine, shared };
+  }
+
+  /**
+   * 本人が作ったものと、会社で共有されたもの（新しい順）。
+   *
+   * @param page 画面のページ（それぞれの飛ばす数と 1 ページの数。仕様書 第6.8節 原則 u14）。無ければ {@link SLIDE_DECK_LIST_MAX} 件まで
+   */
+  async list(viewer: SlideDeckViewer, kind: SlideDeckKind = 'slides', page: { limit?: number; mineOffset?: number; sharedOffset?: number } = {}): Promise<{ mine: SlideDeckSummary[]; shared: SlideDeckSummary[] }> {
+    const limit = page.limit ?? SLIDE_DECK_LIST_MAX;
+    const [mine, shared] = await Promise.all([
+      this.deps.store.listMine(viewer.tenantId, viewer.userId, limit, kind, page.mineOffset ?? 0),
+      this.deps.store.listShared(viewer.tenantId, viewer.userId, limit, kind, page.sharedOffset ?? 0),
     ]);
     const names = new Map<string, string>();
     for (const id of new Set(shared.map((d) => d.userId))) {

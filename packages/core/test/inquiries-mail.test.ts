@@ -122,11 +122,12 @@ test('読む: 問い合わせを作り、問い合わせでないものは一覧
   assert.equal(ev.mail?.to, 'sales@alpha.example.jp', '届いた宛先（別名）を残す');
   const opened = await service.mailOf(member, ev.id);
   assert.ok('body' in opened && opened.body.includes('見積もり'), 'メールは開いたときに窓口のアカウントから読む');
-  const skipped = await service.skippedMails(member);
+  const { items: skipped, total } = await service.skippedMails(member);
   assert.equal(skipped.length, 2);
+  assert.equal(total, 2, '数はページに関係なくすべてで数える');
   const promoted = await service.promoteMail(member, skipped.find((m) => /営業/.test(m.reason))!.messageId);
   assert.ok('id' in promoted);
-  assert.equal((await service.skippedMails(member)).length, 1);
+  assert.equal((await service.skippedMails(member)).items.length, 1);
   assert.ok(audits.some((a) => a.action === 'inquiry.mail_create'));
   assert.ok(!JSON.stringify(audits).includes('山本'), '監査ログにお客様の名前を残さない');
 });

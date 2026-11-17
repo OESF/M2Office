@@ -10,9 +10,10 @@
 
 import { Hono, type Context } from 'hono';
 import { SALES_DOC_KIND_LABELS, SALES_ORDER_STATUS_LABELS, type SalesDocKind, type SalesOrderStatus } from '@m2office/shared';
-import { itemsFrom, type SalesViewer } from '@m2office/core';
+import { itemsFrom, SALES_LIST_MAX, type SalesViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -43,18 +44,20 @@ export function salesDocsRoute(deps: AppDeps) {
 
   // ───────── 受注 ─────────
 
-  /** 受注の一覧（新しい順。`status`、`q`: 取引先・注文番号・品名、`from`・`to`: 注文日の範囲。進み具合つき。第42.14.5節）。 */
+  /**
+   * 受注の一覧（新しい順。`status`、`q`: 取引先・注文番号・品名、`from`・`to`: 注文日の範囲。進み具合つき。第42.14.5節）。
+   * `offset` で 1 ページ（50 件）ずつ返し、`total` に同じ絞り込みでのすべての数を添える（第6.8節 原則 u14）。
+   */
   app.get('/orders', async (c) => {
     const st = c.req.query('status');
     const from = DATE.test(c.req.query('from') ?? '') ? c.req.query('from')! : '';
     const to = DATE.test(c.req.query('to') ?? '') ? c.req.query('to')! : '';
-    let items = await service.listOrders(who(c), {
+    const { items, total } = await service.pageOrders(who(c), {
       ...(st && st in SALES_ORDER_STATUS_LABELS ? { status: st as SalesOrderStatus } : {}),
       ...(c.req.query('q') ? { search: c.req.query('q')!.slice(0, 100) } : {}),
-      ...(from || to ? { limit: 2000 } : {}),
-    });
-    if (from || to) items = items.filter((o) => (!from || (o.orderedOn ?? '') >= from) && (!to || (o.orderedOn ?? '9999') <= to)).slice(0, 200);
-    return c.json({ items });
+      ...(from ? { from } : {}), ...(to ? { to } : {}),
+    }, { limit: PAGE, offset: offsetOf(c.req.query('offset')) });
+    return c.json({ items, total });
   });
 
   /**
@@ -177,7 +180,10 @@ export function salesDocsRoute(deps: AppDeps) {
 
   // ───────── 書類 ─────────
 
-  /** 書類の一覧（`kind`・`status`・`party`・`from`・`to`・`min`・`max`・`unbilled=1`。第42.6節）。 */
+  /**
+   * 書類の一覧（`kind`・`status`・`party`・`from`・`to`・`min`・`max`・`unbilled=1`。第42.6節）。
+   * `offset` で 1 ページ（50 件）ずつ返し、`total` に同じ絞り込みでのすべての数を添える（第6.8節 原則 u14）。
+   */
   app.get('/documents', async (c) => {
     const kind = c.req.query('kind');
     const st = c.req.query('status');
@@ -189,10 +195,11 @@ export function salesDocsRoute(deps: AppDeps) {
       ...(c.req.query('party') ? { party: c.req.query('party')!.slice(0, 100) } : {}),
       ...(date('from') ? { from: date('from')! } : {}), ...(date('to') ? { to: date('to')! } : {}),
       ...(num('min') !== undefined ? { min: num('min')! } : {}), ...(num('max') !== undefined ? { max: num('max')! } : {}),
-      limit: 500,
+      limit: SALES_LIST_MAX,
     });
     if (c.req.query('unbilled') === '1') items = items.filter((d) => d.kind === 'delivery' && d.status === 'issued' && !d.invoiceId);
-    return c.json({ items });
+    const offset = offsetOf(c.req.query('offset'));
+    return c.json({ items: items.slice(offset, offset + PAGE), total: items.length });
   });
 
   /** 納品書をまとめて請求書の下書きを作る（`deliveryIds`。第42.4.2節）。発行は「発行」で行う。 */

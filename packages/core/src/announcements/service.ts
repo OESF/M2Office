@@ -299,12 +299,17 @@ export class AnnouncementService {
     return { announcement: this.toView(a, await this.names(who.tenantId)) };
   }
 
-  /** 一覧（新しい順）。 */
-  async list(who: AnnouncementViewer, limit = 50): Promise<Announcement[]> {
+  /** 一覧（新しい順。`offset` から `limit` 件）。 */
+  async list(who: AnnouncementViewer, limit = 50, offset = 0): Promise<Announcement[]> {
     const names = await this.names(who.tenantId);
     const out: Announcement[] = [];
-    for (const a of await this.deps.store.list(who.tenantId, Math.min(200, limit))) out.push(this.toView(await this.sync(who.tenantId, a), names));
+    for (const a of await this.deps.store.list(who.tenantId, Math.min(200, limit), offset)) out.push(this.toView(await this.sync(who.tenantId, a), names));
     return out;
+  }
+
+  /** お知らせの数（一覧と同じ絞り込み。ページを数える。仕様書 第6.8節 原則 u14）。 */
+  async count(who: AnnouncementViewer): Promise<number> {
+    return this.deps.store.count(who.tenantId);
   }
 
   /** 1 件と、出し先ごとの結果・使える出し先。 */

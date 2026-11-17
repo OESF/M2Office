@@ -29,7 +29,7 @@ import type { AnnouncementSignage } from '../announcements/service.js';
 import type { CanvaService } from './canva.js';
 import { renderSvgPng } from '../columns/cover.js';
 import { pagePng, previewPng, toCanvaPdf, toPdf } from './render.js';
-import type { PrintDesignStore, StoredDesign } from './store.js';
+import { PRINT_DESIGN_LIST_ALL, type PrintDesignStore, type StoredDesign } from './store.js';
 import { imageModel } from '../llm/models.js';
 
 /** 操作する人。 */
@@ -991,6 +991,25 @@ export class PrintDesignService {
     const out = [];
     for (const d of await this.deps.store.list(who.tenantId)) out.push({ ...(await this.view(who.tenantId, d)), state: printStateOf(d, today) });
     return out;
+  }
+
+  /**
+   * 一覧の 1 ページ（新しく直した順。仕様書 第6.8節 原則 u14）。`state` で絞ったときの数 `total` と、掲示の状態ごとの数 `counts`（絞る前）を添える。
+   *
+   * @remarks 掲示の状態は今日の日付から求めるので、すべてを読んでから絞る。中身を組み立てるのはそのページの物だけ。
+   */
+  async page(who: PrintViewer, q: { state?: PrintState; limit: number; offset: number }): Promise<{
+    items: (PrintDesign & { state: PrintState })[]; total: number; counts: Record<PrintState, number>;
+  }> {
+    const today = this.today();
+    const all = (await this.deps.store.list(who.tenantId, PRINT_DESIGN_LIST_ALL)).map((d) => ({ d, state: printStateOf(d, today) }));
+    const counts: Record<PrintState, number> = { draft: 0, upcoming: 0, posted: 0, ended: 0, removed: 0 };
+    for (const x of all) counts[x.state] += 1;
+    const hit = q.state ? all.filter((x) => x.state === q.state) : all;
+    const offset = Math.max(0, Math.floor(q.offset));
+    const items = [];
+    for (const x of hit.slice(offset, offset + q.limit)) items.push({ ...(await this.view(who.tenantId, x.d)), state: x.state });
+    return { items, total: hit.length, counts };
   }
 
   /** 1 つの物と版。 */

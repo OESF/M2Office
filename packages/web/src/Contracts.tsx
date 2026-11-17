@@ -12,6 +12,7 @@ import {
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
 import { BackButton } from './back-button.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const dayLabel = (d: string | null) => (d ? d.replace(/-/g, '/') : '');
@@ -65,11 +66,21 @@ function ContractList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
   const [progress, setProgress] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
 
+  // ページ（50 件ずつ。第6.8節 原則 u14）。絞り込みを変えたら最初のページへ戻す
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  useEffect(() => { setPage(0); }, [status, kind, q]);
+
   const load = useCallback(() => {
-    api.contracts.list({ status: 'all', ...(kind ? { kind } : {}), ...(q.trim() ? { q: q.trim() } : {}) })
-      .then((r) => { setItems(r.items); setStorage(r.storage); setError(null); })
+    api.contracts.list({ status, ...(kind ? { kind } : {}), ...(q.trim() ? { q: q.trim() } : {}), offset: page * PAGE_SIZE })
+      .then((r) => {
+        setItems(r.items); setTotal(r.total); setStorage(r.storage); setError(null);
+        // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
+        const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+        if (page > last) setPage(last);
+      })
       .catch((e) => setError(describeError(e, '読めませんでした')));
-  }, [kind, q]);
+  }, [status, kind, q, page]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -99,7 +110,7 @@ function ContractList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
     else setNote({ kind: failed.length ? 'error' : 'ok', text: `${done.length} 件を入れました。${failed.length ? `入れられなかったもの: ${failed.join('、')}` : '読めなかった項目は「確かめて」の印で出ます。'}` });
   };
 
-  const shown = (items ?? []).filter((c) => (status === 'all' ? true : status === 'live' ? c.status !== 'ended' : c.status === status));
+  const shown = items ?? [];
   return (
     <div className="contracts">
       <div className="row wrap contracts-entry">
@@ -124,7 +135,8 @@ function ContractList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
         <input className="contracts-search" type="search" value={q} placeholder="相手・件名で探す" aria-label="探す" onChange={(e) => setQ(e.target.value)} />
       </div>
       {error && <p className="error">{error}</p>}
-      {items && shown.length === 0 && <p className="muted">{items.length === 0 ? 'まだ契約がありません。' : '当たる契約はありません。'}</p>}
+      {items && shown.length === 0 && <p className="muted">{status === 'all' && !kind && !q.trim() ? 'まだ契約がありません。' : '当たる契約はありません。'}</p>}
+      {shown.length > 0 && <Pager page={page} total={total} onPage={setPage} />}
       {shown.length > 0 && (
         <div className="contracts-table-wrap">
         <div className="table-scroll"><table className="table contracts-table">
@@ -147,6 +159,7 @@ function ContractList({ onOpen, changeKey }: { onOpen: (id: string) => void; cha
         </table></div>
         </div>
       )}
+      {shown.length > 10 && <Pager page={page} total={total} onPage={setPage} />}
     </div>
   );
 }

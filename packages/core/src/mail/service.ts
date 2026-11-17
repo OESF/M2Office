@@ -116,8 +116,9 @@ export class MailService {
       reply: of('reply').sort(byDue).map((t) => this.itemOf(t, shown)),
       action: of('action').sort(byDue).map((t) => this.itemOf(t, shown)),
       waiting: waiting.map((t) => this.itemOf(t, shown)),
-      read: of('read').slice(0, 100).map((t) => this.itemOf(t, shown)),
-      promo: promo.slice(0, 100).map((t) => this.itemOf(t, shown)),
+      // 件数で切らない。画面で 50 件ずつのページで送る（仕様書 第6.8節 原則 u14）
+      read: of('read').map((t) => this.itemOf(t, shown)),
+      promo: promo.map((t) => this.itemOf(t, shown)),
       promoCount: promo.length,
       categories: chips,
       watch: await this.watchState(o),

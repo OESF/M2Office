@@ -12,6 +12,7 @@ import { MAIL_GROUP_LABELS, type MailItem, type MailOverview, type MailThreadDet
 import { api, describeError } from './api.js';
 import { BackButton } from './back-button.js';
 import { Busy } from './components.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 /** 差出人の表示名（「山田 <a@b>」→「山田」）。 */
 const nameOf = (from: string) => from.split(',')[0]!.replace(/\s*<[^>]*>\s*$/, '').replace(/^"|"$/g, '').trim() || from;
@@ -165,10 +166,26 @@ function MailList({ onOpen }: { onOpen: (threadId: string) => void }) {
       {(['read', 'promo'] as const).map((g) => view[g].length > 0 && (
         <details key={g} className="mail-group" open={folds.has(g)} onToggle={(e) => toggle(g, (e.currentTarget as HTMLDetailsElement).open)}>
           <summary>{MAIL_GROUP_LABELS[g]} <span className="mail-count">{view[g].length}</span></summary>
-          <ul className="mail-list">{view[g].map((t) => <MailRow key={t.threadId} item={t} onOpen={onOpen} showCategory={!active} />)}</ul>
+          <PagedMailList key={`${g}:${active ?? ''}`} items={view[g]} onOpen={onOpen} showCategory={!active} />
         </details>
       ))}
     </div>
+  );
+}
+
+/**
+ * たたんだ群（目を通すだけ・宣伝）の一覧。50 件ずつのページで送る（仕様書 第6.8節 原則 u14。前は 100 件で切っていた）。
+ */
+function PagedMailList({ items, onOpen, showCategory }: { items: MailItem[]; onOpen: (threadId: string) => void; showCategory: boolean }) {
+  const [page, setPage] = useState(0);
+  // 開いて片付いて件数が減り、いまのページが無くなったら、最後のページへ戻す
+  const last = Math.max(0, Math.ceil(items.length / PAGE_SIZE) - 1);
+  const p = Math.min(page, last);
+  return (
+    <>
+      <Pager page={p} total={items.length} onPage={setPage} />
+      <ul className="mail-list">{items.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE).map((t) => <MailRow key={t.threadId} item={t} onOpen={onOpen} showCategory={showCategory} />)}</ul>
+    </>
   );
 }
 

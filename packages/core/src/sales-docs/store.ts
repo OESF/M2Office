@@ -54,11 +54,16 @@ export interface DocQuery {
   limit?: number;
 }
 
+/** 書類と受注を 1 度に読む上限（すべてを読むときに渡す数。件数で切るためのものではない。仕様書 第6.8節 原則 u14）。 */
+export const SALES_LIST_MAX = 1_000_000;
+
 /** 受注の絞り込み。 */
 export interface OrderQuery {
   /** 取引先・相手の注文番号・受注番号・品名の一部 */
   search?: string;
   limit?: number;
+  /** 飛ばす数（ページ。仕様書 第6.8節 原則 u14） */
+  offset?: number;
 }
 
 /** 取引先の覚え（第42.4.2節。会話・注文書・前の書類から AI が覚える）。 */
@@ -246,10 +251,10 @@ export class PostgresSalesDocStore implements SalesDocStore {
           and ($8::bigint is null or total <= $8)
           and ($9::text is null or order_id = $9)
           and ($10::text is null or number = $10)
-        order by issued_on desc, created_at desc
+        order by issued_on desc, created_at desc, id desc
         limit $11`,
       [tenantId, q.kind ?? null, q.status ?? null, !!q.withSuperseded, q.from ?? null, q.to ?? null, q.min ?? null, q.max ?? null,
-        q.orderId ?? null, q.number ?? null, q.party ? 2000 : Math.min(q.limit ?? 200, 2000)]);
+        q.orderId ?? null, q.number ?? null, q.party ? SALES_LIST_MAX : Math.min(q.limit ?? 200, SALES_LIST_MAX)]);
     const docs = rows.map(toDoc);
     // 取引先は法人格の書き方の違いをならして比べる（SQL では比べない）
     return (q.party ? docs.filter((d) => matchDoc(d, { party: q.party!, withSuperseded: true })) : docs).slice(0, q.limit ?? 200);
@@ -293,9 +298,16 @@ export class PostgresSalesDocStore implements SalesDocStore {
   }
 
   async listOrders(tenantId: string, q: OrderQuery = {}): Promise<StoredOrder[]> {
-    const rows = await this.q<OrderRow>(tenantId, 'select * from sales_orders where tenant_id = $1 order by created_at desc limit 2000', [tenantId]);
-    const orders = rows.map(toOrder);
-    return (q.search ? orders.filter((o) => orderMatches(o, q.search!)) : orders).slice(0, q.limit ?? 200);
+    const limit = Math.max(1, q.limit ?? 200);
+    const offset = Math.max(0, Math.floor(q.offset ?? 0));
+    if (!q.search) {
+      const rows = await this.q<OrderRow>(tenantId, 'select * from sales_orders where tenant_id = $1 order by created_at desc, id desc limit $2 offset $3',
+        [tenantId, Math.min(limit, SALES_LIST_MAX), offset]);
+      return rows.map(toOrder);
+    }
+    // 探す言葉は表記の揺れをならして比べる（SQL では比べない）ので、すべて読んでから絞る
+    const rows = await this.q<OrderRow>(tenantId, 'select * from sales_orders where tenant_id = $1 order by created_at desc, id desc', [tenantId]);
+    return rows.map(toOrder).filter((o) => orderMatches(o, q.search!)).slice(offset, offset + limit);
   }
 
   async getOrder(tenantId: string, id: string): Promise<StoredOrder | null> {
@@ -435,8 +447,9 @@ export class MemorySalesDocStore implements SalesDocStore {
   }
 
   async listOrders(tenantId: string, q: OrderQuery = {}): Promise<StoredOrder[]> {
+    const offset = Math.max(0, Math.floor(q.offset ?? 0));
     return [...this.orders.values()].filter((o) => o.tenantId === tenantId && (!q.search || orderMatches(o, q.search)))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, q.limit ?? 200).map(({ tenantId: _t, ...o }) => o);
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)).slice(offset, offset + (q.limit ?? 200)).map(({ tenantId: _t, ...o }) => o);
   }
 
   async getOrder(tenantId: string, id: string): Promise<StoredOrder | null> {

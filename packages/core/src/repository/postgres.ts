@@ -411,7 +411,15 @@ export class PostgresRepository implements Repository {
     );
   }
 
-  async listDecidedApprovals(tenantId: string, userId: string, limit: number): Promise<DecidedApproval[]> {
+  async countDecidedApprovals(tenantId: string, userId: string): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId,
+      `select count(*)::int as n from approvals a
+        where a.tenant_id = $1 and a.decided_by = $2 and a.decision in ('approved', 'rejected')`,
+      [tenantId, userId]);
+    return rows[0]?.n ?? 0;
+  }
+
+  async listDecidedApprovals(tenantId: string, userId: string, limit: number, offset = 0): Promise<DecidedApproval[]> {
     return this.q<DecidedApproval>(tenantId,
       `select a.id, a.run_step_id as "runStepId", a.tenant_id as "tenantId",
               a.approver_role as "approverRole", a.approver_user_id as "approverUserId", a.present,
@@ -424,9 +432,9 @@ export class PostgresRepository implements Repository {
          join runs r on r.id = s.run_id and r.tenant_id = a.tenant_id
          join jobs j on j.id = r.job_id and j.tenant_id = r.tenant_id
         where a.tenant_id = $1 and a.decided_by = $2 and a.decision in ('approved', 'rejected')
-        order by a.decided_at desc
-        limit $3`,
-      [tenantId, userId, limit]);
+        order by a.decided_at desc, a.id desc
+        limit $3 offset $4`,
+      [tenantId, userId, limit, Math.max(0, Math.floor(offset))]);
   }
 
   async listRunApprovals(tenantId: string, runId: string): Promise<Approval[]> {

@@ -10,6 +10,7 @@ import { Hono, type Context } from 'hono';
 import type { SlideDeckViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -26,10 +27,18 @@ export function slideDecksRoute(deps: AppDeps) {
   app.use('/:id/*', async (c, next) => (ID.test(c.req.param('id')) ? next() : c.json({ error: '見つかりません' }, 404)));
   app.use('/:id', async (c, next) => (ID.test(c.req.param('id')) ? next() : c.json({ error: '見つかりません' }, 404)));
 
-  /** 本人が作ったもの（mine）と、会社で共有されたもの（shared）。新しい順。`kind` は `slides`（既定）か `doc`。 */
+  /**
+   * 本人が作ったもの（mine）と、会社で共有されたもの（shared）。新しい順。`kind` は `slides`（既定）か `doc`・`sheet`。
+   * それぞれ `mineOffset`・`sharedOffset` で 1 ページ（50 件）ずつ返し、`mineTotal`・`sharedTotal` にすべての数を添える（第6.8節 原則 u14）。
+   */
   app.get('/', async (c) => {
-    const kind = c.req.query('kind');
-    return c.json(await service.list(who(c), kind === 'doc' || kind === 'sheet' ? kind : 'slides'));
+    const q = c.req.query('kind');
+    const kind = q === 'doc' || q === 'sheet' ? q : 'slides';
+    const [lists, counts] = await Promise.all([
+      service.list(who(c), kind, { limit: PAGE, mineOffset: offsetOf(c.req.query('mineOffset')), sharedOffset: offsetOf(c.req.query('sharedOffset')) }),
+      service.counts(who(c), kind),
+    ]);
+    return c.json({ ...lists, mineTotal: counts.mine, sharedTotal: counts.shared });
   });
 
   /** 1 件（本人のものか会社で共有されたもの）。 */

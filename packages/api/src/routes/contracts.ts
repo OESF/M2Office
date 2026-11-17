@@ -11,6 +11,7 @@ import { CONTRACT_KIND_LABELS, type ContractKind, type ContractStatus } from '@m
 import type { ContractViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -36,20 +37,24 @@ export function contractsRoute(deps: AppDeps) {
     await next();
   });
 
-  /** 一覧（期限の近い順。`status`: active・cancel_requested・ended・all、`kind`、`owner`（`me` か利用者の ID）、`q`）。 */
+  /**
+   * 一覧（期限の近い順。`status`: active・cancel_requested・ended・live（終わっていないもの）・all、`kind`、`owner`（`me` か利用者の ID）、`q`）。
+   * `offset` で 1 ページ（50 件）ずつ返し、`total` に同じ絞り込みでのすべての数を添える（第6.8節 原則 u14）。
+   */
   app.get('/', async (c) => {
     const status = c.req.query('status');
     const kind = c.req.query('kind');
     const owner = c.req.query('owner');
     const w = who(c);
-    const items = await service.list(w, {
-      status: status === 'active' || status === 'cancel_requested' || status === 'ended' ? status as ContractStatus : 'all',
+    const filter = {
+      status: status === 'active' || status === 'cancel_requested' || status === 'ended' ? status as ContractStatus : status === 'live' ? 'live' as const : 'all' as const,
       ...(kind && kind in CONTRACT_KIND_LABELS ? { kind: kind as ContractKind } : {}),
       ...(owner ? { ownerId: owner === 'me' ? w.userId : owner.slice(0, 100) } : {}),
       ...(c.req.query('q') ? { search: c.req.query('q')!.slice(0, 100) } : {}),
-    });
+    };
+    const [items, total] = await Promise.all([service.list(w, { ...filter, limit: PAGE, offset: offsetOf(c.req.query('offset')) }), service.count(w, filter)]);
     const storage = (await deps.repo.getTenantSettings(w.tenantId)).contracts.storage;
-    return c.json({ items, storage: storage ? { folderName: storage.folderName } : null });
+    return c.json({ items, total, storage: storage ? { folderName: storage.folderName } : null });
   });
 
   /** 手で入れる（紙だけの古い契約など。第38.5節 ③）。 */

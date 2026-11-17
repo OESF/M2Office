@@ -11,6 +11,7 @@ import { Hono, type Context } from 'hono';
 import { AI_NOT_CONFIGURED_MESSAGE, INQUIRY_REPLY_SEND, aiAvailable, enqueueJob, monthStats, previousMonth, reviewText, type InquiryViewer, type RecordResult } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 import { INQUIRY_CHANNEL_LABELS, type InquiryChannel } from '@m2office/shared';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
@@ -59,18 +60,21 @@ export function inquiriesRoute(deps: AppDeps) {
     const channel = c.req.query('channel');
     const assignee = c.req.query('assignee');
     const w = who(c);
-    const [items, facets] = await Promise.all([
-      service.list(w, {
-        status: status === 'open' || status === 'done' || status === 'dropped' ? status : 'all',
-        ...(c.req.query('q') ? { search: c.req.query('q')! } : {}),
-        ...(c.req.query('contactId') ? { contactId: c.req.query('contactId')! } : {}),
-        ...(channel && channel in INQUIRY_CHANNEL_LABELS ? { channel: channel as InquiryChannel } : {}),
-        ...(c.req.query('category') ? { category: c.req.query('category')!.slice(0, 60) } : {}),
-        ...(assignee ? { assignee: assignee === 'me' ? w.userId : assignee.slice(0, 100) } : {}),
-      }),
+    const filter = {
+      status: (status === 'open' || status === 'done' || status === 'dropped' ? status : 'all') as 'open' | 'done' | 'dropped' | 'all',
+      ...(c.req.query('q') ? { search: c.req.query('q')! } : {}),
+      ...(c.req.query('contactId') ? { contactId: c.req.query('contactId')! } : {}),
+      ...(channel && channel in INQUIRY_CHANNEL_LABELS ? { channel: channel as InquiryChannel } : {}),
+      ...(c.req.query('category') ? { category: c.req.query('category')!.slice(0, 60) } : {}),
+      ...(assignee ? { assignee: assignee === 'me' ? w.userId : assignee.slice(0, 100) } : {}),
+    };
+    // 50 件ずつのページで送る。`total` は同じ絞り込みでのすべての数（仕様書 第6.8節 原則 u14）
+    const [items, total, facets] = await Promise.all([
+      service.list(w, { ...filter, limit: PAGE, offset: offsetOf(c.req.query('offset')) }),
+      service.count(w, filter),
       service.facets(w),
     ]);
-    return c.json({ items, facets });
+    return c.json({ items, total, facets });
   });
 
   /**
@@ -117,7 +121,7 @@ export function inquiriesRoute(deps: AppDeps) {
   });
 
   /** 窓口のアカウントのメールのうち、問い合わせでないと見分けたもの（新しい順）。 */
-  app.get('/mail/skipped', async (c) => c.json({ items: await service.skippedMails(who(c)) }));
+  app.get('/mail/skipped', async (c) => c.json(await service.skippedMails(who(c), offsetOf(c.req.query('offset')))));
 
   /** 問い合わせでないと見分けたメールを、問い合わせにする。 */
   app.post('/mail/:messageId/promote', async (c) => {

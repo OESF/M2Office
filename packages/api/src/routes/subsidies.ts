@@ -12,6 +12,7 @@ import type { SubsidyStatus } from '@m2office/shared';
 import type { SubsidyViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -37,13 +38,19 @@ export function subsidiesRoute(deps: AppDeps) {
     await next();
   });
 
-  /** 候補（締め切りの近い順。過ぎたもの・見送りも含む）と、調べるのに使った会社のこと・関心・最後に調べた日時・調べているか・相談先の地域の窓口（第39.18節）。 */
+  /**
+   * 候補（締め切りの近い順）と、調べるのに使った会社のこと・関心・最後に調べた日時・調べているか・相談先の地域の窓口（第39.18節）。
+   * `view`（active: 候補・past: 過ぎたもの・skipped: 見送ったもの。既定は active）で分け、`offset` で 1 ページ（50 件）ずつ返す。
+   * `total` にその分け方でのすべての数を添える（第6.8節 原則 u14）。
+   */
   app.get('/', async (c) => {
     const w = who(c);
     const settings = (await deps.repo.getTenantSettings(w.tenantId)).subsidies;
     const searching = !!settings.searchingSince && Date.now() - Date.parse(settings.searchingSince) < 10 * 60_000;
+    const v = c.req.query('view');
+    const { items, total } = await service.page(w, { view: v === 'past' || v === 'skipped' ? v : 'active', limit: PAGE, offset: offsetOf(c.req.query('offset')) });
     return c.json({
-      items: await service.list(w), today: service.today(), profile: settings.profile, interest: settings.interest, industry: settings.industry,
+      items, total, today: service.today(), profile: settings.profile, interest: settings.interest, industry: settings.industry,
       searchedAt: settings.searchedAt, searching, admin: c.get('ctx').user.roles.includes('admin'),
       contacts: await service.contactsOf(w.tenantId),
     });

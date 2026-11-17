@@ -12,6 +12,7 @@ import { Hono, type Context } from 'hono';
 import { AI_NOT_CONFIGURED_MESSAGE, COLUMN_PHOTO_MAX_BYTES, WEB_COLUMN_PLACE, aiAvailable, columnPublicUrl, enqueueJob, type ColumnViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 import { tenantOrigin } from '../tenant-origin.js';
 import { COLUMN_BGM_NONE, COLUMN_BUILTIN_BGM, columnImageStyle, columnNarrationVoice } from '@m2office/shared';
 
@@ -42,14 +43,17 @@ export function columnsRoute(deps: AppDeps) {
   /** 貼るだけのページの URL の頭（使っていなければ `null`）。 */
   const pageBase = (c: Context<AppEnv>, key: string | null | undefined) => (key ? `${tenantOrigin(c.req.header('origin'), c.req.header('host'))}/v1/public/columns/${key}` : null);
 
-  /** コラムの一覧（新しい順）と、入れ先の WordPress・テーマ案・予定表・貼るだけのページ（段 2。第32.18.4節）。 */
+  /**
+   * コラムの一覧（新しい順）と、入れ先の WordPress・テーマ案・予定表・貼るだけのページ（段 2。第32.18.4節）。
+   * コラムは `offset` で 1 ページ（50 件）ずつ返し、`total` にすべての数を添える（第6.8節 原則 u14）。
+   */
   app.get('/', async (c) => {
     const { tenant } = c.get('ctx');
-    const [columns, settings, themes, plan] = await Promise.all([
-      service.list(tenant.id), deps.repo.getTenantSettings(tenant.id),
+    const [columns, total, settings, themes, plan] = await Promise.all([
+      service.list(tenant.id, { limit: PAGE, offset: offsetOf(c.req.query('offset')) }), service.count(tenant.id), deps.repo.getTenantSettings(tenant.id),
       deps.columns.planner?.themes(tenant.id) ?? [], deps.columns.planner?.plan(tenant.id) ?? [],
     ]);
-    return c.json({ columns, wordpress: settings.webColumns.wordpress, themes, plan, pageUrl: pageBase(c, settings.webColumns.pastePage?.key) });
+    return c.json({ columns, total, wordpress: settings.webColumns.wordpress, themes, plan, pageUrl: pageBase(c, settings.webColumns.pastePage?.key) });
   });
 
   /** テーマ案を作る（画面の「テーマ案を出す」）。 */

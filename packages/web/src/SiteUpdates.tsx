@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { SITE_EDIT_PAGE_RESULT_LABELS, SITE_EDIT_STATUS_LABELS, type SiteEditView } from '@m2office/shared';
 import { Busy } from './components.js';
 import { api, describeError } from './api.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 const timeLabel = (iso: string) => new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
 
@@ -164,9 +165,16 @@ export function SiteUpdates({ changeKey }: {
     api.siteUpdates.mcpSites().then((r) => { setMcpSites(r.items); setRestAllowed(r.rest !== false); }).catch(() => setMcpSites([]));
   }, []);
 
+  // ページ（50 件ずつ。第6.8節 原則 u14）
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
   const load = useCallback(() => {
-    api.siteUpdates.list().then((r) => setItems(r.items)).catch((e) => setError(describeError(e, 'サイトの直しの記録を読めませんでした')));
-  }, []);
+    api.siteUpdates.list(page * PAGE_SIZE).then((r) => {
+      setItems(r.items); setTotal(r.total);
+      const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+      if (page > last) setPage(last);
+    }).catch((e) => setError(describeError(e, 'サイトの直しの記録を読めませんでした')));
+  }, [page]);
   useEffect(() => { load(); }, [load, changeKey]);
 
   const revert = async (id: string) => {
@@ -191,7 +199,9 @@ export function SiteUpdates({ changeKey }: {
         {note && <p className="ok-msg small">{note}</p>}
         {error && <p className="error small">{error}</p>}
         {items && items.length === 0 && <p className="muted">まだ直したページはありません</p>}
+        {items && items.length > 0 && <Pager page={page} total={total} onPage={setPage} />}
         {items && items.length > 0 && <ul className="site-edits">{items.map((e) => <EditRow key={e.id} edit={e} busy={busy} onRevert={(id) => void revert(id)} />)}</ul>}
+        {items && items.length > 10 && <Pager page={page} total={total} onPage={setPage} />}
       </div>
     </>
   );

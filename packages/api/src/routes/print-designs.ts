@@ -9,10 +9,12 @@
  */
 
 import { Hono, type Context } from 'hono';
+import { PRINT_STATE_LABELS, type PrintState } from '@m2office/shared';
 import type { PrintExport, PrintViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { passCorrection } from '../corrections.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 const EXPORTS: PrintExport[] = ['preview', 'png', 'pdf', 'bleed'];
@@ -44,11 +46,18 @@ export function printDesignsRoute(deps: AppDeps) {
   });
   app.use('/:id/*', async (c, next) => (ID.test(c.req.param('id')) ? next() : c.json({ error: '販促物が見つかりません' }, 404)));
 
-  /** 一覧（新しく直した順。掲示の状態つき）と、本人が管理者か、「ドライブから」を使えるか（第41.19.2節）。 */
-  app.get('/', async (c) => c.json({
-    items: await service.list(who(c)), today: service.today(), admin: c.get('ctx').user.roles.includes('admin'),
-    drive: !!(await service.deps.drive?.available(who(c)).catch(() => false)),
-  }));
+  /**
+   * 一覧（新しく直した順。掲示の状態つき）と、本人が管理者か、「ドライブから」を使えるか（第41.19.2節）。
+   * `state` で掲示の状態を絞り、`offset` で 1 ページ（50 件）ずつ返す。`total` に絞ったすべての数、`counts` に状態ごとの数を添える（第6.8節 原則 u14）。
+   */
+  app.get('/', async (c) => {
+    const st = c.req.query('state');
+    const page = await service.page(who(c), { ...(st && st in PRINT_STATE_LABELS ? { state: st as PrintState } : {}), limit: PAGE, offset: offsetOf(c.req.query('offset')) });
+    return c.json({
+      ...page, today: service.today(), admin: c.get('ctx').user.roles.includes('admin'),
+      drive: !!(await service.deps.drive?.available(who(c)).catch(() => false)),
+    });
+  });
 
   /** 「ドライブから」の選ぶ画面の材料（`drive.file` だけに絞ったトークン。見本の会社は見本の写真の一覧。第41.19.2節）。 */
   app.get('/drive-picker', async (c) => {

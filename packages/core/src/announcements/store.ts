@@ -38,7 +38,10 @@ export type AnnouncementPatch = Partial<Pick<StoredAnnouncement, 'title' | 'body
 
 /** お知らせの置き場。 */
 export interface AnnouncementStore {
-  list(tenantId: string, limit: number): Promise<StoredAnnouncement[]>;
+  /** 新しい順。`offset` から `limit` 件。 */
+  list(tenantId: string, limit: number, offset?: number): Promise<StoredAnnouncement[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  count(tenantId: string): Promise<number>;
   get(tenantId: string, id: string): Promise<StoredAnnouncement | null>;
   create(tenantId: string, a: NewAnnouncement): Promise<string>;
   update(tenantId: string, id: string, patch: AnnouncementPatch): Promise<void>;
@@ -112,9 +115,14 @@ export class PostgresAnnouncementStore implements AnnouncementStore {
     }
   }
 
-  async list(tenantId: string, limit: number): Promise<StoredAnnouncement[]> {
+  async list(tenantId: string, limit: number, offset = 0): Promise<StoredAnnouncement[]> {
     return (await this.q<Row>(tenantId, `select id, title, body, start_date::text, end_date::text, publish_at, status, channels, texts, mail_contact_ids, approved_digest, run_id,
-      created_by, created_at, updated_at, published_at, ended_at from announcements where tenant_id = $1 order by created_at desc limit $2`, [tenantId, limit])).map(toAnnouncement);
+      created_by, created_at, updated_at, published_at, ended_at from announcements where tenant_id = $1 order by created_at desc, id desc limit $2 offset $3`,
+      [tenantId, limit, Math.max(0, Math.floor(offset))])).map(toAnnouncement);
+  }
+
+  async count(tenantId: string): Promise<number> {
+    return (await this.q<{ n: number }>(tenantId, 'select count(*)::int as n from announcements where tenant_id = $1', [tenantId]))[0]?.n ?? 0;
   }
 
   async get(tenantId: string, id: string): Promise<StoredAnnouncement | null> {
@@ -206,8 +214,13 @@ export class MemoryAnnouncementStore implements AnnouncementStore {
     return { ...rest, channels: [...rest.channels], texts: structuredClone(rest.texts), mailContactIds: [...rest.mailContactIds] };
   }
 
-  async list(tenantId: string, limit: number) {
-    return this.rows.filter((r) => r.tenantId === tenantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((r) => this.strip(r));
+  async list(tenantId: string, limit: number, offset = 0) {
+    return this.rows.filter((r) => r.tenantId === tenantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(offset, offset + limit).map((r) => this.strip(r));
+  }
+
+  async count(tenantId: string) {
+    return this.rows.filter((r) => r.tenantId === tenantId).length;
   }
 
   async get(tenantId: string, id: string) {

@@ -15,6 +15,7 @@ import {
 import { api, describeError } from './api.js';
 import { pickDriveImage } from './google-picker.js';
 import { BackButton } from './back-button.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 type Item = PrintDesign & { state: PrintState };
 type Filter = 'all' | PrintState;
@@ -102,30 +103,42 @@ export function PrintDesigns({ designId, onOpen, changeKey, onAnnouncement }: {
 /** 一覧と、作る。 */
 function DesignList({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: string }) {
   const [items, setItems] = useState<Item[] | null>(null);
+  const [byState, setByState] = useState<Record<PrintState, number> | null>(null);
   const [drive, setDrive] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const [error, setError] = useState<string | null>(null);
+  // ページ（50 件ずつ。第6.8節 原則 u14）。絞り込みを変えたら最初のページへ戻す
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  useEffect(() => { setPage(0); }, [filter]);
   const load = useCallback(() => {
-    api.printDesigns.list().then((r) => { setItems(r.items); setDrive(r.drive); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
-  }, []);
+    api.printDesigns.list({ ...(filter !== 'all' ? { state: filter } : {}), offset: page * PAGE_SIZE }).then((r) => {
+      setItems(r.items); setTotal(r.total); setByState(r.counts); setDrive(r.drive); setError(null);
+      // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
+      const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+      if (page > last) setPage(last);
+    }).catch((e) => setError(describeError(e, '読めませんでした')));
+  }, [filter, page]);
   useEffect(load, [load]);
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error) return <p className="error">{error}</p>;
-  if (!items) return <p className="muted">読み込み中…</p>;
-  const counts = (s: PrintState) => items.filter((d) => d.state === s).length;
-  const shown = items.filter((d) => filter === 'all' || d.state === filter);
+  if (!items || !byState) return <p className="muted">読み込み中…</p>;
+  const counts = (s: PrintState) => byState[s];
+  const any = Object.values(byState).some((n) => n > 0);
+  const shown = items;
   return (
     <div className="prd">
       <CreateBox onCreated={onOpen} drive={drive} />
-      {items.length > 0 && (
+      {any && (
         <div className="seg" role="group" aria-label="表示">
           {([['all', 'すべて'], ['posted', '掲示中'], ['upcoming', 'これから'], ['ended', '期間が終わった'], ['draft', '下書き'], ['removed', '外した']] as const).map(([v, label]) => (
             (v === 'all' || counts(v) > 0) && <button key={v} className={filter === v ? 'on' : ''} aria-pressed={filter === v} onClick={() => setFilter(v)}>{label}{v !== 'all' ? ` ${counts(v)}` : ''}</button>
           ))}
         </div>
       )}
-      {items.length === 0 && <p className="muted">まだ作っていません。</p>}
+      {!any && <p className="muted">まだ作っていません。</p>}
+      <Pager page={page} total={total} onPage={setPage} />
       <ul className="prd-grid">
         {shown.map((d) => (
           <li key={d.id}>
@@ -143,6 +156,7 @@ function DesignList({ onOpen, changeKey }: { onOpen: (id: string) => void; chang
           </li>
         ))}
       </ul>
+      {shown.length > 10 && <Pager page={page} total={total} onPage={setPage} />}
     </div>
   );
 }

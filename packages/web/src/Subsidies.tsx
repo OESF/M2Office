@@ -12,6 +12,7 @@ import {
   SUBSIDY_FIT_LABELS, SUBSIDY_KIND_LABELS, type Subsidy, type SubsidyContact, type SubsidyProfile, type SubsidyStatus,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 type View = 'active' | 'past' | 'skipped';
 type Data = Awaited<ReturnType<typeof api.subsidies.list>>;
@@ -38,9 +39,18 @@ export function Subsidies({ changeKey }: {
   const [note, setNote] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
 
+  // ページ（50 件ずつ。第6.8節 原則 u14）。分け方を変えたら最初のページへ戻す
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [view]);
+
   const load = useCallback(() => {
-    api.subsidies.list().then((r) => { setData(r); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
-  }, []);
+    api.subsidies.list(view, page * PAGE_SIZE).then((r) => {
+      setData(r); setError(null);
+      // 件数が減り、いまのページが無くなったら、最後のページへ戻す
+      const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+      if (page > last) setPage(last);
+    }).catch((e) => setError(describeError(e, '読めませんでした')));
+  }, [view, page]);
   useEffect(load, [load]);
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // 調べている間は読み直す
@@ -62,9 +72,7 @@ export function Subsidies({ changeKey }: {
   if (!data) return <p className="muted">読み込み中…</p>;
   const { today } = data;
   const searchedToday = !!data.searchedAt && new Date(Date.parse(data.searchedAt) + 9 * 3_600_000).toISOString().slice(0, 10) === today;
-  const shown = data.items.filter((c) => (view === 'skipped' ? c.status === 'skipped'
-    : view === 'past' ? c.status !== 'skipped' && !!c.deadline && c.deadline < today
-      : c.status !== 'skipped' && (!c.deadline || c.deadline >= today)));
+  const shown = data.items;
 
   return (
     <div className="sbs">
@@ -93,9 +101,11 @@ export function Subsidies({ changeKey }: {
       {shown.length === 0 && (
         <p className="muted">{view === 'active' ? (data.searchedAt ? 'いまは合いそうな制度が見つかっていません。' : 'まだ調べていません。') : 'ありません。'}</p>
       )}
+      <Pager page={page} total={data.total} onPage={setPage} />
       <ul className="sbs-list">
         {shown.map((c) => <SubsidyCard key={c.id} c={c} today={today} onMark={mark} />)}
       </ul>
+      {shown.length > 10 && <Pager page={page} total={data.total} onPage={setPage} />}
       {view === 'active' && data.contacts.length > 0 && <Contacts contacts={data.contacts} />}
     </div>
   );

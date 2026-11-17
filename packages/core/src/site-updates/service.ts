@@ -1533,10 +1533,10 @@ export class SiteUpdateService {
     return { edit: this.view((await this.deps.store.get(who.tenantId, newId))!), runId };
   }
 
-  /** 直しの一覧（新しい順）。承認待ちのまま却下・失敗した実行は、記録も直す。 */
-  async list(who: SiteUpdateViewer, limit = 30): Promise<SiteEditView[]> {
+  /** 直しの一覧（新しい順。`offset` から `limit` 件）。承認待ちのまま却下・失敗した実行は、記録も直す。 */
+  async list(who: SiteUpdateViewer, limit = 30, offset = 0): Promise<SiteEditView[]> {
     await this.purgeOld(who.tenantId);
-    const edits = await this.deps.store.list(who.tenantId, limit);
+    const edits = await this.deps.store.list(who.tenantId, limit, offset);
     for (const e of edits) {
       if (e.status !== 'awaiting' || !e.runId || !this.deps.runStatus) continue;
       const s = await this.deps.runStatus(who.tenantId, e.runId).catch(() => null);
@@ -1547,6 +1547,11 @@ export class SiteUpdateService {
       }
     }
     return edits.map((e) => this.view(e));
+  }
+
+  /** 直しの記録の数（一覧と同じ絞り込み。ページを数える。仕様書 第6.8節 原則 u14）。 */
+  async count(who: SiteUpdateViewer): Promise<number> {
+    return this.deps.store.count(who.tenantId);
   }
 
   /** 直し 1 件。 */

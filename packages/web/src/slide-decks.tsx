@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { SLIDE_DECK_FORMAT_LABEL, SLIDE_DECK_SHARING_LABEL, type SlideDeckFormat, type SlideDeckKind, type SlideDeckSharing, type SlideDeckSummary } from '@m2office/shared';
 import { api, describeError } from './api.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 /** 業務「スライドの作成」の ID。 */
 export const SLIDES_AGENT_ID = 'slides';
@@ -210,35 +211,51 @@ export function SlideDeckList({ kind = 'slides', onOpenRun }: { kind?: SlideDeck
   const [mine, setMine] = useState<SlideDeckSummary[] | null>(null);
   const [shared, setShared] = useState<SlideDeckSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // 本人のものと共有されたものを、それぞれ 50 件ずつのページで送る（第6.8節 原則 u14）
+  const [minePage, setMinePage] = useState(0);
+  const [sharedPage, setSharedPage] = useState(0);
+  const [totals, setTotals] = useState({ mine: 0, shared: 0 });
+  const [stamp, setStamp] = useState(0);
+  useEffect(() => { setMinePage(0); setSharedPage(0); }, [kind]);
   useEffect(() => {
     let alive = true;
-    api.slideDecks(kind).then((r) => {
+    api.slideDecks(kind, { mineOffset: minePage * PAGE_SIZE, sharedOffset: sharedPage * PAGE_SIZE }).then((r) => {
       if (!alive) return;
       setMine(r.mine);
       setShared(r.shared);
+      setTotals({ mine: r.mineTotal, shared: r.sharedTotal });
+      // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
+      const last = (n: number) => Math.max(0, Math.ceil(n / PAGE_SIZE) - 1);
+      if (minePage > last(r.mineTotal)) setMinePage(last(r.mineTotal));
+      if (sharedPage > last(r.sharedTotal)) setSharedPage(last(r.sharedTotal));
     }).catch((err) => { if (alive) setError(describeError(err, '一覧を読めませんでした')); });
     return () => { alive = false; };
-  }, [kind]);
+  }, [kind, minePage, sharedPage, stamp]);
   if (error) return <p className="error">{error}</p>;
   if (!mine || (mine.length === 0 && shared.length === 0)) return null;
   const replace = (d: SlideDeckSummary) => setMine((list) => (list ?? []).map((x) => (x.id === d.id ? d : x)));
-  const removed = (id: string) => setMine((list) => (list ?? []).filter((x) => x.id !== id));
+  // 削除したら読み直す（次のページの物を繰り上げ、数をそろえる）
+  const removed = (id: string) => { setMine((list) => (list ?? []).filter((x) => x.id !== id)); setStamp((n) => n + 1); };
   return (
     <section className="slide-decks">
       {mine.length > 0 && (
         <>
           <h2>{KIND[kind].list}</h2>
+          <Pager page={minePage} total={totals.mine} onPage={setMinePage} />
           <ul className="slide-deck-list card">
             {mine.map((d) => <DeckRow key={d.id} deck={d} onOpenRun={onOpenRun} onChanged={replace} onRemoved={removed} />)}
           </ul>
+          {mine.length > 10 && <Pager page={minePage} total={totals.mine} onPage={setMinePage} />}
         </>
       )}
       {shared.length > 0 && (
         <>
           <h2>会社で共有</h2>
+          <Pager page={sharedPage} total={totals.shared} onPage={setSharedPage} />
           <ul className="slide-deck-list card">
             {shared.map((d) => <DeckRow key={d.id} deck={d} onOpenRun={onOpenRun} onChanged={() => undefined} onRemoved={() => undefined} />)}
           </ul>
+          {shared.length > 10 && <Pager page={sharedPage} total={totals.shared} onPage={setSharedPage} />}
         </>
       )}
     </section>

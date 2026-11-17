@@ -25,6 +25,7 @@ export type SubsidyDraft = Pick<StoredSubsidy,
 
 /** 候補の置き場。 */
 export interface SubsidyStore {
+  /** すべての候補（締め切りの近い順。件数で切らない。仕様書 第6.8節 原則 u14）。 */
   list(tenantId: string): Promise<StoredSubsidy[]>;
   get(tenantId: string, id: string): Promise<StoredSubsidy | null>;
   getByKey(tenantId: string, key: string): Promise<StoredSubsidy | null>;
@@ -83,7 +84,7 @@ export class PostgresSubsidyStore implements SubsidyStore {
   }
 
   async list(tenantId: string): Promise<StoredSubsidy[]> {
-    return (await this.q<Row>(tenantId, `select * from subsidy_candidates where tenant_id = $1 order by found_at desc limit 500`, [tenantId])).map(toSubsidy).sort(byDeadline);
+    return (await this.q<Row>(tenantId, `select * from subsidy_candidates where tenant_id = $1 order by found_at desc, id desc`, [tenantId])).map(toSubsidy).sort(byDeadline);
   }
 
   async get(tenantId: string, id: string): Promise<StoredSubsidy | null> {

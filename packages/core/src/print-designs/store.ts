@@ -21,8 +21,12 @@ export type NewVersion = Omit<PrintVersion, 'id' | 'no' | 'createdAt'>;
 /** 直せる項目。 */
 export type DesignPatch = Partial<Pick<StoredDesign, 'title' | 'currentVersionId' | 'postFrom' | 'postTo' | 'place' | 'removedAt' | 'endedNotified' | 'signage' | 'signageAssetId' | 'canva'>>;
 
+/** 販促物をすべて読むときの数（件数で切るためのものではない。仕様書 第6.8節 原則 u14）。 */
+export const PRINT_DESIGN_LIST_ALL = 1_000_000;
+
 /** 販促物の置き場。 */
 export interface PrintDesignStore {
+  /** 新しく直した順。`limit` の既定は 500。すべてを読むときは {@link PRINT_DESIGN_LIST_ALL} を渡す。 */
   list(tenantId: string, limit?: number): Promise<StoredDesign[]>;
   get(tenantId: string, id: string): Promise<StoredDesign | null>;
   create(tenantId: string, d: NewDesign): Promise<string>;
@@ -92,7 +96,7 @@ export class PostgresPrintDesignStore implements PrintDesignStore {
   }
 
   async list(tenantId: string, limit = 500): Promise<StoredDesign[]> {
-    return (await this.q<DesignRow>(tenantId, `select * from print_designs where tenant_id = $1 order by updated_at desc limit $2`, [tenantId, limit])).map(toDesign);
+    return (await this.q<DesignRow>(tenantId, `select * from print_designs where tenant_id = $1 order by updated_at desc, id desc limit $2`, [tenantId, limit])).map(toDesign);
   }
 
   async get(tenantId: string, id: string): Promise<StoredDesign | null> {
@@ -164,8 +168,9 @@ export class MemoryPrintDesignStore implements PrintDesignStore {
   private clock = 0;
   now: () => Date = () => new Date(Date.now() + this.clock++);
 
-  async list(tenantId: string): Promise<StoredDesign[]> {
-    return [...this.designs.values()].filter((d) => d.tenantId === tenantId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(({ tenantId: _t, ...d }) => ({ ...d }));
+  async list(tenantId: string, limit = 500): Promise<StoredDesign[]> {
+    return [...this.designs.values()].filter((d) => d.tenantId === tenantId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(0, limit).map(({ tenantId: _t, ...d }) => ({ ...d }));
   }
 
   async get(tenantId: string, id: string): Promise<StoredDesign | null> {

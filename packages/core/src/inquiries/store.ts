@@ -49,6 +49,8 @@ export interface InquiryQuery {
   /** 担当の利用者の ID（済んでいない次にやることの担当。次にやることが無ければ受けた人）。 */
   assignee?: string;
   limit?: number;
+  /** 先頭から飛ばす件数（一覧のページ。仕様書 第6.8節 原則 u14）。 */
+  offset?: number;
 }
 
 /** 一覧の絞り込みの選択肢（第33.21節）。 */
@@ -143,6 +145,8 @@ export interface DueTask extends InquiryTask {
 /** 問い合わせの置き場。 */
 export interface InquiryStore {
   list(tenantId: string, q?: InquiryQuery): Promise<Inquiry[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。第6.8節 原則 u14）。 */
+  count(tenantId: string, q?: InquiryQuery): Promise<number>;
   get(tenantId: string, id: string): Promise<Inquiry | null>;
   create(tenantId: string, n: NewInquiry): Promise<string>;
   update(tenantId: string, id: string, patch: InquiryPatch): Promise<void>;
@@ -185,7 +189,9 @@ export interface InquiryStore {
   /** そのスレッドを問い合わせにしたなら、その問い合わせ。 */
   inquiryOfThread(tenantId: string, threadId: string): Promise<string | null>;
   /** 問い合わせでないと見分けたメール（新しい順）。 */
-  skippedMails(tenantId: string, limit?: number): Promise<InquiryMailSkipped[]>;
+  skippedMails(tenantId: string, limit?: number, offset?: number): Promise<InquiryMailSkipped[]>;
+  /** 問い合わせでないと見分けたメールの数（ページを数える。第6.8節 原則 u14）。 */
+  countSkippedMails(tenantId: string): Promise<number>;
   mailCursor(tenantId: string): Promise<string | null>;
   setMailCursor(tenantId: string, at: string): Promise<void>;
   addReply(tenantId: string, r: NewReply): Promise<string>;
@@ -315,7 +321,8 @@ export class PostgresInquiryStore implements InquiryStore {
     return this.tx(tenantId, async (c) => (await c.query<T>(text, params as never[])).rows);
   }
 
-  async list(tenantId: string, q: InquiryQuery = {}): Promise<Inquiry[]> {
+  /** 一覧と数で同じにする絞り込み。 */
+  private filterOf(tenantId: string, q: InquiryQuery): { where: string[]; params: unknown[] } {
     const where = ['i.tenant_id = $1'];
     const params: unknown[] = [tenantId];
     if (q.status && q.status !== 'all') { params.push(q.status); where.push(`i.status = $${params.length}`); }
@@ -336,11 +343,24 @@ export class PostgresInquiryStore implements InquiryStore {
       const p = `$${params.length}`;
       where.push(`(i.from_name ilike ${p} or i.from_company ilike ${p} or i.summary ilike ${p} or i.category ilike ${p} or i.from_phone ilike ${p} or i.from_email ilike ${p})`);
     }
+    return { where, params };
+  }
+
+  async list(tenantId: string, q: InquiryQuery = {}): Promise<Inquiry[]> {
+    const { where, params } = this.filterOf(tenantId, q);
     params.push(Math.min(Math.max(q.limit ?? 200, 1), 500));
+    const lim = params.length;
+    params.push(Math.max(0, Math.floor(q.offset ?? 0)));
     const rows = await this.q<InquiryRow>(tenantId,
       `${INQUIRY_SELECT} where ${where.join(' and ')}
-        order by (i.status = 'open') desc, (t.due is null), t.due asc, i.last_at desc limit $${params.length}`, params);
+        order by (i.status = 'open') desc, (t.due is null), t.due asc, i.last_at desc, i.id desc limit $${lim} offset $${params.length}`, params);
     return rows.map(toInquiry);
+  }
+
+  async count(tenantId: string, q: InquiryQuery = {}): Promise<number> {
+    const { where, params } = this.filterOf(tenantId, q);
+    const rows = await this.q<{ n: number }>(tenantId, `select count(*)::int as n from inquiries i where ${where.join(' and ')}`, params);
+    return rows[0]?.n ?? 0;
   }
 
   async get(tenantId: string, id: string): Promise<Inquiry | null> {
@@ -535,10 +555,17 @@ export class PostgresInquiryStore implements InquiryStore {
     return rows[0]?.inquiry_id ?? null;
   }
 
-  async skippedMails(tenantId: string, limit = 100): Promise<InquiryMailSkipped[]> {
+  async countSkippedMails(tenantId: string): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId,
+      `select count(*)::int as n from inquiry_mail_messages where tenant_id = $1 and status = 'skipped' and direction = 'in'`, [tenantId]);
+    return rows[0]?.n ?? 0;
+  }
+
+  async skippedMails(tenantId: string, limit = 100, offset = 0): Promise<InquiryMailSkipped[]> {
     const rows = await this.q<{ message_id: string; from_text: string; subject: string; reason: string; received_at: Date | string }>(tenantId,
       `select message_id, from_text, subject, reason, received_at from inquiry_mail_messages
-        where tenant_id = $1 and status = 'skipped' and direction = 'in' order by received_at desc limit $2`, [tenantId, limit]);
+        where tenant_id = $1 and status = 'skipped' and direction = 'in' order by received_at desc, message_id desc limit $2 offset $3`,
+      [tenantId, limit, Math.max(0, Math.floor(offset))]);
     return rows.map((r) => ({ messageId: r.message_id, from: r.from_text, subject: r.subject, reason: r.reason, receivedAt: iso(r.received_at) }));
   }
 
@@ -684,6 +711,10 @@ export class MemoryInquiryStore implements InquiryStore {
     return { ...rest, nextTask: this.next(tenantId, r.id) };
   }
 
+  async count(tenantId: string, q: InquiryQuery = {}): Promise<number> {
+    return (await this.list(tenantId, { ...q, limit: Number.MAX_SAFE_INTEGER, offset: 0 })).length;
+  }
+
   async list(tenantId: string, q: InquiryQuery = {}): Promise<Inquiry[]> {
     const words = q.search?.trim().toLowerCase() ?? '';
     return [...this.rows.values()]
@@ -698,7 +729,7 @@ export class MemoryInquiryStore implements InquiryStore {
       .map((r) => this.view(r))
       .sort((a, b) => Number(b.status === 'open') - Number(a.status === 'open')
         || (a.nextTask?.due ?? '9999').localeCompare(b.nextTask?.due ?? '9999') || b.lastAt.localeCompare(a.lastAt))
-      .slice(0, q.limit ?? 200);
+      .slice(q.offset ?? 0, (q.offset ?? 0) + (q.limit ?? 200));
   }
 
   async get(tenantId: string, id: string): Promise<Inquiry | null> {
@@ -875,9 +906,13 @@ export class MemoryInquiryStore implements InquiryStore {
     return hit?.inquiryId ?? null;
   }
 
-  async skippedMails(tenantId: string, limit = 100): Promise<InquiryMailSkipped[]> {
+  async countSkippedMails(tenantId: string): Promise<number> {
+    return this.mails.filter((m) => m.tenantId === tenantId && m.status === 'skipped' && m.direction === 'in').length;
+  }
+
+  async skippedMails(tenantId: string, limit = 100, offset = 0): Promise<InquiryMailSkipped[]> {
     return this.mails.filter((m) => m.tenantId === tenantId && m.status === 'skipped' && m.direction === 'in')
-      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(0, limit)
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(offset, offset + limit)
       .map((m) => ({ messageId: m.messageId, from: m.from, subject: m.subject, reason: m.reason, receivedAt: m.receivedAt }));
   }
 

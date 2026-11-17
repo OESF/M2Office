@@ -13,6 +13,7 @@ import {
   type Announcement, type AnnouncementChannel, type AnnouncementDetail, type AnnouncementPreview, type AnnouncementRecipient, type AnnouncementTexts,
 } from '@m2office/shared';
 import { api, describeError } from './api.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 import { copyText } from './clipboard.js';
 import { Markdown } from './help.js';
 import { BackButton } from './back-button.js';
@@ -40,10 +41,17 @@ function List({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: 
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note>(null);
+  // ページ（50 件ずつ。第6.8節 原則 u14）
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
   const load = useCallback(() => {
-    api.announcements.list().then((r) => setItems(r.items)).catch((e) => setNote({ kind: 'error', text: describeError(e, '読めませんでした') }));
+    api.announcements.list(page * PAGE_SIZE).then((r) => {
+      setItems(r.items); setTotal(r.total);
+      const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+      if (page > last) setPage(last);
+    }).catch((e) => setNote({ kind: 'error', text: describeError(e, '読めませんでした') }));
     api.announcements.lineStatus().then((r) => setLine(r.line)).catch(() => setLine(null));
-  }, []);
+  }, [page]);
   useEffect(() => { load(); }, [load, changeKey]);
   const make = () => {
     if (!text.trim()) return;
@@ -61,6 +69,7 @@ function List({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: 
       </div>
       {line && <p className="small muted">LINE の友だち {line.followers ?? '—'} 人・今月の残り {line.remaining ?? '上限なし'}{line.remaining !== null ? ' 通' : ''}</p>}
       {items && items.length === 0 && <p className="muted">まだありません</p>}
+      {items && items.length > 0 && <Pager page={page} total={total} onPage={setPage} />}
       {items && items.length > 0 && (
         <div className="table-scroll"><table className="table">
           <thead><tr><th>題名</th><th>期間</th><th>出し先</th><th>状態</th><th>出す日時</th></tr></thead>
@@ -77,6 +86,7 @@ function List({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKey: 
           </tbody>
         </table></div>
       )}
+      {items && items.length > 10 && <Pager page={page} total={total} onPage={setPage} />}
     </div>
   );
 }

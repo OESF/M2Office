@@ -11,6 +11,7 @@ import {
 } from './api.js';
 import { Markdown, openHelp } from './help.js';
 import { Icon } from './nav.js';
+import { Pager, usePaged } from './Pager.js';
 import { keyLabel, useHotkey } from './keys.js';
 import { RecorderDialog } from './Recorder.js';
 import { DocTemplateField, SlideDesignField } from './slide-design-picker.js';
@@ -728,17 +729,19 @@ export function ApprovalTray({
  * @param reloadKey 承認待ちが変わったら読み直す（判断した直後に、ここへ移る）
  */
 function DecidedApprovals({ reloadKey }: { reloadKey: string }) {
-  const [items, setItems] = useState<DecidedApprovalView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    api.decidedApprovals().then((r) => setItems(r.items)).catch((e) => setError(describeError(e, '読み込めませんでした')));
-  }, [reloadKey]);
-  if (error) return <p className="error">{error}</p>;
+  // 50 件ずつのページで送る（第6.8節 原則 u14。前は 100 件で切っていた）
+  const paged = usePaged((offset) => api.decidedApprovals(offset));
+  const { reload } = paged;
+  useEffect(() => { void reload(); }, [reloadKey, reload]);
+  const items = paged.items;
+  if (paged.error) return <p className="error">{describeError(paged.error, '読み込めませんでした')}</p>;
   if (!items || items.length === 0) return null;
   return (
     <>
       <h2 className="section-title">判断したもの</h2>
+      <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />
       {items.map((a) => <DecidedRow key={a.id} item={a} />)}
+      {items.length > 10 && <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />}
     </>
   );
 }

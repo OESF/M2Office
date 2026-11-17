@@ -25,17 +25,23 @@ export type ContractPatch = Partial<Pick<StoredContract,
 
 /** 一覧の絞り込み。 */
 export interface ContractQuery {
-  status?: ContractStatus | 'all';
+  /** `live` は終わっていないもの（有効と申し出中） */
+  status?: ContractStatus | 'all' | 'live';
   kind?: ContractKind;
   ownerId?: string;
   /** 相手・件名・メモの一部 */
   search?: string;
   limit?: number;
+  /** 飛ばす数（ページ。仕様書 第6.8節 原則 u14） */
+  offset?: number;
 }
 
 /** 契約の管理の置き場。 */
 export interface ContractStore {
+  /** 期限の近い順。`offset` から `limit` 件（既定 500）。 */
   list(tenantId: string, q?: ContractQuery): Promise<StoredContract[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  count(tenantId: string, q?: ContractQuery): Promise<number>;
   get(tenantId: string, id: string): Promise<StoredContract | null>;
   create(tenantId: string, c: NewContract): Promise<string>;
   update(tenantId: string, id: string, patch: ContractPatch, by: string): Promise<void>;
@@ -108,10 +114,12 @@ export class PostgresContractStore implements ContractStore {
     }
   }
 
-  async list(tenantId: string, q: ContractQuery = {}): Promise<StoredContract[]> {
+  /** 一覧と数で同じにする絞り込み。 */
+  private filterOf(tenantId: string, q: ContractQuery): { where: string[]; params: unknown[] } {
     const where = ['tenant_id = $1'];
     const params: unknown[] = [tenantId];
-    if (q.status && q.status !== 'all') { params.push(q.status); where.push(`status = $${params.length}`); }
+    if (q.status === 'live') where.push(`status <> 'ended'`);
+    else if (q.status && q.status !== 'all') { params.push(q.status); where.push(`status = $${params.length}`); }
     if (q.kind) { params.push(q.kind); where.push(`kind = $${params.length}`); }
     if (q.ownerId) { params.push(q.ownerId); where.push(`owner_id = $${params.length}`); }
     if (q.search?.trim()) {
@@ -120,9 +128,21 @@ export class PostgresContractStore implements ContractStore {
       const p = `$${params.length}`;
       where.push(`(party ilike ${p} or title ilike ${p} or note ilike ${p})`);
     }
-    params.push(Math.min(Math.max(q.limit ?? 500, 1), 1000));
-    const rows = await this.q<Row>(tenantId, `select * from contracts where ${where.join(' and ')} order by created_at desc limit $${params.length}`, params);
-    return rows.map(toContract).sort(byDue);
+    return { where, params };
+  }
+
+  async list(tenantId: string, q: ContractQuery = {}): Promise<StoredContract[]> {
+    const { where, params } = this.filterOf(tenantId, q);
+    // 次の期限は契約の中身から求める（SQL では並べられない）ので、当たるものをすべて読んで並べてから切り出す
+    const rows = await this.q<Row>(tenantId, `select * from contracts where ${where.join(' and ')} order by created_at desc, id desc`, params);
+    const offset = Math.max(0, Math.floor(q.offset ?? 0));
+    return rows.map(toContract).sort(byDue).slice(offset, offset + Math.min(Math.max(q.limit ?? 500, 1), 1000));
+  }
+
+  async count(tenantId: string, q: ContractQuery = {}): Promise<number> {
+    const { where, params } = this.filterOf(tenantId, q);
+    const rows = await this.q<{ n: number }>(tenantId, `select count(*)::int as n from contracts where ${where.join(' and ')}`, params);
+    return rows[0]?.n ?? 0;
   }
 
   async get(tenantId: string, id: string): Promise<StoredContract | null> {
@@ -173,13 +193,17 @@ export class MemoryContractStore implements ContractStore {
   async list(tenantId: string, q: ContractQuery = {}): Promise<StoredContract[]> {
     const w = q.search?.trim().toLowerCase() ?? '';
     return [...this.rows.values()].filter((r) => r.tenantId === tenantId)
-      .filter((r) => !q.status || q.status === 'all' || r.status === q.status)
+      .filter((r) => !q.status || q.status === 'all' || (q.status === 'live' ? r.status !== 'ended' : r.status === q.status))
       .filter((r) => !q.kind || r.kind === q.kind)
       .filter((r) => !q.ownerId || r.ownerId === q.ownerId)
       .filter((r) => !w || [r.party, r.title, r.note].some((x) => x.toLowerCase().includes(w)))
       .map(({ tenantId: _t, ...c }) => ({ ...c }))
       .sort(byDue)
-      .slice(0, q.limit ?? 500);
+      .slice(q.offset ?? 0, (q.offset ?? 0) + (q.limit ?? 500));
+  }
+
+  async count(tenantId: string, q: ContractQuery = {}): Promise<number> {
+    return (await this.list(tenantId, { ...q, limit: Number.MAX_SAFE_INTEGER, offset: 0 })).length;
   }
 
   async get(tenantId: string, id: string): Promise<StoredContract | null> {

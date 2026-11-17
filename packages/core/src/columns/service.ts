@@ -190,12 +190,17 @@ export class ColumnService {
     return this.deps.store;
   }
 
-  /** コラムの一覧（新しい順）。止まった書き上げは「書けませんでした」にしてから返す。 */
-  async list(tenantId: string): Promise<WebColumn[]> {
+  /** コラムの一覧（新しい順）。止まった書き上げは「書けませんでした」にしてから返す。`page` で 1 ページ分だけ返す（仕様書 第6.8節 原則 u14）。 */
+  async list(tenantId: string, page: { limit?: number; offset?: number } = {}): Promise<WebColumn[]> {
     await this.failStuck(tenantId);
-    const [columns, users] = await Promise.all([this.deps.store.list(tenantId), this.deps.repo.listUsers(tenantId)]);
+    const [columns, users] = await Promise.all([this.deps.store.list(tenantId, page.limit, page.offset), this.deps.repo.listUsers(tenantId)]);
     const nameOf = new Map(users.map((u) => [u.id, u.displayName]));
     return columns.map((c) => ({ ...c, createdByName: nameOf.get(c.createdBy) ?? '（取得できませんでした）' }));
+  }
+
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  async count(tenantId: string): Promise<number> {
+    return this.deps.store.count(tenantId);
   }
 
   /** 1 つのコラムと版。見つからなければ `null`。承認待ちで実行が終わっていれば下書きに戻してから返す。 */

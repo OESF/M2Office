@@ -12,6 +12,7 @@ import { siteConnectionAgentId, siteLabelOf, type SiteUpdateViewer } from '@m2of
 import { userSites } from '../context.js';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -37,8 +38,11 @@ export function siteUpdatesRoute(deps: AppDeps) {
     await next();
   });
 
-  /** 直しの記録（新しい順）。 */
-  app.get('/', async (c) => c.json({ items: await service.list(who(c)) }));
+  /** 直しの記録（新しい順）。`offset` で 1 ページ（50 件）ずつ返し、`total` にすべての数を添える（第6.8節 原則 u14）。 */
+  app.get('/', async (c) => {
+    const [items, total] = await Promise.all([service.list(who(c), PAGE, offsetOf(c.req.query('offset'))), service.count(who(c))]);
+    return c.json({ items, total });
+  });
 
   /** つないでいるサイト（名前・URL・利用者・直せるか）。開いたときに WordPress に問い合わせる。 */
   app.get('/site', async (c) => c.json(await service.site(who(c))));

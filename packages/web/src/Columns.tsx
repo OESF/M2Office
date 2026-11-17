@@ -17,6 +17,7 @@ import {
 import { api, describeError, type ColumnDetail } from './api.js';
 import { Markdown } from './help.js';
 import { BackButton } from './back-button.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 
 /**
  * 開いた一覧を画面の中まで送る（ref に渡す。開いた所が画面の外で、開いたことに気づかないのを防ぐ）。
@@ -86,9 +87,18 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ページ（50 件ずつ。第6.8節 原則 u14）
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+
   const load = useCallback(() => {
-    api.columns.list().then((r) => { setColumns(r.columns); setThemes(r.themes ?? []); setPlan(r.plan ?? []); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
-  }, []);
+    api.columns.list(page * PAGE_SIZE).then((r) => {
+      setColumns(r.columns); setTotal(r.total); setThemes(r.themes ?? []); setPlan(r.plan ?? []); setError(null);
+      // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
+      const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+      if (page > last) setPage(last);
+    }).catch((e) => setError(describeError(e, '読めませんでした')));
+  }, [page]);
   useEffect(load, [load]);
   // 書いているコラムがあれば、書き上がるまで読み直す
   useEffect(() => {
@@ -210,6 +220,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
       )}
       {error && <p className="error">{error}</p>}
       {columns && columns.length === 0 && !writing && <p className="muted">まだコラムがありません。</p>}
+      {columns && columns.length > 0 && !writing && <Pager page={page} total={total} onPage={setPage} />}
       {columns && columns.length > 0 && !writing && (
         <div className="table-scroll"><table className="table columns-list">
           <thead><tr><th>題名</th><th>状態</th><th>指摘</th><th>書いた人</th><th>更新</th></tr></thead>
@@ -226,6 +237,7 @@ function ColumnList({ onOpen }: { onOpen: (id: string) => void }) {
           </tbody>
         </table></div>
       )}
+      {columns && columns.length > 10 && !writing && <Pager page={page} total={total} onPage={setPage} />}
     </div>
   );
 }

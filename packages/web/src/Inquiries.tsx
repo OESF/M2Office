@@ -15,6 +15,7 @@ import {
   type Inquiry, type InquiryChannel, type InquiryDetail, type InquiryMailSkipped, type InquiryReply, type InquiryStatus, type InquiryTemperature,
 } from '@m2office/shared';
 import { api, describeError, type InquiryRecorded } from './api.js';
+import { PAGE_SIZE, Pager, usePaged } from './Pager.js';
 import { BackButton } from './back-button.js';
 
 const when = (iso: string) => new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -92,11 +93,20 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
   const [candidates, setCandidates] = useState<Inquiry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<'skipped' | 'review' | null>(null);
+  // ページ（50 件ずつ。第6.8節 原則 u14）。絞り込みを変えたら最初のページへ戻す
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  useEffect(() => { setPage(0); }, [status, q, channel, category, assignee]);
 
   const load = useCallback(() => {
-    api.inquiries.list({ status, ...(q.trim() ? { q: q.trim() } : {}), ...(channel ? { channel } : {}), ...(category ? { category } : {}), ...(assignee ? { assignee } : {}) })
-      .then((r) => { setItems(r.items); setFacets(r.facets); setError(null); }).catch((e) => setError(describeError(e, '読めませんでした')));
-  }, [status, q, channel, category, assignee]);
+    api.inquiries.list({ status, ...(q.trim() ? { q: q.trim() } : {}), ...(channel ? { channel } : {}), ...(category ? { category } : {}), ...(assignee ? { assignee } : {}), offset: page * PAGE_SIZE })
+      .then((r) => {
+        setItems(r.items); setTotal(r.total); setFacets(r.facets); setError(null);
+        // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
+        const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+        if (page > last) setPage(last);
+      }).catch((e) => setError(describeError(e, '読めませんでした')));
+  }, [status, q, channel, category, assignee, page]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
   // 秘書が問い合わせを残したら読み直す（はじめの 1 回は上で読む）
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -169,6 +179,7 @@ function InquiryList({ onOpen, changeKey, onColumn }: { onOpen: (id: string) => 
       {panel === 'review' && <MonthReview {...(onColumn ? { onColumn } : {})} />}
       {error && <p className="error">{error}</p>}
       {items && items.length === 0 && <p className="muted">{q || channel || category || assignee ? '見つかりません。' : status === 'open' ? '対応中の問い合わせはありません。' : 'まだ問い合わせがありません。'}</p>}
+      {items && items.length > 0 && <Pager page={page} total={total} onPage={setPage} />}
       {items && items.length > 0 && (
         <div className="table-scroll"><table className="table inquiries-list">
           <thead><tr><th>次にやること</th><th>誰から</th><th>経路</th><th>用件</th><th>担当</th><th>状態</th><th>最後</th></tr></thead>
@@ -457,13 +468,13 @@ function Replies({ inquiryId, replies, onChanged }: { inquiryId: string; replies
 
 /** 窓口のアカウントのメールのうち、問い合わせでないと見分けたもの。「問い合わせにする」で戻せる。 */
 function SkippedMails({ onOpen, onChanged }: { onOpen: (id: string) => void; onChanged: () => void }) {
-  const [items, setItems] = useState<InquiryMailSkipped[] | null>(null);
   const [note, setNote] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => {
-    api.inquiries.skipped().then((r) => setItems(r.items)).catch((e) => setNote({ kind: 'error', text: describeError(e, '読めませんでした') }));
-  }, []);
-  useEffect(load, [load]);
+  // 50 件ずつのページで送る（第6.8節 原則 u14）
+  const paged = usePaged((offset) => api.inquiries.skipped(offset));
+  const items = paged.items;
+  useEffect(() => { if (paged.error) setNote({ kind: 'error', text: describeError(paged.error, '読めませんでした') }); }, [paged.error]);
+  const load = () => { void paged.reload(); };
   const promote = async (messageId: string) => {
     setBusy(true);
     try {
@@ -480,6 +491,7 @@ function SkippedMails({ onOpen, onChanged }: { onOpen: (id: string) => void; onC
     <div className="inquiries-panel">
       <NoteText note={note} />
       {items && items.length === 0 && <p className="muted small">ありません。</p>}
+      {items && items.length > 0 && <Pager page={paged.page} total={paged.total} onPage={paged.setPage} />}
       {items && items.length > 0 && (
         <div className="table-scroll"><table className="table small">
           <thead><tr><th>届いた</th><th>差出人</th><th>件名</th><th>見分けた理由</th><th /></tr></thead>

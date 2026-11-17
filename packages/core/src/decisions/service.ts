@@ -150,9 +150,14 @@ export class DecisionService {
     return s;
   }
 
-  /** 自分の相談と、共有された相談の一覧。 */
-  async list(who: DecisionViewer): Promise<DecisionSummary[]> {
-    return this.deps.store.list(who.tenantId, who.userId);
+  /** 自分の相談と、共有された相談の一覧。`page` で 1 ページ分だけ返す（仕様書 第6.8節 原則 u14）。 */
+  async list(who: DecisionViewer, page: { limit?: number; offset?: number } = {}): Promise<DecisionSummary[]> {
+    return this.deps.store.list(who.tenantId, who.userId, page);
+  }
+
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  async count(who: DecisionViewer): Promise<number> {
+    return this.deps.store.count(who.tenantId, who.userId);
   }
 
   /** 相談の中身（見られなければ `null`）。 */

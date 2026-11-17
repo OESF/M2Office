@@ -11,6 +11,7 @@ import { Hono, type Context } from 'hono';
 import { DecisionError, DECISIONS_UNAVAILABLE, type DecisionViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 /** 差分を読む間隔（ミリ秒）。 */
@@ -39,8 +40,11 @@ export function decisionsRoute(deps: AppDeps) {
     await next();
   });
 
-  /** 自分の相談と、共有された相談の一覧。 */
-  app.get('/', async (c) => c.json({ items: await service.list(who(c)) }));
+  /** 自分の相談と、共有された相談の一覧。`offset` で 1 ページ（50 件）ずつ返し、`total` にすべての数を添える（第6.8節 原則 u14）。 */
+  app.get('/', async (c) => {
+    const [items, total] = await Promise.all([service.list(who(c), { limit: PAGE, offset: offsetOf(c.req.query('offset')) }), service.count(who(c))]);
+    return c.json({ items, total });
+  });
 
   /** 相談を始める（討論はワーカーが進める）。 */
   app.post('/', async (c) => {

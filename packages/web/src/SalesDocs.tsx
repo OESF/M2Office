@@ -15,6 +15,7 @@ import {
 } from '@m2office/shared';
 import { api, describeError, type SalesDocDetail } from './api.js';
 import { BackButton } from './back-button.js';
+import { PAGE_SIZE, Pager } from './Pager.js';
 import { QuoteState, QuoteView } from './quotes.js';
 
 /** 書類の種類ごとの業務（送る・直すを頼む先。見積書は見積書の部品が頼む）。 */
@@ -81,12 +82,21 @@ function OrderList({ onOpen, changeKey }: { onOpen: (id: string) => void; change
   const [error, setError] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
   const file = useRef<HTMLInputElement>(null);
+  // ページ（50 件ずつ。第6.8節 原則 u14）。絞り込みを変えたら最初のページへ戻す
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  useEffect(() => { setPage(0); }, [status, q, range]);
 
   const load = useCallback(() => {
-    api.sales.orders({ ...(status ? { status } : {}), ...(q.trim() ? { q: q.trim() } : {}), ...range })
-      .then((r) => { setItems(r.items); setError(null); })
+    api.sales.orders({ ...(status ? { status } : {}), ...(q.trim() ? { q: q.trim() } : {}), ...range, offset: page * PAGE_SIZE })
+      .then((r) => {
+        setItems(r.items); setTotal(r.total); setError(null);
+        // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
+        const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+        if (page > last) setPage(last);
+      })
       .catch((e) => setError(describeError(e, '読めませんでした')));
-  }, [status, q, range]);
+  }, [status, q, range, page]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -133,6 +143,7 @@ function OrderList({ onOpen, changeKey }: { onOpen: (id: string) => void; change
       </div>
       {error && <p className="error">{error}</p>}
       {items && items.length === 0 && <p className="muted">{q || status || range.from || range.to ? '当たる受注はありません。' : 'まだ受注がありません。'}</p>}
+      {items && items.length > 0 && <Pager page={page} total={total} onPage={setPage} />}
       {items && items.length > 0 && (
         <div className="table-scroll"><table className="table contracts-table">
           <thead><tr><th>受注番号</th><th>取引先</th><th>注文番号</th><th>注文日</th><th>納期</th><th className="num">合計</th><th>状態</th><th>見積</th><th>請書</th><th>納品</th><th>請求</th></tr></thead>
@@ -159,6 +170,7 @@ function OrderList({ onOpen, changeKey }: { onOpen: (id: string) => void; change
           </tbody>
         </table></div>
       )}
+      {items && items.length > 10 && <Pager page={page} total={total} onPage={setPage} />}
     </>
   );
 }
@@ -308,7 +320,17 @@ function OrderView({ id, onBack, onOpen, changeKey }: { id: string; onBack: () =
   const partyName = r?.order.party.name ?? '';
   useEffect(() => {
     if (!partyName) { setQuotes([]); return; }
-    api.quotes.list({ party: partyName }).then((x) => setQuotes(x.items)).catch(() => setQuotes([]));
+    // 結べる見積書はその取引先のすべて。一覧はページで返るので、全ページを読む（件数で切らない。第6.8節 原則 u14）
+    void (async () => {
+      const all: SalesDocument[] = [];
+      for (let offset = 0; ; ) {
+        const x = await api.quotes.list({ party: partyName, offset });
+        all.push(...x.items);
+        offset += x.items.length;
+        if (x.items.length === 0 || offset >= x.total) break;
+      }
+      return all;
+    })().then(setQuotes).catch(() => setQuotes([]));
   }, [partyName]);
   if (error) return <div className="contracts"><BackButton label="受注の一覧" onClick={onBack} /><p className="error">{error}</p></div>;
   if (!r) return <div className="contracts"><p className="muted">読み込み中…</p></div>;
@@ -453,12 +475,21 @@ function DocList({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKe
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [note, setNote] = useState<Note>(null);
   const [error, setError] = useState<string | null>(null);
+  // ページ（50 件ずつ。第6.8節 原則 u14）。絞り込みを変えたら最初のページへ戻す
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  useEffect(() => { setPage(0); }, [f]);
   const load = useCallback(() => {
     const { status, ...rest } = f;
-    api.sales.documents({ ...rest, ...(status === 'unbilled' ? { unbilled: '1' } : status ? { status } : {}) })
-      .then((r) => { setItems(r.items); setError(null); })
+    api.sales.documents({ ...rest, ...(status === 'unbilled' ? { unbilled: '1' } : status ? { status } : {}), offset: page * PAGE_SIZE })
+      .then((r) => {
+        setItems(r.items); setTotal(r.total); setError(null);
+        // 削除して件数が減り、いまのページが無くなったら、最後のページへ戻す
+        const last = Math.max(0, Math.ceil(r.total / PAGE_SIZE) - 1);
+        if (page > last) setPage(last);
+      })
       .catch((e) => setError(describeError(e, '読めませんでした')));
-  }, [f]);
+  }, [f, page]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
   useEffect(() => { if (changeKey) load(); }, [changeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
@@ -489,7 +520,9 @@ function DocList({ onOpen, changeKey }: { onOpen: (id: string) => void; changeKe
       )}
       {error && <p className="error">{error}</p>}
       {items && items.length === 0 && <p className="muted">当たる書類はありません。</p>}
+      {items && items.length > 0 && <Pager page={page} total={total} onPage={setPage} />}
       {items && items.length > 0 && <DocTable docs={items} onOpen={onOpen} picked={picked} onPick={pick} />}
+      {items && items.length > 10 && <Pager page={page} total={total} onPage={setPage} />}
     </>
   );
 }

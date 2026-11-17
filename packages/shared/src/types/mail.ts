@@ -92,7 +92,7 @@ export interface MailOverview {
   action: MailItem[];
   waiting: MailItem[];
   read: MailItem[];
-  /** 宣伝・お知らせ（直近 14 日の新しい順に 100 件まで。画面ではたたんで出す。第 0.544.0 版）。 */
+  /** 宣伝・お知らせ（直近 14 日の新しい順。画面ではたたんで出し、50 件ずつのページで送る。第 0.544.0 版・第6.8節 原則 u14）。 */
   promo: MailItem[];
   /** 宣伝・お知らせの件数（直近 14 日。秘書の答えに使う）。 */
   promoCount: number;

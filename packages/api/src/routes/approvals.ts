@@ -12,6 +12,7 @@ import { ApprovalForbiddenError, RunNotResumableError, describeContext, executed
 import type { AppDeps } from '../context.js';
 import { passCorrection } from '../corrections.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 /**
  * 承認トレイ。承認待ちの一覧と、承認・却下の受付。
@@ -21,9 +22,6 @@ import type { AppEnv } from '../middleware/tenant.js';
  * 外部アプリからの承認は既定で禁止とし、ここでは画面からの操作だけを受ける。
  * `external-send` と `financial` は恒久的に API 承認を禁止する。
  */
-/** 「判断したもの」に出す件数（仕様書 第6.2.5節）。 */
-const DECIDED_LIMIT = 100;
-
 
 export function approvalsRoute(deps: AppDeps) {
   const app = new Hono<AppEnv>();
@@ -62,14 +60,17 @@ export function approvalsRoute(deps: AppDeps) {
 
   /**
    * 本人が判断したもの（仕様書 第6.2.5節）。何を承認したか（判断したときの承認の画面）と、どのように承認したか、
-   * 承認のあとに実際に行ったことと結果を返す。新しい順に 100 件まで。
+   * 承認のあとに実際に行ったことと結果を返す。新しい順に 50 件ずつのページ（`offset`。`total` はすべての数。第6.8節 原則 u14）。
    *
    * @remarks 自動で通過した承認・期限切れ・取り消しは含まない（人が判断していない）。本人の判断だけを返す
    */
   app.get('/decided', async (c) => {
     const ctx = c.get('ctx');
     const view = await deps.tenantView(ctx.tenant.id);
-    const decided = await deps.repo.listDecidedApprovals(ctx.tenant.id, ctx.user.id, DECIDED_LIMIT);
+    const [decided, total] = await Promise.all([
+      deps.repo.listDecidedApprovals(ctx.tenant.id, ctx.user.id, PAGE, offsetOf(c.req.query('offset'))),
+      deps.repo.countDecidedApprovals(ctx.tenant.id, ctx.user.id),
+    ]);
     // 権限区画に属する業務は、いま区画に入っている間だけ見せる（区画を出たら前に判断したものも見せない。第6.2.3節）
     const { compartments } = await withCompartments(deps.repo, ctx.tenant.id, decided, ctx.user);
     const rows = decided.filter((a) => a.approverUserId || !a.compartment || compartments.includes(a.compartment));
@@ -94,7 +95,7 @@ export function approvalsRoute(deps: AppDeps) {
         done: a.decision === 'approved' ? executedCalls(step, describeContext(view.registry, artifacts)) : [],
       });
     }
-    return c.json({ items });
+    return c.json({ items, total });
   });
 
   app.post('/:id', async (c) => {

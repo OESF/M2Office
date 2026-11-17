@@ -26,7 +26,7 @@ import { silentLogger, type Logger } from '../log/logger.js';
 import { addDays, closingCutoff, closingDayFrom, docTotals, dueDateFrom, itemAmount, jstToday, yenText } from './calc.js';
 import { itemsFrom, readOrder } from './extract.js';
 import { docFileName, renderSalesDoc } from './render.js';
-import { partyKey, type DocPatch, type DocQuery, type NewDoc, type OrderQuery, type PartyMemo, type SalesDocStore, type StoredDoc, type StoredOrder } from './store.js';
+import { SALES_LIST_MAX, partyKey, type DocPatch, type DocQuery, type NewDoc, type OrderQuery, type PartyMemo, type SalesDocStore, type StoredDoc, type StoredOrder } from './store.js';
 
 /** 操作する人。 */
 export interface SalesViewer {
@@ -992,6 +992,32 @@ export class SalesDocService {
     ]);
     const all = orders.map((o) => this.orderView(o, docs, names, memos));
     return (q.status ? all.filter((o) => o.status === q.status) : all).slice(0, q.limit ?? 200);
+  }
+
+  /**
+   * 受注の一覧の 1 ページと、同じ絞り込みでのすべての数（新しい順。仕様書 第6.8節 原則 u14）。
+   *
+   * @remarks
+   * 状態は書類から求めるので、状態や注文日で絞るときはすべての受注を読んでから絞る。注文日の無い受注は、注文日で絞ると外れる。
+   *
+   * @param q 絞り込み（`status`・`search`・`from`・`to`。日は `YYYY-MM-DD` で両端を含む）
+   * @param page 1 ページの数と飛ばす数
+   */
+  async pageOrders(who: SalesViewer, q: { status?: SalesOrderStatus; search?: string; from?: string; to?: string },
+    page: { limit: number; offset: number }): Promise<{ items: SalesOrder[]; total: number }> {
+    const search = q.search ? { search: q.search } : {};
+    const [orders, docs, names, memos] = await Promise.all([
+      this.deps.store.listOrders(who.tenantId, { ...search, limit: SALES_LIST_MAX }),
+      this.deps.store.listDocs(who.tenantId, { withSuperseded: true, limit: 2000 }), this.names(who.tenantId), this.memos(who.tenantId),
+    ]);
+    const dated = q.from || q.to
+      ? orders.filter((o) => (!q.from || (o.orderedOn ?? '') >= q.from) && (!q.to || (o.orderedOn ?? '9999') <= q.to)) : orders;
+    const offset = Math.max(0, Math.floor(page.offset));
+    if (!q.status) {
+      return { items: dated.slice(offset, offset + page.limit).map((o) => this.orderView(o, docs, names, memos)), total: dated.length };
+    }
+    const all = dated.map((o) => this.orderView(o, docs, names, memos)).filter((o) => o.status === q.status);
+    return { items: all.slice(offset, offset + page.limit), total: all.length };
   }
 
   /** 受注 1 件と、つながった書類。 */

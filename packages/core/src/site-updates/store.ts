@@ -93,8 +93,10 @@ export type NewSiteEdit = Pick<StoredSiteEdit, 'requestedBy' | 'request' | 'reve
 export interface SiteEditStore {
   create(tenantId: string, e: NewSiteEdit): Promise<string>;
   get(tenantId: string, id: string): Promise<StoredSiteEdit | null>;
-  /** 新しい順。 */
-  list(tenantId: string, limit: number): Promise<StoredSiteEdit[]>;
+  /** 新しい順。`offset` から `limit` 件。 */
+  list(tenantId: string, limit: number, offset?: number): Promise<StoredSiteEdit[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  count(tenantId: string): Promise<number>;
   update(tenantId: string, id: string, patch: Partial<Pick<StoredSiteEdit, 'status' | 'runId' | 'pages' | 'terms' | 'actions' | 'appliedAt' | 'revertedAt'>>): Promise<void>;
   /**
    * `before` より前に作った直しの、直す前と後の本文を消す（記録は残す）。
@@ -181,8 +183,13 @@ export class PostgresSiteEditStore implements SiteEditStore {
     return rows[0] ? toEdit(rows[0]) : null;
   }
 
-  async list(tenantId: string, limit: number): Promise<StoredSiteEdit[]> {
-    return (await this.q<Row>(tenantId, `select ${COLUMNS} from site_edits where tenant_id = $1 order by created_at desc limit $2`, [tenantId, limit])).map(toEdit);
+  async list(tenantId: string, limit: number, offset = 0): Promise<StoredSiteEdit[]> {
+    return (await this.q<Row>(tenantId, `select ${COLUMNS} from site_edits where tenant_id = $1 order by created_at desc, id desc limit $2 offset $3`,
+      [tenantId, limit, Math.max(0, Math.floor(offset))])).map(toEdit);
+  }
+
+  async count(tenantId: string): Promise<number> {
+    return (await this.q<{ n: number }>(tenantId, 'select count(*)::int as n from site_edits where tenant_id = $1', [tenantId]))[0]?.n ?? 0;
   }
 
   async update(tenantId: string, id: string, patch: Partial<Pick<StoredSiteEdit, 'status' | 'runId' | 'pages' | 'terms' | 'actions' | 'appliedAt' | 'revertedAt'>>): Promise<void> {
@@ -251,9 +258,13 @@ export class MemorySiteEditStore implements SiteEditStore {
     return r && r.tenantId === tenantId ? structuredClone(r.e) : null;
   }
 
-  async list(tenantId: string, limit: number): Promise<StoredSiteEdit[]> {
+  async list(tenantId: string, limit: number, offset = 0): Promise<StoredSiteEdit[]> {
     return [...this.rows.values()].filter((r) => r.tenantId === tenantId).map((r) => structuredClone(r.e))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)).slice(offset, offset + limit);
+  }
+
+  async count(tenantId: string): Promise<number> {
+    return [...this.rows.values()].filter((r) => r.tenantId === tenantId).length;
   }
 
   async update(tenantId: string, id: string, patch: Partial<Pick<StoredSiteEdit, 'status' | 'runId' | 'pages' | 'terms' | 'actions' | 'appliedAt' | 'revertedAt'>>): Promise<void> {

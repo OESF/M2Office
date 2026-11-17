@@ -290,6 +290,11 @@ export class InquiryService {
     return (await this.deps.store.list(who.tenantId, q)).map((i) => this.named(i, names));
   }
 
+  /** 一覧と同じ絞り込みでの数（一覧のページを数える。仕様書 第6.8節 原則 u14）。 */
+  count(who: InquiryViewer, q: InquiryQuery = {}): Promise<number> {
+    return this.deps.store.count(who.tenantId, q);
+  }
+
   /** 一覧の絞り込みの選択肢（分類は多い順。担当は名前つき。第33.21節）。 */
   async facets(who: InquiryViewer): Promise<{ categories: string[]; assignees: { id: string; name: string }[] }> {
     const [f, names] = await Promise.all([this.deps.store.facets(who.tenantId), this.names(who.tenantId)]);
@@ -865,8 +870,13 @@ export class InquiryService {
   }
 
   /** 問い合わせでないと見分けたメール。 */
-  async skippedMails(who: InquiryViewer): Promise<InquiryMailSkipped[]> {
-    return this.deps.store.skippedMails(who.tenantId, 100);
+  /** 問い合わせでないと見分けたメール（新しい順に 50 件ずつ。`total` はすべての数。仕様書 第6.8節 原則 u14）。 */
+  async skippedMails(who: InquiryViewer, offset = 0): Promise<{ items: InquiryMailSkipped[]; total: number }> {
+    const [items, total] = await Promise.all([
+      this.deps.store.skippedMails(who.tenantId, 50, offset),
+      this.deps.store.countSkippedMails(who.tenantId),
+    ]);
+    return { items, total };
   }
 
   /**

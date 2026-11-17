@@ -49,8 +49,10 @@ export interface DecisionTurnDraft {
 export interface DecisionStore {
   create(tenantId: string, d: { createdBy: string; topic: string; turns: number; crossCheck: boolean; fileIds: string[] }): Promise<StoredDecision>;
   get(tenantId: string, id: string): Promise<StoredDecision | null>;
-  /** 自分の相談と、共有された相談（ゴミ箱のものは除く）。新しい順。 */
-  list(tenantId: string, userId: string): Promise<DecisionSummary[]>;
+  /** 自分の相談と、共有された相談（ゴミ箱のものは除く）。新しい順。`page` で 1 ページ分だけ返す（既定は 200 件。仕様書 第6.8節 原則 u14）。 */
+  list(tenantId: string, userId: string, page?: { limit?: number; offset?: number }): Promise<DecisionSummary[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  count(tenantId: string, userId: string): Promise<number>;
   update(tenantId: string, id: string, patch: DecisionPatch): Promise<void>;
   /** 動かす必要のある相談（始める前・途中のもの）の ID。 */
   workList(tenantId: string): Promise<string[]>;
@@ -173,12 +175,21 @@ export class PostgresDecisionStore implements DecisionStore {
     return rows[0] ? toSession(rows[0]) : null;
   }
 
-  async list(tenantId: string, userId: string): Promise<DecisionSummary[]> {
+  /** 一覧と数で同じにする絞り込み（$1 は会社、$2 は見る人）。 */
+  private static readonly LIST_WHERE = `s.tenant_id = $1 and s.trashed_at is null
+         and (s.created_by = $2 or exists (select 1 from decision_shares x where x.session_id = s.id and x.user_id = $2))`;
+
+  async list(tenantId: string, userId: string, page: { limit?: number; offset?: number } = {}): Promise<DecisionSummary[]> {
     const rows = await this.q<SessionRow>(tenantId,
-      `${SESSION_SELECT} where s.tenant_id = $1 and s.trashed_at is null
-         and (s.created_by = $2 or exists (select 1 from decision_shares x where x.session_id = s.id and x.user_id = $2))
-       order by s.updated_at desc limit 200`, [tenantId, userId]);
+      `${SESSION_SELECT} where ${PostgresDecisionStore.LIST_WHERE}
+       order by s.updated_at desc, s.id desc limit $3 offset $4`,
+      [tenantId, userId, Math.min(Math.max(page.limit ?? 200, 1), 500), Math.max(0, Math.floor(page.offset ?? 0))]);
     return rows.map(toSession).map((s) => summaryOf(s, userId));
+  }
+
+  async count(tenantId: string, userId: string): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId, `select count(*)::int as n from decision_sessions s where ${PostgresDecisionStore.LIST_WHERE}`, [tenantId, userId]);
+    return rows[0]?.n ?? 0;
   }
 
   async update(tenantId: string, id: string, patch: DecisionPatch): Promise<void> {
@@ -371,11 +382,22 @@ export class MemoryDecisionStore implements DecisionStore {
     return s && s.tenantId === tenantId ? this.view(s) : null;
   }
 
-  async list(tenantId: string, userId: string): Promise<DecisionSummary[]> {
-    return [...this.sessions.values()]
-      .filter((s) => s.tenantId === tenantId && !s.trashedAt && (s.createdBy === userId || this.shares.some((x) => x.sessionId === s.id && x.userId === userId)))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  async list(tenantId: string, userId: string, page: { limit?: number; offset?: number } = {}): Promise<DecisionSummary[]> {
+    const offset = Math.max(0, Math.floor(page.offset ?? 0));
+    return this.visibleTo(tenantId, userId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(offset, offset + (page.limit ?? 200))
       .map((s) => summaryOf(this.view(s), userId));
+  }
+
+  async count(tenantId: string, userId: string): Promise<number> {
+    return this.visibleTo(tenantId, userId).length;
+  }
+
+  /** 一覧と数で同じにする絞り込み。 */
+  private visibleTo(tenantId: string, userId: string) {
+    return [...this.sessions.values()]
+      .filter((s) => s.tenantId === tenantId && !s.trashedAt && (s.createdBy === userId || this.shares.some((x) => x.sessionId === s.id && x.userId === userId)));
   }
 
   async update(tenantId: string, id: string, patch: DecisionPatch): Promise<void> {

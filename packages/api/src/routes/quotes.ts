@@ -8,9 +8,10 @@
 
 import { Hono, type Context } from 'hono';
 import { salesQuoteState, type SalesQuoteState } from '@m2office/shared';
-import { salesToday, type SalesViewer } from '@m2office/core';
+import { SALES_LIST_MAX, salesToday, type SalesViewer } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import type { AppEnv } from '../middleware/tenant.js';
+import { PAGE, offsetOf } from '../paging.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 const STATES: SalesQuoteState[] = ['submitted', 'won', 'lost', 'expired', 'cancelled'];
@@ -39,13 +40,17 @@ export function quotesRoute(deps: AppDeps) {
   });
   app.use('/:id/*', async (c, next) => (ID.test(c.req.param('id')) ? next() : c.json({ error: '見積書が見つかりません' }, 404)));
 
-  /** 見積書の一覧（新しい版だけ。新しい順。`party`・`state`: submitted・won・lost・expired・cancelled）。 */
+  /**
+   * 見積書の一覧（新しい版だけ。新しい順。`party`・`state`: submitted・won・lost・expired・cancelled）。
+   * `offset` で 1 ページ（50 件）ずつ返し、`total` に同じ絞り込みでのすべての数を添える（第6.8節 原則 u14）。
+   */
   app.get('/', async (c) => {
     const state = c.req.query('state') as SalesQuoteState | undefined;
     const today = salesToday();
-    let items = await service.listQuotes(who(c), { ...(c.req.query('party') ? { party: c.req.query('party')!.slice(0, 100) } : {}), limit: 500 });
+    let items = await service.listQuotes(who(c), { ...(c.req.query('party') ? { party: c.req.query('party')!.slice(0, 100) } : {}), limit: SALES_LIST_MAX });
     if (state && STATES.includes(state)) items = items.filter((d) => salesQuoteState(d, today) === state);
-    return c.json({ items, orders: !!(await deps.salesDocs.access(who(c).tenantId, who(c).userId)) });
+    const offset = offsetOf(c.req.query('offset'));
+    return c.json({ items: items.slice(offset, offset + PAGE), total: items.length, orders: !!(await deps.salesDocs.access(who(c).tenantId, who(c).userId)) });
   });
 
   /** 見積書 1 通（版・この見積書に対する受注・前の版からの違い）。 */

@@ -16,7 +16,10 @@ export type NewColumnVersion = Omit<WebColumnVersion, 'version' | 'createdAt' | 
 
 /** コラムの置き場。 */
 export interface ColumnStore {
-  list(tenantId: string, limit?: number): Promise<WebColumn[]>;
+  /** 新しく直した順。`offset` から `limit` 件（既定 200）。 */
+  list(tenantId: string, limit?: number, offset?: number): Promise<WebColumn[]>;
+  /** 一覧と同じ絞り込みでの数（ページを数える。仕様書 第6.8節 原則 u14）。 */
+  count(tenantId: string): Promise<number>;
   get(tenantId: string, id: string): Promise<WebColumn | null>;
   create(tenantId: string, c: { theme: string; memo: string; createdBy: string }): Promise<string>;
   update(tenantId: string, id: string, patch: Partial<{
@@ -127,8 +130,14 @@ export class PostgresColumnStore implements ColumnStore {
     return this.tx(tenantId, async (c) => (await c.query<T>(text, params as never[])).rows);
   }
 
-  async list(tenantId: string, limit = 200): Promise<WebColumn[]> {
-    return (await this.q<ColumnRow>(tenantId, `${COLUMN_SELECT} where c.tenant_id = $1 order by c.updated_at desc limit $2`, [tenantId, limit])).map(toColumn);
+  async list(tenantId: string, limit = 200, offset = 0): Promise<WebColumn[]> {
+    return (await this.q<ColumnRow>(tenantId, `${COLUMN_SELECT} where c.tenant_id = $1 order by c.updated_at desc, c.id desc limit $2 offset $3`,
+      [tenantId, limit, Math.max(0, Math.floor(offset))])).map(toColumn);
+  }
+
+  async count(tenantId: string): Promise<number> {
+    const rows = await this.q<{ n: number }>(tenantId, 'select count(*)::int as n from web_columns c where c.tenant_id = $1', [tenantId]);
+    return rows[0]?.n ?? 0;
   }
 
   async get(tenantId: string, id: string): Promise<WebColumn | null> {
@@ -276,8 +285,13 @@ export class MemoryColumnStore implements ColumnStore {
     return { ...rest, title: v?.title ?? '', reviewCount: v?.review.length ?? 0 };
   }
 
-  async list(tenantId: string): Promise<WebColumn[]> {
-    return [...this.columns.values()].filter((c) => c.tenantId === tenantId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((c) => this.view(c));
+  async list(tenantId: string, limit = 200, offset = 0): Promise<WebColumn[]> {
+    return [...this.columns.values()].filter((c) => c.tenantId === tenantId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(offset, offset + limit).map((c) => this.view(c));
+  }
+
+  async count(tenantId: string): Promise<number> {
+    return [...this.columns.values()].filter((c) => c.tenantId === tenantId).length;
   }
 
   async get(tenantId: string, id: string): Promise<WebColumn | null> {
