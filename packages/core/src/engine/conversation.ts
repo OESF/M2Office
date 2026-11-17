@@ -13,7 +13,7 @@ import { parseToolCalls } from './tool-protocol.js';
 import type { HandedFile } from '../connectors/file-send.js';
 
 /** 約束事の版。変えたら上げる（実行の記録に残し、問題集の結果と結ぶ）。 */
-export const CONVERSATION_CONTRACT_VERSION = 3;
+export const CONVERSATION_CONTRACT_VERSION = 4;
 
 /**
  * M2Office の約束事（仕様書 第48.5節）。接続の業務の会話の最初に渡す。
@@ -44,8 +44,13 @@ const KEEP_RECENT_RESULTS = 6;
 /** 畳んだ道具の答えに残す長さ。確認のトークンや ID は前のほうにあることが多い。 */
 const FOLDED_LENGTH = 1500;
 
+/**
+ * M2Office の道具の名前の頭（第49.8節）。接続の道具（`<接続の ID>.<道具>`）と同じ形にそろえ、推論が名前を推し量らなくてよいようにする。
+ */
+export const M2OFFICE_TOOL_PREFIX = 'm2office.';
+
 /** 道具を取り寄せる道具の名前（M2Office の道具。第48.7節）。 */
-export const TOOLS_LOAD = 'tools_load';
+export const TOOLS_LOAD = `${M2OFFICE_TOOL_PREFIX}tools_load`;
 
 /** 道具を取り寄せる道具の定義。 */
 export const TOOLS_LOAD_SPEC: LlmToolSpec = {
@@ -55,7 +60,7 @@ export const TOOLS_LOAD_SPEC: LlmToolSpec = {
 };
 
 /** 預けたファイルを送る道具の名前（M2Office の道具。第48.8.1節）。 */
-export const FILES_SEND = 'files_send';
+export const FILES_SEND = `${M2OFFICE_TOOL_PREFIX}files_send`;
 
 /**
  * 預けたファイルを送る道具の定義。預けたファイルの印だけを選べる。
@@ -87,13 +92,9 @@ export function filesSendSpec(files: HandedFile[]): LlmToolSpec {
   };
 }
 
-/**
- * 預けたファイルを送る道具の呼び出しか。推論は、ほかの道具に倣って接続の印を前に付けることがある（`<接続>.files_send`・`<接続>__files_send`）。
- *
- * @remarks 2026-11-16 に、前に付けた名前で呼んで「使えない道具」と返り、前の記事の画像で代えた事故があった（第48.8.1節）
- */
+/** 預けたファイルを送る道具の名前か（M2Office の道具の名前のとおりのときだけ。第49.8節で、名前の推し量りの受け付けを外した）。 */
 export function isFilesSendName(name: string): boolean {
-  return name === FILES_SEND || name.endsWith(`.${FILES_SEND}`) || name.endsWith(`__${FILES_SEND}`);
+  return name === FILES_SEND;
 }
 
 /** 渡されたファイルの一覧（会話の最初の指示に出す）。 */
@@ -101,7 +102,7 @@ export function handedFilesText(files: HandedFile[]): string {
   if (files.length === 0) return '';
   return [
     '## 渡されたファイル',
-    `頼みといっしょに、次のファイルを渡しています。相手に送るときは ${FILES_SEND} を使ってください。${FILES_SEND} は取り寄せずに、この名前のまま呼べます（接続の名前を前に付けません）。`,
+    `頼みといっしょに、次のファイルを渡しています。相手に送るときは ${FILES_SEND} を使ってください。${FILES_SEND} は取り寄せずに呼べます。`,
     '送れなかったときは、相手の側にある別のファイルで代えないでください（送れたかどうかは、M2Office が記録から答えに書きます）。',
     ...files.map((f) => `- ${f.fileId}: ${f.purpose}（${f.name}・${f.mimeType}${f.alt ? `・内容: ${f.alt}` : ''}）`),
   ].join('\n');

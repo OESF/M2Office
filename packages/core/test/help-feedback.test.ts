@@ -62,7 +62,8 @@ test('秘書: 使い方の質問でヘルプに当たる記事が無いときだ
     listMemories: async () => [], listUserCompartments: async () => [], listConversationsOfDay: async () => [],
     searchKnowledge: async () => ({ hits: [], rewrites: [] }), appendAudit: async () => undefined, appendConversation: async () => undefined,
   } as unknown as Repository;
-  const llm = { name: 'fake', complete: async () => ({ text: '', tokensUsed: 0 }) } as unknown as LlmProvider;
+  // 頼みの読み取り（第49.5節）は使い方の質問を選ぶ。ほかの呼び出しには何も返さない
+  const llm = { name: 'fake', complete: async (req: { messages: { content: string }[] }) => ({ text: req.messages[0]!.content.startsWith('秘書への頼みを読み取り') ? '{"to":"how-to"}' : '', tokensUsed: 0 }) } as unknown as LlmProvider;
   const missed: { tenantId: string; question: string }[] = [];
   const secretary = new Secretary({ repo, llm, connector: {} as never, agents: [], help, helpMiss: async (tenantId, question) => { missed.push({ tenantId, question }); } });
   const hit = await secretary.respond('t1', 'u1', '承認のしかたは？ どうやって承認するの？');

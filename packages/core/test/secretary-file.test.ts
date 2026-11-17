@@ -121,7 +121,8 @@ test('他人のファイルは、名前も示さない', async () => {
 
 test('ファイルを受け取れる業務があれば、取次を提案する（勝手に始めない）', async () => {
   const minutes = OFFICIAL_AGENTS.find((a) => a.id === 'minutes')!;
-  const llm = fakeLlm('{"agentId":"minutes","reason":"議事録の依頼"}');
+  // 頼みの読み取り（第49.5節）は to で先を返す
+  const llm = fakeLlm('{"to":"minutes","agentId":"minutes","reason":"議事録の依頼"}');
   let startedLookup = false;
   const s = new Secretary({
     repo: fakeRepo(), llm, connector: {} as never, agents: [minutes],

@@ -44,6 +44,7 @@ export { GeminiLiveProvider } from './voice/gemini-live.js';
 export { MockVoiceProvider } from './voice/mock.js';
 export * from './memory/learn.js';
 export * from './memory/kinds.js';
+export { READ_ANSWER, READ_OPEN, parseReading, readRequest, readingPrompt, type Reading, type ReadingChoice, type ReadingInput } from './secretary/reading.js';
 export * from './memory/promotion.js';
 export * from './memory/work.js';
 export * from './memory/profile.js';
@@ -87,10 +88,10 @@ export { FILE_SEND_MAX_BYTES, FILE_SEND_MAX_PER_RUN, fileSendTargetProblem, hand
 export { mcpSiteOf, siteHandOff, handOffParentOf, REQUEST_LABEL, siteChildFinished, type SiteHandOff, type SiteHandOffParent, type SiteHandOffParents } from './connectors/site-handoff.js';
 export { siteOptions, userSites, outputSiteOf, OUTPUT_SITE_ASK, type OutputSite, type UserSitesDeps } from './connectors/sites.js';
 export { IN_FLOW_HOURS, isInFlowApproval } from './engine/in-flow.js';
-export { CONVERSATION_CONTRACT, CONVERSATION_CONTRACT_VERSION, CONVERSATION_MAX_ROUNDS, FILES_SEND, LOAD_ALL_BELOW, TOOLS_LOAD, conversationSystem, filesSendSpec, handedFilesText, isFilesSendName, foldMessages, completeByText, jsonSchemaOf, toolSpecOf } from './engine/conversation.js';
+export { CONVERSATION_CONTRACT, CONVERSATION_CONTRACT_VERSION, CONVERSATION_MAX_ROUNDS, FILES_SEND, LOAD_ALL_BELOW, M2OFFICE_TOOL_PREFIX, TOOLS_LOAD, conversationSystem, filesSendSpec, handedFilesText, isFilesSendName, foldMessages, completeByText, jsonSchemaOf, toolSpecOf } from './engine/conversation.js';
 export { toWireName, fromWireName, sanitizeSchema, checkJsonArgs, openAiToolBody, openAiToolCalls, type LlmToolSpec, type LlmToolCall, type LlmChatMessage, type LlmToolRequest } from './llm/tools.js';
 export { recordedCallFailure, childDidWork, selectionRequest } from './engine/run-engine.js';
-export { APPROVAL_STOP, APPROVAL_MODIFY, APPROVAL_TALK_HOURS, isApprovalCorrection, correctedRequest, type ApprovalTalkDeps, type PendingTalkApproval } from './secretary/approval-talk.js';
+export { APPROVAL_STOP, APPROVAL_TALK_HOURS, isApprovalCorrection, correctedRequest, type ApprovalTalkDeps, type PendingTalkApproval } from './secretary/approval-talk.js';
 export { answeredSite, isRestSiteAgent, isSiteAgent, namedSite, siteAliases, siteAskText, siteKeyOfAgent, type SiteOption } from './secretary/site-choice.js';
 export {
   ConnectionCredentials, needsConnectionMessage, lostConnectionMessage, type ConnectionCredentialsDeps,
@@ -176,7 +177,7 @@ export type { ScheduleChecks, ScheduleBlock, ScheduleBlockKind } from './schedul
 export { nextRunAt, validateRule, describeRule, localDay } from './scheduler/rule.js';
 export { businessDayChecker, closedReason, closedDaysBetween, CLOSED_REASON_LABELS, type BusinessDayDeps, type ClosedReason } from './scheduler/business-days.js';
 export { isSchedulable, missingInputs, withEnabled, triggeredNow } from './scheduler/control.js';
-export { answerSchedule, type ScheduleAnswer } from './secretary/schedules.js';
+export { SCHEDULE_ACTIONS, answerSchedule, type ScheduleAction, type ScheduleAnswer } from './secretary/schedules.js';
 export { SecretaryConductor, type ConductorDeps, type ConductorOutcome } from './secretary/conductor.js';
 export {
   PlanRunner, createPlan, cancelPlan, planProgress, planStatusText, planningPrompt, parsePlan,
@@ -191,18 +192,18 @@ export {
   OFFICIAL_AGENTS, LOOKUP_AGENT_ID, PLAN_REPORT_AGENT_ID, resolveOfficialAgent, DEFAULT_STANDARD_MINUTES, standardMinutes, stepLabel,
   agentFace, assignAgentFaces, MORNING_BRIEF, AG05_WEEKLY_BRIEF, RETIRED_AGENT_IDS,
 } from './agents/index.js';
-export { Secretary, acceptsFile, asksConnectionData, commandText, fillInputs, readNoteRequest, recordingTaker, isRecordingName } from './secretary/secretary.js';
+export { Secretary, acceptsFile, commandText, fillInputs, readNoteRequest, recordingTaker, isRecordingName } from './secretary/secretary.js';
 export { ProactiveWatcher, PROACTIVE_TRIGGER, TRAVEL_PREFIX, PREP_WINDOW_MIN, TRAVEL_NOTICE_HOUR, isMeetingSoon, hasPlace, meetingKey } from './secretary/proactive.js';
 export type { SecretaryReply, ResponseLayer } from './secretary/secretary.js';
-export { REFERS_TO_PAST, caseMailLine, closeness, recall, type CaseMailCounts, type Recall } from './secretary/recall.js';
+export { caseMailLine, closeness, recall, type CaseMailCounts, type Recall } from './secretary/recall.js';
 export {
-  DAY_RECORD_MAX, FOLLOW_UP, FOLLOW_UP_SKIPS, MEMORY_BUDGET, PAST_WORK, MENTIONS_MAX, WEEK_DAYS, delegateContext, followsUp, hasContext, loadWorkingMemory, mentionsFromTools, mentionsOfRun, mentionsToOpen, openItemRequest,
+  DAY_RECORD_MAX, MEMORY_BUDGET, MENTIONS_MAX, WEEK_DAYS, delegateContext, hasContext, loadWorkingMemory, mentionsFromTools, mentionsOfRun,
   referredDays, routeSituation, screenMention, situationText, weekText, type DayRecord, type ScreenContext, type WorkingMemory,
 } from './secretary/working-memory.js';
 export { LIST_MIN, SPOKEN_MAX, needsCanvas } from './secretary/canvas.js';
 export { HOME_SUGGESTIONS_MAX, homeBriefPrompt, parseHomeBrief, pickSome, secretaryExamples, type HomeBrief } from './secretary/home.js';
 export { secretaryClockLine } from './secretary/clock.js';
-export { CORRECTION, correctMemory, correctionPrompt, parseCorrection, type CorrectionOp, type CorrectionResult } from './secretary/correct.js';
+export { correctMemory, correctionPrompt, parseCorrection, type CorrectionOp, type CorrectionResult } from './secretary/correct.js';
 export { DIRECT_QUERIES, type EvidenceItem } from './secretary/catalog.js';
 export {
   MEMORY_MAX_CHARS, memoryTextOf, refuseToRemember, refusalMessage,
@@ -233,10 +234,10 @@ export * from './hr/index.js';
 export * from './signage/index.js';
 export * from './notices/index.js';
 export * from './brief/index.js';
-export { answerNotice, type NoticeAnswer } from './secretary/notices.js';
+export { NOTICE_KINDS, answerNotice, type NoticeAnswer, type NoticeKind } from './secretary/notices.js';
 export { signageRequest, signageFileRequest, answerSignage, signageConfirmText, SIGNAGE_YES, SIGNAGE_NO, type SignageSecretaryDeps, type SignageRequest } from './secretary/signage.js';
 export { securityRequest, answerSecurity, type SecurityRequest, type SecuritySecretaryDeps } from './secretary/security.js';
-export { answerReservation, maybeReservation, parseReservation, timesOf, itemIn, seriesOf, type ReservationSecretaryDeps, type ReservationAsk, type SeriesAsk } from './secretary/reservations.js';
+export { answerReservation, parseReservation, timesOf, itemIn, seriesOf, type ReservationSecretaryDeps, type ReservationAsk, type SeriesAsk } from './secretary/reservations.js';
 export * from './chat/group-share.js';
 export * from './chat/inbound.js';
 export {

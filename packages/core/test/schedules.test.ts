@@ -77,26 +77,26 @@ test('再開すると次回を今から求め直し、止めていた間の回�
   assert.equal(now.nextRunAt, NOW.toISOString());
 });
 
-test('秘書: 「朝のブリーフを止めて」で止め、朝のブリーフの実行には取り次がない', async () => {
+test('秘書: 読み取りが「止める」と決めた「朝のブリーフを止めて」で止める（どの定時実行かは業務の名前で照らす）', async () => {
   const { repo, items, audits } = fakeRepo([schedule('s1', 'morning-brief'), schedule('s2', 'weekly-brief')]);
-  const a = await answerSchedule(repo, 't1', 'u1', '朝のブリーフを止めて', AGENTS, NOW);
+  const a = await answerSchedule(repo, 't1', 'u1', '朝のブリーフを止めて', AGENTS, 'pause', NOW);
   assert.equal(a?.action, 'pause');
   assert.match(a!.text, /「朝のブリーフ」.*を止めました/);
   assert.equal(items[0]!.enabled, false);
   assert.equal(items[1]!.enabled, true, 'ほかの定時実行は止めない');
   assert.equal(audits[0]?.action, 'schedule.update');
   assert.equal(audits[0]?.actorType, 'secretary');
-  const again = await answerSchedule(repo, 't1', 'u1', '朝のブリーフを止めて', AGENTS, NOW);
+  const again = await answerSchedule(repo, 't1', 'u1', '朝のブリーフを止めて', AGENTS, 'pause', NOW);
   assert.match(again!.text, /もう止まっています/);
 });
 
 test('秘書: 再開と今すぐ実行', async () => {
   const { repo, items, audits } = fakeRepo([schedule('s1', 'morning-brief', { enabled: false, nextRunAt: '2026-09-20T22:30:00Z' })]);
-  const r = await answerSchedule(repo, 't1', 'u1', '止めていた朝のブリーフを再開して', AGENTS, NOW);
+  const r = await answerSchedule(repo, 't1', 'u1', '止めていた朝のブリーフを再開して', AGENTS, 'resume', NOW);
   assert.equal(r?.action, 'resume');
   assert.match(r!.text, /再開しました。次回は 9\/28（月）7:30 です/);
   assert.equal(items[0]!.enabled, true);
-  const run = await answerSchedule(repo, 't1', 'u1', '朝のブリーフを今すぐ実行して', AGENTS, NOW);
+  const run = await answerSchedule(repo, 't1', 'u1', '朝のブリーフを今すぐ実行して', AGENTS, 'run', NOW);
   assert.equal(run?.action, 'run');
   assert.equal(items[0]!.nextRunAt, NOW.toISOString());
   assert.equal(audits.at(-1)?.action, 'schedule.trigger');
@@ -107,7 +107,7 @@ test('秘書: 定時実行の状態を並べる。推論を使わない', async 
     schedule('s1', 'morning-brief'),
     schedule('s2', 'weekly-brief', { enabled: false, rule: { kind: 'weekly', weekday: 1, hour: 8, minute: 0 } }),
   ]);
-  const a = await answerSchedule(repo, 't1', 'u1', '定時実行はどうなってる？', AGENTS, NOW);
+  const a = await answerSchedule(repo, 't1', 'u1', '定時実行はどうなってる？', AGENTS, 'status', NOW);
   assert.equal(a?.action, 'status');
   assert.match(a!.text, /定時実行は 2 件です/);
   assert.match(a!.text, /朝のブリーフ: 毎平日（月〜金） 7:30・有効・次回/);
@@ -116,27 +116,20 @@ test('秘書: 定時実行の状態を並べる。推論を使わない', async 
 
 test('秘書: どれか決められなければ実行せずに聞き、登録・削除は画面を案内する', async () => {
   const { repo, items } = fakeRepo([schedule('s1', 'morning-brief'), schedule('s2', 'weekly-brief')]);
-  const ask = await answerSchedule(repo, 't1', 'u1', '定時実行を止めて', AGENTS, NOW);
+  const ask = await answerSchedule(repo, 't1', 'u1', '定時実行を止めて', AGENTS, 'pause', NOW);
   assert.equal(ask?.action, 'ask');
   assert.match(ask!.text, /どの定時実行を止めますか/);
   assert.ok(items.every((s) => s.enabled), '何も止めない');
-  const edit = await answerSchedule(repo, 't1', 'u1', '定時実行を追加して', AGENTS, NOW);
+  const edit = await answerSchedule(repo, 't1', 'u1', '定時実行を追加して', AGENTS, 'edit', NOW);
   assert.equal(edit?.action, 'edit');
   assert.match(edit!.text, /「定時実行」の画面/);
 });
 
-test('秘書: 定時実行の話でなければ答えない（業務の依頼・予定の確認）', async () => {
-  const { repo } = fakeRepo([schedule('s1', 'morning-brief')]);
-  assert.equal(await answerSchedule(repo, 't1', 'u1', '朝のブリーフを作って', AGENTS, NOW), null);
-  assert.equal(await answerSchedule(repo, 't1', 'u1', '今日のスケジュールは？', AGENTS, NOW), null);
-  assert.equal(await answerSchedule(repo, 't1', 'u1', '会議を止めてほしいと伝えて', AGENTS, NOW), null);
-});
-
 test('秘書: ほかの人の定時実行は見ない・触らない', async () => {
   const { repo, items } = fakeRepo([schedule('s1', 'morning-brief', { userId: 'u2' })]);
-  const a = await answerSchedule(repo, 't1', 'u1', '朝のブリーフを止めて', AGENTS, NOW);
-  assert.equal(a, null, '本人の定時実行に名前が当たらない');
-  const s = await answerSchedule(repo, 't1', 'u1', '定時実行の一覧を見せて', AGENTS, NOW);
+  const a = await answerSchedule(repo, 't1', 'u1', '朝のブリーフを止めて', AGENTS, 'pause', NOW);
+  assert.match(a!.text, /定時実行はありません/, 'ほかの人の定時実行は引かない');
+  const s = await answerSchedule(repo, 't1', 'u1', '定時実行の一覧を見せて', AGENTS, 'status', NOW);
   assert.match(s!.text, /定時実行はありません/);
   assert.equal(items[0]!.enabled, true);
 });

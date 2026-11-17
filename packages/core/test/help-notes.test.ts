@@ -36,7 +36,8 @@ test('秘書: 使い方の答えに、いちばん上の記事の会社の補足
     listMemories: async () => [], listUserCompartments: async () => [], listConversationsOfDay: async () => [],
     searchKnowledge: async () => ({ hits: [], rewrites: [] }), appendAudit: async () => undefined, appendConversation: async () => undefined,
   } as unknown as Repository;
-  const llm = { name: 'fake', complete: async () => ({ text: '', tokensUsed: 0 }) } as unknown as LlmProvider;
+  // 頼みの読み取り（第49.5節）は使い方の質問を選ぶ。ほかの呼び出しには何も返さない
+  const llm = { name: 'fake', complete: async (req: { messages: { content: string }[] }) => ({ text: req.messages[0]!.content.startsWith('秘書への頼みを読み取り') ? '{"to":"how-to"}' : '', tokensUsed: 0 }) } as unknown as LlmProvider;
   const notes = new MemoryHelpNoteStore();
   const secretary = new Secretary({
     repo, llm, connector: {} as never, agents: [], help, helpNote: async (t, id) => (await notes.get(t, id))?.text ?? null,
@@ -71,7 +72,16 @@ test('秘書に頼んで補足を書く・消す: 管理者だけ。業務の名
     listMemories: async () => [], listUserCompartments: async () => [], listConversationsOfDay: async () => [],
     searchKnowledge: async () => ({ hits: [], rewrites: [] }), appendAudit: async () => undefined, appendConversation: async () => undefined,
   } as unknown as Repository;
-  const llm = { name: 'stub', complete: async () => ({ text: '', tokensUsed: 0 }) } as unknown as LlmProvider;
+  // 頼みの読み取り（第49.5節）の見本: 補足を書く・消す頼みを読み取る。ほかの推論には何も返さない
+  const llm = {
+    name: 'fake',
+    complete: async (req: { messages: { content: string }[] }) => {
+      if (!req.messages[0]!.content.startsWith('秘書への頼みを読み取り')) return { text: '', tokensUsed: 0 };
+      const m = req.messages.at(-1)!.content;
+      const read = /さっきの答え/.test(m) ? { to: 'answer' } : { to: 'help-note', kind: /消して/.test(m) ? 'remove' : 'write' };
+      return { text: JSON.stringify(read), tokensUsed: 0 };
+    },
+  } as unknown as LlmProvider;
   const notes = new MemoryHelpNoteStore();
   const secretary = new Secretary({
     repo, llm, connector: {} as never, agents: [minutes], help,

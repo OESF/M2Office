@@ -8,7 +8,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { adFooter, judgeAdvertising, renderBulk } from '../src/index.js';
-import { bulkMailRequest, contactRequest } from '../src/secretary/contacts.js';
 import { buildRawMessage } from '../src/connectors/google/mime.js';
 import type { LlmProvider } from '../src/llm/provider.js';
 
@@ -31,15 +30,6 @@ test('宣伝かの判断: 推論が使えない・答えが読めなければ宣
   assert.equal(await judgeAdvertising(llm('{"advertising": true}'), 'ご案内', '新製品の説明会を開きます'), true);
   assert.equal(await judgeAdvertising(llm('分かりません'), 'お礼', '…'), true);
   assert.equal(await judgeAdvertising({ name: 'stub', complete: async () => ({ text: '{"advertising": false}', tokensUsed: 1 }) }, 'お礼', '…'), true);
-});
-
-test('秘書への依頼: 名刺の相手へのまとめてのメールを見分け、1 人へのメールや名刺の問いとは分ける', () => {
-  assert.equal(bulkMailRequest('9 月 25 日の発表会で名刺交換した人にお礼のメールを送って'), true);
-  assert.equal(bulkMailRequest('発表会に参加してくださった方にお礼をまとめて送りたい'), true);
-  assert.equal(bulkMailRequest('株式会社サンプルの方々に新製品の案内を一斉に送って'), true);
-  assert.equal(bulkMailRequest('田中さんにお礼のメールを送って'), false);
-  assert.equal(bulkMailRequest('先週名刺交換した人を教えて'), false);
-  assert.equal(contactRequest('先週名刺交換した人を教えて'), 'ask');
 });
 
 test('配信の停止の見出し: 宣伝のメールに List-Unsubscribe と、押すだけで止まる List-Unsubscribe-Post を付ける', () => {

@@ -33,7 +33,7 @@ function setup(route: string, fill: Record<string, unknown>, agents: AgentDefini
     name: 'fake',
     complete: async (req: { messages: { content: string }[] }) => {
       const system = req.messages[0]!.content;
-      if (system.startsWith('依頼に最も合う業務')) return { text: route, tokensUsed: 1 };
+      if (system.startsWith('秘書への頼みを読み取り')) return { text: route, tokensUsed: 1 };
       if (system.includes('入力を JSON のオブジェクトで返して')) { prompts.push(system); return { text: JSON.stringify(fill), tokensUsed: 1 }; }
       return { text: '', tokensUsed: 1 };
     },

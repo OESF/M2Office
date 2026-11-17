@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_USER_SETTINGS, type AuditEvent } from '@m2office/shared';
-import { CORRECTION, correctMemory, parseCorrection, type LlmProvider, type Repository } from '../src/index.js';
+import { correctMemory, parseCorrection, type LlmProvider, type Repository } from '../src/index.js';
 import type { KnowledgeItem, Memory, MemoryCandidate, Promotion } from '../src/repository/types.js';
 
 class Repo {
@@ -41,11 +41,6 @@ const llmOf = (text: string): LlmProvider & { prompts: string[] } => {
   const prompts: string[] = [];
   return { name: 'test', prompts, complete: async (r: { messages: { content: string }[] }) => { prompts.push(r.messages.at(-1)!.content); return { text, tokensUsed: 5 }; } } as never;
 };
-
-test('訂正らしい言い方を拾う', () => {
-  for (const q of ['それは違う、山田さんは総務だよ', '覚えたことを直しておいて', '見積の話は忘れて', '間違ってるよ']) assert.ok(CORRECTION.test(q), q);
-  assert.ok(!CORRECTION.test('明日の予定は？'));
-});
 
 test('推論の応答から操作を取り出す。決められないときは聞き返す', () => {
   assert.deepEqual(parseCorrection('- 直す M1 → 山田さんは総務の担当\n- 消す K1\n- 覚える → 締めは 25 日'), [

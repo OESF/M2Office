@@ -1004,11 +1004,11 @@ export class RunEngine {
             const want = (Array.isArray(call.args['names']) ? call.args['names'] : []).filter((n): n is string => typeof n === 'string');
             const found = all.filter((t) => want.includes(t.name)).map((t) => t.name);
             state.loaded = [...new Set([...state.loaded, ...found])];
-            // files_send は取り寄せなくても呼べる（前に接続の名前を付けて頼まれても、そう返す）
-            const filesSend = handed.length > 0 && want.some((n) => isFilesSendName(n) && !found.includes(n));
+            // M2Office の道具（files_send）は取り寄せなくても呼べる
+            const filesSend = handed.length > 0 && want.some((n) => isFilesSendName(n));
             reply({
               loaded: found, notFound: want.filter((n) => !found.includes(n) && !(handed.length > 0 && isFilesSendName(n))),
-              ...(filesSend ? { note: `${FILES_SEND} は取り寄せずに、この名前のまま呼べます` } : {}),
+              ...(filesSend ? { note: `${FILES_SEND} は取り寄せずに呼べます` } : {}),
             });
             continue;
           }

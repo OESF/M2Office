@@ -52,19 +52,12 @@ export type ReservationAsk =
   | { kind: 'cancel'; item: string | null; itemKind: ReservableKind | null; date: string | null }
   | { kind: 'add-item'; names: { name: string; kind: ReservableKind | null }[] };
 
-const VERB = /(予約|取って|とって|取れる|押さえ|おさえ|使いたい|借りたい|空いて|あいて|空き|延ばして|延長|ずらして|取り消|キャンセル|使ってる|使っている)/;
 const KIND_WORDS: [RegExp, ReservableKind][] = [
   [/(会議室|ミーティングルーム|応接室|部屋)/, 'room'],
   [/(社用車|営業車|車)/, 'car'],
   [/(備品|機材)/, 'equipment'],
 ];
 
-/** 予約の頼みらしいか（予約できるものの一覧を引く前の、軽い見分け）。「会議室 A、明日 10 時から 6 人で」のように、時刻だけでもよい。 */
-export function maybeReservation(message: string): boolean {
-  const m = message.normalize('NFKC').replace(/\s+/g, '');
-  if (/(方法|やり方|どうやって|とは|仕組み|使い方)/.test(m)) return false;
-  return VERB.test(m) || /\d{1,2}(時|:\d{2})/.test(m);
-}
 
 const norm = (s: string) => s.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
 
@@ -155,7 +148,6 @@ function namesOf(text: string): { name: string; kind: ReservableKind | null }[] 
  */
 export function parseReservation(message: string, today: string, names: readonly string[]): ReservationAsk | null {
   const m = message.normalize('NFKC').replace(/\s+/g, '');
-  if (!maybeReservation(message)) return null;
   const add = /^(.+?)を(?:予約できる(?:もの)?(?:ように|に)|予約の(?:対象|一覧)に(?:足|入れ|追加))/.exec(message.normalize('NFKC').trim());
   if (add) return { kind: 'add-item', names: namesOf(add[1]!) };
   const item = itemIn(message, names);

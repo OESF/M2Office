@@ -13,12 +13,6 @@ import { AUTO_PROMOTED_SOURCE, LEARNED_SOURCE } from '../memory/learn.js';
 import { promotionTitle } from '../memory/promotion.js';
 import { MEMORY_MAX_CHARS, refuseToRemember } from './memory.js';
 
-/**
- * 記憶の訂正らしい言い方。当たったら、推論に記憶と照らし合わせさせる。
- *
- * @remarks 広めに拾う。直すものが無ければ推論が「無し」と返し、ふつうの答えに戻る
- */
-export const CORRECTION = /(違う|違います|ちがう|間違(い|って|え)|誤り|訂正|直して|直しといて|直しておいて|忘れて|忘れといて)/;
 
 /** 推論が返す、記憶への操作。 */
 export type CorrectionOp =

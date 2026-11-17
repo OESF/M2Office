@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { APPROVAL_MODIFY, APPROVAL_STOP, OFFICIAL_AGENTS, Secretary, correctedRequest, type LlmProvider, type PendingTalkApproval, type Repository } from '../src/index.js';
+import { APPROVAL_STOP, OFFICIAL_AGENTS, Secretary, correctedRequest, type LlmProvider, type PendingTalkApproval, type Repository } from '../src/index.js';
 
 const agent = OFFICIAL_AGENTS.find((a) => a.id === 'scheduling')!;
 
@@ -30,7 +30,7 @@ function world(opts: { correction?: boolean; route?: string; pendingAt?: string 
     async complete(req: { messages: { role: string; content: string }[] }) {
       const system = req.messages[0]?.content ?? '';
       if (system.includes('承認を待っています')) return { text: JSON.stringify({ correction: opts.correction ?? false }), tokensUsed: 1 };
-      if (system.startsWith('依頼に最も合う業務')) return { text: opts.route ?? 'none', tokensUsed: 1 };
+      if (system.startsWith('秘書への頼みを読み取り')) return { text: opts.route ?? 'none', tokensUsed: 1 };
       return { text: 'わかりました', tokensUsed: 1 };
     },
   } as unknown as LlmProvider;
@@ -45,10 +45,9 @@ function world(opts: { correction?: boolean; route?: string; pendingAt?: string 
   return { s, rejected, started };
 }
 
-test('取りやめと直しの言い方', () => {
+test('取りやめの言い方と、直しの頼みの入れ方', () => {
   for (const t of ['やめて', 'やっぱりやめて', '公開しないで', '中止して', 'キャンセルしてください']) assert.ok(APPROVAL_STOP.test(t), t);
   for (const t of ['会議をやめてもいいか教えて', 'やめておく理由は？']) assert.ok(!APPROVAL_STOP.test(t), t);
-  for (const t of ['期限は来週にして', '題名を「休診のご案内」に変えて', 'ポップアップは外して']) assert.ok(APPROVAL_MODIFY.test(t), t);
   assert.deepEqual(correctedRequest({ request: 'お知らせを出して', title: 'x' }, '期限は来週にして'), { request: 'お知らせを出して\n\n直し: 期限は来週にして', title: 'x' });
 });
 
@@ -61,7 +60,7 @@ test('「やめて」は、本人が判断する承認待ちを却下する（�
 });
 
 test('直しの頼みは、承認を却下して、もとの依頼に直しを足して同じ業務をやり直す', async () => {
-  const w = world({ correction: true });
+  const w = world({ correction: true, route: JSON.stringify({ to: 'approval-fix', changes: true }) });
   const reply = await w.s.respond('t', 'u1', '期限は来週にして');
   assert.deepEqual(w.rejected, [{ approvalId: 'ap1', comment: '期限は来週にして' }]);
   assert.equal(w.started[0]?.agentId, agent.id);

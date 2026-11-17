@@ -12,9 +12,8 @@ import { withCompartments } from '../engine/run-access.js';
 import type { Repository } from '../repository/types.js';
 import type { WorkspaceConnector } from '../connectors/types.js';
 import { addDays, jst, ymd } from '../connectors/mock.js';
-import { MAIL_CHECK, MAIL_SEARCH } from './mail.js';
 import {
-  DO_NOT_REMEMBER, REMEMBER, WHAT_REMEMBERED, memoryTextOf, refusalMessage, refuseToRemember,
+  DO_NOT_REMEMBER, LEADING, TRAILING, memoryTextOf, refusalMessage, refuseToRemember,
 } from './memory.js';
 
 /** 「〜は覚えないで」から、覚えない言葉を取り出す。 */
@@ -48,6 +47,8 @@ export interface DirectQuery {
   excludes?: RegExp[];
   /** 権限区画。区画内のものは本人参照に限る（第16.3.4節）。 */
   compartment: string | null;
+  /** 層 2 の読み取りに見せる、答えられる範囲（第49.5節）。範囲の外の頼みに選ばせないため */
+  readHint?: string;
   answer(ctx: DirectQueryContext): Promise<DirectAnswer>;
 }
 
@@ -83,22 +84,31 @@ export interface EvidenceItem {
   cited?: boolean;
 }
 
-/** 照会ではなく作業の依頼であることを示す言い回し。 */
-const ACTION_WORDS = /調整|入れて|作って|作成|下書き|返信|起票|まとめ|送って|共有/;
+/** 定型の問いの終わり（「は？」「を教えて」「ある？」など）。頼みの全体の形を読むために使う。 */
+const ASK_TAIL = String.raw`(?:の?一覧)?\s*(?:は|を|って)?\s*(?:何|なに)?\s*(?:が|か)?\s*(?:ある|あります|どう|教えて|見せて|確認して|知りたい|何件|いくつ|何通)?(?:か|ですか|ますか|なってる|なっていますか)?(?:ください)?\s*[？?。！!]*\s*$`;
 
 /**
- * 定型の照会にしては長い依頼（仕様書 第10.9.2節）。
+ * 予定の照会の定型（「今日の予定は？」「今週のスケジュールを見せて」「次の予定は？」）。頼みの全体がこの形のときだけ当てる（第49.4節）。
  *
- * @remarks
- * 層 1 は「今日の予定は？」のような短い照会のためのもの。長い依頼に「予定」「スケジュール」が入っていても、定型の答えを返さない。
- * 2026-09-26 に、出張の行程を頼んだ長い依頼に「今日の予定はありません」と答えた
+ * @remarks 「今週の予定の詳細を教えて」「10 月 1 日の出張の行程」のような形の違う頼みは、層 2 の読み取りが選ぶ
  */
-// @wordlist 形を読む（第49.4節）
-const LONG_REQUEST = /^[\s\S]{40,}$/;
-
-/** 今日・明日・今週のほかの日を指す言い方。定型の予定の照会は、この 3 つしか答えられない。 */
-// @wordlist 形を読む（第49.4節）
-const OTHER_DAY = /\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}\/\d{1,2}|来週|来月|再来|昨日|先週/;
+// @wordlist 定型（第49.4節）
+const SCHEDULE_ASK = new RegExp(String.raw`^\s*(?:(?:今日|きょう|本日|明日|あした|あす|今週|次)の)?(?:予定|スケジュール)` + ASK_TAIL);
+/** 未読のメールの件数の定型（「未読のメールは何件？」）。 */
+// @wordlist 定型（第49.4節）
+const UNREAD_ASK = new RegExp(String.raw`^\s*(?:未読(?:の)?メール|メールの未読|未読)` + ASK_TAIL);
+/** 今日のタスクの定型（「今日のタスクは？」）。 */
+// @wordlist 定型（第49.4節）
+const TASKS_ASK = new RegExp(String.raw`^\s*(?:今日の)?(?:タスク|ToDo|やること)` + ASK_TAIL, 'i');
+/** 承認待ちの定型（「承認待ちはある？」）。 */
+// @wordlist 定型（第49.4節）
+const APPROVALS_ASK = new RegExp(String.raw`^\s*(?:承認待ち|承認(?:が)?(?:要る|必要な)もの|確認すること)` + ASK_TAIL);
+/** 覚えていることの一覧の定型（「何を覚えてる？」「覚えていることを見せて」）。 */
+// @wordlist 定型（第49.4節）
+const MEMORY_LIST_ASK = new RegExp(String.raw`^\s*(?:(?:私|わたし)(?:のこと)?(?:について)?(?:は|、)?\s*)?(?:何を覚えて(?:る|いる|います)|覚えている(?:こと)?|記憶(?:の一覧|していること)?)` + ASK_TAIL);
+/** 実行の状況の定型（「実行の状況は？」）。 */
+// @wordlist 定型（第49.4節）
+const RUNS_ASK = new RegExp(String.raw`^\s*(?:実行(?:の)?状況|業務の(?:状況|進み具合|進捗)|進捗|最近の実行)` + ASK_TAIL);
 
 /** 接続口の値の出どころを根拠の 1 行目に示す。ダミーを本物と取り違えないため。 */
 export function sourceNote(connector: WorkspaceConnector, tenantId: string): { label: string; value: string }[] {
@@ -114,6 +124,16 @@ const md = (iso: string) =>
   new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', weekday: 'short' })
     .format(new Date(iso));
 
+/**
+ * 予定 1 件の行（本文の箇条書き）。終日の予定は時刻を出さない（0 時と出さない）。
+ *
+ * @param withDay 日付も出すか（今日の予定なら時刻だけ）
+ */
+export function eventLine(e: { title: string; start: string; end: string; location: string | null; allDay?: boolean }, withDay: boolean): string {
+  const when = e.allDay ? '終日' : `${hm(e.start)}〜${hm(e.end)}`;
+  return `- ${withDay ? `${md(e.start)} ` : ''}${when}　${e.title}${e.location ? `（${e.location}）` : ''}`;
+}
+
 /** 予定を照会する期間。「今日」「明日」「今週」を言葉から決める。 */
 function rangeOf(message: string): { label: string; from: string; to: string } {
   const today = ymd(new Date());
@@ -126,8 +146,8 @@ function rangeOf(message: string): { label: string; from: string; to: string } {
 const schedule: DirectQuery = {
   id: 'calendar-range',
   label: '予定の確認',
-  patterns: [/予定|スケジュール/],
-  excludes: [ACTION_WORDS, LONG_REQUEST, OTHER_DAY],
+  patterns: [SCHEDULE_ASK],
+  readHint: '今日・明日・今後 7 日間の予定と、次の予定だけを答えられる。ほかの日（来週の金曜・〇月〇日など）は答えられない',
   compartment: null,
   async answer(ctx) {
     const range = rangeOf(ctx.message);
@@ -138,44 +158,39 @@ const schedule: DirectQuery = {
     if (wantsNext) {
       const next = events.find((e) => Date.parse(e.start) > Date.now());
       return {
-        text: next ? `次の予定は ${md(next.start)} ${hm(next.start)} からの「${next.title}」です。`
+        text: next ? `次の予定は ${md(next.start)}${next.allDay ? '（終日）' : ` ${hm(next.start)} から`}の「${next.title}」です。${next.location ? `場所は ${next.location} です。` : ''}`
           : `${range.label}、この後の予定はありません。`,
-        evidence: [...sourceNote(ctx.connector, ctx.tenantId),
-          ...(next ? [{ label: hm(next.start), value: `${next.title}（${next.location ?? '場所未設定'}）` }] : [])],
+        evidence: sourceNote(ctx.connector, ctx.tenantId),
       };
     }
     if (events.length === 0) {
       return { text: `${range.label}の予定はありません。`, evidence: sourceNote(ctx.connector, ctx.tenantId) };
     }
+    // 予定の中身は本文に並べる。「根拠」に隠すと、件数しか見えない（2026-11-17。「詳細を表示して」でも同じ答えだった）
     return {
-      text: `${range.label}の予定は ${events.length} 件です。`,
-      evidence: [...sourceNote(ctx.connector, ctx.tenantId), ...events.map((e) => ({
-        label: range.label === '今日' ? hm(e.start) : `${md(e.start)} ${hm(e.start)}`,
-        value: e.title,
-      }))],
+      text: [`${range.label}の予定は ${events.length} 件です。`, '', ...events.map((e) => eventLine(e, range.label !== '今日'))].join('\n'),
+      evidence: sourceNote(ctx.connector, ctx.tenantId),
     };
   },
 };
-
-/** 人の連絡先を尋ねる言葉。「メールアドレス」は未読メールの問いではない（名刺を探す問い。第27.9節）。 */
-const CONTACT_WORDS = /メールアドレス|メアド|アドレス|連絡先/;
 
 /** 未読メールの件数を返す。 */
 const unreadMail: DirectQuery = {
   id: 'mail-unread',
   label: '未読メールの確認',
-  patterns: [/メール|受信/],
-  // 「チェックして」「大事なメールある？」は件数ではなく中身の確認（秘書がその場で振り分けて案内する。第10.9.6節）。
-  // 「〇〇のメールを探して」は探す依頼（調べものが Gmail とナレッジの整理を探す。第10.9.6節「メールを探す」）
-  excludes: [ACTION_WORDS, LONG_REQUEST, CONTACT_WORDS, MAIL_CHECK, MAIL_SEARCH],
+  // 「大事なメールある？」「〇〇のメールを探して」は件数の問いではない。形の違う頼みは層 2 の読み取りが選ぶ（第49.5節）
+  patterns: [UNREAD_ASK],
+  readHint: '未読の件数を尋ねる頼みだけに選ぶ（新しい未読 5 通の差出人と件名も並べる）。中身を見て大事なものを案内してほしい頼み（確認・チェック・大事なもの）はメールの確認、特定の相手・件名のメールを探す頼みは調べもの',
   compartment: null,
   async answer(ctx) {
     // 受信トレイの「メイン」だけを数える。振り分けられたものと迷惑メールは数えない（仕様書 第10.9.2節）
     const { total, more, items } = await ctx.connector.mail.unread({ tenantId: ctx.tenantId, userId: ctx.userId }, { limit: 5 });
+    // 新しいもの（5 件まで）の差出人と件名は本文に並べる（「根拠」に隠さない）
+    const from = (m: { from: string }) => m.from.replace(/\s*<.*>$/, '').replace(/^"|"$/g, '');
     return {
-      text: total === 0 ? '受信トレイに未読のメールはありません。' : `受信トレイに未読のメールが ${total} 件${more ? '以上' : ''}あります。`,
-      evidence: [...sourceNote(ctx.connector, ctx.tenantId),
-        ...items.map((m) => ({ label: m.from.replace(/\s*<.*>$/, '').replace(/^"|"$/g, ''), value: m.subject }))],
+      text: total === 0 ? '受信トレイに未読のメールはありません。'
+        : [`受信トレイに未読のメールが ${total} 件${more ? '以上' : ''}あります。`, ...(items.length ? ['', ...items.map((m) => `- ${from(m)}: ${m.subject}`), ...(total > items.length ? [`- ほか ${total - items.length} 件${more ? '以上' : ''}`] : [])] : [])].join('\n'),
+      evidence: sourceNote(ctx.connector, ctx.tenantId),
     };
   },
 };
@@ -184,8 +199,8 @@ const unreadMail: DirectQuery = {
 const todayTasks: DirectQuery = {
   id: 'tasks-today',
   label: '今日のタスク',
-  patterns: [/タスク|ToDo|やること/i],
-  excludes: [ACTION_WORDS, LONG_REQUEST],
+  patterns: [TASKS_ASK],
+  readHint: '今日までが期限の ToDo（タスク・やること）の一覧',
   compartment: null,
   async answer(ctx) {
     const items = await ctx.connector.tasks.list({ tenantId: ctx.tenantId, userId: ctx.userId }, {});
@@ -195,9 +210,8 @@ const todayTasks: DirectQuery = {
     return {
       text: due.length === 0
         ? '今日が期限のタスクはありません。'
-        : `今日までのタスクが ${due.length} 件あります（うち期限切れ ${overdue.length} 件）。`,
-      evidence: [...sourceNote(ctx.connector, ctx.tenantId),
-        ...due.map((t) => ({ label: overdue.includes(t) ? '期限切れ' : '今日', value: t.title }))],
+        : [`今日までのタスクが ${due.length} 件あります（うち期限切れ ${overdue.length} 件）。`, '', ...due.map((t) => `- ${overdue.includes(t) ? '（期限切れ）' : ''}${t.title}`)].join('\n'),
+      evidence: sourceNote(ctx.connector, ctx.tenantId),
     };
   },
 };
@@ -213,7 +227,7 @@ const todayTasks: DirectQuery = {
 const conversationForget: DirectQuery = {
   id: 'conversation-forget',
   label: '会話を残さない',
-  patterns: [/(この|今の|いまの|さっきの)(会話|話|やり取り|やりとり)[はを]?\s*(残さないで|記録しないで|保存しないで|消して)/],
+  patterns: [/^\s*(この|今の|いまの|さっきの)(会話|話|やり取り|やりとり)[はを]?\s*(残さないで|記録しないで|保存しないで|消して)(ください|ね|ほしい)?\s*[。！!]?\s*$/],
   compartment: null,
   async answer(ctx) {
     const since = new Date(Date.now() - 60 * 60_000).toISOString();
@@ -242,9 +256,10 @@ const conversationForget: DirectQuery = {
 const memoryRemember: DirectQuery = {
   id: 'memory-remember',
   label: '覚えておく',
-  patterns: [REMEMBER],
+  // 「〇〇を覚えておいて」「覚えて: 〇〇」のように、頼みの前か後ろに付いた定型だけに当てる
+  patterns: [TRAILING, LEADING],
   // 「覚えないで」と「何を覚えてる？」は別の照会で扱う
-  excludes: [DO_NOT_REMEMBER, WHAT_REMEMBERED],
+  excludes: [DO_NOT_REMEMBER, MEMORY_LIST_ASK],
   compartment: null,
   async answer(ctx) {
     const settings = await ctx.repo.getUserSettings(ctx.tenantId, ctx.userId);
@@ -366,7 +381,7 @@ const textSize: DirectQuery = {
 const memoryList: DirectQuery = {
   id: 'memory-list',
   label: '覚えていることの確認',
-  patterns: [WHAT_REMEMBERED],
+  patterns: [MEMORY_LIST_ASK],
   compartment: null,
   async answer(ctx) {
     const items = await ctx.repo.listMemories(ctx.tenantId, ctx.userId);
@@ -383,7 +398,8 @@ const memoryList: DirectQuery = {
 const pendingApprovals: DirectQuery = {
   id: 'pending-approvals',
   label: '承認待ちの確認',
-  patterns: [/承認/, /確認すること/],
+  patterns: [APPROVALS_ASK],
+  readHint: '本人が判断する承認待ちの件数と一覧',
   compartment: null,
   async answer(ctx) {
     // 本人が判断できる承認だけ（承認トレイと同じ規則。ほかの人の業務の承認の中身を見せない。仕様書 第6.2.1節）
@@ -406,7 +422,8 @@ const recentRuns: DirectQuery = {
   id: 'recent-runs',
   label: '実行状況の確認',
   // 「あれ、どうなった」は件数ではなく、覚えていることから答える（第10.7.3節）。ここでは拾わない
-  patterns: [/実行/, /状況/, /進捗/],
+  patterns: [RUNS_ASK],
+  readHint: '本人が頼んだ業務の、最近の実行の件数と状態。特定の頼みの結果の中身は答えられない',
   compartment: null,
   async answer(ctx) {
     // 本人が依頼した実行だけ（実行履歴の画面と同じ。ほかの人の実行は数えない）

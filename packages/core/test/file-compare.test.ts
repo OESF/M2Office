@@ -127,7 +127,7 @@ test('秘書: 修正版を渡して「前の版と比べて」と頼まれたら
     name: 'fake',
     complete: async (req: { messages: { content: string }[] }) => {
       const system = req.messages[0]!.content;
-      if (system.startsWith('依頼に最も合う業務')) return { text: 'contract-review', tokensUsed: 1 };
+      if (system.startsWith('秘書への頼みを読み取り')) return { text: 'contract-review', tokensUsed: 1 };
       if (system.includes('入力を JSON のオブジェクトで返して')) return { text: JSON.stringify({ __comparePrevious: compare }), tokensUsed: 1 };
       return { text: '', tokensUsed: 1 };
     },

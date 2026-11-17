@@ -13,51 +13,28 @@ import { proposalLine, statusLine } from '../inventory/watch.js';
 import { dateIn } from '../cards/service.js';
 import type { EvidenceItem } from './catalog.js';
 
-/** 在庫の数を指す言葉。 */
-const STOCK = /在庫|残り|残数|残量|何個|いくつ残|どれくらい(ある|残)/;
-/** 尋ねる言い回し。 */
-const ASKS = /[?？]|教えて|知りたい|調べて|確認して|ある[?？]?$|ありますか|は$|は[?？]?$|って$|何個|いくつ|どれくらい/;
-/** 足りなくなりそうなものを尋ねる言い回し。 */
-const LOW = /足りなく|少ない|少なく|残りわずか|切れそう|なくなりそう|無くなりそう|欠品|発注(した|する)?ほうが|補充が(必要|要る)/;
-/** 期間の記録を尋ねる言い回し（調べものへ回す）。 */
-const HISTORY = /先週|先月|今週|今月|昨日|おととい|一昨日|去年|期間|履歴|記録|推移|使用量|使った量|いつ|何回|入出庫/;
-/** 記録を頼む言い回し。 */
-const RECORD_VERB = /入庫|入荷|仕入れた|届いた|納品され|補充した|使った|使用した|消費した|売れた|販売した|出庫|出した|捨てた|廃棄した|移した|移動した|(記録|入庫|出庫)して/;
-/** 数と数え方（「2 箱」「1 本」「３個」）。 */
-// @wordlist 形を読む（第49.4節）
-const QTY = /[0-9０-９]+(\.[0-9]+)?\s*(個|本|箱|冊|枚|セット|袋|缶|回|台|ケース|パック|ダース|kg|ｋｇ|g|ml|L|包|錠|瓶|巻|組|足|着|点)/;
 
-/** 発注を頼む言い回し。 */
-const ORDER = /(発注|注文)(して|しておいて|しといて|お願い|を頼|したい|をかけて)/;
 
-/** 予約の取り置き・メニューで使う品目を頼む言い回し（第29.13節）。 */
-const RESERVE = /取り置(いて|き|いといて)|引き当て|(コース|メニュー|プラン|施術)では.*(使う|使います|使わない|使いません)/;
 
 /** 在庫の依頼の種類。 */
+/**
+ * 在庫の頼みの種類（層 2 の読み取りが決める。第29.15節・第49.5節）。
+ *
+ * `stock`（数を尋ねる）・`low`（足りなくなりそうなもの）・`history`（期間の記録）・`record`（入庫・使用・移動を頼む）・
+ * `order`（発注を頼む。発注のメールは承認のあとに送る）・`reserve`（予約の取り置き・メニューで使う品目）
+ */
 export type InventoryRequest = 'stock' | 'low' | 'history' | 'record' | 'order' | 'reserve';
 
-/**
- * 在庫についての依頼かを見分ける。
- *
- * @returns `stock`（数を尋ねる）・`low`（足りなくなりそうなもの）・`history`（期間の記録）・`record`（入庫・使用・移動を頼む）・
- *   `order`（発注を頼む。発注のメールは承認のあとに送る）・`reserve`（予約の取り置き・メニューで使う品目）。
- *   在庫の依頼でなければ `null`
- * @remarks 在庫管理を使えるかは呼ぶ側が確かめる。「使った」だけ（数も在庫の言葉も無い）では記録の依頼にしない
- */
-export function inventoryRequest(message: string): InventoryRequest | null {
-  const m = message.normalize('NFKC').trim();
-  const stockWord = STOCK.test(m) || /在庫/.test(m);
-  if (ORDER.test(m)) return 'order';
-  if (RESERVE.test(m) && !/[?？]$/.test(m)) return 'reserve';
-  if (RECORD_VERB.test(m) && (QTY.test(m) || /在庫/.test(m)) && !/[?？]$/.test(m) && !/何個|いくつ/.test(m)) return 'record';
-  if (LOW.test(m) && (stockWord || /もの|品/.test(m))) return 'low';
-  // 「先週のコピー用紙の使用を教えて」: 期間と入出庫の言葉がそろった問い
-  if (HISTORY.test(m) && /使用|使った|入庫|入荷|出庫|入出庫|仕入/.test(m) && ASKS.test(m)) return 'history';
-  if (!stockWord) return null;
-  if (HISTORY.test(m)) return 'history';
-  if (ASKS.test(m) || /在庫$/.test(m)) return 'stock';
-  return null;
-}
+/** 在庫の頼みの種類と、読み取りに見せる説明。 */
+export const INVENTORY_KINDS: { kind: InventoryRequest; text: string }[] = [
+  { kind: 'stock', text: '在庫の数・残りを尋ねる' },
+  { kind: 'low', text: '足りなくなりそうなもの・残りわずかなものを尋ねる' },
+  { kind: 'history', text: '期間の入出庫・使用の記録を尋ねる' },
+  { kind: 'record', text: '入庫・使用・移動・廃棄を記録してほしい（数を言って「使った」「届いた」など）' },
+  { kind: 'order', text: '在庫を発注してほしい（発注のメールは承認の後に送る）' },
+  { kind: 'reserve', text: '予約の取り置き・メニューで使う品目を決めてほしい' },
+];
+
 
 /** 問いから品目を指す言葉を取り出す（「コピー用紙の在庫は？」→「コピー用紙」）。無ければ空（全品目）。 */
 export function stockQuery(message: string): string {

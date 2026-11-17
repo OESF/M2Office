@@ -1,6 +1,6 @@
 /**
  * @file 秘書がアプリの一覧を変える処理の単体テスト（仕様書 第6.1.1.2節）。入れる（言われた URL・確かめた公式サイト）・消す・
- * Google のサービスを出す・出さない・尋ねる・アプリの一覧の話でなければ回さない。
+ * Google のサービスを出す・出さない・尋ねる。アプリの一覧の頼みかは秘書の読み取りが決める（第49.5節）。
  */
 
 import { test } from 'node:test';
@@ -21,9 +21,8 @@ function setup(launcher: UserSettings['launcher'] = { hidden: [], links: [] }) {
 }
 const says = (o: Record<string, unknown>): LlmProvider => ({ name: 'gemini', complete: async () => ({ text: JSON.stringify(o), tokensUsed: 1 }) });
 
-test('アプリの一覧の話でなければ回さない', async () => {
+test('アプリの一覧の頼みかは読み取りが決め、推論が「無し」と読めば何もしない', async () => {
   const { repo } = setup();
-  assert.equal(await answerLauncher({ repo, llm: says({ action: 'add' }) }, 't', 'u', '明日の予定は？'), null);
   assert.equal(await answerLauncher({ repo, llm: says({ action: 'none' }) }, 't', 'u', 'アプリの一覧って何？の説明をして'), null);
 });
 

@@ -221,12 +221,3 @@ test('People API: ラベルを探して無ければ作り、M2Office の番号�
   assert.deepEqual(fromGooglePerson({}).names, []);
 });
 
-test('秘書: 「〇〇さんを連絡先に入れて」は名刺の修正に回す（予定やメールの依頼は回さない）', async () => {
-  const { contactRequest } = await import('../src/secretary/contacts.js');
-  assert.equal(contactRequest('ミライ工業の山本さんを連絡先に入れて'), 'fix');
-  assert.equal(contactRequest('田中さんを Google の電話帳に登録して'), 'fix');
-  assert.equal(contactRequest('この名刺を Google の連絡先に追加して'), 'fix');
-  assert.equal(contactRequest('田中さんを連絡先から外して'), 'fix');
-  assert.equal(contactRequest('田中さんとの予定を入れて'), null);
-  assert.equal(contactRequest('連絡先に入れておいて'), null);
-});

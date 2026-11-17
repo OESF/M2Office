@@ -48,21 +48,41 @@ export function siteKeyOfAgent(agentId: string): string | null {
 /** 当てるために、全角と半角・大文字と小文字・空白をそろえる。 */
 const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, '');
 
-/** 名前の終わりの一般的な言葉（「みどり皮膚科」でも「みどり皮膚科クリニック」に当てる）。 */
-const GENERIC_TAIL = /(クリニック|医院|病院|診療所|歯科医院|株式会社|有限会社|のサイト|のホームページ|サイト|ホームページ|ウェブサイト|webサイト)$/i;
-const GENERIC_HEAD = /^(株式会社|有限会社|医療法人(社団|財団)?)/;
-
-/** サイトの言い方の一覧（3 文字以上のものだけ）。 */
+/** サイトの言い方の一覧（そろえた名前のうち 3 文字以上のもの）。 */
 export function siteAliases(...names: (string | null | undefined)[]): string[] {
   const out = new Set<string>();
   for (const raw of names) {
     if (!raw) continue;
     const n = norm(raw);
-    for (const v of [n, n.replace(GENERIC_TAIL, ''), n.replace(GENERIC_HEAD, ''), n.replace(GENERIC_HEAD, '').replace(GENERIC_TAIL, '')]) {
-      if (v.length >= 3) out.add(v);
-    }
+    if (n.length >= 3) out.add(n);
   }
   return [...out];
+}
+
+/** 2 つの文に続けて共通に出てくる部分の、いちばん長いものの長さ。 */
+function longestCommon(a: string, b: string): number {
+  let best = 0;
+  const prev = new Array<number>(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = 0;
+    for (let j = 1; j <= b.length; j++) {
+      const keep = prev[j]!;
+      prev[j] = a[i - 1] === b[j - 1] ? diag + 1 : 0;
+      if (prev[j]! > best) best = prev[j]!;
+      diag = keep;
+    }
+  }
+  return best;
+}
+
+/**
+ * 頼みがその言い方を指しているか。言い方の半分以上（3 文字以上）が続けて頼みに出ていれば指しているとみなす。
+ *
+ * @remarks 名前の終わりの一般的な言葉（「クリニック」「株式会社」など）の一覧で外さない（第49.4節）。「みどり皮膚科」は「みどり皮膚科クリニック」を指す
+ */
+function mentions(message: string, alias: string): boolean {
+  const n = longestCommon(message, alias);
+  return n >= 3 && n * 2 >= alias.length;
 }
 
 /**
@@ -70,7 +90,11 @@ export function siteAliases(...names: (string | null | undefined)[]): string[] {
  */
 export function namedSite(message: string, sites: SiteOption[]): SiteOption | null {
   const m = norm(message);
-  const hits = sites.filter((s) => s.aliases.some((a) => m.includes(a)));
+  // 言い方がそのまま出ている所は、ほかのサイトの重なりに使わない（「blog.example」の「.example」で「site.example」に当てないため）
+  const exact = sites.filter((s) => s.aliases.some((a) => m.includes(a)));
+  let rest = m;
+  for (const s of exact) for (const a of s.aliases) rest = rest.split(a).join('\u0000');
+  const hits = [...exact, ...sites.filter((s) => !exact.includes(s) && s.aliases.some((a) => mentions(rest, a)))];
   return hits.length === 1 ? hits[0]! : null;
 }
 

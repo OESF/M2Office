@@ -13,8 +13,6 @@ import type { LlmProvider } from '../llm/provider.js';
 import { aiAvailable } from '../llm/unconfigured.js';
 import type { EvidenceItem } from './catalog.js';
 
-/** アプリの一覧の話か（当たったときだけ推論に読ませる）。 */
-const LAUNCHER_WORD = /(アプリ(の)?(一覧|メニュー|ランチャー)|アプリ一覧|格子のボタン|ランチャー|リンク集|ブックマーク)/;
 
 /** Google のサービスの呼び方（秘書の答えに使う）。 */
 const SERVICE_NAMES: Record<(typeof GOOGLE_APP_IDS)[number], string> = {
@@ -53,12 +51,11 @@ function parseObject(text: string): Record<string, unknown> | null {
 const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[\s　「」『』（）()・]/g, '');
 
 /**
- * アプリの一覧の頼みに応える。アプリの一覧の話でなければ `null`（ふつうの会話に回す）。
+ * アプリの一覧の頼みに応える（アプリの一覧の頼みかは層 2 の読み取りが決める。第49.5節）。読めなければ `null`（ふつうの会話に回す）。
  *
  * @remarks 推論が使えないときは、URL がそのまま書かれた「入れて」だけを扱う
  */
 export async function answerLauncher(deps: LauncherDeps, tenantId: string, userId: string, message: string): Promise<LauncherAnswer | null> {
-  if (!LAUNCHER_WORD.test(message)) return null;
   const prefs = await deps.repo.getUserSettings(tenantId, userId);
   const current = prefs.launcher;
   const save = async (next: typeof current) => {

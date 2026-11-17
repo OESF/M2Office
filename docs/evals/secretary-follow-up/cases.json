@@ -3,7 +3,7 @@
  "title": "秘書の続きの頼みの問題集（仕様書 第10.7.4.5節、ADR-0147）",
  "description": "続きの頼み（それも・さっきの・〇曜日に頼んだ）・開いている画面・似た業務の取り違え・続きに見えて新しい頼みを含む 100 問。業種を問わない例にしている。",
  "expectKeys": {
-  "route": "選ぶべき先。業務の ID・none（秘書が自分で答える）・direct:<照会の ID>（決め打ちの照会）",
+  "route": "選ぶべき先。業務の ID・none（秘書が自分で答える）・direct:<照会の ID>（決め打ちの照会）・open（話に出たものを開く。第 0.604.0 版で分けた）",
   "answerContains": "秘書の答え（層 3）に含まれるべき文字（話に出たもののリンクなど）",
   "contextContains": "業務に渡す材料に含まれるべき文字（開いている 1 件の ID など）",
   "weekday": "history のやり取りを置く曜日（今日より前の直近のその曜日）"
@@ -720,7 +720,7 @@
    ],
    "message": "さっきのメールを開いて",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "https://mail.google.com/mail/u/0/#all/t-a1"
     ]
@@ -757,7 +757,7 @@
    ],
    "message": "さっきのメールのリンクをちょうだい",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "https://mail.google.com/mail/u/0/#all/t-a2"
     ]
@@ -794,7 +794,7 @@
    ],
    "message": "先ほどのメール、どこにある？",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "https://mail.google.com/mail/u/0/#all/t-a3"
     ]
@@ -831,7 +831,7 @@
    ],
    "message": "さっきの見つけたメールをもう一度見せて",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "https://mail.google.com/mail/u/0/#all/t-a4"
     ]
@@ -868,7 +868,7 @@
    ],
    "message": "そのメールを開きたい",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "https://mail.google.com/mail/u/0/#all/t-a5"
     ]
@@ -905,7 +905,7 @@
    ],
    "message": "さっきのメールのリンク",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "https://mail.google.com/mail/u/0/#all/t-a6"
     ]
@@ -942,7 +942,7 @@
    ],
    "message": "先ほどのメールを開いて",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "https://mail.google.com/mail/u/0/#all/t-a7"
     ]
@@ -979,7 +979,7 @@
    ],
    "message": "さっきのメール、開ける？",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "https://mail.google.com/mail/u/0/#all/t-a8"
     ]
@@ -1016,7 +1016,7 @@
    ],
    "message": "さっきの資料を開いて",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "/library/L-b0"
     ]
@@ -1053,7 +1053,7 @@
    ],
    "message": "その資料のリンクを",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "/library/L-b1"
     ]
@@ -1090,7 +1090,7 @@
    ],
    "message": "先ほどの資料はどこ？",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "/library/L-b2"
     ]
@@ -1127,7 +1127,7 @@
    ],
    "message": "さっきの資料、もう一度",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "/library/L-b3"
     ]
@@ -1164,7 +1164,7 @@
    ],
    "message": "さっき見つけた資料を開きたい",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "/library/L-b4"
     ]
@@ -1201,7 +1201,7 @@
    ],
    "message": "その資料を見せて",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "/library/L-b5"
     ]
@@ -1238,7 +1238,7 @@
    ],
    "message": "先ほど見つけた資料のリンク",
    "expect": {
-    "route": "none",
+    "route": "open",
     "answerContains": [
      "/library/L-b6"
     ]

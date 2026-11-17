@@ -9,8 +9,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { OFFICIAL_AGENTS, Secretary, type LlmProvider, type Repository } from '../src/index.js';
 
-/** 推論の代わり。渡されたメッセージを控える。 */
-function fakeLlm() {
+/** 推論の代わり。渡されたメッセージを控える。頼みの読み取り（層 2）には `route` を返し、控えない。 */
+function fakeLlm(route = 'answer') {
   const seen: { role: string; content: string }[][] = [];
   return {
     name: 'fake',
@@ -18,6 +18,7 @@ function fakeLlm() {
     async complete(req: { messages: { role: string; content: string }[] }) {
       // 言い換えを考えさせる呼び出し（第11.7.7.0節）は数えない
       if (String(req.messages.at(-1)?.content ?? '').startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
+      if (String(req.messages[0]?.content ?? '').startsWith('秘書への頼みを読み取り')) return { text: JSON.stringify({ to: route }), tokensUsed: 1 };
       seen.push(req.messages);
       return { text: 'わかりました', tokensUsed: 3 };
     },
@@ -114,7 +115,8 @@ test('照会には取り次がない。作業の依頼には取り次ぐ（仕�
 
   // 作業の依頼は、これまでどおり取り次ぐ
   const doIt = fake();
-  const s2 = new Secretary({ repo: doIt.repo, llm: fakeLlm(), connector: {} as never, agents: [minutes] });
+  // 照会か作業かは、頼みの読み取りが決める（言葉の一覧で決めない。第49.5節）
+  const s2 = new Secretary({ repo: doIt.repo, llm: fakeLlm('minutes'), connector: {} as never, agents: [minutes] });
   const told = await s2.respond('t', 'u1', 'この会議の議事録をまとめてください');
   assert.equal(told.suggestedAgent?.id, 'minutes');
 });

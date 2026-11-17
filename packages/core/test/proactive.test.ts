@@ -102,7 +102,8 @@ function secretary(todoAnswer: string, proactivity: 'low' | 'normal' = 'normal')
     complete: async (req: { messages: { content: string }[] }) => {
       const sys = req.messages[0]?.content ?? '';
       if (sys.startsWith('本人の発言から、本人自身がこれからする用事')) return { text: todoAnswer, tokensUsed: 1 };
-      if (sys.startsWith('依頼に最も合う業務')) return { text: 'none', tokensUsed: 1 };
+      // 頼みの読み取り（第49.5節）の見本: 秘書への頼み（〜ください）でなければ、本人の用事を述べたと読む
+      if (sys.startsWith('秘書への頼みを読み取り')) return { text: JSON.stringify({ to: 'answer', ownTodo: !/ください/.test(String(req.messages.at(-1)?.content)) }), tokensUsed: 1 };
       return { text: 'わかりました', tokensUsed: 1 };
     },
   } as unknown as LlmProvider;

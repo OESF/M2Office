@@ -9,31 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TENANT_SETTINGS } from '@m2office/shared';
 import { InventoryService, MemoryInventoryStore, type Repository } from '../src/index.js';
-import { answerStock, bareStockQuestion, findPlaces, inventoryRequest, stockQuery } from '../src/secretary/inventory.js';
-
-test('在庫の依頼の見分け: 数の問い・残りわずか・期間の記録・記録の依頼', () => {
-  const cases: [string, string | null][] = [
-    ['コピー用紙の在庫は', 'stock'],
-    ['ハンドクリームの在庫は？', 'stock'],
-    ['コピー用紙は何個ある？', 'stock'],
-    ['トナーは残りいくつ？', 'stock'],
-    ['在庫を教えて', 'stock'],
-    ['足りなくなりそうなものは？', 'low'],
-    ['残りわずかの品を教えて', 'low'],
-    ['先週のコピー用紙の使用を教えて', 'history'],
-    ['今月の入庫の記録は？', 'history'],
-    ['A4 用紙を 2 箱入庫して', 'record'],
-    ['トナーを発注して', 'order'],
-    ['コピー用紙を注文しておいて', 'order'],
-    ['トナーを１本使った', 'record'],
-    ['体験セットを 2 セット店頭に移した', 'record'],
-    ['このテンプレートを使った', null],
-    ['会議の資料を 3 部出した', null],
-    ['今日の予定は？', null],
-    ['就業規則の残業の上限は？', null],
-  ];
-  for (const [message, want] of cases) assert.equal(inventoryRequest(message), want, message);
-});
+import { answerStock, bareStockQuestion, findPlaces, stockQuery } from '../src/secretary/inventory.js';
 
 test('問いから品目の言葉を取り出す', () => {
   assert.equal(stockQuery('コピー用紙の在庫は？'), 'コピー用紙');

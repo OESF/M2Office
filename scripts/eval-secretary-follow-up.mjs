@@ -14,6 +14,12 @@
  *   npm run eval:secretary-follow-up -- --stub        # 見本の推論で仕組みだけを確かめる（費用なし・結果は残さない）
  *   npm run eval:secretary-follow-up -- --yes --only A # 分類（A〜F）か ID で絞る
  *   npm run eval:secretary-follow-up -- --yes --tenant oesf # その会社の推論（管理者ページで入れた会社の鍵）で回す
+ *   npm run eval:secretary-follow-up -- --yes --after --set secretary-routing --tenant oesf # 取り次ぎの問題集（第49.10節）で回す
+ *
+ * `--set <名前>` は `docs/evals/<名前>/cases.json` を使う（既定は secretary-follow-up）。問題の `connections` は会社の接続の名前、
+ * `expect.routeIn` はどれかに回れば合格の先、`expect.notRoute` は回ってはならない先。先の `mail-check` はメールの確認、`open` は話に出たものを開く。
+ * `features` は使える機能（inventory・notices・reservations・cards・approvals・plans・schedules）。`expect.read` は読み取りが選ぶべき先（`inventory:stock` など。
+ * 機能は見本なので、扱いの中身は採点しない）、`expect.notRead` は選んではならない先（`inventory:*` のように頭で指せる）、`expect.ownTodo` は本人の用事と読むか。
  *
  * `--tenant <サブドメイン>` は、データベース（DATABASE_URL）からその会社を引き、アプリと同じ仕組み（TenantAiResolver）で
  * 会社の推論を開く。鍵は暗号化されたまま読み、この中で開くだけで、表に出さない（M2OFFICE_SECRET_KEY が要る）。
@@ -27,21 +33,22 @@ import { fileURLToPath } from 'node:url';
 import { tsImport } from 'tsx/esm/api';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const dir = join(root, 'docs/evals/secretary-follow-up');
+const setName = process.argv.includes('--set') ? process.argv[process.argv.indexOf('--set') + 1] : 'secretary-follow-up';
+const dir = join(root, 'docs/evals', setName);
 const argv = process.argv.slice(2);
 const stub = argv.includes('--stub');
 const only = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : null;
 
 const core = await tsImport('../packages/core/src/index.ts', import.meta.url);
 const {
-  Secretary, OFFICIAL_AGENTS, platformAi, StubLlmProvider, PostgresRepository, TenantAiResolver, secretBoxFromEnv, aiUsageMeterFromEnv,
+  Secretary, OFFICIAL_AGENTS, CARD_UPDATE, CARD_BULK_MAIL, platformAi, StubLlmProvider, PostgresRepository, TenantAiResolver, secretBoxFromEnv, aiUsageMeterFromEnv,
   withAiUsage, defaultGeminiModels, deploymentFromEnv, localLlmFromEnv,
 } = core;
 const tenantSub = argv.includes('--tenant') ? argv[argv.indexOf('--tenant') + 1] : null;
 
 const doc = JSON.parse(readFileSync(join(dir, 'cases.json'), 'utf8'));
 const cases = doc.cases.filter((c) => !only || c.category === only || c.id === only);
-console.log(`秘書の続きの頼みの評価: ${cases.length} 問`);
+console.log(`${doc.title ?? setName}: ${cases.length} 問`);
 if (!argv.includes('--yes') && !stub) {
   console.log('回すときは --yes を付けてください（GEMINI_API_KEY か、--tenant <サブドメイン> の会社の鍵が要ります。1 問で推論を 2〜4 回呼びます）。仕組みだけなら --stub。');
   process.exit(0);
@@ -116,12 +123,17 @@ function repoFor(c, now) {
     listConversationDays: async (_t, _u, since) => [...new Set(rows.filter((r) => r.createdAt >= since).map((r) => dayOf(r.createdAt)))].sort().reverse(),
     listConversationsBetween: async (_t, _u, from, to) => rows.filter((r) => r.createdAt >= from && r.createdAt < to),
     listRunsWithJobs: async () => [...runs].reverse(),
-    listActivePlans: async () => [],
+    // 動いている段取り（features に plans があるとき）
+    listActivePlans: async () => ((c.features ?? []).includes('plans') ? [{ id: 'p1', request: '出張の準備をして', status: 'running', question: null, context: '', createdAt: now.toISOString(), updatedAt: now.toISOString() }] : []),
+    listPlanSteps: async () => [],
     listPendingApprovals: async () => [],
     // 段取りを選んだら、先は plan として数える（2026-11-14 の 2 回目で、見本に無くて例外になった）
     createPlan: async () => undefined,
     saveUserSettings: async () => undefined,
-    listSchedules: async () => [],
+    // 本人の定時実行（features に schedules があるとき）
+    listSchedules: async () => ((c.features ?? []).includes('schedules') ? [{ id: 's1', tenantId: 't', userId: 'u', agentId: 'morning-brief', input: {}, rule: { kind: 'daily', time: '07:30' }, timezone: 'Asia/Tokyo', enabled: true, nextRunAt: now.toISOString(), lastRunAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() }] : []),
+    // 会社の接続（Slack など）。名前だけを持つ（読むだけの道具が 1 つある形）
+    listConnections: async () => (c.connections ?? []).map((name) => ({ id: name.toLowerCase(), name, tools: [{ name: 'read', description: '', risk: 'read' }] })),
   };
   return repo;
 }
@@ -129,7 +141,7 @@ function repoFor(c, now) {
 /** 見本の接続口。決め打ちの照会が呼ぶものに、空の答えを返す。 */
 const connector = {
   calendar: { list: async () => [], listEvents: async () => [] },
-  mail: { unreadCount: async () => 0, unread: async () => [], listUnread: async () => [], search: async () => [] },
+  mail: { unreadCount: async () => 0, unread: async () => ({ total: 0, more: false, items: [] }), listUnread: async () => [], search: async () => [] },
   tasks: { list: async () => [], create: async () => ({}) },
   sourceFor: () => 'mock',
 };
@@ -138,26 +150,51 @@ async function runCase(c, workingMemory) {
   const now = new Date();
   const repo = repoFor(c, now);
   const started = [];
+  // メールの画面の見本（メールの確認を選べるようにする）。中身は無い（一覧は読めない形で返す）
+  const empty = new Proxy({}, { get: () => async () => [] });
+  const mail = new Proxy({ store: empty }, { get: (o, k) => (k in o ? o[k] : async () => (k === 'overview' ? null : [])) });
+  // 機能の見本（読み取りの選べる先に出すため。扱いの中身は採点しない）
+  const f = new Set(c.features ?? []);
+  const anything = () => new Proxy({}, { get: () => async () => [] });
+  const reads = [];
+  let ownTodo = false;
   const s = new Secretary({
-    repo, llm, connector, agents: AGENTS, workingMemory,
+    repo, llm, connector, agents: [...AGENTS, ...(f.has('cards') ? [CARD_UPDATE, CARD_BULK_MAIL] : [])], workingMemory, mail,
+    onTrace: (_t, _u, action, target, detail) => { if (action === 'secretary.read') { reads.push(target); ownTodo = detail?.ownTodo === true; } },
+    ...(f.has('inventory') ? { inventory: { access: async () => true, service: anything() } } : {}),
+    // お知らせの見本: 本人に 1 件届いている
+    ...(f.has('notices') ? { notices: new Proxy({}, { get: (_o, k) => (k === 'forUser' ? async () => [{ id: 'n1', title: '年末調整の書類の提出', dueOn: null, daysLeft: null, authorName: '' }] : async () => []) }) } : {}),
+    ...(f.has('reservations') ? { reservations: { ...anything(), access: async () => true } } : {}),
+    ...(f.has('approvals') ? { approvals: { pending: async () => [{ approvalId: 'a1', runId: 'r-ap', agentId: 'document-draft', agentVersion: 1, agentName: '文書の作成', input: { request: 'お知らせの文書を作って' }, present: 'お知らせの文書', createdAt: now.toISOString(), conversation: false }], reject: async () => undefined } } : {}),
     startLookup: async (_t, _u, request, _f, context) => { started.push({ agentId: 'secretary-lookup', context: context ?? '' }); return { runId: 'r-new', already: false }; },
     startAgent: async (_t, _u, agent, input) => { started.push({ agentId: agent.id, context: JSON.stringify(input) }); return { runId: 'r-new', already: false }; },
   });
   let reply;
+  const began = Date.now();
   try {
     // AI の利用は、評価の用途として数える（会社の鍵で回すとき。第6.6.2節）
     reply = await withAiUsage({ userId: null, purpose: 'eval:secretary-follow-up' }, () => s.respond('t', 'u', c.message, undefined, c.screen ? { screen: c.screen } : {}));
   } catch (err) {
-    return { ok: false, got: `例外: ${err.message}` };
+    // 機能の見本で扱いが止まっても、読み取りの採点はする
+    if (!c.expect.read && !c.expect.notRead && c.expect.ownTodo === undefined) return { ok: false, got: `例外: ${err.message}` };
+    reply = { text: `（見本の機能で止まりました: ${err.message}）`, evidence: [] };
   }
   const direct = repo.audits.find((a) => a.action === 'secretary.direct')?.targetId;
   const planned = reply.lookup?.runId?.startsWith('plan:');
-  const got = started[0]?.agentId ?? (planned ? 'plan' : direct ? `direct:${direct}` : reply.suggestedAgent ? reply.suggestedAgent.id : 'none');
+  const mailCheck = repo.audits.some((a) => a.action === 'secretary.mail' && a.targetId === 'check');
+  const opened = repo.audits.some((a) => a.action === 'secretary.open_mention');
+  const got = started[0]?.agentId ?? (planned ? 'plan' : direct ? `direct:${direct}` : mailCheck ? 'mail-check' : opened ? 'open' : reply.suggestedAgent ? reply.suggestedAgent.id : 'none');
   const problems = [];
   if (c.expect.route && got !== c.expect.route) problems.push(`先: ${got}（期待 ${c.expect.route}）`);
+  if (c.expect.routeIn && !c.expect.routeIn.includes(got)) problems.push(`先: ${got}（期待 ${c.expect.routeIn.join('・')} のどれか）`);
+  if (c.expect.notRoute?.includes(got)) problems.push(`先: ${got}（この先に回してはならない）`);
+  const read = reads[0] ?? '（読み取りなし）';
+  if (c.expect.read && read !== c.expect.read) problems.push(`読み取り: ${read}（期待 ${c.expect.read}）`);
+  for (const n of c.expect.notRead ?? []) if (n.endsWith('*') ? read.startsWith(n.slice(0, -1)) : read === n) problems.push(`読み取り: ${read}（選んではならない）`);
+  if (c.expect.ownTodo !== undefined && ownTodo !== c.expect.ownTodo) problems.push(`本人の用事: ${ownTodo}（期待 ${c.expect.ownTodo}）`);
   for (const s of c.expect.answerContains ?? []) if (!reply.text.includes(s)) problems.push(`答えに「${s}」が無い`);
   for (const s of c.expect.contextContains ?? []) if (!started.some((x) => x.context.includes(s))) problems.push(`業務への材料に「${s}」が無い`);
-  return { ok: problems.length === 0, got, problems, answer: reply.text.slice(0, 160).replace(/\n/g, ' ') };
+  return { ok: problems.length === 0, got, problems, answer: reply.text.slice(0, 160).replace(/\n/g, ' '), ms: Date.now() - began };
 }
 
 const modes = argv.includes('--after') ? [['後', true]] : [['前', false], ['後', true]];
@@ -178,10 +215,16 @@ const byCategory = (list) => [...new Set(cases.map((c) => c.category))].map((cat
   return `${cat} ${xs.filter((r) => r.ok).length}/${xs.length}`;
 }).join('・');
 const lines = [
-  `# 秘書の続きの頼みの評価（${new Date().toISOString().slice(0, 10)}）`, '',
+  `# ${doc.title ?? setName}の評価（${new Date().toISOString().slice(0, 10)}）`, '',
   // 会社の名前は結果に書かない（会社の鍵で回したことだけを残す）
   `推論: ${stub ? '見本' : llm.name}${tenantSub ? '（会社の鍵）' : ''}・問題 ${cases.length} 問・合格の目安 9 割（Q-365）`, '',
-  ...modes.map(([label]) => `- ${label}: ${results[label].filter((r) => r.ok).length}/${cases.length}（${byCategory(results[label])}）`), '',
+  ...modes.map(([label]) => `- ${label}: ${results[label].filter((r) => r.ok).length}/${cases.length}（${byCategory(results[label])}）`),
+  // 答えるまでの時間（業務へ頼む・照会の答えまで。層 3 で答えたものは層 3 の時間も含む。第49.10節「速さ」）
+  ...modes.map(([label]) => {
+    const ms = results[label].map((r) => r.ms).filter((x) => typeof x === 'number').sort((a, b) => a - b);
+    const at = (q) => (ms.length ? (ms[Math.min(ms.length - 1, Math.floor(ms.length * q))] / 1000).toFixed(1) : '-');
+    return `- ${label}の答えるまでの時間: 中央 ${at(0.5)} 秒・9 割 ${at(0.9)} 秒`;
+  }), '',
   '## 外れた問題（後）', '',
   ...(results['後'] ?? []).filter((r) => !r.ok).map((r) => `- ${r.id}: ${r.problems?.join('／') ?? r.got} — 答え: ${r.answer ?? ''}`),
 ];

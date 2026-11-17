@@ -202,25 +202,25 @@ test('秘書: 「全員に〜伝えて」でお知らせを出す。無いグル
   const { repo, notices } = setup();
   const created = new FakeLlm(() => '{"about": true, "title": "年末調整の書類の提出", "body": "12 月 5 日までに総務へ出してください", "link": "", "all": true, "groups": [], "dueOn": "2026-12-05", "until": null}');
   const deps = { notices, repo: repo as unknown as Repository, llm: created };
-  const a = await answerNotice(deps, 't1', 'u-a', '全員に、年末調整の書類を 12 月 5 日までに出すよう伝えて', NOW);
+  const a = await answerNotice(deps, 't1', 'u-a', '全員に、年末調整の書類を 12 月 5 日までに出すよう伝えて', 'create', NOW);
   assert.equal(a?.action, 'create');
   assert.equal((await notices.forUser('t1', 'u-b', NOW)).length, 1);
 
   const unknown = new FakeLlm(() => '{"about": true, "title": "x", "body": "", "link": "", "all": false, "groups": ["経理部"], "dueOn": null, "until": null}');
-  const ask = await answerNotice({ ...deps, llm: unknown }, 't1', 'u-a', '経理部に、請求書の締めを伝えて', NOW);
+  const ask = await answerNotice({ ...deps, llm: unknown }, 't1', 'u-a', '経理部に、請求書の締めを伝えて', 'create', NOW);
   assert.equal(ask?.action, 'ask');
   assert.match(ask!.text, /経理部/);
   assert.match(ask!.text, /開発/, 'ある会社のグループを示す');
 
   const id = (await notices.forUser('t1', 'u-b', NOW))[0]!.id;
   const pickIt = new FakeLlm(() => JSON.stringify({ id }));
-  const done = await answerNotice({ ...deps, llm: pickIt }, 't1', 'u-b', '年末調整、出したよ', NOW);
+  const done = await answerNotice({ ...deps, llm: pickIt }, 't1', 'u-b', '年末調整、出したよ', 'done', NOW);
   assert.equal(done?.action, 'done');
   assert.equal((await notices.forUser('t1', 'u-b', NOW)).length, 0);
 
-  const denied = await answerNotice({ ...deps, llm: pickIt }, 't1', 'u-b', '年末調整のお知らせを取り下げて', NOW);
+  const denied = await answerNotice({ ...deps, llm: pickIt }, 't1', 'u-b', '年末調整のお知らせを取り下げて', 'withdraw', NOW);
   assert.equal(denied?.action, 'ask', '出していない一般の人は取り下げられない');
-  const ok = await answerNotice({ ...deps, llm: pickIt }, 't1', 'u-a', '年末調整のお知らせを取り下げて', NOW);
+  const ok = await answerNotice({ ...deps, llm: pickIt }, 't1', 'u-a', '年末調整のお知らせを取り下げて', 'withdraw', NOW);
   assert.equal(ok?.action, 'withdraw');
 });
 

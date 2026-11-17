@@ -151,10 +151,10 @@ test('秘書: 出した人が「何人済んだ？」と聞けば数で答え、
   const llm: LlmProvider = { name: 'fake', complete: async () => ({ text: JSON.stringify({ id: r.notice.id }), tokensUsed: 1 }) };
   const repo = { listGroups: async () => [], getUserSettings: async () => structuredClone(DEFAULT_USER_SETTINGS), findUserById: async (_t: string, u: string) => USERS.find((x) => x.id === u) ?? null, listUserGroupIds: async () => [] } as unknown as Repository;
   const deps = { notices: s.notices, repo, llm };
-  const p = await answerNotice(deps, 't1', 'u-a', '年末調整のお知らせ、何人済んだ？', NOW);
+  const p = await answerNotice(deps, 't1', 'u-a', '年末調整のお知らせ、何人済んだ？', 'progress', NOW);
   assert.equal(p?.action, 'progress');
   assert.match(p?.text ?? '', /宛先 4 人のうち、済んだ人が 1 人です。\n済んでいない人の名前は、締切を過ぎてからお伝えします/);
-  const m = await answerNotice(deps, 't1', 'u-c', '年末調整はもう知らせないで', NOW);
+  const m = await answerNotice(deps, 't1', 'u-c', '年末調整はもう知らせないで', 'mute', NOW);
   assert.equal(m?.action, 'mute');
   assert.equal(await s.notices.remind('t1', at('2026-11-22', 9)), 2, '止めた人（高橋）と済んだ人（鈴木）には出さない');
 });

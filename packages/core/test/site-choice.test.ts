@@ -40,7 +40,7 @@ function world(route = 'site-updates:edit', access: { sites?: SiteOption[]; deni
     async complete(req: { messages: { role: string; content: string }[] }) {
       const system = req.messages[0]?.content ?? '';
       // 取り次ぎの推論は、いつも REST API のサイトの業務を選ぶ（名前が無ければどちらか分からない）
-      if (system.startsWith('依頼に最も合う業務')) return { text: route, tokensUsed: 1 };
+      if (system.startsWith('秘書への頼みを読み取り')) return { text: route, tokensUsed: 1 };
       if (system.includes('入力を JSON のオブジェクトで返して')) return { text: '{}', tokensUsed: 1 };
       return { text: 'わかりました', tokensUsed: 1 };
     },
@@ -53,7 +53,7 @@ function world(route = 'site-updates:edit', access: { sites?: SiteOption[]; deni
   return { s, started };
 }
 
-test('頼みの中のサイトの名前は、名前の終わりの一般的な言葉を外しても当たる。2 つ当たれば決めない', () => {
+test('頼みの中のサイトの名前は、名前の半分以上が続けて出ていれば当たる（業種の言葉の一覧で外さない）。2 つ当たれば決めない', () => {
   assert.equal(namedSite('みどり皮膚科のサイトに休診のお知らせを出して', sites)?.key, 'mcp:clinic');
   assert.equal(namedSite('趣味のブログの記事を直して', sites)?.key, 'rest');
   assert.equal(namedSite('blog.example のトップを直して', sites)?.key, 'rest');

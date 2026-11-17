@@ -13,19 +13,6 @@ import type { NoticeService } from '../notices/service.js';
 import { todayIn } from '../notices/service.js';
 import type { EvidenceItem } from './catalog.js';
 
-/** 宛先を言って伝える依頼（人の名前ではなく、全員・グループ・部署）。 */
-const CREATE = /(全員|みんな|皆さん|皆様|全社|社員|グループ|部署|部|課|チーム)(の(皆さん|皆様|人|みんな|全員))?(に|へ|宛て)[\s\S]{0,400}(伝えて|知らせて|お知らせして|周知して|連絡して|流して|出して)|お知らせ(を)?(出して|出したい|作って)/;
-/** 取り下げ。 */
-const WITHDRAW = /お知らせ[\s\S]{0,60}(取り下げ|取り消|消して|下げて)/;
-/** 一覧。 */
-const LIST = /お知らせ(は|って|を)?(ある|何|なに|教えて|見せて|確認|[？?])|お知らせの一覧/;
-/** 済んだ人の数（出した人と管理者。第10.15.1節）。 */
-const PROGRESS = /お知らせ[\s\S]{0,60}(何人|どれだけ|どのくらい|誰が|だれが|済んでいない|まだの人)|(済んでいない|まだ出していない|出していない)人/;
-/** 締切の前の知らせを止める（第10.15.1節）。 */
-// @wordlist 安全の側（第49.4節）
-const MUTE = /(もう|これ以上)(知らせ|通知し|言わ)(ないで|なくていい|なくて大丈夫)/;
-/** 済んだ。本人宛てのお知らせがあるときだけ見る。 */
-const DONE = /出した|提出した|出しました|済んだ|済ませた|済みました|申し込んだ|申し込みました|終わった|終わりました|完了した/;
 
 /** 秘書の答え。 */
 export interface NoticeAnswer {
@@ -66,22 +53,34 @@ function line(n: Pick<NoticeForUser, 'title' | 'dueOn' | 'daysLeft' | 'authorNam
  * 社内のお知らせの依頼なら応え、そうでなければ `null`（第10.15節）。
  *
  * @remarks
- * 言い回しで当たりを付け、当たったときだけ推論に中身を読み取らせる。お知らせの話でなければ推論が「無し」と返す。
+ * 種類は層 2 の読み取りが決め（第49.5節）、ここでは推論に中身を読み取らせる。お知らせの話でなければ推論が「無し」と返す。
  * 推論が使えないときは扱わない（画面の API から出せる）。本人の権限で行う（取り下げは出した人と管理者だけ）。
  */
 export async function answerNotice(
-  deps: Deps, tenantId: string, userId: string, message: string, now: Date = new Date(),
+  deps: Deps, tenantId: string, userId: string, message: string, kind: NoticeKind, now: Date = new Date(),
 ): Promise<NoticeAnswer | null> {
   const { llm } = deps;
   if (!aiAvailable(llm) || llm.name === 'stub') return null;
-  if (WITHDRAW.test(message)) return withdraw(deps, tenantId, userId, message, now);
-  if (PROGRESS.test(message)) return progress(deps, tenantId, userId, message, now);
-  if (MUTE.test(message)) return mute(deps, tenantId, userId, message, now);
-  if (CREATE.test(message)) return create(deps, tenantId, userId, message, now);
-  if (LIST.test(message)) return list(deps, tenantId, userId, now);
-  if (DONE.test(message)) return done(deps, tenantId, userId, message, now);
-  return null;
+  if (kind === 'withdraw') return withdraw(deps, tenantId, userId, message, now);
+  if (kind === 'progress') return progress(deps, tenantId, userId, message, now);
+  if (kind === 'mute') return mute(deps, tenantId, userId, message, now);
+  if (kind === 'create') return create(deps, tenantId, userId, message, now);
+  if (kind === 'list') return list(deps, tenantId, userId, now);
+  return done(deps, tenantId, userId, message, now);
 }
+
+/** お知らせの頼みの種類（層 2 の読み取りが決める。第10.15節・第49.5節）。 */
+export type NoticeKind = 'create' | 'withdraw' | 'list' | 'progress' | 'mute' | 'done';
+
+/** お知らせの頼みの種類と、読み取りに見せる説明。 */
+export const NOTICE_KINDS: { kind: NoticeKind; text: string }[] = [
+  { kind: 'create', text: '社内の全員・グループ・部署に、お知らせを出してほしい（「全員に〇〇を伝えて」）' },
+  { kind: 'withdraw', text: '出した社内のお知らせを取り下げたい' },
+  { kind: 'list', text: '自分に届いている社内のお知らせを知りたい' },
+  { kind: 'progress', text: '出したお知らせを、誰が済ませたか・済んでいない人を知りたい' },
+  { kind: 'mute', text: '社内のお知らせについて、もう知らせないでほしい' },
+  { kind: 'done', text: 'お知らせで頼まれたこと（提出・申し込みなど）を済ませたと伝える' },
+];
 
 async function create(deps: Deps, tenantId: string, userId: string, message: string, now: Date): Promise<NoticeAnswer | null> {
   const [groups, prefs] = await Promise.all([deps.repo.listGroups(tenantId), deps.repo.getUserSettings(tenantId, userId)]);

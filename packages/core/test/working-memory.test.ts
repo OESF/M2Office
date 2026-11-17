@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  DAY_RECORD_MAX, MEMORY_BUDGET, OFFICIAL_AGENTS, PAST_WORK, Secretary, delegateContext, followsUp, loadWorkingMemory, mentionsFromTools, mentionsToOpen, openItemRequest,
+  DAY_RECORD_MAX, MEMORY_BUDGET, OFFICIAL_AGENTS, Secretary, delegateContext, loadWorkingMemory, mentionsFromTools,
   referredDays, routeSituation, situationText, weekText, type Conversation, type LlmProvider, type Repository,
 } from '../src/index.js';
 
@@ -29,16 +29,6 @@ test('referredDays: 曜日・昨日・先週の金曜・〇日前・月日を日
   assert.deepEqual(referredDays('来週の月曜に会議を入れて', WEDNESDAY), []);
   assert.deepEqual(referredDays('次の金曜までに出して', WEDNESDAY), []);
   assert.deepEqual(referredDays('見積を作って', WEDNESDAY), []);
-});
-
-test('followsUp: 続きの頼みを見分ける。「それぞれ」や、ふつうの照会は続きにしない', () => {
-  for (const m of ['それも探して', 'さっきのメールを開いて', '先ほどの資料をもう一度', 'あの件どうなった', 'この資料の要点は？', '同じように〇〇社のも',
-    '月曜日に頼んだ仕事は', '昨日の見積はどうなった', 'もう1件探して', 'ほかにもある？', '〇〇社のも探して', 'そのメールを開きたい']) {
-    assert.equal(followsUp(m), true, m);
-  }
-  for (const m of ['今日の予定は？', '未読のメールは？', 'それぞれ頼んで', '来週の月曜に会議を入れて', '見積を作って']) {
-    assert.equal(followsUp(m), false, m);
-  }
 });
 
 test('mentionsFromTools: メール・資料・ドライブの結果から、題名・ID・リンクを拾う。推論の文からは作らない', () => {
@@ -158,7 +148,7 @@ function llmSeeing(route: string) {
       const last = String(req.messages.at(-1)?.content ?? '');
       if (last.startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
       seen.push({ system, user: req.messages.slice(1).map((x) => String(x.content)) });
-      if (system.startsWith('依頼に最も合う業務')) return { text: route, tokensUsed: 1 };
+      if (system.startsWith('秘書への頼みを読み取り')) return { text: route, tokensUsed: 1 };
       return { text: 'わかりました', tokensUsed: 1 };
     },
   } as unknown as LlmProvider & { seen: { system: string; user: string[] }[] };
@@ -215,8 +205,8 @@ test('業務を選ぶ推論に、いまの状況（最後に頼んだ業務・�
     startLookup: async () => ({ runId: 'r2', already: false }),
   });
   await s.respond('t', 'u1', '試作社のも同じように', undefined, { screen: { view: 'library', label: 'ナレッジの整理', item: { kind: '資料', id: 'L1', title: '保守契約書' } } });
-  const routing = llm.seen.find((x) => x.system.startsWith('依頼に最も合う業務'))!;
-  assert.match(routing.system, /最後に頼んだ業務と同じ業務を選んで/);
+  const routing = llm.seen.find((x) => x.system.startsWith('秘書への頼みを読み取り'))!;
+  assert.match(routing.system, /最後に頼んだ業務と同じ先を選んで/);
   assert.equal(routing.user.length, 2, '状況と依頼を分けて渡す');
   assert.match(routing.user[0]!, /最後に頼んだ業務: 調べもの「見本商事の資料を探して」/);
   assert.match(routing.user[0]!, /開いている画面: ナレッジの整理。開いている 1 件: 資料「保守契約書」/);
@@ -232,7 +222,7 @@ test('会話を残さない人でも、その日のうちは前のやり取り�
   await s.respond('t', 'u1', '来月の展示会の準備の段取りを相談したい');
   await s.respond('t', 'u1', 'さっきの件、もう少し詳しく');
   assert.equal(appended.length, 0, '会話ログには残さない');
-  const answer = llm.seen.filter((x) => !x.system.startsWith('依頼に最も合う業務')).at(-1)!;
+  const answer = llm.seen.filter((x) => !x.system.startsWith('秘書への頼みを読み取り')).at(-1)!;
   assert.ok(answer.user.some((u) => u.includes('来月の展示会の準備の段取りを相談したい')), '層 3 に今日のやり取りを渡す');
 });
 
@@ -247,38 +237,47 @@ test('続きの頼みでも、本人の指図（「さっきの会話は残さ�
   assert.equal(cleared, 1);
 });
 
-test('問題集（docs/evals/secretary-follow-up）: 続きの頼みは続きと見分け、新しい頼みは見分けない。曜日を指す頼みは日付に直す', () => {
+test('問題集（docs/evals/secretary-follow-up）: 曜日を指す頼みは日付に直す', () => {
   const doc = JSON.parse(readFileSync(new URL('../../../docs/evals/secretary-follow-up/cases.json', import.meta.url), 'utf8')) as {
     cases: { id: string; category: string; message: string; screen?: unknown }[];
   };
   assert.equal(doc.cases.length, 100);
   for (const c of doc.cases) {
-    if (['A', 'B', 'C', 'D'].includes(c.category)) assert.equal(followsUp(c.message), true, `${c.id}: ${c.message}`);
-    if (c.category === 'F') assert.equal(followsUp(c.message), false, `${c.id}: ${c.message}`);
     if (c.category === 'C') assert.equal(referredDays(c.message, WEDNESDAY).length, 1, `${c.id}: ${c.message}`);
   }
 });
 
-test('問題集の B・C・D（2026-11-14 の評価で外れた型）: 話に出たものを開く・前の仕事を振り返る・開いている 1 件を指す、を見分ける', async () => {
-  type Case = { id: string; category: string; message: string; history: { message: string; reply: string; mentions?: Conversation['mentions'] }[]; screen?: { view: string; label: string; item: { kind: string; id: string; title: string } }; expect: { answerContains?: string[]; contextContains?: string[] } };
-  const doc = JSON.parse(readFileSync(new URL('../../../docs/evals/secretary-follow-up/cases.json', import.meta.url), 'utf8')) as { cases: Case[] };
-  for (const c of doc.cases.filter((x) => ['B', 'C', 'D'].includes(x.category))) {
-    const rows = c.history.map((h, i) => turn(`2026-11-18T0${i}:00:00.000Z`, h.message, h.reply, h.mentions));
-    const m = await loadWorkingMemory(memoryRepo(rows), 't', 'u', c.message, [], { now: WEDNESDAY, keep: true, screen: c.screen ?? null });
-    if (c.category === 'B') {
-      const open = mentionsToOpen(m, c.message);
-      assert.ok(open?.some((x) => c.expect.answerContains!.includes(x.url!)), `${c.id}: ${c.message}`);
-    }
-    if (c.category === 'C') assert.match(c.message, PAST_WORK, c.id);
-    if (c.category === 'D') assert.equal(openItemRequest(m, c.message)?.id, c.expect.contextContains![0], `${c.id}: ${c.message}`);
-  }
+test('話に出たものを開く頼みは、読み取りが番号で選んだものを、探し直さずにリンクで出す（第10.7.4.2節・第49.5節）', async () => {
+  const now = new Date();
+  const rows = [turn(new Date(now.getTime() - 120_000).toISOString(), '（お調べした結果）見本商事のメールを探して', '1 通', [
+    { kind: 'mail', title: '見積のご確認', id: 't1', url: 'https://mail.example/t1' },
+    { kind: 'library', title: '保守契約書', id: 'L1', url: '/library/L1' },
+  ])];
+  const { repo } = secretaryRepo(rows);
+  const llm = llmSeeing(JSON.stringify({ to: 'open', open: [1] }));
+  const lookups: string[] = [];
+  const s = new Secretary({
+    repo, llm, connector: {} as never, agents: OFFICIAL_AGENTS.filter((a) => a.id === 'secretary-lookup'),
+    startLookup: async (_t, _u, request) => { lookups.push(request); return { runId: 'r2', already: false }; },
+  });
+  const reply = await s.respond('t', 'u1', 'さっきのメールをもう一度開いて');
+  assert.equal(reply.text, '「見積のご確認」です。[開く](https://mail.example/t1)');
+  assert.equal(lookups.length, 0, '探し直さない');
+  const routing = llm.seen.find((x) => x.system.startsWith('秘書への頼みを読み取り'))!;
+  assert.match(routing.system, /話に出たもの（新しい順）:\n1\. 見積のご確認\n2\. 保守契約書/, '話に出たものを番号で見せる');
+  assert.match(routing.system, /- open: 前に話に出たもの/);
 });
 
-test('開く頼みでも、探す・作る頼みと、話に出ていない種類は当てない', async () => {
-  const rows = [turn('2026-11-18T01:00:00.000Z', '（お調べした結果）見本商事のメールを探して', '1 通', [{ kind: 'mail', title: '見積', id: 't1', url: 'https://mail.example/t1' }])];
-  const m = await loadWorkingMemory(memoryRepo(rows), 't', 'u', '', [], { now: WEDNESDAY, keep: true });
-  assert.equal(mentionsToOpen(m, 'さっきのメールに似たものを探して'), null);
-  assert.equal(mentionsToOpen(m, 'さっきの資料を開いて'), null, '資料は話に出ていない');
-  assert.equal(mentionsToOpen(m, 'メールを開いて'), null, '前を指していない');
-  assert.equal(openItemRequest(m, 'この資料の要点は？'), null, '開いている画面が無い');
+test('前の仕事を尋ねるだけの問いは、読み取りが refersBack とすれば業務に回さず、覚えていることから答える（第10.7.4.1節）', async () => {
+  const { repo } = secretaryRepo([]);
+  const llm = llmSeeing(JSON.stringify({ to: 'answer', refersBack: true }));
+  const started: string[] = [];
+  const s = new Secretary({
+    repo, llm, connector: {} as never, agents: OFFICIAL_AGENTS.filter((a) => a.id === 'secretary-lookup'),
+    startLookup: async (_t, _u, request) => { started.push(request); return { runId: 'r2', already: false }; },
+  });
+  const reply = await s.respond('t', 'u1', '金曜日に頼んだもの、どうなりました？');
+  assert.equal(reply.layer, 'full');
+  assert.equal(started.length, 0);
 });
+

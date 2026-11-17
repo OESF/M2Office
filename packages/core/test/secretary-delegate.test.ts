@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { OFFICIAL_AGENTS, Secretary, asksConnectionData, fillInputs, type LlmProvider, type Repository } from '../src/index.js';
+import { OFFICIAL_AGENTS, Secretary, fillInputs, type LlmProvider, type Repository } from '../src/index.js';
 
 const agent = (id: string) => OFFICIAL_AGENTS.find((a) => a.id === id)!;
 
@@ -22,7 +22,7 @@ function llmWith(answers: { route?: string; fill?: string }) {
       const last = String(req.messages.at(-1)?.content ?? '');
       if (last.startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
       seen.push(system.slice(0, 40));
-      if (system.startsWith('依頼に最も合う業務')) return { text: answers.route ?? 'none', tokensUsed: 1 };
+      if (system.startsWith('秘書への頼みを読み取り')) return { text: answers.route ?? 'none', tokensUsed: 1 };
       if (system.includes('入力を JSON のオブジェクトで返して')) { seen.push(last); return { text: answers.fill ?? '{}', tokensUsed: 1 }; }
       return { text: 'わかりました', tokensUsed: 1 };
     },
@@ -166,7 +166,7 @@ function llmFull(route: string, full: string) {
       const last = String(req.messages.at(-1)?.content ?? '');
       if (last.startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
       systems.push(system);
-      if (system.startsWith('依頼に最も合う業務')) return { text: route, tokensUsed: 1 };
+      if (system.startsWith('秘書への頼みを読み取り')) return { text: route, tokensUsed: 1 };
       return { text: full, tokensUsed: 1 };
     },
   } as unknown as LlmProvider & { systems: string[] };
@@ -175,54 +175,48 @@ function llmFull(route: string, full: string) {
 // 2026-09-27 に oesf で起きた言い回しそのもの。層 3 が「少々お待ちください」と約束し、何も起こさなかった
 const SLACK_ASK = 'Slack で「general」を含むチャンネルを検索して、チャンネル名を教えて。調べるだけで、投稿はしないでください。';
 
-test('会社の接続（Slack）の名前が出る「探す・読む」依頼は、推論に選ばせずに秘書の調べものへ回す（第10.11.5.1節）', async () => {
+test('会社の接続（Slack）のデータを探す・読む頼みは、読み取りが選べば秘書の調べものへ回す。読み取りには接続の名前を見せる（第10.11.5.1節・第49.5節）', async () => {
   const d = deps();
   const repo = withSlack(d);
-  const llm = llmFull('none', '取得できましたら結果をお伝えしますね。少々お待ちください！');
+  const llm = llmFull(JSON.stringify({ to: 'secretary-lookup', changes: false }), '取得できましたら結果をお伝えしますね。少々お待ちください！');
   const s = new Secretary({ repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
   const reply = await s.respond('t', 'u1', SLACK_ASK);
   assert.equal(d.lookups.length, 1, '調べものを実際に起こす');
   assert.deepEqual(reply.lookup, { runId: 'run-lookup', request: SLACK_ASK });
   assert.match(reply.text, /お調べします。終わりましたらお伝えします/);
-  assert.ok(!llm.systems.some((x) => x.startsWith('依頼に最も合う業務')), '推論に選ばせない');
+  const routing = llm.systems.filter((x) => x.startsWith('秘書への頼みを読み取り'));
+  assert.equal(routing.length, 1, '読み取りは 1 回');
+  assert.match(routing[0]!, /会社の接続（Slack）のメッセージ・チャンネル・人などを探す・読む・まとめる頼み/);
 });
 
-test('「〇〇のメールを探して」は、推論に選ばせずに秘書の調べものへ回す。調べものは Gmail とナレッジの整理を探せる（第10.9.6節）', async () => {
+test('「〇〇のメールを探して」は、読み取りが選べば秘書の調べものへ回す。調べものは Gmail とナレッジの整理を探せる（第10.9.6節）', async () => {
   const d = deps();
-  const llm = llmWith({ route: 'none' });
+  const llm = llmWith({ route: JSON.stringify({ to: 'secretary-lookup' }) });
   const s = new Secretary({ repo: d.repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
   const ask = '見本商事のメールを探して';
   const reply = await s.respond('t', 'u1', ask);
   assert.equal(d.lookups.length, 1, '調べものを起こす');
   assert.equal(d.lookups[0]!.request, ask);
   assert.ok(!/未読/.test(reply.text), '未読の件数を答えない');
-  assert.ok(!llm.seen.some((x) => x.startsWith('依頼に最も合う業務')), '推論に選ばせない');
   const tools = agent('secretary-lookup').tools;
   assert.ok(tools.includes('gmail.search') && tools.includes('library.search') && tools.includes('library.read'));
   assert.ok(!tools.some((t) => /send|create|draft|update|share|forget/.test(t)), '調べものは読むだけ');
 });
 
-test('送る依頼（「Slack に投稿して」）は調べものに回さない。取次の説明には会社の接続の名前を入れる', async () => {
+test('送る頼み（「Slack に投稿して」）を読み取りが調べものと読まなければ、調べものに回さない', async () => {
   const d = deps();
   const repo = withSlack(d);
-  const llm = llmFull('none', 'わかりました');
+  const llm = llmFull(JSON.stringify({ to: 'answer', changes: true }), 'わかりました');
   const s = new Secretary({ repo, llm, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: d.startAgent, startLookup: d.startLookup });
   await s.respond('t', 'u1', 'Slack の #研究開発 にお知らせを投稿してください');
   assert.equal(d.lookups.length, 0);
-  const routing = llm.systems.find((x) => x.startsWith('依頼に最も合う業務')) ?? '';
-  assert.match(routing, /会社の接続（Slack）のメッセージ・チャンネル・人などを探す・読む依頼/);
-  assert.equal(asksConnectionData('投稿はしないで、Slack で探して', [{ id: 'slack', name: 'Slack' }]), true, '打ち消しの「投稿はしない」は送る依頼ではない');
-  assert.equal(asksConnectionData('Slack の使い方を教えて', []), false, '会社に接続が無ければ当てない');
-  // 「まとめて」「内容」も読む依頼（2026-11-16 に当たらず、推論が前の失敗の記録を見て断った）
-  assert.equal(asksConnectionData('slackの#generalの内容をまとめて', [{ id: 'slack', name: 'Slack' }]), true);
-  assert.equal(asksConnectionData('Slack の #general の最近のやり取りを要約して', [{ id: 'slack', name: 'Slack' }]), true);
-  assert.equal(asksConnectionData('Slack の #general の内容をまとめて資料を作って', [{ id: 'slack', name: 'Slack' }]), false, '作る依頼は業務の取次に任せる');
 });
 
-test('層 3 は、調べる必要があれば調べものを始める道具を呼び、M2Office はその呼び出しの記録で調べものを始める。約束の文を言葉で見張らない（第10.11.5.1節・第49.7節）', async () => {
+test('頼みを読み取れなかったときだけ、層 3 に調べものを始める道具を渡し、呼び出しの記録で調べものを始める。約束の文を言葉で見張らない（第10.11.5.1節・第49.7節）', async () => {
   const d = deps();
   const tools: string[][] = [];
-  const base = llmFull('none', '');
+  // 読み取りの答えが読めない（層 3 に任せる）
+  const base = llmFull('読めない答え', '');
   const llm = {
     ...base,
     async completeTools(req: { tools: { name: string }[] }) {
@@ -250,11 +244,21 @@ test('層 3 は、調べる必要があれば調べものを始める道具を�
   const r3 = await s3.respond('t', 'u1', '来週の大阪の天気はどうですか');
   assert.equal(r3.lookup, undefined);
   assert.ok(plain.systems.some((x) => x.includes('あとで調べて伝えると約束しないでください')));
+
+  // 読み取りが「秘書が答える」と決めた頼み（社内の規程の質問など）では、層 3 に道具を渡さない
+  const rule = deps();
+  const ruleTools: string[][] = [];
+  const decided = { ...llmFull(JSON.stringify({ to: 'answer' }), '規程には書かれていません。'), async completeTools(req: { tools: { name: string }[] }) { ruleTools.push(req.tools.map((x) => x.name)); return { text: '', tokensUsed: 1, toolCalls: [] }; } } as unknown as LlmProvider;
+  const s4 = new Secretary({ repo: rule.repo, llm: decided, connector: {} as never, agents: [agent('secretary-lookup')], startAgent: rule.startAgent, startLookup: rule.startLookup });
+  await s4.respond('t', 'u1', '出張の日当はいくら？');
+  assert.deepEqual(ruleTools, [], '層 3 に調べものを始める道具を渡さない');
+  assert.equal(rule.lookups.length, 0);
 });
 
-test('推論が、出していないのに「画面に表示しました」と答えたら、その答えを返さず、出していないと伝える（第31.11.1節）', async () => {
+test('サイネージの頼みで出す文を決め打ちで読めなかったら、層 3 に答えさせず、出していないと伝える（第31.11.1節・第49.5節）', async () => {
   const d = deps();
-  const base = llmWith({});
+  // 読み取りはサイネージの頼みと読む。層 3 の推論は「表示しました」と答える見本（呼ばれてはならない）
+  const base = llmWith({ route: JSON.stringify({ to: 'signage', changes: true }) });
   const llm = {
     ...base,
     async complete(req: { messages: { role: string; content: string }[] }) {

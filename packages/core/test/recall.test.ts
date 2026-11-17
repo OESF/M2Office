@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { OFFICIAL_AGENTS, REFERS_TO_PAST, Secretary, closeness, recall, type LlmProvider, type Repository } from '../src/index.js';
+import { OFFICIAL_AGENTS, Secretary, closeness, recall, type LlmProvider, type Repository } from '../src/index.js';
 
 const NOW = new Date('2026-09-25T03:00:00.000Z');
 
@@ -61,13 +61,7 @@ test('記憶の読み出しに失敗しても、答えは返す', async () => {
   assert.deepEqual(await recall(repo, 't', 'u1', 'x', [], NOW), { text: '', evidence: [] });
 });
 
-test('過去を指す問いを見分ける。「あれば」は過去を指さない', () => {
-  for (const q of ['ねえ、あれどうなった？', 'あの件の進み具合は', '例の見積', '先週頼んだやつ', 'この前の議事録', 'その後どう？']) {
-    assert.ok(REFERS_TO_PAST.test(q), q);
-  }
-  for (const q of ['資料があれば議事録を作って', '明日の予定は？', '有給休暇は何日？']) {
-    assert.ok(!REFERS_TO_PAST.test(q), q);
-  }
+test('言葉の重なりで、記憶の近さを測る', () => {
   assert.ok(closeness('保守契約の件', 'B 社の保守契約の更新') >= 2);
   assert.equal(closeness('有給休暇', '営業定例の議事録'), 0);
 });
@@ -90,15 +84,16 @@ test('「あれ、どうなった」は業務へ取り次がず、覚えてい�
       // 言い換えを考えさせる呼び出し（第11.7.7.0節）は取次の判定ではない。数えない
       if (req.messages.at(-1)!.content.startsWith('社内の規程や文書を探します')) return { text: '', tokensUsed: 0 };
       seen.push(req);
-      // 取次の判定（高速）なら議事録の作成を選ぶ、という推論を置く。呼ばれてはならない
-      return req.tier === 'fast' ? { text: 'minutes', tokensUsed: 1 } : { text: '議事録の作成は承認待ちです。', tokensUsed: 3 };
+      // 頼みの読み取り（第49.5節）は、前の話を指す振り返りの問いと読む。業務は選ばない
+      if (req.messages[0]!.content.startsWith('秘書への頼みを読み取り')) return { text: JSON.stringify({ to: 'answer', refersBack: true }), tokensUsed: 1 };
+      return { text: '議事録の作成は承認待ちです。', tokensUsed: 3 };
     },
   } as unknown as LlmProvider;
   const s = new Secretary({ repo, llm, connector: {} as never, agents: OFFICIAL_AGENTS });
   const reply = await s.respond('t', 'u1', 'ねえ、営業定例のあれどうなった？', undefined, { record: false });
   assert.equal(reply.layer, 'full');
   assert.equal(reply.suggestedAgent, undefined, '業務を提案しない');
-  assert.ok(seen.every((x) => x.tier !== 'fast'), '取次の判定をしない');
+  assert.equal(seen.filter((x) => x.messages[0]!.content.startsWith('秘書への頼みを読み取り')).length, 1, '頼みの読み取りは 1 回');
   const sent = seen.at(-1)!.messages.map((m) => m.content).join('\n');
   assert.match(sent, /議事録の作成・共有「営業定例」 — 承認待ち/, '頼んだ業務を渡す');
   assert.ok(seen.at(-1)!.messages.findIndex((m) => m.content.includes('覚えていること')) < seen.at(-1)!.messages.length - 1, '覚えていることは本人の依頼とは別のメッセージ');

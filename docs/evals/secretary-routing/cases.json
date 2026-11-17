@@ -1,0 +1,905 @@
+{
+ "version": 1,
+ "title": "秘書の取り次ぎの問題集（仕様書 第49.10節、ADR-0150）",
+ "description": "層 2 の頼みの読み取り（第49.5節）を測る。G はこれまで言葉の一覧を足して塞いだ頼み（すべて合格が要る。Q-386）、H は定型でない言い方の照会、I は業務の取り次ぎ。業種を問わない例にしている。 J は各機能の頼み（段 3。これまで機能ごとの言葉の一覧で見分けていたもの。すべて合格が要る）。",
+ "expectKeys": {
+  "route": "選ぶべき先。業務の ID・none（秘書が自分で答える）・direct:<照会の ID>・plan・mail-check・open",
+  "routeIn": "このどれかに回れば合格",
+  "notRoute": "回してはならない先",
+  "answerContains": "答えに含まれるべき文字",
+  "connections": "会社の接続の名前",
+  "read": "読み取りが選ぶべき先（種類のある先は「先:種類」）",
+  "notRead": "選んではならない先（* で頭を指す）",
+  "ownTodo": "本人の用事と読むか",
+  "features": "使える機能"
+ },
+ "cases": [
+  {
+   "id": "G-01",
+   "category": "G",
+   "history": [],
+   "message": "見本商事のメールを探して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "G-02",
+   "category": "G",
+   "history": [],
+   "message": "先月の見積のメールを検索して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "G-03",
+   "category": "G",
+   "history": [],
+   "message": "A 社と決めた支払い条件のメールはどこ？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "G-04",
+   "category": "G",
+   "history": [],
+   "message": "サンプル商事からのメールを出して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "G-05",
+   "category": "G",
+   "history": [],
+   "message": "メールを確認して",
+   "expect": {
+    "route": "mail-check"
+   }
+  },
+  {
+   "id": "G-06",
+   "category": "G",
+   "history": [],
+   "message": "大事なメールある？",
+   "expect": {
+    "route": "mail-check"
+   }
+  },
+  {
+   "id": "G-07",
+   "category": "G",
+   "history": [],
+   "message": "何かメール来てる？",
+   "expect": {
+    "routeIn": [
+     "mail-check",
+     "direct:mail-unread"
+    ],
+    "note": "「何か来てる？」は件数の答え（新しい 5 通の差出人と件名を並べる。第 0.603.1 版）でも、確認でも答えになる"
+   }
+  },
+  {
+   "id": "G-08",
+   "category": "G",
+   "history": [],
+   "message": "未読のメールは何件？",
+   "expect": {
+    "route": "direct:mail-unread"
+   }
+  },
+  {
+   "id": "G-09",
+   "category": "G",
+   "history": [],
+   "message": "佐々木さんのメールアドレスを教えて",
+   "expect": {
+    "notRoute": [
+     "direct:mail-unread",
+     "mail-check"
+    ]
+   }
+  },
+  {
+   "id": "G-10",
+   "category": "G",
+   "history": [],
+   "message": "slackの#generalの内容をまとめて",
+   "expect": {
+    "route": "secretary-lookup"
+   },
+   "connections": [
+    "Slack"
+   ]
+  },
+  {
+   "id": "G-11",
+   "category": "G",
+   "history": [],
+   "message": "Slack で「general」を含むチャンネルを検索して、チャンネル名を教えて。調べるだけで、投稿はしないでください。",
+   "expect": {
+    "route": "secretary-lookup"
+   },
+   "connections": [
+    "Slack"
+   ]
+  },
+  {
+   "id": "G-12",
+   "category": "G",
+   "history": [],
+   "message": "Slack の #研究開発 にお知らせを投稿してください",
+   "expect": {
+    "notRoute": [
+     "secretary-lookup"
+    ]
+   },
+   "connections": [
+    "Slack"
+   ]
+  },
+  {
+   "id": "G-13",
+   "category": "G",
+   "history": [],
+   "message": "会議費の1人あたりの上限は",
+   "expect": {
+    "route": "none"
+   }
+  },
+  {
+   "id": "G-14",
+   "category": "G",
+   "history": [],
+   "message": "有給休暇は何日前までに申請すればいい？",
+   "expect": {
+    "route": "none"
+   }
+  },
+  {
+   "id": "G-15",
+   "category": "G",
+   "history": [],
+   "message": "この会議の議事録をまとめてください",
+   "expect": {
+    "route": "minutes"
+   }
+  },
+  {
+   "id": "G-16",
+   "category": "G",
+   "history": [],
+   "message": "ねえ、営業定例のあれどうなった？",
+   "expect": {
+    "route": "none"
+   }
+  },
+  {
+   "id": "G-17",
+   "category": "G",
+   "history": [
+    {
+     "message": "補助金の締め切りを調べて",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "weekday": "金曜日",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「補助金の締め切りを調べて」",
+       "id": "r-g3",
+       "url": "/runs/r-g3"
+      }
+     ]
+    }
+   ],
+   "message": "金曜日に頼んだもの、どうなりました？",
+   "expect": {
+    "route": "none"
+   }
+  },
+  {
+   "id": "G-18",
+   "category": "G",
+   "history": [
+    {
+     "message": "11 月 20 日の大阪出張の行程を組んで",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「11 月 20 日の大阪出張の行程を組んで」",
+       "id": "r-g2",
+       "url": "/runs/r-g2"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）11 月 20 日の大阪出張の行程を組んで",
+     "reply": "行き 8:00 東京発 のぞみ 9 号、10:30 新大阪着。帰り 17:00 新大阪発。"
+    }
+   ],
+   "message": "さっきの行程をカレンダーに入れて",
+   "expect": {
+    "route": "calendar-register"
+   }
+  },
+  {
+   "id": "G-19",
+   "category": "G",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-g0",
+       "url": "/runs/r-g0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-g1",
+       "url": "https://mail.google.com/mail/u/0/#all/t-g1"
+      }
+     ]
+    }
+   ],
+   "message": "さっきの会社のメールも探して",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "G-20",
+   "category": "G",
+   "history": [],
+   "message": "次の会議の準備、規程の確認、天気の確認をそれぞれ頼んで",
+   "expect": {
+    "route": "plan"
+   }
+  },
+  {
+   "id": "G-21",
+   "category": "G",
+   "history": [],
+   "message": "東京と大阪の拠点の、それぞれの明日の天気を調べて",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "G-22",
+   "category": "G",
+   "history": [],
+   "message": "承認はどうやるの？",
+   "expect": {
+    "notRoute": [
+     "direct:pending-approvals"
+    ]
+   }
+  },
+  {
+   "id": "G-23",
+   "category": "G",
+   "history": [],
+   "message": "承認待ちはある？",
+   "expect": {
+    "route": "direct:pending-approvals"
+   }
+  },
+  {
+   "id": "G-24",
+   "category": "G",
+   "history": [],
+   "message": "10 月 1 日の出張の行程を組んで。新幹線で大阪、午後に打ち合わせ",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "G-25",
+   "category": "G",
+   "history": [],
+   "message": "来週の金曜の予定は？",
+   "expect": {
+    "route": "secretary-lookup"
+   }
+  },
+  {
+   "id": "G-26",
+   "category": "G",
+   "history": [],
+   "message": "資料があれば議事録を作って",
+   "expect": {
+    "route": "minutes"
+   }
+  },
+  {
+   "id": "G-27",
+   "category": "G",
+   "history": [
+    {
+     "message": "見本商事のメールを探して",
+     "reply": "お調べします。終わりましたらお伝えします。",
+     "mentions": [
+      {
+       "kind": "run",
+       "title": "調べもの「見本商事のメールを探して」",
+       "id": "r-g0",
+       "url": "/runs/r-g0"
+      }
+     ]
+    },
+    {
+     "message": "（お調べした結果）見本商事のメールを探して",
+     "reply": "1 通ありました。見本商事 の「見積のご確認」",
+     "mentions": [
+      {
+       "kind": "mail",
+       "title": "見積のご確認（見本商事）",
+       "id": "t-g1",
+       "url": "https://mail.google.com/mail/u/0/#all/t-g1"
+      }
+     ]
+    }
+   ],
+   "message": "さっきのメールを開いて",
+   "expect": {
+    "route": "open",
+    "answerContains": [
+     "https://mail.google.com/mail/u/0/#all/t-g1"
+    ]
+   }
+  },
+  {
+   "id": "G-28",
+   "category": "G",
+   "history": [],
+   "message": "この資料の要点は？",
+   "expect": {
+    "route": "secretary-lookup"
+   },
+   "screen": {
+    "view": "library",
+    "label": "ナレッジの整理",
+    "item": {
+     "kind": "資料",
+     "id": "L-g1",
+     "title": "保守契約書"
+    }
+   }
+  },
+  {
+   "id": "H-01",
+   "category": "H",
+   "history": [],
+   "message": "今週の予定の詳細を教えて",
+   "expect": {
+    "route": "direct:calendar-range"
+   }
+  },
+  {
+   "id": "H-02",
+   "category": "H",
+   "history": [
+    {
+     "message": "今週の予定は？",
+     "reply": "今後 7 日間の予定は 3 件です。\n\n- 11/18(水) 10:00〜11:00　企画会議\n- 11/19(木) 終日　燃えるごみ\n- 11/20(金) 14:00〜15:00　面談"
+    }
+   ],
+   "message": "詳細を表示して",
+   "expect": {
+    "route": "direct:calendar-range"
+   }
+  },
+  {
+   "id": "H-03",
+   "category": "H",
+   "history": [],
+   "message": "明日って何か予定入ってたっけ",
+   "expect": {
+    "route": "direct:calendar-range"
+   }
+  },
+  {
+   "id": "H-04",
+   "category": "H",
+   "history": [],
+   "message": "今日中にやらないといけないタスクを見せて",
+   "expect": {
+    "route": "direct:tasks-today"
+   }
+  },
+  {
+   "id": "H-05",
+   "category": "H",
+   "history": [],
+   "message": "わたしが判断しないといけない承認、溜まってる？",
+   "expect": {
+    "route": "direct:pending-approvals"
+   }
+  },
+  {
+   "id": "I-01",
+   "category": "I",
+   "history": [],
+   "message": "見積書を作って、相手は見本商事",
+   "expect": {
+    "route": "quote"
+   }
+  },
+  {
+   "id": "I-02",
+   "category": "I",
+   "history": [],
+   "message": "新サービスの企画書の下書きを作って",
+   "expect": {
+    "route": "document-draft"
+   }
+  },
+  {
+   "id": "I-03",
+   "category": "I",
+   "history": [],
+   "message": "来週、山田さん（yamada@client.example）と打ち合わせの日程を調整して",
+   "expect": {
+    "route": "scheduling"
+   }
+  },
+  {
+   "id": "I-04",
+   "category": "I",
+   "history": [],
+   "message": "来期の採用計画のスライドを作って",
+   "expect": {
+    "route": "slides"
+   }
+  },
+  {
+   "id": "I-05",
+   "category": "I",
+   "history": [],
+   "message": "経費の一覧表を作って",
+   "expect": {
+    "route": "sheet-builder"
+   }
+  },
+  {
+   "id": "J-01",
+   "category": "J",
+   "history": [],
+   "message": "〇〇社の田中さんの電話番号は？",
+   "expect": {
+    "read": "contacts:ask"
+   },
+   "features": [
+    "cards"
+   ]
+  },
+  {
+   "id": "J-02",
+   "category": "J",
+   "history": [],
+   "message": "先週名刺交換した人を教えて",
+   "expect": {
+    "read": "contacts:ask"
+   },
+   "features": [
+    "cards"
+   ]
+  },
+  {
+   "id": "J-03",
+   "category": "J",
+   "history": [],
+   "message": "佐々木美穂さんの連絡先情報（メールアドレス・住所など）",
+   "expect": {
+    "read": "contacts:ask"
+   },
+   "features": [
+    "cards"
+   ]
+  },
+  {
+   "id": "J-04",
+   "category": "J",
+   "history": [],
+   "message": "田中さんの電話番号を 03-1234-5678 に直して",
+   "expect": {
+    "read": "business-cards:update"
+   },
+   "features": [
+    "cards"
+   ]
+  },
+  {
+   "id": "J-05",
+   "category": "J",
+   "history": [],
+   "message": "田中さんは展示会で会った、とメモして",
+   "expect": {
+    "read": "business-cards:update"
+   },
+   "features": [
+    "cards"
+   ]
+  },
+  {
+   "id": "J-06",
+   "category": "J",
+   "history": [],
+   "message": "佐々木さんの名刺は 9 月 25 日の展示会でもらった",
+   "expect": {
+    "read": "business-cards:update"
+   },
+   "features": [
+    "cards"
+   ]
+  },
+  {
+   "id": "J-07",
+   "category": "J",
+   "history": [],
+   "message": "ミライ工業の山本さんを連絡先に入れて",
+   "expect": {
+    "read": "business-cards:update"
+   },
+   "features": [
+    "cards"
+   ]
+  },
+  {
+   "id": "J-08",
+   "category": "J",
+   "history": [],
+   "message": "9 月 25 日の発表会で名刺交換した人にお礼のメールを送って",
+   "expect": {
+    "read": "business-cards:bulk-mail"
+   },
+   "features": [
+    "cards"
+   ]
+  },
+  {
+   "id": "J-09",
+   "category": "J",
+   "history": [],
+   "message": "田中さんにお礼のメールを送って",
+   "expect": {
+    "notRead": [
+     "business-cards:bulk-mail",
+     "contacts:ask"
+    ]
+   },
+   "features": [
+    "cards"
+   ]
+  },
+  {
+   "id": "J-10",
+   "category": "J",
+   "history": [],
+   "message": "コピー用紙の在庫は",
+   "expect": {
+    "read": "inventory:stock"
+   },
+   "features": [
+    "inventory"
+   ]
+  },
+  {
+   "id": "J-11",
+   "category": "J",
+   "history": [],
+   "message": "足りなくなりそうなものは？",
+   "expect": {
+    "read": "inventory:low"
+   },
+   "features": [
+    "inventory"
+   ]
+  },
+  {
+   "id": "J-12",
+   "category": "J",
+   "history": [],
+   "message": "先週のコピー用紙の使用を教えて",
+   "expect": {
+    "read": "inventory:history"
+   },
+   "features": [
+    "inventory"
+   ]
+  },
+  {
+   "id": "J-13",
+   "category": "J",
+   "history": [],
+   "message": "A4 用紙を 2 箱入庫して",
+   "expect": {
+    "read": "inventory:record"
+   },
+   "features": [
+    "inventory"
+   ]
+  },
+  {
+   "id": "J-14",
+   "category": "J",
+   "history": [],
+   "message": "トナーを１本使った",
+   "expect": {
+    "read": "inventory:record"
+   },
+   "features": [
+    "inventory"
+   ]
+  },
+  {
+   "id": "J-15",
+   "category": "J",
+   "history": [],
+   "message": "トナーを発注して",
+   "expect": {
+    "read": "inventory:order"
+   },
+   "features": [
+    "inventory"
+   ]
+  },
+  {
+   "id": "J-16",
+   "category": "J",
+   "history": [],
+   "message": "このテンプレートを使った",
+   "expect": {
+    "notRead": [
+     "inventory:*"
+    ]
+   },
+   "features": [
+    "inventory"
+   ]
+  },
+  {
+   "id": "J-17",
+   "category": "J",
+   "history": [],
+   "message": "就業規則の残業の上限は？",
+   "expect": {
+    "read": "answer"
+   },
+   "features": [
+    "inventory"
+   ]
+  },
+  {
+   "id": "J-18",
+   "category": "J",
+   "history": [],
+   "message": "全員に、年末調整の書類を 12 月 5 日までに出すよう伝えて",
+   "expect": {
+    "read": "notice:create"
+   },
+   "features": [
+    "notices"
+   ]
+  },
+  {
+   "id": "J-19",
+   "category": "J",
+   "history": [],
+   "message": "年末調整のお知らせを取り下げて",
+   "expect": {
+    "read": "notice:withdraw"
+   },
+   "features": [
+    "notices"
+   ]
+  },
+  {
+   "id": "J-20",
+   "category": "J",
+   "history": [],
+   "message": "年末調整、出したよ",
+   "expect": {
+    "read": "notice:done"
+   },
+   "features": [
+    "notices"
+   ]
+  },
+  {
+   "id": "J-21",
+   "category": "J",
+   "history": [],
+   "message": "年末調整のお知らせ、何人済んだ？",
+   "expect": {
+    "read": "notice:progress"
+   },
+   "features": [
+    "notices"
+   ]
+  },
+  {
+   "id": "J-22",
+   "category": "J",
+   "history": [],
+   "message": "年末調整はもう知らせないで",
+   "expect": {
+    "read": "notice:mute"
+   },
+   "features": [
+    "notices"
+   ]
+  },
+  {
+   "id": "J-23",
+   "category": "J",
+   "history": [],
+   "message": "朝のブリーフを止めて",
+   "expect": {
+    "read": "schedule:pause"
+   },
+   "features": [
+    "schedules"
+   ]
+  },
+  {
+   "id": "J-24",
+   "category": "J",
+   "history": [],
+   "message": "止めていた朝のブリーフを再開して",
+   "expect": {
+    "read": "schedule:resume"
+   },
+   "features": [
+    "schedules"
+   ]
+  },
+  {
+   "id": "J-25",
+   "category": "J",
+   "history": [],
+   "message": "朝のブリーフを今すぐ実行して",
+   "expect": {
+    "read": "schedule:run"
+   },
+   "features": [
+    "schedules"
+   ]
+  },
+  {
+   "id": "J-26",
+   "category": "J",
+   "history": [],
+   "message": "定時実行はどうなってる？",
+   "expect": {
+    "read": "schedule:status"
+   },
+   "features": [
+    "schedules"
+   ]
+  },
+  {
+   "id": "J-27",
+   "category": "J",
+   "history": [],
+   "message": "定時実行を追加して",
+   "expect": {
+    "read": "schedule:edit"
+   },
+   "features": [
+    "schedules"
+   ]
+  },
+  {
+   "id": "J-28",
+   "category": "J",
+   "history": [],
+   "message": "それは違う、山田さんは総務だよ",
+   "expect": {
+    "read": "memory-fix"
+   },
+   "features": []
+  },
+  {
+   "id": "J-29",
+   "category": "J",
+   "history": [],
+   "message": "見積の話は忘れて",
+   "expect": {
+    "read": "memory-fix"
+   },
+   "features": []
+  },
+  {
+   "id": "J-30",
+   "category": "J",
+   "history": [],
+   "message": "https://www.example.co.jp/order をアプリの一覧に入れて",
+   "expect": {
+    "read": "launcher"
+   },
+   "features": []
+  },
+  {
+   "id": "J-31",
+   "category": "J",
+   "history": [],
+   "message": "明日の10時から会議室を予約して",
+   "expect": {
+    "read": "reservation"
+   },
+   "features": [
+    "reservations"
+   ]
+  },
+  {
+   "id": "J-32",
+   "category": "J",
+   "history": [],
+   "message": "期限は来週にして",
+   "expect": {
+    "read": "approval-fix"
+   },
+   "features": [
+    "approvals"
+   ]
+  },
+  {
+   "id": "J-33",
+   "category": "J",
+   "history": [],
+   "message": "段取りはどこまで進んだ？",
+   "expect": {
+    "read": "plan-talk:status"
+   },
+   "features": [
+    "plans"
+   ]
+  },
+  {
+   "id": "J-34",
+   "category": "J",
+   "history": [],
+   "message": "さっきの段取りは取りやめて",
+   "expect": {
+    "read": "plan-talk:cancel"
+   },
+   "features": [
+    "plans"
+   ]
+  },
+  {
+   "id": "J-35",
+   "category": "J",
+   "history": [],
+   "message": "あとで山田さんに見積もりを送らないと",
+   "expect": {
+    "ownTodo": true
+   },
+   "features": []
+  },
+  {
+   "id": "J-36",
+   "category": "J",
+   "history": [],
+   "message": "あとで見積もりを送っておいてください",
+   "expect": {
+    "ownTodo": false
+   },
+   "features": []
+  }
+ ]
+}

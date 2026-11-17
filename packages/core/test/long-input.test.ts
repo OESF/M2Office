@@ -14,8 +14,6 @@ import { SECRETARY_COMMAND_CHARS, SECRETARY_MESSAGE_MAX, SECRETARY_MESSAGE_TOO_L
 import { MockWorkspaceConnector, OFFICIAL_AGENTS, Secretary, UnconfiguredLlmProvider, commandText, type Repository } from '../src/index.js';
 import { signageRequest } from '../src/secretary/signage.js';
 import { attendanceRequest } from '../src/secretary/attendance.js';
-import { maybeReservation } from '../src/secretary/reservations.js';
-import { inventoryRequest } from '../src/secretary/inventory.js';
 import { partyFromText } from '../src/inquiries/line.js';
 import { noticeDaysOf, renewMonthsOf } from '../src/contracts/extract.js';
 import { readOrderByRule } from '../src/sales-docs/extract.js';
@@ -51,7 +49,7 @@ test('決まった言い回しで見分ける部分は文の頭だけを見る�
   const evil = ['「'.repeat(SECRETARY_MESSAGE_MAX), '\t'.repeat(SECRETARY_MESSAGE_MAX), '0'.repeat(SECRETARY_MESSAGE_MAX), '!'.repeat(SECRETARY_MESSAGE_MAX)];
   for (const m of evil) {
     const head = commandText(m);
-    const took = ms(() => { signageRequest(head); attendanceRequest(head); maybeReservation(head); inventoryRequest(head); });
+    const took = ms(() => { signageRequest(head); attendanceRequest(head); });
     assert.ok(took < 500, `頭だけを見れば速い（${Math.round(took)} ms）`);
   }
 });
