@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket as NodeWebSocket } from 'ws';
-import { AiNotConfiguredError, AiPolicyBlockedError, needsCanvas, type Logger, type SecretaryReply, type VoiceEvent, type VoiceSession, type VoiceTool, AiLimitError, withAiUsage, addMishear, correctHeard, mishearOf, voiceWords, voiceWordsLine, type VoiceWord } from '@m2office/core';
+import { AiNotConfiguredError, AiPolicyBlockedError, needsCanvas, type Logger, type SecretaryReply, type VoiceEvent, type VoiceSession, type VoiceTool, AiLimitError, withAiUsage, addMishear, correctHeard, secretaryClockLine, tidyTranscript, mishearOf, voiceWords, voiceWordsLine, type VoiceWord } from '@m2office/core';
 import type { AppDeps } from '../context.js';
 import { SESSION_COOKIE, sessionIdOf } from '../auth/session.js';
 import { extractSubdomain } from '../middleware/tenant.js';
@@ -45,10 +45,15 @@ const LOOKUP_POLL_MS = 3000;
  * @remarks
  * 押した人が「何を言えばよいか」を考えずに済むよう、秘書から先に声をかける。
  */
-function greetingNote(callMe: string, secretaryName: string, facts: string[]): string {
+function greetingNote(callMe: string, secretaryName: string, facts: string[], clock: string): string {
   return [
     '（内部情報・この文をそのまま読み上げないこと）',
     '音声での対話が始まりました。あなたから先に、ひと息で声をかけてください。',
+    /*
+      いまの日時を、声をかける指示そのものに書く（第6.1.4節）。会話の最初の指示の中ほどに 1 行あるだけでは、
+      夕方の 18 時に「おはようございます」と挨拶した（2026-11-17）。挨拶の言葉は、この時刻から推論が選ぶ
+    */
+    `${clock}最初の挨拶は、この時刻に合ったものにしてください。`,
     `相手の呼び方: ${callMe}`,
     secretaryName ? `あなたの名前: ${secretaryName}（名乗ってください）` : '名前は決まっていません。名乗らないでください。',
     facts.length > 0
@@ -68,11 +73,12 @@ function greetingNote(callMe: string, secretaryName: string, facts: string[]): s
  * **裏で別のものが動いていることを、利用者に話させない。**
  * 利用者から見れば、調べたのは秘書自身である。
  */
-function lookupNote(x: { request: string; text: string | null; failureReason: string | null; agentName?: string | null; agentId?: string; proactive?: boolean }, shown: boolean): string {
+function lookupNote(x: { request: string; text: string | null; failureReason: string | null; agentName?: string | null; agentId?: string; proactive?: boolean }, shown: boolean, clock: string): string {
   return [
     '（内部情報・この文をそのまま読み上げないこと）',
+    // 朝のブリーフは持ち越して夕方に伝えることもある。挨拶は、いまの時刻に合ったものを秘書が選ぶ（第6.1.4節）
     x.agentId === 'morning-brief'
-      ? '今朝のブリーフができました。朝の挨拶を添えて、最初に今日いちばん気をつけることを伝えてください。'
+      ? `今朝のブリーフができました。${clock}この時刻に合った挨拶を添えて、最初に今日いちばん気をつけることを伝えてください。`
       : x.proactive
       ? `頼まれる前に、あなたが先回りして用意したもの（${x.agentName ?? '移動の調べもの'}）ができました。「〇〇の準備をしておきました」のように伝えてください。`
       : x.agentName
@@ -170,6 +176,16 @@ async function start(
   const replied: string[] = [];
   const add = (into: string[], text: string) => {
     if (into.join('').length < TRANSCRIPT_LIMIT) into.push(text);
+  };
+  /*
+    聞き取りは 1 回の発話ごとにまとめてから整え（単語の間の空白・ハングルの聞き違え。第10.5.2節）、発話ごとに改行して残す。
+    断片のまま整えると、断片の境目の空白が残るため
+  */
+  let heardNow = '';
+  const flushHeardNow = () => {
+    const tidy = tidyTranscript(heardNow).trim();
+    if (tidy) add(heard, `${heard.length ? '\n' : ''}${tidy}`);
+    heardNow = '';
   };
   const send = (payload: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
@@ -297,14 +313,18 @@ async function start(
       tools: [secretaryTool(), canvasTool()],
       onEvent: (event: VoiceEvent) => {
         switch (event.type) {
-          case 'heard':
-            add(heard, event.text);
+          case 'heard': {
+            heardNow += event.text;
+            // デバッグの記録には、相手が返した聞き取りをそのまま残す（整える前の形を確かめられるように）
             if (deps.debug) heardTurn += event.text;
-            send({ type: 'heard', text: event.text });
+            const shown = tidyTranscript(event.text);
+            if (shown) send({ type: 'heard', text: shown });
             break;
+          }
           case 'reply':
             // 応答が始まった＝話している。この間は割り込まない
             gate.startedSpeaking();
+            flushHeardNow();
             add(replied, event.text);
             if (deps.debug) { flushHeard(); replyTurn += event.text; }
             send({ type: 'reply', text: event.text });
@@ -314,6 +334,7 @@ async function start(
             if (ws.readyState === ws.OPEN) ws.send(event.pcm, { binary: true });
             break;
           case 'turn-end':
+            flushHeardNow();
             flushHeard();
             flushReply();
             send({ type: 'turn-end' });
@@ -363,7 +384,7 @@ async function start(
         const shown = !!x.text && needsCanvas({ text: x.text, evidence: [] }) !== null;
         if (shown) showOnCanvas(x.request, reply);
         dbg(`調べものの結果を音声へ${shown ? '（画面にも出した）' : ''}: ${x.request}`, x);
-        gate.tell(lookupNote(x, shown));
+        gate.tell(lookupNote(x, shown, secretaryClockLine(persona.timeZone)));
       }
     } catch (err) {
       // 探せなくても会話は続ける。次の見回りで拾う
@@ -382,6 +403,7 @@ async function start(
     callMeOf(persona),
     prefs.secretary.name,
     await greetingFacts(deps, tenantId, userId, log),
+    secretaryClockLine(persona.timeZone),
   ));
   await deps.repo.appendAudit({
     id: randomUUID(), tenantId, actorType: 'user', actorId: userId,
@@ -505,6 +527,7 @@ async function start(
         // 話した中身は入れない（第10.5.5節）
         detail: { seconds }, occurredAt: new Date().toISOString(),
       });
+      flushHeardNow();
       const message = heard.join('').trim();
       const reply = replied.join('').trim();
       if (!message && !reply) return;

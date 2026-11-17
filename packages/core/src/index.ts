@@ -42,6 +42,7 @@ export * from './conversations/rotation.js';
 export * from './voice/provider.js';
 export { GeminiLiveProvider } from './voice/gemini-live.js';
 export { MockVoiceProvider } from './voice/mock.js';
+export { tidyTranscript } from './voice/transcript.js';
 export * from './memory/learn.js';
 export * from './memory/kinds.js';
 export { READ_ANSWER, READ_OPEN, parseReading, readRequest, readingPrompt, type Reading, type ReadingChoice, type ReadingInput } from './secretary/reading.js';

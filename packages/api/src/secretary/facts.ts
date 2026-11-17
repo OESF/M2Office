@@ -11,8 +11,6 @@ import type { AppDeps } from '../context.js';
 
 /** 最初の画面に題名を添える未読のお知らせの数の上限。 */
 const UNREAD_TITLES = 3;
-/** 未読のお知らせを数える件数の上限（超えたら「〇件以上」と伝える）。 */
-const UNREAD_SCAN = 200;
 
 /**
  * 音声を始めたときの第一声の材料を集める（このあとの予定と、本人が判断できる承認待ち）。
@@ -62,12 +60,14 @@ export async function homeFacts(
 ): Promise<string[]> {
   const facts = await greetingFacts(deps, tenantId, userId, log);
   try {
-    const all = await deps.repo.listNotifications(tenantId, userId, UNREAD_SCAN);
-    const unread = all.filter((n) => !n.readAt);
-    if (unread.length > 0) {
-      const count = all.length >= UNREAD_SCAN && unread.length === all.length ? `${UNREAD_SCAN} 件以上` : `${unread.length} 件`;
-      const titles = unread.slice(0, UNREAD_TITLES).map((n) => `「${n.title}」`).join('');
-      facts.push(`まだ見ていないお知らせが全部で ${count}。新しいものは ${titles}`);
+    // 数はメニューの件数と同じ数え方（未読のすべて）にする。題名は新しい未読から
+    const [{ unread: count }, recent] = await Promise.all([
+      deps.repo.countNotifications(tenantId, userId),
+      deps.repo.listNotifications(tenantId, userId, 50),
+    ]);
+    if (count > 0) {
+      const titles = recent.filter((n) => !n.readAt).slice(0, UNREAD_TITLES).map((n) => `「${n.title}」`).join('');
+      facts.push(`まだ見ていないお知らせが全部で ${count} 件。${titles ? `新しいものは ${titles}` : ''}`);
     }
   } catch (err) {
     log.warn('最初の画面のお知らせを取れませんでした', { err });

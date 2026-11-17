@@ -867,15 +867,24 @@ export class PostgresRepository implements Repository {
     );
   }
 
-  async listNotifications(tenantId: string, userId: string, limit: number): Promise<Notification[]> {
+  async listNotifications(tenantId: string, userId: string, limit: number, offset = 0): Promise<Notification[]> {
     return this.q<Notification>(tenantId, 
       `select id, tenant_id as "tenantId", user_id as "userId", kind, title, body,
               run_id as "runId", read_at as "readAt", created_at as "createdAt",
               delivered_at as "deliveredAt"
          from notifications where tenant_id = $1 and user_id = $2
-        order by created_at desc limit $3`,
-      [tenantId, userId, limit],
+        order by created_at desc, id desc limit $3 offset $4`,
+      [tenantId, userId, limit, Math.max(0, Math.floor(offset))],
     );
+  }
+
+  async countNotifications(tenantId: string, userId: string): Promise<{ total: number; unread: number }> {
+    const rows = await this.q<{ total: string; unread: string }>(tenantId,
+      `select count(*) as total, count(*) filter (where read_at is null) as unread
+         from notifications where tenant_id = $1 and user_id = $2`,
+      [tenantId, userId],
+    );
+    return { total: Number(rows[0]?.total ?? 0), unread: Number(rows[0]?.unread ?? 0) };
   }
 
   async saveBrief(tenantId: string, userId: string, b: Brief): Promise<void> {

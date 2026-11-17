@@ -257,6 +257,9 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [lookups, setLookups] = useState<Lookup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  // 未読の数（すべて）。一覧は新しい 50 件だけなので、一覧から数えない（秘書の言う数とそろえる。第6.5.5節）
+  const [unread, setUnread] = useState(0);
+  const [noticeTotal, setNoticeTotal] = useState(0);
   const [showTour, setShowTour] = useState(false);
   // 初回の案内（仕様書 第6.10.3節）。見終えていなければ出す
   useEffect(() => {
@@ -341,6 +344,8 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
       setApprovals(p.items);
       setHistory(j.items as never);
       setNotifications(n.items);
+      setUnread(n.unread);
+      setNoticeTotal(n.total);
       setLookups(l.items);
       // まだ伝えていない調べものを受け取り、秘書の応答として出す（仕様書 第10.11.7節）。
       // 伝えたことはサーバーが記録するため、画面を開き直しても二度は出ない。
@@ -613,7 +618,6 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
   useEffect(() => {
     document.title = `${me.tenant.shortName || me.tenant.name} | M2Office`;
   }, [me.tenant.shortName, me.tenant.name]);
-  const unread = notifications.filter((n) => !n.readAt).length;
   const isAdmin = me.user.roles.includes('admin');
 
   return (
@@ -860,7 +864,7 @@ export function App({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {view.kind === 'notifications' && (
             <>
               <h1>お知らせ</h1>
-              <Notifications items={notifications} onRead={() => void refresh()} onOpenBrief={openBrief} />
+              <Notifications items={notifications} total={noticeTotal} onRead={() => void refresh()} onOpenBrief={openBrief} />
             </>
           )}
           {view.kind === 'cards' && (
@@ -1880,14 +1884,47 @@ const tail = (text: string) => (text.length > CAPTION_MAX ? `…${text.slice(-CA
  *
  * @remarks 本人の受け取り箱の整理なので、消す前に確認を挟まない（ADR-0028）
  */
-function Notifications({ items, onRead, onOpenBrief }: { items: Notification[]; onRead: () => void; onOpenBrief?: (runId: string) => Promise<boolean> }) {
+/** お知らせの画面の 1 ページの件数（API と同じ。仕様書 第6.5.5節）。 */
+const NOTICE_PAGE = 50;
+
+/**
+ * お知らせの画面（仕様書 第6.5.5節）。
+ *
+ * @remarks
+ * 新しい 50 件を 1 ページとし、古いお知らせはページを送って見る（第 0.606.6 版。古い未読が見えず、既読にも削除にもできなかった）。
+ * 最初のページは画面全体で数秒ごとに読み直している一覧をそのまま使い、2 ページめからはそのページを読む。
+ */
+function Notifications({ items: latest, total, onRead, onOpenBrief }: {
+  items: Notification[]; total: number; onRead: () => void; onOpenBrief?: (runId: string) => Promise<boolean>;
+}) {
+  const [page, setPage] = useState(0);
+  const [older, setOlder] = useState<Notification[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const pages = Math.max(1, Math.ceil(total / NOTICE_PAGE));
+  const loadPage = useCallback((p: number) => {
+    if (p === 0) { setOlder(null); return; }
+    api.notifications(p * NOTICE_PAGE).then((r) => setOlder(r.items)).catch((e) => setError(describeError(e, '読み込めませんでした')));
+  }, []);
+  useEffect(() => { loadPage(page); }, [page, loadPage]);
+  // 消して件数が減り、いまのページが無くなったら、最後のページへ戻す
+  useEffect(() => { if (page > pages - 1) setPage(pages - 1); }, [page, pages]);
+  const items = page === 0 ? latest : (older ?? []);
   // 一覧が変わったら、無くなったお知らせを選んだままにしない
   useEffect(() => {
     setSelected((cur) => new Set([...cur].filter((id) => items.some((n) => n.id === id))));
   }, [items]);
-  if (items.length === 0) return <p className="muted">お知らせはありません</p>;
+  // 既読にした・消したら、画面全体の件数と、開いているページを読み直す
+  const changed = () => { onRead(); if (page > 0) loadPage(page); };
+  const go = (p: number) => { setSelected(new Set()); setError(null); setPage(p); };
+  const pager = pages > 1 && (
+    <div className="row notice-pager">
+      <button className="btn ghost small" disabled={page === 0} onClick={() => go(page - 1)}>‹ 前ページ</button>
+      <span className="muted small">{page * NOTICE_PAGE + 1}〜{Math.min(total, (page + 1) * NOTICE_PAGE)} 件め / {total} 件</span>
+      <button className="btn ghost small" disabled={page >= pages - 1} onClick={() => go(page + 1)}>次ページ ›</button>
+    </div>
+  );
+  if (items.length === 0 && page === 0) return <p className="muted">お知らせはありません</p>;
   const all = selected.size === items.length;
   const toggle = (id: string) => setSelected((cur) => {
     const next = new Set(cur);
@@ -1896,7 +1933,7 @@ function Notifications({ items, onRead, onOpenBrief }: { items: Notification[]; 
   });
   const remove = (fn: () => Promise<unknown>) => {
     setError(null);
-    void fn().then(() => { setSelected(new Set()); onRead(); }).catch((e) => setError(describeError(e, '削除できませんでした')));
+    void fn().then(() => { setSelected(new Set()); changed(); }).catch((e) => setError(describeError(e, '削除できませんでした')));
   };
   return (
     <>
@@ -1905,9 +1942,11 @@ function Notifications({ items, onRead, onOpenBrief }: { items: Notification[]; 
         {selected.size > 0 && <button className="btn small" onClick={() => remove(() => api.deleteNotifications([...selected]))}>選んだ {selected.size} 件を削除</button>}
       </div>
       {error && <p className="error">{error}</p>}
+      {pager}
       {items.map((n) => (
-        <NoticeRow key={n.id} notice={n} onRead={onRead} onOpenBrief={onOpenBrief} selected={selected.has(n.id)} onSelect={() => toggle(n.id)} onDelete={() => remove(() => api.deleteNotification(n.id))} />
+        <NoticeRow key={n.id} notice={n} onRead={changed} onOpenBrief={onOpenBrief} selected={selected.has(n.id)} onSelect={() => toggle(n.id)} onDelete={() => remove(() => api.deleteNotification(n.id))} />
       ))}
+      {items.length > 10 && pager}
     </>
   );
 }

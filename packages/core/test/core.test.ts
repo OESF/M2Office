@@ -64,6 +64,10 @@ class MemoryRepo {
   async listNotifications(t: string, userId: string) {
     return this.notifications.filter((n) => n.tenantId === t && n.userId === userId);
   }
+  async countNotifications(t: string, userId: string) {
+    const mine = this.notifications.filter((n) => n.tenantId === t && n.userId === userId);
+    return { total: mine.length, unread: mine.filter((n) => !n.readAt).length };
+  }
   artifacts: Artifact[] = [];
   async createArtifact(a: Artifact) { this.artifacts.push(a); }
   async listArtifacts(t: string, runId: string) { return this.artifacts.filter((a) => a.tenantId === t && a.runId === runId); }

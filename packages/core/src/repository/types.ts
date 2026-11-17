@@ -133,8 +133,19 @@ export interface Repository {
 
   /** 本人宛の通知を保存する。宛先の決定はツール側で行う。 */
   createNotification(n: Notification): Promise<void>;
-  /** 本人の通知を新しい順に返す。他人の通知は返さない。 */
-  listNotifications(tenantId: string, userId: string, limit: number): Promise<Notification[]>;
+  /**
+   * 本人の通知を新しい順に返す。他人の通知は返さない。
+   *
+   * @param offset 先頭から飛ばす件数（お知らせの画面のページ。仕様書 第6.5.5節）。既定は 0
+   */
+  listNotifications(tenantId: string, userId: string, limit: number, offset?: number): Promise<Notification[]>;
+  /**
+   * 本人の通知の数（すべてと、未読のすべて。仕様書 第6.5.5節）。
+   *
+   * @remarks 一覧の件数の上限に関係なく数える。メニューの件数と秘書の言う数をそろえ、お知らせの画面のページを数えるため
+   * （2026-11-17 に、一覧の 50 件の中だけを数えて 46、秘書は 86 と言った）
+   */
+  countNotifications(tenantId: string, userId: string): Promise<{ total: number; unread: number }>;
   /** ブリーフの本文を残す（同じ実行なら上書き。第9.5.5.1.2節）。 */
   saveBrief(tenantId: string, userId: string, b: Brief): Promise<void>;
   /**

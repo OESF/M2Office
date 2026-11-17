@@ -1520,7 +1520,8 @@ export const api = {
     await call('/auth/logout', { method: 'POST' });
     csrfToken = null;
   },
-  notifications: () => call<{ items: Notification[]; unread: number }>('/notifications'),
+  /** お知らせ（新しい順に 1 ページ。`offset` で古いページ。`total`・`unread` はすべての数。仕様書 第6.5.5節）。 */
+  notifications: (offset = 0) => call<{ items: Notification[]; unread: number; total: number; offset: number; pageSize: number }>(`/notifications${offset > 0 ? `?offset=${offset}` : ''}`),
   mySettings: () => call<UserSettings>('/me/settings'),
   saveMySettings: <K extends keyof UserSettings>(section: K, value: UserSettings[K]) =>
     call(`/me/settings/${section}`, { method: 'PUT', body: JSON.stringify(value) }),
