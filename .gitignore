@@ -26,6 +26,8 @@ docs/review/hr-payroll/hr-payroll-review.pdf
 # マスター管理画面の運営者マニュアルの PDF は docs/ops-manual/*.md から作る（npm run docs:ops-manual-pdf）
 docs/ops-manual/ops-manual.pdf
 docs/ops-manual/ops-recovery.pdf
+# 管理者のはじめかたの PDF は docs/getting-started/*.md から作る（npm run docs:getting-started-pdf）
+docs/getting-started/getting-started.pdf
 *.log
 
 # エディタと OS

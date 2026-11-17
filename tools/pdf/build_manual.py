@@ -4,7 +4,7 @@
 Markdown は章ごとに分けたまま保守し、配布と通読のときだけ 1 本にまとめる。
 
 使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF] [--owner=作成の法人 --company=会社名 --contact=担当者 --to=宛先]
-  マニュアルの名前: developer（既定。docs/developer/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・ops（運営者。docs/ops-manual/）・
+  マニュアルの名前: developer（既定。docs/developer/）・getting-started（管理者のはじめかた。docs/getting-started/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・ops（運営者。docs/ops-manual/）・
     ops-recovery（運営者マニュアルのうち全体の構成・バックアップと復旧の章と、新しい VPS を用意して入れる章だけ。サーバーが止まったときに読む印刷用）・
     hr-review（人事・給与の監修のお願い。docs/review/hr-payroll/）
   既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
@@ -41,6 +41,11 @@ MANUALS = {
         'dir': os.path.join(ROOT, 'docs', 'ops-manual'), 'pdf': 'ops-recovery.pdf',
         'title': 'M2Office バックアップと復旧の手順書', 'subtitle': 'サーバーが止まったときに読む印刷用の手順書',
         'chapters': ['18-architecture.md', '17-backup-recovery.md', '12-vps-setup.md', '13-vps-m2office-setup.md'], 'intro': False,
+    },
+    # クラウド版を使い始める会社の管理者に渡す手引き（申し込み・はじめの設定・招待・Google とのつなぎ方）。画面のヘルプは使い始めてからしか読めないため、印刷して渡す
+    'getting-started': {
+        'dir': os.path.join(ROOT, 'docs', 'getting-started'), 'pdf': 'getting-started.pdf',
+        'title': 'M2Office はじめかた（管理者）', 'subtitle': 'クラウド版の申し込みから使い始めるまで',
     },
     'hr-payroll': {
         'dir': os.path.join(ROOT, 'docs', 'manual', 'hr-payroll'), 'pdf': 'hr-payroll-manual.pdf',

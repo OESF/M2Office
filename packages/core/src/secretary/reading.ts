@@ -110,7 +110,10 @@ export function readingPrompt(input: ReadingInput): string {
  */
 export function parseReading(text: string, allowed: readonly string[], mentionCount = 0, kindsOf: Record<string, readonly string[]> = {}): Omit<Reading, 'tokensUsed'> | null {
   const ids = new Set([READ_ANSWER, ...allowed]);
-  const body = /\{[\s\S]*\}/.exec(text)?.[0];
+  // 最初の { から最後の } まで（正規表現で探すと、{ が続く長い答えで遅くなる。CodeQL js/polynomial-redos）
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  const body = start >= 0 && end > start ? text.slice(start, end + 1) : undefined;
   if (body) {
     try {
       const o = JSON.parse(body) as Record<string, unknown>;
@@ -143,7 +146,8 @@ export function parseReading(text: string, allowed: readonly string[], mentionCo
  * @returns 読み取り。推論が使えない・失敗した・決められなかったときは `null`（呼ぶ側は層 3 に任せる）
  */
 export async function readRequest(llm: LlmProvider, input: ReadingInput): Promise<Reading | null> {
-  if (llm.name === 'stub' || llm.name === 'unconfigured') return null;
+  // 自動テストのスタブは、読み取りの問いに決まった答えを返す（llm/stub.ts の stubReading）。鍵が無いときだけ読まない
+  if (llm.name === 'unconfigured') return null;
   try {
     const res = await llm.complete({
       tier: 'fast',

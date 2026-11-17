@@ -14,7 +14,7 @@
  * 文はまとめて渡す（M2Office も 60 件ずつまとめて確かめる）。並びの影響を見るため、3 通りの並びで回す。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tsImport } from 'tsx/esm/api';
@@ -90,8 +90,16 @@ const lines = [
 console.log(lines.join('\n'));
 mkdirSync(join(dir, 'results'), { recursive: true });
 const day = new Date().toISOString().slice(0, 10);
+// 同じ日の結果があれば番号を付ける。有無を先に確かめず、書けなかったら（もうある）次の番号で書く（CodeQL js/file-system-race）
 let n = 1;
 let out = join(dir, 'results', `${day}.md`);
-while (existsSync(out)) out = join(dir, 'results', `${day}-${++n}.md`);
-writeFileSync(out, `${lines.join('\n')}\n`, { flag: 'wx' });
+for (;;) {
+  try {
+    writeFileSync(out, `${lines.join('\n')}\n`, { flag: 'wx' });
+    break;
+  } catch (e) {
+    if (e?.code !== 'EEXIST') throw e;
+    out = join(dir, 'results', `${day}-${++n}.md`);
+  }
+}
 console.log(`残しました: ${out}`);

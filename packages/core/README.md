@@ -486,6 +486,7 @@ AG-02 議事録の作成・共有は、承認②のあとに `knowledge.register
 - `GeminiLiveProvider` が Gemini Live 固有の形（`setup`・`realtimeInput`・`serverContent`）を担います。鍵はサーバーだけが持ちます
 - 鍵が無い会社では音声を始めず、「Gemini の接続が設定されていません」と伝えます（`AiNotConfiguredError`。仕様書 第20.2.4節）。`MockVoiceProvider` は自動テスト（`LLM_PROVIDER=stub`）の中だけで使います
 - 音は通すだけで、どこにも書き出しません（第10.5.3節）。会話ログに残すのは文字だけです
+- 聞き取りの文字は `tidyTranscript`（`voice/transcript.ts`）で整えてから字幕と会話ログに渡します。Gemini Live は聞き取りの言語を指定できないため、日本語の文字に接する空白を詰め、ハングルの聞き違えを外します（第10.5.2節。形を読むだけで、意味は読まない）
 - 声（`VOICE_CHOICES` から本人が選ぶ）は `speechConfig` で、話し方の指示（例: 関西弁で話して）は指示文の末尾で渡します（第10.5.6節）。知らない声の名前は中継が落とします
 
 ### 通知と、そのバックアップ（`notify/`）

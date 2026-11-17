@@ -81,6 +81,9 @@ export class StubLlmProvider implements LlmProvider {
     // 見積書の見本（第15.2.3節）の自動テスト。見本の文に `M2O-QUOTE-SAMPLE:` に続く 1 行の JSON があれば、それを返す
     const sampleAt = user.indexOf('M2O-QUOTE-SAMPLE:');
     if (sampleAt !== -1) return { text: user.slice(sampleAt + 'M2O-QUOTE-SAMPLE:'.length).split('\n')[0] ?? '', tokensUsed: 32 };
+    // 秘書の頼みの読み取り（仕様書 第49.5節）を自動テストで通しで確かめるための、決まった応答
+    const reading = stubReading(system, user);
+    if (reading !== null) return { text: reading, tokensUsed: 16 };
     // 秘書の段取り（仕様書 第10.14節）を自動テストで通しで確かめるための、決まった応答
     const planned = stubPlanning(system, user);
     if (planned !== null) return { text: planned, tokensUsed: 16 };
@@ -588,8 +591,65 @@ function extractField(text: string, key: string): string {
  * - 段取りを立てる指示には、使える業務のうち秘書の調べもの（1 段目）と社内ナレッジ Q&A（1 段目の答えを使う 2 段目）を返す
  * - 問いへの答えかの見分けには「はい」を返す
  */
+/**
+ * 秘書の頼みの読み取り（層 2。仕様書 第49.5節）への決まった応答。読み取りの問いでなければ `null`。
+ *
+ * @remarks
+ * **自動テストと鍵の無い開発の環境のためだけのもの**（このスタブは利用者の画面では使わない）。本番の推論の代わりに、
+ * 選べる先の一覧（「選べる先:」の行）から、頼みの語句で 1 つを選ぶ。秘書の本体は言葉の一覧で回す先を決めない（第49.4節）が、
+ * スタブは推論の代わりなので、ここに語句を置く。当たらなければ秘書が答える（`answer`）
+ */
+function stubReading(system: string, user: string): string | null {
+  if (!system.startsWith('秘書への頼みを読み取り')) return null;
+  const listed = system.split('選べる先:\n')[1]?.split('\n\n')[0] ?? '';
+  const choices = new Map<string, string>();
+  for (const line of listed.split('\n')) {
+    // ID に「:」を含むもの（direct:pending-approvals）があるが、ID は空白を含まないので、最初の「: 」で分ける
+    const at = line.indexOf(': ');
+    if (line.startsWith('- ') && at > 2) choices.set(line.slice(2, at), line.slice(at + 2));
+  }
+  const has = (id: string) => choices.has(id);
+  const pick = (to: string, kind = '') => JSON.stringify({ reason: '自動テストの決まった読み取り', to, kind, open: [], refersBack: false, changes: false, ownTodo: false });
+  // 業務の名前（「名前 — 説明」の名前）
+  const nameOf = (id: string) => (choices.get(id) ?? '').split(' — ')[0] ?? '';
+  const agents = [...choices.keys()].filter((id) => (choices.get(id) ?? '').includes(' — '));
+  // 動いている段取りについての問い（進み具合・取りやめ）は、新しい段取りより先に見る
+  if (has('plan-talk') && /段取り/.test(user) && /どこまで|進み|進んだ|やめ|中止/.test(user)) return pick('plan-talk', /やめ|中止/.test(user) ? 'cancel' : 'status');
+  if (has('plan') && /段取り|それぞれ/.test(user) && !/どこまで|進み|進んだ|やめ|中止/.test(user)) return pick('plan');
+  if (has('schedule')) {
+    const kind = /今すぐ/.test(user) ? 'run' : /再開/.test(user) ? 'resume' : /止めて|停止/.test(user) ? 'pause'
+      : /定時実行/.test(user) && /追加|登録|変え|削除/.test(user) ? 'edit' : /定時実行/.test(user) ? 'status' : '';
+    if (kind) return pick('schedule', kind);
+  }
+  // 各機能の頼み（第49.5節）。選べる先にあるときだけ
+  if (has('inventory') && /在庫/.test(user)) {
+    return pick('inventory', /足りな|少な|切れそう/.test(user) ? 'low' : /発注/.test(user) ? 'order' : /使った|届いた|入庫|記録/.test(user) ? 'record' : /履歴|先月|期間/.test(user) ? 'history' : 'stock');
+  }
+  if (has('launcher') && /アプリの一覧/.test(user)) return pick('launcher');
+  if (has('help-note') && /補足/.test(user)) return pick('help-note', /消して|外して|削除/.test(user) ? 'remove' : 'write');
+  if (has('reservation') && /予約/.test(user) && /会議室|社用車|備品|空き/.test(user)) return pick('reservation');
+  if (has('memory-fix') && /それは違う|は忘れて|のことは忘れて/.test(user)) return pick('memory-fix');
+  if (has('notice') && /お知らせ/.test(user)) {
+    return pick('notice', /取り下げ/.test(user) ? 'withdraw' : /済ませた|出しました|提出しました/.test(user) ? 'done' : /誰が|済んでいない/.test(user) ? 'progress' : /知らせないで/.test(user) ? 'mute' : /伝えて|出して/.test(user) ? 'create' : 'list');
+  }
+  const direct = [...choices.keys()].find((id) => id.startsWith('direct:') && (
+    (/承認待ち/.test(user) && id.endsWith('pending-approvals')) || (/予定/.test(user) && id.endsWith('calendar-range'))
+    || (/未読/.test(user) && id.endsWith('mail-unread')) || (/タスク/.test(user) && id.endsWith('tasks-today'))));
+  if (direct) return pick(direct);
+  if (has('how-to') && /どうやる|どうやって|どうすれば|どうしたら|方法|やり方|使い方/.test(user)) return pick('how-to');
+  const byName = agents.find((id) => nameOf(id) && user.includes(nameOf(id)));
+  if (byName) return pick(byName);
+  // 業務の名前の一部（「議事録」「週次ブリーフ」など）
+  // 契約書を渡した問い（「この NDA 大丈夫？」）は契約書チェックへ（第28.8節）
+  const contract = /NDA|契約|覚書|約款/.test(user) ? agents.find((id) => nameOf(id).includes('契約書')) : undefined;
+  if (contract) return pick(contract);
+  const byWord = ['議事録', 'ブリーフ', '日程', '返信', '下書き'].find((w) => user.includes(w));
+  const byPart = byWord ? agents.find((id) => nameOf(id).includes(byWord)) : undefined;
+  if (byPart) return pick(byPart);
+  return pick('answer');
+}
+
 function stubPlanning(system: string, user: string): string | null {
-  if (system.includes('依頼に最も合う業務を 1 つ選び') && system.includes('plan: 段取り') && user.includes('段取り')) return 'plan';
   if (system.includes('問いへの答えなら「はい」')) return 'はい';
   if (user.startsWith('# 段取り')) {
     const listed = (id: string) => user.includes(`\n- ${id}: `);
