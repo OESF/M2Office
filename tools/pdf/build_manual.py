@@ -4,7 +4,7 @@
 Markdown は章ごとに分けたまま保守し、配布と通読のときだけ 1 本にまとめる。
 
 使い方: python3 tools/pdf/build_manual.py [マニュアルの名前] [出力の PDF] [--owner=作成の法人 --company=会社名 --contact=担当者 --to=宛先]
-  マニュアルの名前: developer（既定。docs/developer/）・getting-started（管理者のはじめかた。docs/getting-started/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・ops（運営者。docs/ops-manual/）・
+  マニュアルの名前: developer（既定。docs/developer/）・getting-started（管理者のはじめかた。docs/getting-started/）・getting-started-user（利用者のはじめかた。docs/getting-started-user/）・hr-payroll（docs/manual/hr-payroll/）・inventory（docs/manual/inventory/）・ops（運営者。docs/ops-manual/）・
     ops-recovery（運営者マニュアルのうち全体の構成・バックアップと復旧の章と、新しい VPS を用意して入れる章だけ。サーバーが止まったときに読む印刷用）・
     hr-review（人事・給与の監修のお願い。docs/review/hr-payroll/）
   既定の出力先は各マニュアルのディレクトリの PDF（版管理の対象外）
@@ -46,6 +46,11 @@ MANUALS = {
     'getting-started': {
         'dir': os.path.join(ROOT, 'docs', 'getting-started'), 'pdf': 'getting-started.pdf',
         'title': 'M2Office はじめかた（管理者）', 'subtitle': 'クラウド版の申し込みから使い始めるまで',
+    },
+    # 同じく、会社の利用者に渡す手引き（ログイン・画面の見方・秘書への頼み方・承認・お知らせ・誰に何が見えるか）
+    'getting-started-user': {
+        'dir': os.path.join(ROOT, 'docs', 'getting-started-user'), 'pdf': 'getting-started-user.pdf',
+        'title': 'M2Office はじめかた（利用者）', 'subtitle': 'ログインから秘書に仕事を頼むまで',
     },
     'hr-payroll': {
         'dir': os.path.join(ROOT, 'docs', 'manual', 'hr-payroll'), 'pdf': 'hr-payroll-manual.pdf',

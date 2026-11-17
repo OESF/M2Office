@@ -28,6 +28,8 @@ docs/ops-manual/ops-manual.pdf
 docs/ops-manual/ops-recovery.pdf
 # 管理者のはじめかたの PDF は docs/getting-started/*.md から作る（npm run docs:getting-started-pdf）
 docs/getting-started/getting-started.pdf
+# 利用者のはじめかたの PDF は docs/getting-started-user/*.md から作る（npm run docs:getting-started-user-pdf）
+docs/getting-started-user/getting-started-user.pdf
 *.log
 
 # エディタと OS
