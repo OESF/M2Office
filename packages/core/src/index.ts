@@ -166,7 +166,7 @@ export type { AdvanceResult, RunEngineDeps } from './engine/run-engine.js';
 export { validateDefinition } from './engine/validate.js';
 export { todayJst } from './engine/run-engine.js';
 export { describeCall, jpDate, type DescribedCall, type DescribeContext } from './engine/describe-call.js';
-export { changesState, doneRecordText, failureOf, marksOf, readsText, recordCall, recordsOfSteps, type RecordedCall, type RecordedFile } from './engine/done-record.js';
+export { adminCallsOf, changesState, failedNoteText, failureOf, marksOf, recordCall, recordsOfSteps, type RecordedCall, type RecordedFile } from './engine/done-record.js';
 export { composeApprovalPresent, describeContext, executedCalls, hideInternalIds, repeatsArtifact, type ExecutedCall } from './engine/approval-present.js';
 export { enqueueJob, setEnqueueAiGuard } from './engine/enqueue.js';
 export { cancelRun, createdDriveLinks, CANCELLABLE } from './engine/cancel.js';

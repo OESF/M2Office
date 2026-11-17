@@ -88,12 +88,6 @@ export interface AgentStep {
    * 見える状態を変える呼び出しの所でだけ止める。`present` は、その承認の画面の 1 行目（どのサイト・接続か）
    */
   conversation?: { present: string; maxRounds?: number };
-  /**
-   * 段の答えの後ろに、M2Office が業務の記録から書き添えるもの（仕様書 第49.7節、ADR-0150）。
-   *
-   * @remarks `reads` は、この業務で読んだもの（道具と指したもの）。秘書の調べものの答えに付ける。推論の言い分に任せない
-   */
-  record?: 'reads';
   /** 結果が空だった場合の扱い。既定は `continue`。 */
   onEmpty?: 'continue' | 'stop';
   /** 失敗した場合の扱い。既定は `stop`。 */

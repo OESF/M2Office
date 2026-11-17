@@ -666,6 +666,16 @@ function RunRow({ run, requester, contentFor }: { run: AdminRun; requester: stri
                       <span className="muted">（{st.kind === 'approval' ? '承認' : '処理'}）</span>
                     </span>
                     <span className={`status ${st.status}`}>{statusLabel(st.status)}</span>
+                    {/* 呼んだ道具の記録（M2Office の内部の記録。利用者の画面には出さない。第49.7節） */}
+                    {st.calls && st.calls.length > 0 && (
+                      <ul className="small muted run-calls">
+                        {st.calls.map((x, i) => (
+                          <li key={i}>
+                            {x.ok ? '' : '失敗: '}{x.label}{x.changes ? '（見える状態を変える）' : ''}{x.reason ? ` — ${x.reason}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </li>
                 ))}
               </ul>

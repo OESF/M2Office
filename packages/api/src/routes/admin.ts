@@ -15,7 +15,7 @@ import { maskClientId,
 } from '@m2office/shared';
 import { semanticSearchEnabled,
   DEFAULT_STANDARD_MINUTES, GOOGLE_DATA_RETENTION_DAYS, KNOWLEDGE_MAX_CHARS,
-  describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, purposeLabel,
+  adminCallsOf, describeRule, scheduleBlocker, scheduleChecks, stepLabel, toolGoogleScopes, type AuditQuery, jstMonth, purposeLabel,
   detectKind, readQuoteSample, MAX_FILE_BYTES, serviceReport, monthRange,
   billingRefusal, fileToText, RETIRED_AGENT_IDS,
 } from '@m2office/core';
@@ -102,7 +102,7 @@ export function adminRoute(deps: AppDeps) {
    *
    * @remarks
    * **中身は返さない。** 段の入力と出力、成果物、業務の入力は含めない。
-   * 返すのは段の表示名と状態、失敗の理由、時刻、費用、削減時間までである。
+   * 返すのは段の表示名と状態、呼んだ道具（言い方と成否。引数は返さない。第49.7節）、失敗の理由、時刻、費用、削減時間までである。
    * 管理者が見られるのは状態・費用・起動経路だけであり、これは不変則 I-10 の帰結である。
    */
   app.get('/runs/:id', async (c) => {
@@ -113,14 +113,19 @@ export function adminRoute(deps: AppDeps) {
     const view = await deps.tenantView(tenant.id);
     const def = job ? view.allAgents.find((a) => a.id === job.agentId) : undefined;
     const labels = new Map((def?.steps ?? []).map((st) => [st.id, stepLabel(st)]));
-    const steps = (await deps.repo.listRunSteps(tenant.id, run.id)).map((st) => ({
-      seq: st.seq,
-      label: labels.get(st.stepId) ?? st.stepId,
-      kind: st.kind,
-      status: st.status,
-      startedAt: st.startedAt,
-      endedAt: st.endedAt,
-    }));
+    const steps = (await deps.repo.listRunSteps(tenant.id, run.id)).map((st) => {
+      const calls = adminCallsOf(st.output);
+      return {
+        seq: st.seq,
+        label: labels.get(st.stepId) ?? st.stepId,
+        kind: st.kind,
+        status: st.status,
+        startedAt: st.startedAt,
+        endedAt: st.endedAt,
+        // 呼んだ道具の記録（言い方・成否だけ。指したものは返さない。第49.7節）。利用者の画面には出さない内部の記録
+        ...(calls.length ? { calls } : {}),
+      };
+    });
     return c.json({
       id: run.id,
       status: run.status,

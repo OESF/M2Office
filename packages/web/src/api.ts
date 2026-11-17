@@ -1019,7 +1019,11 @@ export interface AdminRunStatus {
   id: string; status: string; startedAt: string; endedAt: string | null;
   failureReason: string | null;
   tokensUsed: number; costJpy: number; savedMinutes: number; origin: string | null;
-  steps: { seq: number; label: string; kind: string; status: string; startedAt: string; endedAt: string | null }[];
+  steps: {
+    seq: number; label: string; kind: string; status: string; startedAt: string; endedAt: string | null;
+    /** この段で呼んだ道具の記録（言い方・成否・見える状態を変えたか・行えなかった理由。指したものは含まない。仕様書 第49.7節） */
+    calls?: { label: string; ok: boolean; changes: boolean; reason?: string }[];
+  }[];
 }
 
 export interface AgentSummary {

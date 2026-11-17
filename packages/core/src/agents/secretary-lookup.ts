@@ -97,8 +97,6 @@ export const SECRETARY_LOOKUP: AgentDefinition = {
       id: 'answer',
       type: 'agent',
       label: 'まとめる',
-      // 読んだものは、M2Office が記録から答えの後ろに添える（仕様書 第49.7節）
-      record: 'reads',
       instruction: [
         '読んだ内容をもとに、依頼への答えをまとめる。',
         '数値は読み取ったものだけを書く。自分で計算した数値を、読み取った値のように書かない。',

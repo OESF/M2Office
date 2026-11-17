@@ -1472,15 +1472,14 @@ test('1 本の会話: 準備と見直しは止めずに進め、確定の呼び�
   assert.deepEqual(w.sent.at(-1), { name: 'confirm_notice_change', args: { confirmationToken: 'a'.repeat(64) } }, '止めた呼び出しをそのとおりに行う');
   const lastMessages = w.requests.at(-1)!.messages;
   assert.ok(lastMessages.some((m) => m.role === 'tool' && m.content.includes('site.example/notice/1')), '確定の答えを会話に返して続ける');
-  // 行ったことは M2Office が記録から最初に書く（第49.7節）
+  // 呼び出しの記録は段の出力に残し、利用者に見せる答えには内部の記録を書かない（第49.7節。第 0.606.2 版）
   const out = (await w.repo.listRunSteps('t', 'r1')).find((s) => s.kind === 'agent')!.output as { text: string; record: { name: string; ok: boolean }[] };
   assert.deepEqual(out.record.map((r) => [r.name, r.ok]), [['clinic-site.prepare_notice_change', true], ['clinic-site.review_notice_change', true], ['clinic-site.confirm_notice_change', true]]);
-  assert.match(out.text, /^\*\*行ったこと\*\*（M2Office の記録）\n- 準備しました: 医院のサイト（prepare_notice_change）（postId: 7）\n- 行いました: 医院のサイト（confirm_notice_change）.* — https:\/\/site\.example\/notice\/1\n- 読んだもの: 医院のサイト（review_notice_change）/);
-  assert.ok(out.text.endsWith('公開しました。トップページで確かめられます。'));
+  assert.equal(out.text, '公開しました。トップページで確かめられます。', 'すべて行えたなら、推論の答えだけ');
 });
 
-test('行ったことの記録: 失敗の形・番号と URL の印・読んだものを、言葉の意味を読まずに書く（第49.7節）', async () => {
-  const { recordCall, doneRecordText, readsText, failureOf } = await import('../src/index.js');
+test('行ったことの記録: 失敗の形・番号と URL の印を言葉の意味を読まずに残し、利用者には行えなかったことだけを業務の言葉で、管理者には言い方と成否を出す（第49.7節）', async () => {
+  const { recordCall, failedNoteText, adminCallsOf, failureOf } = await import('../src/index.js');
   const tool = { name: 'site.create_post', risk: 'draft' as const, helpText: '', connection: { id: 'site', name: 'サイト', tool: 'create_post' } };
   const okRec = recordCall({ name: 'site.create_post', args: { title: '秋の便り', body: 'x'.repeat(200) } }, { name: 'site.create_post', risk: 'draft', result: { source: 'external', text: JSON.stringify({ success: true, post_id: 101090, edit_url: 'https://site.example/wp-admin/post.php?post=101090', nested: { id: 9 } }) } }, tool);
   assert.equal(okRec.ok, true);
@@ -1491,17 +1490,17 @@ test('行ったことの記録: 失敗の形・番号と URL の印・読んだ�
   assert.equal(ngRec.reason, '権限がありません');
   assert.equal(failureOf({ name: 'x', result: { available: false, reason: '未接続' } }), '未接続');
   assert.equal(failureOf({ error: '使えない道具です' }), '使えない道具です');
-  const text = doneRecordText([okRec, ngRec]);
-  assert.match(text, /- 下書きを作りました: サイト（create_post）（title: 秋の便り） — post_id: 101090/);
-  assert.match(text, /- 行えませんでした: サイト（create_post） — 権限がありません/);
-  assert.ok(!text.includes('行っていません'));
-  const reads = [
-    recordCall({ name: 'gmail.search', args: { query: '見積' } }, { name: 'gmail.search', risk: 'read', result: { items: [] } }, { name: 'gmail.search', risk: 'read', helpText: '条件に合うメールを探します。本文は読みません' }),
-    recordCall({ name: 'gmail.search', args: { query: '見積' } }, { name: 'gmail.search', risk: 'read', result: { items: [] } }, { name: 'gmail.search', risk: 'read', helpText: '条件に合うメールを探します。本文は読みません' }),
-    recordCall({ name: 'slack.read', args: { channel: 'C1' } }, { error: '取得できませんでした' }, { name: 'slack.read', risk: 'read', helpText: '' }),
-  ];
-  assert.equal(readsText(reads), '**読んだもの**（M2Office の記録）\n- 条件に合うメールを探します（query: 見積）', '同じものは 1 つにまとめ、読めなかったものは出さない');
-  assert.equal(readsText([]), '');
+  const text = failedNoteText([okRec, ngRec, ngRec], [{ purpose: '記事のアイキャッチ画像', delivered: false }, { purpose: '本文の図', delivered: true }]);
+  assert.equal(text, '**行えなかったことがあります**\n- 「サイト」での操作を行えませんでした\n- 「記事のアイキャッチ画像」を送れていません');
+  assert.ok(!/create_post|権限がありません|title|post_id/.test(text), '道具の名前・引数・印・相手の返した理由は利用者に出さない');
+  assert.equal(failedNoteText([okRec], [{ purpose: '本文の図', delivered: true }]), '', '行えなかったことが無ければ何も書かない');
+  const readRec = recordCall({ name: 'gmail.search', args: { query: '見積' } }, { name: 'gmail.search', risk: 'read', result: { items: [] } }, { name: 'gmail.search', risk: 'read', helpText: '条件に合うメールを探します。本文は読みません' });
+  assert.deepEqual(adminCallsOf({ record: [okRec, ngRec, readRec] }), [
+    { label: 'サイト（create_post）', ok: true, changes: true },
+    { label: 'サイト（create_post）', ok: false, changes: true, reason: '権限がありません' },
+    { label: '条件に合うメールを探します', ok: true, changes: false },
+  ], '管理者には言い方と成否だけ。指したもの（引数）は出さない');
+  assert.deepEqual(adminCallsOf({ text: 'x' }), []);
 });
 
 test('1 本の会話: 理由つきの却下は会話に返して直させ、理由なしの却下は業務を終える', async () => {
@@ -1577,9 +1576,7 @@ test('1 本の会話: M2Office の道具は m2office. の名前で渡し、名�
   const answers = sent.requests.slice(1).flatMap((r) => r.messages.filter((m) => m.role === 'tool').map((m) => m.content));
   assert.ok(answers.some((a) => a.includes('777')));
   const doneText = ((await sent.repo.listRunSteps('t', 'r1')).at(-1)!.output as { text: string }).text;
-  assert.match(doneText, /^\*\*行ったこと\*\*（M2Office の記録）\n- 渡したファイルを送りました: 記事のアイキャッチ画像\n/, '送れたことを、記録から最初に書く');
-  assert.ok(!doneText.includes('行っていません'), 'ファイルを送れたなら「行っていません」と書かない');
-  assert.ok(doneText.endsWith('\n\nアイキャッチを付けました。'), '推論の文は後ろに置く');
+  assert.equal(doneText, 'アイキャッチを付けました。', '送れたなら、内部の記録を書かずに推論の答えだけ');
   // 接続の名前を前に付けた呼び方は、M2Office の道具として扱わない（名前をそろえたので、推し量りを受け付けない）
   const guessed = conversationWorld([
     { calls: [{ name: 'clinic-site.files_send', args: { fileId: 'cover-1', url: 'https://www.site.example/upload/key', format: 'multipart' } }] },
@@ -1588,7 +1585,7 @@ test('1 本の会話: M2Office の道具は m2office. の名前で渡し、名�
   assert.equal((await guessed.engine.advance(guessed.run)).outcome, 'completed');
   assert.ok(guessed.requests[1]!.messages.some((m) => m.role === 'tool' && m.content.includes('使えない道具です')));
   const text = ((await guessed.repo.listRunSteps('t', 'r1')).at(-1)!.output as { text: string }).text;
-  assert.match(text, /^\*\*行ったこと\*\*（M2Office の記録）\n- 見える状態を変える操作は、行っていません\n- 渡したファイルを送れていません: 記事のアイキャッチ画像/, '推論の言い分に任せず、行っていないことと送れていないことを書く');
+  assert.match(text, /^\*\*行えなかったことがあります\*\*\n- 「記事のアイキャッチ画像」を送れていません\n\nアップロード済みの画像を設定しました。$/, '推論の言い分に任せず、送れていないことを業務の言葉で最初に書く');
   assert.ok(String(guessed.requests[0]!.messages[0]!.content).includes('別のファイルで代えないでください'), '別のファイルで代えないよう伝える');
 });
 
@@ -1605,7 +1602,8 @@ test('名前で頼まれたものが無いとき: 約束事（版 2 から）と
   const { CONVERSATION_CONTRACT, CONVERSATION_CONTRACT_VERSION, conversationSystem: system } = await import('../src/index.js');
   const { SECRETARY_LOOKUP } = await import('../src/agents/secretary-lookup.js');
   assert.ok(CONVERSATION_CONTRACT_VERSION >= 2);
-  assert.match(CONVERSATION_CONTRACT, /M2Office が記録から答えの最初に書きます/, '版 3: 行ったことは M2Office が記録で書く（第49.7節）');
+  assert.match(CONVERSATION_CONTRACT, /行えなかったことは M2Office が答えの最初に書きます/, '版 5: 行えなかったことだけを M2Office が書く（第49.7節）');
+  assert.match(CONVERSATION_CONTRACT, /道具の名前・引数・番号のような内部のことを書かず/, '版 5: 内部のことを答えに書かせない');
   assert.match(CONVERSATION_CONTRACT, /^8\. 頼みが名前で指したもの/m);
   assert.match(CONVERSATION_CONTRACT, /送る・作る・直す・公開する頼みでは近いもので代えず/);
   assert.ok(system({ connectionName: 'Slack', summary: '', company: '', tools: [], loadAll: true }).includes('8. 頼みが名前で指したもの'), '接続の業務の最初の指示に入る');

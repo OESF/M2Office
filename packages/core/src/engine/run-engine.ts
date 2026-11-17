@@ -32,7 +32,7 @@ import { silentLogger, type Logger } from '../log/logger.js';
 import { ApprovalForbiddenError, RunNotResumableError } from './errors.js';
 import { standardMinutes, stepLabel } from '../agents/index.js';
 import { describeCall } from './describe-call.js';
-import { doneRecordText, readsText, recordCall, recordsOfSteps, type RecordedCall } from './done-record.js';
+import { failedNoteText, recordCall, type RecordedCall } from './done-record.js';
 import { composeApprovalPresent, describeContext } from './approval-present.js';
 import { validateDefinition } from './validate.js';
 import { selectConnectionTools } from './tool-select.js';
@@ -988,10 +988,10 @@ export class RunEngine {
         spent += costOf(res);
         state.rounds += 1;
         if (res.toolCalls.length === 0) {
-          // 行ったこと（見える状態を変えた呼び出しと成否・預けたファイル・読んだもの）は、答えの最初に M2Office が記録から書く。
-          // 推論の文は、その後ろに説明として置く（推論の言い分に任せない。第49.7節・Q-385）
+          // 行えなかったこと（見える状態を変える呼び出しの失敗・送れなかったファイル）だけは、答えの最初に M2Office が記録から書く。
+          // 推論の文は、その後ろに置く（推論の言い分に任せない。第49.7節・Q-385）。記録そのものは `record` に残り、管理者の画面で見る
           const files = handed.map((f) => ({ purpose: f.purpose, delivered: (state!.delivered ?? []).includes(f.fileId) }));
-          state.text = [doneRecordText(state.record ?? [], files), res.text.trim()].filter(Boolean).join('\n\n');
+          state.text = [failedNoteText(state.record ?? [], files), res.text.trim()].filter(Boolean).join('\n\n');
           state.messages.push({ role: 'assistant', content: res.text });
           await save('succeeded', new Date().toISOString());
           return { kind: 'ok', tokensUsed, costJpy: spent };
@@ -1380,11 +1380,7 @@ export class RunEngine {
         history.push({ role: 'user', content: toolReport(roundResults) });
       }
 
-      // 読んだものを添える段（秘書の調べものの答え）は、この業務の記録から、読んだものを答えの後ろに書く（第49.7節）
-      if (step.record === 'reads' && mode === 'run') {
-        const reads = readsText([...recordsOfSteps(previous.filter((p) => p.kind === 'agent')), ...record]);
-        if (reads) text = [text.trim(), reads].filter(Boolean).join('\n\n');
-      }
+      // 呼び出しの記録は段の出力に残す。利用者の画面には出さず、管理者の画面の実行の詳細で見る（第49.7節。第 0.606.2 版）
       const output = { text, tools: toolResults, ...(record.length ? { record } : {}), ...(mode === 'plan' ? { planned: true } : {}), ...(selection.selected ? { selectedTools: selection.selected } : {}) };
       await repo.updateRunStep(run.tenantId, {
         ...runStep, status: 'succeeded', output, endedAt: new Date().toISOString(),

@@ -31,6 +31,7 @@ import { keyLabel, useHotkey, useNumberHotkeys } from './keys.js';
 import { timeGreeting } from './greeting.js';
 import { RecorderDialog } from './Recorder.js';
 import { meetingMinutesRequest } from './meeting-request.js';
+import { EMPTY_HISTORY, INPUT_HISTORY_MAX, mergeHistory, shouldRecall, stepHistory, type HistoryState } from './input-history.js';
 import { AgentForm, ApprovalRow, ApprovalTray, AskBox, Elapsed, FILE_ACCEPT, isRecordingFile, KNOWLEDGE_QA_AGENT_ID, RunView, statusLabel, SuspendedBanner, tooLargeMessage } from './components.js';
 import { DemoBanner } from './demo-terms.js';
 import { Sources } from './sources.js';
@@ -1469,6 +1470,41 @@ function SecretaryBar({ drive, lookups, avatar, captions, request, onRequestTake
   useHotkey('Mod+J', useCallback(() => box.current?.focus(), []));
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  /*
+    前に送った依頼を ↑↓ で呼び戻す（第6.1.3節「入力欄」）。この画面で送った依頼と、呼び戻しを始めるたびに読むサーバーの会話の記録から並べる。
+    ブラウザには残さない（共用の端末で、ほかの人の依頼を見せないため）
+  */
+  const sentRef = useRef<string[]>([]);
+  const historyRef = useRef<HistoryState>(EMPTY_HISTORY);
+  // 会話の記録を読んでいる間に続けて押されたキーは捨てる（読み終える前の状態から二重に動かさない）
+  const loadingHistory = useRef(false);
+  async function recall(dir: 'older' | 'newer', current: string) {
+    if (loadingHistory.current) return;
+    let s = historyRef.current;
+    if (dir === 'older' && s.index === -1) {
+      loadingHistory.current = true;
+      // 呼び戻しを始めるときに、会話の記録を読み直す（本人が消した会話を出さないため）。読めなければこの画面で送った依頼だけ
+      let stored: string[] = [];
+      try {
+        // 頼んだ業務の結果の行（runId のある行）は、本人が書いた依頼ではないので除く
+        stored = (await api.myConversations()).items.filter((c) => c.runId === null).map((c) => c.message);
+      } catch { /* 読めなければ、この画面で送った依頼だけで呼び戻す */ } finally {
+        loadingHistory.current = false;
+      }
+      s = { items: mergeHistory(sentRef.current, stored), index: -1, draft: current };
+    }
+    const r = stepHistory(s, dir, current);
+    historyRef.current = r.state;
+    if (r.text === null) return;
+    setText(r.text);
+    // さかのぼるときはカーソルを頭に、戻るときは終わりに置く（続けて ↑・↓ を押せるように。複数行の依頼でも行の間を動かさない）
+    requestAnimationFrame(() => {
+      const el = box.current;
+      if (!el) return;
+      const at = dir === 'older' ? 0 : el.value.length;
+      el.setSelectionRange(at, at);
+    });
+  }
   const [hint, setHint] = useState<string | null>(null);
   // 渡すファイルは 5 つまで（第10.10.2節）。選んだ時点で上げ、ID を持っておく
   const [files, setFiles] = useState<{ id: string; name: string }[]>([]);
@@ -1659,6 +1695,8 @@ function SecretaryBar({ drive, lookups, avatar, captions, request, onRequestTake
       if (!chosen) {
         setText('');
         setFiles([]);
+        sentRef.current = [asked.trim(), ...sentRef.current].slice(0, INPUT_HISTORY_MAX);
+        historyRef.current = EMPTY_HISTORY;
       }
       setHint('考えています…');
       // 書いた依頼には、文字で秘書のキャンバスに返す。音声で話している最中でも読み上げない（第6.2.0節）
@@ -1728,15 +1766,29 @@ function SecretaryBar({ drive, lookups, avatar, captions, request, onRequestTake
           rows={1}
           maxLength={SECRETARY_MESSAGE_MAX}
           placeholder="例: 今日の予定は？"
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            // 書き換えたら呼び戻しをやめる（書き換えた文が、次に ↑ を押したときの書きかけになる）
+            historyRef.current = EMPTY_HISTORY;
+          }}
           onPaste={(e) => {
             // ドライブのリンクを貼ったら、そのファイルを選んだ状態でファイル選びを開く（第10.10.8節）。貼った文はそのまま残す
             const id = drive ? driveFileIdOf(e.clipboardData.getData('text')) : null;
             if (id) void fromDrive(id);
           }}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            // ↑ で前に送った依頼へさかのぼり、↓ で戻る（第6.1.3節）。修飾キーとの組み合わせ・複数行の中の移動は、本来の動きのまま
+            if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+              const el = e.currentTarget;
+              const browsing = historyRef.current.index !== -1;
+              if (!shouldRecall(e.key, el.value, { start: el.selectionStart, end: el.selectionEnd }, browsing)) return;
+              e.preventDefault();
+              void recall(e.key === 'ArrowUp' ? 'older' : 'newer', el.value);
+              return;
+            }
             // Enter で送り、Shift+Enter で改行する。変換確定の Enter では送らない（第6.1.3節）
-            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+            if (e.key !== 'Enter' || e.shiftKey) return;
             e.preventDefault();
             void send();
           }}

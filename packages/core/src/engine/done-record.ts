@@ -5,7 +5,7 @@
  * 推論は、していないことを「しました」と書くことがある（2026-11-16 に、画像を送れないまま「アイキャッチを設定しました」と書いた）。
  *
  * 業務の段は、道具を呼ぶたびに {@link recordCall} で 1 件を作り、段の出力の `record` に残す。
- * 結果を人に伝えるときは、{@link doneRecordText}（行ったこと）か {@link readsText}（読んだもの）で書く。
+ * 利用者には、行えなかったことだけを {@link failedNoteText} で業務の言葉で伝える。記録そのものは管理者の画面で見る（{@link adminCallsOf}）。
  * どちらも、言葉の意味を読まない。道具の危険度と、結果の形（失敗の印・番号・URL）だけを見る（第49.4節「形を読む」）。
  */
 
@@ -19,8 +19,10 @@ export interface RecordedCall {
   risk: RiskLevel;
   /** 接続の道具の役割（第47.4.1節）。あれば行ったことの言い方に使う。 */
   role?: 'read' | 'prepare' | 'review' | 'commit' | 'undo';
-  /** 人に見せる道具の言い方（接続なら「サービスの名前（相手の道具の名前）」、内蔵なら道具の説明の最初の文）。 */
+  /** 管理者の画面に出す道具の言い方（接続なら「サービスの名前（相手の道具の名前）」、内蔵なら道具の説明の最初の文）。 */
   label: string;
+  /** 接続の名前（利用者に、行えなかった操作をどの接続かで伝える）。内蔵の道具には無い。 */
+  service?: string;
   /** 指したもの（引数のうち、短い文字と数）。 */
   target: string;
   /** 行えたか。 */
@@ -40,20 +42,7 @@ const CHANGES: ReadonlySet<RiskLevel> = new Set<RiskLevel>(['draft', 'write-inte
 /** 見える状態を変える呼び出しか。 */
 export const changesState = (risk: RiskLevel): boolean => CHANGES.has(risk);
 
-/** 危険度ごとの「行ったこと」の言い方。 */
-const DONE_VERBS: Record<string, string> = {
-  draft: '下書きを作りました',
-  'write-internal': '書き込みました',
-  'external-send': '送りました',
-  financial: 'お金に関わる操作をしました',
-};
 
-/** 接続の道具の役割ごとの言い方（役割があれば、危険度より先に使う）。 */
-const ROLE_VERBS: Record<string, string> = {
-  prepare: '準備しました',
-  commit: '行いました',
-  undo: '元に戻しました',
-};
 
 const TARGET_MAX = 60;
 
@@ -147,6 +136,7 @@ export function recordCall(
   const marks = reason === null && tool && changesState(tool.risk) ? marksOf(recorded) : [];
   return {
     name: call.name, risk: tool?.risk ?? 'read', ...(tool?.connection?.role ? { role: tool.connection.role } : {}), label: labelOf(tool, call.name),
+    ...(tool?.connection ? { service: tool.connection.name } : {}),
     target: targetOf(call.args, tool?.connection?.labels), ok: reason === null,
     ...(reason !== null ? { reason: reason.slice(0, 200) } : {}),
     ...(marks.length ? { marks } : {}),
@@ -161,49 +151,38 @@ export function recordsOfSteps(steps: { output: unknown }[]): RecordedCall[] {
   });
 }
 
-/** 読んだもの 1 行（同じ道具と指したものは 1 つにまとめる）。 */
-function readLines(calls: RecordedCall[]): string[] {
-  const seen = new Set<string>();
+/**
+ * 行えなかったこと（接続の業務の結果の最初に置く。第49.7節・Q-385。第 0.606.2 版）。
+ *
+ * 利用者の画面には、道具の名前・引数・成否の一覧のような M2Office の内部の記録を出さない（第 0.606.2 版。読んでも分からず、
+ * 問い合わせのもとになるため）。記録そのものは段の出力の `record` に残り、管理者の画面の実行の詳細で見られる。
+ * ただし、推論が行えなかったことを「しました」と書くことがあるため（2026-11-16 に、画像を送れないまま「アイキャッチを設定しました」と書いた）、
+ * **行えなかったことだけ**は、M2Office が記録から、業務の言葉で答えの最初に書く。理由の文（相手の返した技術的な文）は出さない。
+ *
+ * @returns Markdown。行えなかったことが無ければ空
+ */
+export function failedNoteText(calls: RecordedCall[], files: RecordedFile[] = []): string {
   const lines: string[] = [];
+  const seen = new Set<string>();
   for (const c of calls) {
-    if (changesState(c.risk) || !c.ok) continue;
-    const line = c.target ? `${c.label}（${c.target}）` : c.label;
+    if (!changesState(c.risk) || c.ok) continue;
+    const line = c.service ? `- 「${c.service}」での操作を行えませんでした` : '- 操作の一部を行えませんでした';
     if (seen.has(line)) continue;
     seen.add(line);
     lines.push(line);
   }
-  return lines;
+  for (const f of files) if (!f.delivered) lines.push(`- 「${f.purpose}」を送れていません`);
+  return lines.length ? ['**行えなかったことがあります**', ...lines].join('\n') : '';
 }
 
 /**
- * 行ったこと（接続の業務の結果の最初に置く。第49.7節・Q-385）。
+ * 管理者の画面に出す、段の呼び出しの記録（第6.2.4節・第49.7節。第 0.606.2 版）。
  *
- * @returns Markdown。見える状態を変えた呼び出しと成否・印、預けたファイル、読んだもの。
- * 見える状態を変えた呼び出しが無ければ、そう書く
+ * 道具の言い方・成否・見える状態を変えたか・行えなかった理由だけを返す。**指したもの（引数）と印は返さない**
+ * （頼みや相手のデータの中身が入るため。管理者は実行の中身を見ない。不変則 I-10）。
  */
-export function doneRecordText(calls: RecordedCall[], files: RecordedFile[] = []): string {
-  const lines: string[] = [];
-  for (const c of calls) {
-    if (!changesState(c.risk)) continue;
-    const what = `${c.label}${c.target ? `（${c.target}）` : ''}`;
-    lines.push(c.ok
-      ? `- ${(c.role && ROLE_VERBS[c.role]) ?? DONE_VERBS[c.risk] ?? '行いました'}: ${what}${c.marks?.length ? ` — ${c.marks.join('、')}` : ''}`
-      : `- 行えませんでした: ${what} — ${c.reason ?? '理由が分かりません'}`);
-  }
-  for (const f of files) lines.push(f.delivered ? `- 渡したファイルを送りました: ${f.purpose}` : `- 渡したファイルを送れていません: ${f.purpose}`);
-  if (!calls.some((c) => changesState(c.risk) && c.ok) && !files.some((f) => f.delivered)) lines.unshift('- 見える状態を変える操作は、行っていません');
-  const reads = readLines(calls);
-  if (reads.length) lines.push(`- 読んだもの: ${reads.slice(0, 8).join('・')}${reads.length > 8 ? ` ほか ${reads.length - 8} 件` : ''}`);
-  return ['**行ったこと**（M2Office の記録）', ...lines].join('\n');
-}
-
-/**
- * 読んだもの（調べものの答えの後ろに、出典と同じように添える。第49.7節）。
- *
- * @returns Markdown。読んだものが無ければ空
- */
-export function readsText(calls: RecordedCall[]): string {
-  const reads = readLines(calls);
-  if (reads.length === 0) return '';
-  return ['**読んだもの**（M2Office の記録）', ...reads.slice(0, 10).map((l) => `- ${l}`), ...(reads.length > 10 ? [`- ほか ${reads.length - 10} 件`] : [])].join('\n');
+export function adminCallsOf(output: unknown): { label: string; ok: boolean; changes: boolean; reason?: string }[] {
+  return recordsOfSteps([{ output }]).map((c) => ({
+    label: c.label, ok: c.ok, changes: changesState(c.risk), ...(c.reason ? { reason: c.reason } : {}),
+  }));
 }
